@@ -1,0 +1,522 @@
+{% extends 'base/layout.html' %}
+{% import 'components/components.html' as components %}
+{% block title %}
+  - Report Opening
+{% endblock %}
+{% block styles %}
+  <style>
+    :where([class^="ri-"])::before {
+      content: "\f3c2";
+    }
+    body {
+      font-family: "Inter", sans-serif;
+      background-color: #f9fafb;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 50;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-content {
+      width: 90%;
+      max-width: 340px;
+      background-color: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .warning-message {
+      display: none;
+    }
+
+    #calendar {
+      max-width: 1100px;
+      margin: 40px auto;
+    }
+  </style>
+{% endblock %}
+{% block header %}
+  {{ components.header(left='ri-arrow-left-s-line', middle=org.name, right='logo', leftUrl=url_for('entity.entity_list')) }}
+{% endblock %}
+{% block content %}
+  <!-- Petty Cash Entity Display -->
+  <div class="mt-6 mb-4 card bg-white p-4">
+    <h1 class="text-2xl font-semibold text-gray-900">{{ org.name }}</h1>
+    <p class="text-sm text-gray-500">Last report: April 29, 2025</p>
+  </div>
+  <div class="mt-4 bg-white rounded-lg p-4 shadow-sm mb-3">
+    <div class="flex justify-between mb-3">
+      <div>
+        <p class="text-sm text-gray-500">Sumitted Report Until</p>
+        <p class="text-2xl font-semibold text-gray-900">March 2, 2025</p>
+      </div>
+      <div>
+        <p class="text-sm text-gray-500">Current Balance</p>
+        <p class="text-2xl font-semibold text-gray-900">$1,245.78</p>
+      </div>
+    </div>
+    <div class="text-right mt-6">
+      <a href="#" class="text-primary font-semibold">
+        View All Reports <i class="ri-arrow-right-s-line"></i><i></i>
+      </a>
+    </div>
+  </div>
+  <!-- Calendar Section -->
+  <div class="bg-white rounded-lg shadow-sm p-4 mb-6">
+    <h2 class="text-lg font-semibold mb-4">April 2025</h2>
+    <div class="grid grid-cols-7 gap-1 text-center text-xs mb-2">
+      <div class="text-gray-500">Su</div>
+      <div class="text-gray-500">Mo</div>
+      <div class="text-gray-500">Tu</div>
+      <div class="text-gray-500">We</div>
+      <div class="text-gray-500">Th</div>
+      <div class="text-gray-500">Fr</div>
+      <div class="text-gray-500">Sa</div>
+    </div>
+    <div class="grid grid-cols-7 gap-1 text-center">
+      <div class="text-gray-400 py-2">30</div>
+      <div class="text-gray-400 py-2">31</div>
+      <div class="py-2">1</div>
+      <div class="py-2">2</div>
+      <div class="py-2">3</div>
+      <div class="py-2">4</div>
+      <div class="py-2">5</div>
+      <div class="py-2">6</div>
+      <div class="py-2">7</div>
+      <div class="py-2">8</div>
+      <div class="py-2">9</div>
+      <div class="py-2">10</div>
+      <div class="py-2">11</div>
+      <div class="py-2">12</div>
+      <div class="py-2">13</div>
+      <div class="py-2">14</div>
+      <div class="py-2">15</div>
+      <div class="py-2">16</div>
+      <div class="py-2">17</div>
+      <div class="py-2">18</div>
+      <div class="py-2">19</div>
+      <div class="py-2">20</div>
+      <div class="py-2">21</div>
+      <div class="py-2">22</div>
+      <div class="py-2">23</div>
+      <div class="py-2">24</div>
+      <div class="py-2">25</div>
+      <div class="py-2">26</div>
+      <div class="py-2">27</div>
+      <div class="py-2">28</div>
+      <div class="py-2">29</div>
+      <div class="bg-primary text-white rounded-full py-2 font-bold">30</div>
+      <div class="text-gray-400 py-2">1</div>
+      <div class="text-gray-400 py-2">2</div>
+      <div class="text-gray-400 py-2">3</div>
+    </div>
+    <div class="flex mt-4 text-xs">
+      <div class="flex items-center mr-4">
+        <div class="w-3 h-3 bg-secondary rounded-full mr-1"></div>
+        <span>Xero Published</span>
+      </div>
+      <div class="flex items-center mr-4">
+        <div class="w-3 h-3 bg-red-200 rounded-full mr-1"></div>
+        <span>To Publish</span>
+      </div>
+      <div class="flex items-center">
+        <div class="w-3 h-3 bg-primary rounded-full mr-1"></div>
+        <span>Today</span>
+      </div>
+    </div>
+  </div>
+  <!-- <div id='calendar'></div> -->
+  <div
+    class="flex items-start card rounded-lg p-4 border-amber-300 border bg-amber-100"
+  >
+    <div
+      class="w-fit rounded-full px-4 py-3 text-white text-xl bg-amber-400 shadow-sm"
+    >
+      <i class="ri-error-warning-line"></i>
+    </div>
+    <div class="ms-4">
+      <div class="font-semibold text-amber-900 mb-3">Action Required</div>
+      <p class="text-amber-900 mb-3">
+        You have unpublished reports. Please publish your report to Xero to
+        keepp records up to date.
+      </p>
+      <a
+        href="# "
+        class="ms-auto btn bg-amber-400 px-4 py-3 text-white font-semibold"
+      >
+        <i class="ri-history-line"></i>
+        View Report History</a
+      >
+    </div>
+  </div>
+  <!-- Modal Popup -->
+  <div id="reportModal" class="modal reportModal">
+    <div class="modal-content">
+      <!-- Header -->
+      <div class="mb-6">
+        <button><i class="ri-arrow-left-s-line text-3xl"></i></button>
+        <h2 class="text-xl font-semibold text-gray-900">Before You Start</h2>
+        <p class="text-sm text-gray-500 mt-1">
+          Please confirm the following details. If you have an existing draft, you'll continue where you left off.
+        </p>
+      </div>
+      <!-- Previous Balance Section -->
+      <div class="mb-6">
+        <p class="text-sm text-gray-500">Deposit as of April 29 2025</p>
+        <p class="text-2xl font-semibold text-gray-900">$1,245.78</p>
+        <p class="text-xs text-gray-500">HSBC account (**** 1234)</p>
+      </div>
+      <!-- Bank Deposit Confirmation -->
+      <div class="mb-6">
+        <p class="text-sm font-medium text-gray-700 mb-3">
+          Have you confirmed all bank deposits?
+        </p>
+        <div class="space-y-2">
+          <label class="flex items-center cursor-pointer">
+            <input
+              type="radio"
+              name="bankConfirm"
+              id="bankConfirmYes"
+              value="yes"
+              class="w-4 h-4 text-primary focus:ring-primary"
+            />
+            <span class="ml-2 text-sm text-gray-700"
+              >Yes, all deposits are confirmed</span
+            >
+          </label>
+          <label class="flex items-center cursor-pointer">
+            <input
+              type="radio"
+              name="bankConfirm"
+              id="bankConfirmNo"
+              value="no"
+              class="w-4 h-4 text-primary focus:ring-primary"
+            />
+            <span class="ml-2 text-sm text-gray-700"
+              >No, some deposits are pending</span
+            >
+          </label>
+        </div>
+      </div>
+      <!-- Warning Message -->
+      <div
+        id="warningMessage"
+        class="warning-message bg-red-50 border border-red-100 rounded-md p-3 mb-6"
+      >
+        <div class="flex">
+          <div
+            class="flex-shrink-0 w-5 h-5 flex items-center justify-center text-red-500 mr-3"
+          >
+            <i class="ri-error-warning-line"></i>
+          </div>
+          <p class="text-sm text-red-700">
+            <span class="font-semibold">Please Note</span> <br />
+            By Proceeding you confirm that stated deposit amount will be revesed
+            in Xero
+          </p>
+        </div>
+      </div>
+      <div
+        id="warningMessage2"
+        class="warning-message bg-amber-50 border border-red-100 rounded-md p-3 mb-6"
+      >
+        <div class="flex">
+          <div
+            class="flex-shrink-0 w-5 h-5 flex items-center justify-center text-red-500 mr-3"
+          >
+            <i class="ri-error-warning-line"></i>
+          </div>
+          <p class="text-sm text-amber-700">
+            <span class="font-semibold">Please Note</span> <br />
+            This action is irreversible By proceeding, you confirm that the
+            stated deposit is accurate and has been deposited to the specified
+            bank
+          </p>
+        </div>
+      </div>
+      <!-- Action Buttons -->
+      <div class="flex space-x-3">
+        <button
+          id="cancelBtn"
+          class="flex-1 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-button hover:bg-gray-50 transition-colors cursor-pointer !rounded-button"
+        >
+          Cancel
+        </button>
+        <button
+          id="proceedBtn"
+          disabled
+          data-tenant-id="{{ org.id }}"
+          class="disabled:bg-[#d1d5db] disabled:text-gray-700 items-center justify-center text-center flex-1 py-2.5 bg-primary text-white font-medium rounded-button hover:bg-primary/90 transition-colors cursor-pointer !rounded-button"
+        >
+          Proceed
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="bankModal" class="modal bankModal">
+    <div class="modal-content">
+      <!-- Header -->
+      <div class="mb-6">
+        <button><i class="ri-arrow-left-s-line text-3xl"></i></button>
+        <h2 class="text-xl font-semibold text-gray-900">Deposit to Bank</h2>
+      </div>
+      <form action="#" method="post" id="bankForm" class="bankForm">
+        <div class="mb-4">
+          <label
+            for="expenseAmount"
+            class="block text-sm font-semibold text-gray-700 mb-1"
+            >Deposit Amount <span class="text-red-500">*</span></label
+          >
+          <div class="relative">
+            <div
+              class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+            >
+              <span class="text-gray-500">$</span>
+            </div>
+            <input
+              type="number"
+              id="depositAmount"
+              name="depositAmount"
+              placeholder="0.00"
+              step="0.01"
+              min="0.01"
+              class="w-full pl-8 pr-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              required
+            />
+          </div>
+          <div id="amountError" class="text-red-500 text-xs mt-1 hidden">
+            Please enter a valid amount
+          </div>
+        </div>
+        <div class="mb-4">
+          <label
+            for="depositBankAccount"
+            class="block text-sm font-semibold text-gray-700 mb-1"
+            >Deposit Bank Account<span class="text-red-500">*</span></label
+          >
+          <div class="relative">
+            <select
+              id="depositBankAccount"
+              name="depositBankAccount"
+              class="w-full px-3 py-2 border border-gray-300 rounded appearance-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              required
+            >
+              <option value="" disabled="" selected="">Select a Bank</option>
+              <option value="123456">HSBC account (**** 1234)</option>
+              <option value="123456">ABCD Account (**** 1234)</option>
+            </select>
+            <div
+              class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"
+            >
+              <i class="ri-arrow-down-s-line text-gray-400"></i>
+            </div>
+          </div>
+          <div id="bankError" class="text-red-500 text-xs mt-1 hidden">
+            Please select a Bank
+          </div>
+        </div>
+        <div class="mb-4">
+          <label
+            for="expenseAmount"
+            class="block text-sm font-semibold text-gray-700 mb-1"
+            >Deposit Date <span class="text-red-500">*</span></label
+          >
+          <div class="relative">
+            <input
+              type="date"
+              id="depositDate"
+              name="depositDate"
+              class="w-full pl-8 pr-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              required
+            />
+          </div>
+          <div id="amountError" class="text-red-500 text-xs mt-1 hidden">
+            Please enter a valid amount
+          </div>
+        </div>
+        <div class="flex space-x-3">
+          <button
+            id="cancelBtn"
+            class="bankCancelBtn flex-1 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-button hover:bg-gray-50 transition-colors cursor-pointer !rounded-button"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            id="proceedBtn"
+            class="bankProceedBtn flex-1 py-2.5 bg-primary text-white font-medium rounded-button hover:bg-primary/90 transition-colors cursor-pointer !rounded-button"
+          >
+            Proceed
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div
+    id="sidebar"
+    class="top-[56px] hidden flex flex-col gap-3 fixed z-10 w-[56px] bg-white right-0"
+  >
+    <a href="#" class="text-2xl flex flex-col items-center justify-center p-3">
+      <span><i class="ri-home-3-fill"></i></span>
+      <span class="text-sm">Home</span>
+    </a>
+    <a href="#" class="text-2xl flex flex-col items-center justify-center p-3">
+      <span><i class="ri-add-circle-fill"></i></span>
+      <span class="text-sm">New</span>
+    </a>
+    <a href="#" class="text-2xl flex flex-col items-center justify-center p-3">
+      <span><i class="ri-file-chart-line"></i></span>
+      <span class="text-sm">Report</span> </a
+    ><a href="{{ url_for('entity_settings') }}" class="text-2xl flex flex-col items-center justify-center p-3">
+      <span><i class="ri-settings-4-fill"></i></span>
+      <span class="text-sm">Settings</span> </a
+    ><a href="#" class="text-2xl flex flex-col items-center justify-center p-3">
+      <span><i class="ri-question-line"></i></span>
+      <span class="text-sm">Help</span>
+    </a>
+  </div>
+{% endblock %}
+{% block footer %}
+  <div class="px-3 py-2">
+    <button
+      id="startReportBtn"
+      class="w-full bg-primary text-white py-3 rounded-lg font-medium flex items-center justify-center space-x-2"
+    >
+      <i class="ri-add-line"></i>
+      <span>Start New Report</span>
+    </button>
+  </div>
+{% endblock %}{% block scripts %}
+  <script
+    src="https://code.jquery.com/jquery-3.7.1.js"
+    integrity="sha256-eKhayi8LEQwp4NKxN+CfCh+3qOVUtJn3QNZ0TciWLP4="
+    crossorigin="anonymous"
+  ></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const modal = document.getElementById("reportModal");
+      const bankModal = document.getElementById("bankModal");
+      const bankConfirmNo = document.getElementById("bankConfirmNo");
+      const bankConfirmYes = document.getElementById("bankConfirmYes");
+      const startReportBtn = document.getElementById("startReportBtn");
+      const cancelBtn = document.getElementById("cancelBtn");
+      const proceedBtn = document.getElementById("proceedBtn");
+      const warningMessage = document.getElementById("warningMessage");
+      const warningMessage2 = document.getElementById("warningMessage2");
+      const radioButtons = document.querySelectorAll(
+        'input[name="bankConfirm"]',
+      );
+      const bankForm = document.querySelector(".bankForm");
+      const bankCancel = document.querySelector(".bankCancelBtn");
+      const bankProceed = document.querySelector(".bankProceedBtn");
+
+      // Show modal by default
+      modal.style.display = "flex";
+      // Show modal when Start New Report button is clicked
+      startReportBtn.addEventListener("click", function () {
+        modal.style.display = "flex";
+      });
+      // Hide modal when Cancel button is clicked
+      cancelBtn.addEventListener("click", function () {
+        modal.style.display = "none";
+        // Reset radio buttons
+        radioButtons.forEach((radio) => {
+          radio.checked = false;
+        });
+        warningMessage.style.display = "none";
+      });
+      // Handle Proceed button click
+      proceedBtn.addEventListener("click", function () {
+        modal.style.display = "none";
+        // Reset radio buttons
+        if (bankConfirmNo.checked) {
+          modal.style.display = "none";
+          bankModal.style.display = "flex";
+        } else if (bankConfirmYes.checked) {
+          let tenantId = proceedBtn.dataset.tenantId;
+          // Redirect to resume route instead of directly to opening
+          // This will check if user has existing draft and redirect accordingly
+          window.location.href = "/report/resume";
+        }
+
+        warningMessage.style.display = "none";
+        // Here you would typically navigate to the next screen
+        // For demo purposes, we'll just show an alert
+        // In a real app, you would redirect or show the next view
+        // alert("Proceeding to create new report");
+        //Redirect to report resume endpoint to check for existing drafts
+
+        radioButtons.forEach((radio) => {
+          radio.checked = false;
+        });
+      });
+      // Show/hide warning message based on radio button selection
+      radioButtons.forEach((radio) => {
+        radio.addEventListener("change", function () {
+          if (this.value === "no") {
+            warningMessage.style.display = "block";
+            warningMessage2.style.display = "none";
+            proceedBtn.removeAttribute("disabled");
+          } else if (this.value === "yes") {
+            warningMessage2.style.display = "block";
+            warningMessage.style.display = "none";
+            proceedBtn.removeAttribute("disabled");
+          }
+        });
+      });
+
+      // Close modal if user clicks outside of it
+      window.addEventListener("click", function (event) {
+        if (event.target === modal) {
+          modal.style.display = "none";
+          // Reset radio buttons
+          radioButtons.forEach((radio) => {
+            radio.checked = false;
+          });
+          warningMessage.style.display = "none";
+        }
+      });
+
+      const navMenu = document.getElementById("navMenu");
+      const sidebar = document.getElementById("sidebar");
+      navMenu.addEventListener("click", function () {
+        sidebar.classList.toggle("hidden");
+      });
+
+      bankForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        // Redirect to resume route instead of directly to opening
+        // This will check if user has existing draft and redirect accordingly
+        window.location.href = "/report/resume";
+      });
+
+      bankCancel.addEventListener("click", function (e) {
+        e.preventDefault();
+        $(bankForm).trigger("reset");
+        bankModal.style.display = "none";
+        modal.style.display = "flex";
+      });
+      //  To add sliding in action required javascript
+    });
+
+    document.addEventListener("DOMContentLoaded", function () {
+      const toastBtn = document.querySelector(".toast-close");
+      const toast = document.querySelector(".toast");
+
+      toastBtn.addEventListener("click", function () {
+        $(".toast").hide();
+      });
+
+      setTimeout(() => {
+        $(".toast").hide();
+      }, 3000);
+    });
+  </script>
+{% endblock %}

@@ -1,0 +1,207 @@
+MINTY
+Terms and Conditions
+Module 1: Petty Cash Management
+Module 2: Bill Submission
+Effective Date: [INSERT DATE]  |  Version: 1.0
+Product
+Minty — Petty Cash & Bill Submission App
+Repository
+github.com/OliveandVineHK/Minty
+Modules
+Module 1: Petty Cash Management  |  Module 2: Bill Submission
+Governing Law
+Laws of the Hong Kong Special Administrative Region
+Language
+English (Bilingual Traditional Chinese version available)
+Effective Date
+[INSERT DATE]
+
+1. Definitions and Interpretation
+In these Terms and Conditions, the following definitions apply:
+"Minty" or "the App" refers to the Minty application, its web frontend, and all modules, hosted at or distributed via github.com/[your-org]/Minty.
+"Module 1" or "Petty Cash" refers to the Petty Cash Management module, enabling Users to manage petty cash funds, record disbursements, and perform reconciliation.
+"Module 2" or "Bill Submission" refers to the Bill Submission module, enabling Users to submit, upload, track, and obtain approval for bills and expense claims.
+"User" or "you" means any individual or entity — including employees, administrators, and approvers — who accesses or uses any module of Minty.
+"Administrator" means a User with elevated permissions to manage fund allocations, approve submissions, and configure settings within a module.
+"Custodian" means the User designated as responsible for managing and reconciling a petty cash fund under Module 1.
+"Petty Cash Fund" means the allocated float amount managed through Module 1 by a Custodian.
+"Disbursement" means any payment or cash-out recorded against a Petty Cash Fund in Module 1.
+"Bill Submission" means an expense claim or bill filed by a User through Module 2 for review and approval.
+"Supporting Document" means any receipt, invoice, or evidence uploaded to substantiate a Bill Submission.
+"Organisation" means the company, team, or entity that has deployed Minty for internal use.
+"PDPO" means the Personal Data (Privacy) Ordinance (Cap. 486) of Hong Kong.
+
+2. Acceptance of Terms
+By accessing or using Minty — including any module — you confirm that:
+You have read, understood, and agree to be bound by these Terms and Conditions in their entirety.
+You are at least 18 years of age, or are acting under the supervision and authority of your Organisation.
+Where you act on behalf of an Organisation, you have the authority to bind that Organisation to these Terms.
+Your use of the App and its modules complies with all applicable Hong Kong laws and regulations, including those governing financial record-keeping and expense management.
+If you do not agree to these Terms, you must immediately cease using Minty and all its modules.
+
+3. Module 1: Petty Cash Management
+MODULE 1 — Petty Cash Management
+
+3.1  Purpose and Scope
+Module 1 enables Organisations to digitally manage petty cash funds. Its features include:
+Creation and configuration of one or more Petty Cash Funds with defined float amounts.
+Recording of individual Disbursements against a fund, including payee, purpose, amount, and date.
+Uploading of supporting receipts or vouchers for each Disbursement.
+Reconciliation of fund balances and generation of reconciliation reports.
+Assignment of Custodian and Administrator roles for each fund.
+Top-up request and replenishment workflows.
+3.2  Custodian Responsibilities
+Users designated as Custodians of a Petty Cash Fund agree to:
+Maintain accurate and complete records of all Disbursements made from the fund.
+Ensure that Supporting Documents (receipts, vouchers) are uploaded promptly for each Disbursement.
+Not record fictitious, inflated, or fraudulent Disbursements.
+Reconcile the fund balance at such intervals as required by their Organisation or by applicable law.
+Report any discrepancy, loss, or suspected misuse of the Petty Cash Fund to their Administrator immediately.
+Return or account for any unspent fund balance upon request by the Administrator or Organisation.
+3.3  Administrator Responsibilities
+Users with Administrator access to Module 1 agree to:
+Review and approve or reject top-up and replenishment requests in a timely manner.
+Monitor fund activity for irregularities, anomalies, or policy violations.
+Configure fund limits, disbursement categories, and approval thresholds appropriately.
+Ensure that only authorised individuals are assigned Custodian or Administrator roles.
+3.4  Disbursement Limits and Controls
+Module 1 may allow Organisations to set per-transaction and per-period disbursement limits. Users acknowledge that:
+Minty enforces limits as configured by the Administrator; it is the Organisation's responsibility to set appropriate limits.
+Circumventing or splitting transactions to avoid disbursement limits is prohibited and may constitute misconduct under your Organisation's policies.
+Minty is not responsible for losses arising from misconfigured limits or insufficient internal controls.
+3.5  Record Accuracy and Audit
+All Disbursement records entered into Module 1 are intended to accurately reflect real transactions. You agree that:
+Records submitted through Module 1 may be used by your Organisation for internal audits, financial reporting, and compliance purposes.
+Minty generates Petty Cash reports based solely on data entered by Users; the accuracy of those reports depends on the accuracy of User-entered data.
+Minty does not independently audit, verify, or validate petty cash transactions.
+
+4. Module 2: Bill Submission
+MODULE 2 — Bill Submission
+
+4.1  Purpose and Scope
+Module 2 enables Users to submit bills and expense claims for review and approval within their Organisation. Features include:
+Creation and submission of Bill Submissions with itemised expense details, amounts, dates, and categories.
+Upload of Supporting Documents (receipts, invoices, purchase orders) to substantiate each submission.
+Multi-level approval workflows configurable by Administrators.
+Status tracking of submitted bills (pending, approved, rejected, paid).
+Generation of expense summary reports for approved submissions.
+Integration with petty cash records where an expense is reimbursed from a Petty Cash Fund under Module 1.
+4.2  User Obligations — Submitters
+Users who submit bills through Module 2 agree to:
+Submit only legitimate, business-related expenses that comply with their Organisation's expense policy.
+Ensure all details — amounts, dates, payees, and categories — are accurate and truthful.
+Upload clear and legible Supporting Documents for each Bill Submission; blurred, altered, or falsified documents are prohibited.
+Not submit duplicate claims for the same expense.
+Not submit personal or non-business expenses as business claims.
+Acknowledge that fraudulent or dishonest expense submissions may result in disciplinary action by the Organisation, and may constitute a criminal offence under Hong Kong law.
+4.3  User Obligations — Approvers
+Users with approval authority in Module 2 agree to:
+Review Bill Submissions promptly and in good faith against the Organisation's expense policy.
+Approve only submissions that are legitimate, properly documented, and within authorised limits.
+Reject submissions that are incomplete, unsupported, or appear fraudulent, providing a reason for rejection where possible.
+Not approve their own Bill Submissions or those submitted by persons they supervise, where a conflict of interest exists.
+Maintain the confidentiality of expense information reviewed in their approver capacity.
+4.4  Supporting Documents
+By uploading Supporting Documents through Module 2, you represent and warrant that:
+The documents are authentic and have not been altered, fabricated, or digitally manipulated.
+You have the right to upload and share the documents within your Organisation.
+The documents accurately reflect the transaction they are intended to support.
+Minty reserves the right to flag or reject submissions with suspicious or unreadable Supporting Documents.
+4.5  Approval Workflow and Finality
+The approval workflow in Module 2 is configured by your Organisation's Administrator. You acknowledge that:
+Approval of a Bill Submission within Minty does not by itself authorise payment; actual payment is subject to your Organisation's financial controls.
+Approved submissions may be exported, reported on, or integrated with your Organisation's accounting systems.
+Once a submission is marked as paid, it may not be edited. Disputes regarding paid submissions must be raised with your Organisation's Administrator.
+
+5. General User Obligations
+Across both modules, all Users agree to:
+Access the App only for legitimate business purposes as authorised by their Organisation.
+Not share login credentials or allow unauthorised persons to access their User account.
+Not attempt to gain access to another User's data, submissions, or fund records.
+Not reverse-engineer, decompile, or extract source code beyond what is available under the open-source licence on GitHub.
+Not introduce malware, scripts, or harmful code into the Platform.
+Comply with all applicable laws of the Hong Kong Special Administrative Region, including those relating to financial integrity, fraud prevention, and data privacy.
+Notify Minty or their Administrator promptly upon discovering any security vulnerability, unauthorised access, or data breach affecting the App.
+
+6. Prices, Fees, and Refunds
+6.1  Service Fees
+Minty may charge fees for access to the App or specific module features. All fees will be:
+Clearly disclosed within the App or agreed in writing prior to activation.
+Stated in Hong Kong Dollars (HK$) unless otherwise specified.
+Subject to applicable taxes as required by Hong Kong law.
+6.2  Refund Policy
+Subject to the Sale of Goods Ordinance (Cap. 26) and the Supply of Services (Implied Terms) Ordinance (Cap. 457):
+Subscription or access fees are generally non-refundable once a billing period has commenced.
+Refunds may be granted at Minty's sole discretion where a demonstrable technical failure is attributable to the App.
+Refund requests must be submitted in writing to [support@minty.app] within 14 days of the charge.
+Nothing in this section limits your statutory rights under Hong Kong law.
+
+7. Intellectual Property
+The Minty application, including source code available on GitHub, is governed by the open-source licence stated in the repository. Nothing in these Terms grants rights beyond those conferred by:
+The applicable open-source licence for the Minty GitHub repository.
+Your limited right to use the App and its modules as an authorised User.
+All trademarks, branding, and proprietary materials associated with Minty remain the property of the respective owners. Unauthorised commercial use of the Minty name or branding is prohibited.
+Expense data, petty cash records, and reports generated through the App belong to the Organisation. Minty claims no ownership over User-submitted business data.
+
+8. Disclaimer and Limitation of Liability
+8.1  No Financial or Accounting Advice
+Minty is a business operations software tool. Nothing within the App — including petty cash reports (Module 1) or bill submission summaries (Module 2) — constitutes financial, accounting, tax, audit, or legal advice. Organisations should engage qualified professionals for such purposes.
+8.2  Data Accuracy
+Minty generates records and reports based entirely on data entered by Users. Minty does not independently verify, audit, or validate any Disbursement, Bill Submission, or Supporting Document. The Organisation bears full responsibility for the accuracy and integrity of data entered into the App.
+8.3  Service Availability
+The App and its modules are provided on an "as available" basis. Minty does not warrant uninterrupted or error-free operation. Scheduled and unscheduled maintenance may temporarily affect access to either module.
+8.4  Limitation of Liability
+Subject to the Control of Exemption Clauses Ordinance (Cap. 71) and the Unconscionable Contracts Ordinance (Cap. 458), and to the fullest extent permitted by Hong Kong law:
+Minty's total aggregate liability for any claim arising out of these Terms or the use of any module shall not exceed the total fees paid by the Organisation to Minty in the three (3) months preceding the event giving rise to the claim.
+Minty shall not be liable for any indirect, incidental, consequential, or punitive damages, including financial loss, data loss, reputational harm, or regulatory penalties.
+Minty is not liable for losses arising from fraudulent or erroneous data submitted by Users through either module.
+Minty is not liable for losses resulting from misconfigured approval workflows, fund limits, or access permissions set by an Organisation's Administrator.
+Nothing in these Terms limits liability for death or personal injury caused by negligence, fraud, or any liability that cannot be excluded under Hong Kong law.
+
+9. Personal Data and Privacy
+Minty processes personal data in accordance with the Personal Data (Privacy) Ordinance (Cap. 486) of Hong Kong.
+9.1  Module 1 — Petty Cash Data
+User identity data (name, role) is collected to assign Custodian and Administrator responsibilities.
+Disbursement records, including payee names and transaction details, are stored to support fund management and reconciliation.
+Uploaded receipts and vouchers may contain personal data of third parties; Users are responsible for ensuring such uploads comply with PDPO requirements.
+9.2  Module 2 — Bill Submission Data
+Submitter identity, expense details, and Supporting Documents are collected to facilitate the approval workflow.
+Approver identity and decisions are logged to maintain an auditable record.
+Expense reports generated from Module 2 may be shared within the Organisation for financial reporting purposes.
+9.3  Data Retention
+Personal and transactional data is retained only as long as necessary for the purposes for which it was collected, or as required by applicable Hong Kong law. Financial records — including petty cash disbursements and approved bill submissions — may be retained for up to 7 years in accordance with statutory requirements.
+9.4  Your Rights
+Users and data subjects have the right to request access to, and correction of, personal data held by Minty. Requests should be directed to [digitalisation@oliveandvinehk.com]. For full details, please refer to Minty's Privacy Policy, accessible within the App and on the GitHub repository.
+
+10. Termination
+Minty reserves the right to suspend or terminate access to the App or any module, with or without notice, if:
+A User or Organisation breaches any provision of these Terms.
+Fraudulent, unlawful, or abusive use of either module is suspected.
+Applicable fees remain unpaid after a reasonable notice period.
+Upon termination, all access to Module 1 and Module 2 ceases immediately. Records and reports generated prior to termination may be exported by the Administrator before access is revoked, subject to Minty providing reasonable notice where practicable.
+An Organisation may terminate its use of Minty by providing written notice to [support@minty.app]. Termination does not entitle the Organisation to a refund of prepaid fees.
+
+11. Governing Law and Jurisdiction
+These Terms and Conditions are governed by the laws of the Hong Kong Special Administrative Region of the People's Republic of China.
+Any dispute arising out of or in connection with these Terms — including any question regarding their existence, validity, or termination — shall be subject to the exclusive jurisdiction of the courts of Hong Kong.
+Parties are encouraged to attempt resolution through mediation before commencing court proceedings. The Hong Kong Mediation Centre is suggested as a neutral body; participation is voluntary.
+
+12. Amendments to These Terms
+Minty reserves the right to update or amend these Terms — including any module-specific provisions — at any time. For material changes, Minty will:
+Provide at least 14 days' advance notice via in-app notification or email to the Organisation's registered contact.
+Update the version number and effective date at the top of this document.
+Clearly identify which module or section has been amended.
+Continued use of the App or any module after the effective date of an amendment constitutes acceptance of the revised Terms.
+
+13. Contact Information
+For questions, support, or data requests relating to these Terms or any module, please contact:
+
+Email
+digitalisation@oliveandvinehk.com
+GitHub
+github.com/OliveandVineHK/Minty — Issues & Discussions
+Address
+Olive and Vine Limited, Hong Kong SAR
+
+These Terms and Conditions are governed by the laws of the Hong Kong Special Administrative Region.
+© 2026 Minty. All rights reserved. Version 1.0

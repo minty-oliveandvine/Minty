@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Report Dashboard</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+    <style>
+                /* Navbar Styles */
+        .navbar {
+            padding: 0.5rem 1rem;
+        }
+
+        .navbar-brand img {
+            max-height: 40px;
+        }
+
+        .navbar-nav .nav-link {
+            font-size: 1rem;
+            margin-right: 1rem;
+            padding: 0.5rem 1rem;
+        }
+
+        .navbar-toggler {
+            border: none;
+        }
+
+        /* Adjust the layout for smaller screens */
+        @media (max-width: 768px) {
+            .navbar-nav .nav-link {
+                font-size: 0.9rem;
+                margin-right: 0.5rem;
+                padding: 0.5rem;
+            }
+
+            .navbar-collapse {
+                text-align: center;
+            }
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" class="logo" style="width: 40px;">
+            </a>
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link btn btn-secondary text-white" href="{{ url_for('auth.logout') }}">Logout</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+        
+    <div class="container mt-5">
+        <h1 class="text-center">Admin Report Dashboard</h1>
+
+        <!-- Super Admin Only: Link to Admin Dashboard -->
+        {% if current_user.system_role == 'superuser' %}
+        <div class="text-center mb-4">
+            <a href="{{ url_for('user_management.admin_dashboard') }}" class="btn btn-primary">Go to Admin Dashboard</a>
+        </div>
+        {% endif %}
+
+        <!-- Filter/Sort Section -->
+        <div class="filter-section mb-5">
+            <h5>Filter Reports / 리포트 필터</h5>
+            <div class="row">
+                <!-- Filter options for date, company, etc. -->
+                <div class="row">
+                    <!-- Start Date Filter -->
+                    <div class="col-md-4">
+                        <label for="startDateFilter">Start Date:</label>
+                        <input type="date" id="startDateFilter" class="form-control">
+                    </div>
+                
+                    <!-- End Date Filter -->
+                    <div class="col-md-4">
+                        <label for="endDateFilter">End Date:</label>
+                        <input type="date" id="endDateFilter" class="form-control">
+                    </div>
+                </div>                
+                <div class="col-md-4">
+                    <label for="companyFilter">Company:</label>
+                    <select id="companyFilter" class="form-control">
+                        <option value="">Select a company</option>
+                        {% for company in cumulative_total_sales_by_company.keys() %}
+                            <option value="{{ company }}">{{ company }}</option>
+                        {% endfor %}
+                    </select>                    
+                </div>
+                <div class="col-md-4">
+                    <label for="uploadedByFilter">Uploaded By:</label>
+                    <select id="uploadedByFilter" class="form-control">
+                        <option value="">Select a user</option>
+                        {% for user in reports|map(attribute='uploaded_by')|unique %}
+                            <option value="{{ user }}">{{ user }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- Expenses and Sales filters -->
+                <div class="col-md-4">
+                    <label for="expensesFilter">Expenses:</label>
+                    <input type="number" id="expensesFilter" class="form-control" placeholder="Exact value or range">
+                    <select id="expensesCondition" class="form-control mt-1">
+                        <option value="exact">Exact</option>
+                        <option value="range">Range (±10%)</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="salesFilter">Sales:</label>
+                    <input type="number" id="salesFilter" class="form-control" placeholder="Exact value or range">
+                    <select id="salesCondition" class="form-control mt-1">
+                        <option value="exact">Exact</option>
+                        <option value="range">Range (±10%)</option>
+                    </select>
+                </div>
+                <!-- Filter and Reset buttons -->
+                <div class="col-md-4 mt-4">
+                    <button id="filterButton" class="btn btn-primary btn-block">Apply Filter/Sort</button>
+                </div>
+                <div class="col-md-4 mt-4">
+                    <button id="resetButton" class="btn btn-secondary btn-block">Reset Filter</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report List Section -->
+        <h3>All Reports</h3>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Transaction Date</th>
+                        <th>Company</th>
+                        <th>Shop Sales</th>
+                        <th>Delivery Sales</th>
+                        <th>Total Sales</th>
+                        <th>Expenses</th>
+                        <th>Uploaded By</th>
+                        <th>Upload Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="reportTable">
+                    {% for report in reports %}
+                    <tr>
+                        <td>{{ report.transaction_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ report.company }}</td>
+                        <td>${{ (report.total_sales or 0) | round(2) }}</td>
+                        <td>${{ report.shop_sales | default(0) | round(2) }}</td>
+                        <td>${{ report.delivery_sales | default(0) | round(2) }}</td>
+                        <td>${{ report.expenses | default(0) | round(2) }}</td>                        
+                        <td>{{ report.uploaded_by }}</td>
+                        <td>{{ report.date.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>
+                            <a href="{{ url_for('report.report_detail', id=report.id) }}" class="btn btn-success">View</a>
+                            {% if current_user.system_role == 'superuser' %}
+                                <a href="{{ url_for('report.download_report', id=report.id) }}" class="btn btn-primary">Download</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                
+            </table>
+        </div>
+
+        <div class="text-center mt-5">
+            <h3>Download Report Statements</h3>
+            <p>Filter by company and dates to download detailed reports with expenses listed in rows.</p>
+            <a href="{{ url_for('report.download_statements') }}" class="btn btn-warning">Download Report Statements</a>
+        </div>
+        
+
+        <!-- Cumulative Totals by Company Section -->
+        <h3>Sales and Expenses Breakdown by Company</h3>
+        <div class="table-responsive">
+            <table class="table table-bordered mt-4">
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Total Shop Sales</th>
+                        <th>Total Delivery Sales</th>
+                        <th>Total Sales</th>
+                        <th>Total Expenses</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for company in cumulative_shop_sales_by_company.keys() %}
+                    <tr>
+                        <td>{{ company }}</td>
+                        <td>${{ (cumulative_shop_sales_by_company[company] | default(0)) | round(2) }}</td>
+                        <td>${{ (cumulative_delivery_sales_by_company[company] | default(0)) | round(2) }}</td>
+                        <td>${{ (cumulative_total_sales_by_company[company] | default(0)) | round(2) }}</td>
+                        <td>${{ (cumulative_expenses_by_company[company] | default(0)) | round(2) }}</td>                    
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>    
+        
+
+    <!-- Script Section -->
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+    <script>
+        document.getElementById('filterButton').addEventListener('click', function () {
+            const endDate = document.getElementById('endDateFilter').value;
+            const company = document.getElementById('companyFilter').value;
+            const uploadedBy = document.getElementById('uploadedByFilter').value;
+            const expenses = document.getElementById('expensesFilter').value;
+            const expensesCondition = document.getElementById('expensesCondition').value;
+            const sales = document.getElementById('salesFilter').value;
+            const salesCondition = document.getElementById('salesCondition').value;
+    
+            // Create query parameters
+            const queryParams = new URLSearchParams();
+            if (endDate) queryParams.append('end_date', endDate);
+            if (company) queryParams.append('company', company);
+            if (uploadedBy) queryParams.append('uploaded_by', uploadedBy);
+            if (expenses) queryParams.append('expenses', expenses);
+            if (sales) queryParams.append('sales', sales);
+    
+            // Redirect with query parameters
+            window.location.href = `/admin?${queryParams.toString()}`;
+        });
+    
+        // Reset filters
+        document.getElementById('resetButton').addEventListener('click', function () {
+            window.location.href = '/admin'; // Reload page without filters
+        });
+    </script>
+    
+</body>
+</html>

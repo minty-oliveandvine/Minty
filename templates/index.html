@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Daily Cash Report - 일일 현금 리포트</title>
+    <!-- Bootstrap CSS -->
+    <link
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+
+    <!-- Custom Button Styles -->
+    <style>
+      /* Responsive Table Styling */
+      .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling for iOS */
+        margin-bottom: 20px;
+      }
+
+      #adjustedOpeningBalance {
+        font-weight: bold;
+        background-color: #f8f9fa;
+      }
+
+      .btn-primary {
+        background-color: #4a7c59;
+        border-color: #4a7c59;
+      }
+
+      .btn-primary:hover {
+        background-color: #36543a;
+        border-color: #36543a;
+      }
+
+      .btn-block {
+        width: 100%;
+      }
+
+      .logo {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        width: 80px;
+        height: auto;
+      }
+
+      .is-invalid {
+        border-color: red;
+      }
+
+      @media (max-width: 768px) {
+        .logo {
+          width: 60px;
+        }
+
+        .btn-block {
+          font-size: 1rem;
+        }
+
+        th,
+        td {
+          font-size: 0.9rem;
+          padding: 10px;
+        }
+
+        select,
+        input {
+          font-size: 0.9rem;
+        }
+
+        button {
+          font-size: 0.8rem;
+          padding: 6px 12px;
+        }
+      }
+
+      /* Stacking rows for very small devices (mobile) */
+      @media (max-width: 480px) {
+        .table {
+          display: block;
+        }
+
+        thead {
+          display: none; /* Hide headers */
+        }
+
+        tr {
+          display: flex;
+          flex-direction: column;
+          margin-bottom: 15px;
+          border: 1px solid #ddd;
+        }
+
+        td {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px;
+          font-size: 0.85rem;
+          white-space: normal; /* Allow wrapping */
+        }
+
+        td::before {
+          content: attr(data-label); /* Use 'data-label' for cell headers */
+          font-weight: bold;
+          color: #4a7c59;
+          flex: 1;
+          padding-right: 10px;
+          text-align: left;
+        }
+
+        td select,
+        td input,
+        td button {
+          flex: 2;
+        }
+      }
+
+      /* Ensure a neat layout for the file upload and preview section */
+      td[data-label="Files"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      td[data-label="Files"] input[type="file"],
+      td[data-label="Files"] .preview-button {
+        width: 100%;
+        max-width: 200px;
+        margin: 0 auto;
+      }
+
+      .file-preview-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        max-width: 100%;
+        margin-top: 10px;
+      }
+
+      .file-preview-container img {
+        max-width: 100%;
+        max-height: 300px;
+        object-fit: contain;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+
+      .file-preview-container embed {
+        max-width: 100%;
+        max-height: 300px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      /* Responsive styles for smaller screens */
+      @media (max-width: 768px) {
+        td[data-label="Files"] {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        td[data-label="Files"] input[type="file"],
+        td[data-label="Files"] .preview-button {
+          max-width: 100%;
+          margin: 0;
+        }
+
+        .file-preview-container img,
+        .file-preview-container embed {
+          max-height: 200px; /* Adjust for smaller screens */
+        }
+      }
+
+      .no-file {
+        border: red 5px solid !important;
+      }
+
+      .flash-container {
+        position: sticky;
+        top: 3rem;
+        z-index: 2;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="flash-container"></div>
+
+    <div class="container mt-5">
+      <img
+        src="{{ url_for('static', filename='img/logo.png') }}"
+        class="logo"
+        alt="Logo"
+      />
+      {% if current_user.username %}
+        <div class="text-center mb-3">
+          <p class="text-muted">Logged in as: {{ current_user.email }}</p>
+        </div>
+      {% endif %}
+      {{ current_user.id }}
+
+      <h1 class="text-center">Create Daily Report / 리포트 생성하기</h1>
+
+      <!-- Back to Reports Button -->
+      <div class="mb-4">
+        <a href="{{ url_for('auth.index', entity_id=entity_id) if entity_id else url_for('auth.index') }}" class="btn btn-secondary"
+          >Back to Reports / 리포트로 돌아가기</a
+        >
+      </div>
+
+      <form id="dailyReportForm" enctype="multipart/form-data" method="POST">
+        <input type="text" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="entity_id" value="{{ entity_id or '' }}" />
+        <!-- Add Company Field (readonly) -->
+        <div class="form-group">
+          <label for="company">Company:</label>
+          <input
+            type="text"
+            id="company"
+            name="company"
+            class="form-control"
+            value="{{ entity_name or entity_id or '' }}"
+            readonly
+          />
+        </div>
+        <!-- Opening Drawer Section -->
+        <div class="form-group">
+          <label>Opening Cashier Drawer Balance (현금 잔고):</label>
+          <input
+            type="number"
+            id="openingDrawer"
+            name="opening_balance"
+            class="form-control"
+            value="{{ opening_balance }}"
+            {%
+              if
+              opening_balance
+              !="0"
+            %}
+              readonly
+            {% endif %}
+            required
+          />
+        </div>
+
+        <!-- Addition to Cash Balance Section -->
+        <div class="form-group">
+          <label>Addition to Cash Balance (시제금 보충):</label>
+          <input
+            type="number"
+            id="additiontocashbalance"
+            name="cash_addition"
+            class="form-control"
+            placeholder="Enter Addition to Cash Balance Amount / 시제금 보충 금액을 기입하세요."
+            min="0"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Adjusted Opening Balance (조정된 현금 잔고):</label>
+          <input
+            type="number"
+            id="adjustedOpeningBalance"
+            class="form-control"
+            value="{{ report.adjusted_opening_balance | default(0) | round(2) }}"
+            readonly
+          />
+        </div>
+
+        <!-- Transaction Date Section -->
+        <div class="form-group">
+          <label>Transaction Date 데일리 리포트 날짜:</label>
+          <input
+            type="date"
+            id="transaction_date"
+            name="transaction_date"
+            class="form-control"
+            value="{{ next_transaction_date.strftime('%Y-%m-%d') if next_transaction_date else '' }}"
+            data-first-report="{{ 'true' if is_first_report else 'false' }}"
+            {%
+              if
+              next_transaction_date
+            %}
+              readonly
+            {% endif %}
+            required
+            data-next-transaction-date="{{ next_transaction_date.strftime('%Y-%m-%d') if next_transaction_date else '' }}"
+          />
+        </div>
+
+        <!-- Sales Section -->
+        <div id="cashSalesContainer">
+          <h2>Sales 수입</h2>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_cash">Cash:</label>
+            <input
+              type="number"
+              id="shop_sales_cash"
+              name="sales[shop_sales][cash]"
+              class="cash-sale form-control"
+              value="{{ report.cash_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_visa">Visa:</label>
+            <input
+              type="number"
+              id="shop_sales_visa"
+              name="sales[shop_sales][visa]"
+              class="cash-sale form-control"
+              value="{{ report.visa_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_master">Master:</label>
+            <input
+              type="number"
+              id="shop_sales_master"
+              name="sales[shop_sales][master]"
+              class="cash-sale form-control"
+              value="{{ report.master_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_unionpay">UnionPay:</label>
+            <input
+              type="number"
+              id="shop_sales_unionpay"
+              name="sales[shop_sales][unionpay]"
+              class="cash-sale form-control"
+              value="{{ report.unionpay_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_alipay">Alipay:</label>
+            <input
+              type="number"
+              id="shop_sales_alipay"
+              name="sales[shop_sales][alipay]"
+              class="cash-sale form-control"
+              value="{{ report.alipay_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_wechat">WeChat Pay:</label>
+            <input
+              type="number"
+              id="shop_sales_wechat"
+              name="sales[shop_sales][wechat]"
+              class="cash-sale form-control"
+              value="{{ report.wechat_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_amex">Amex:</label>
+            <input
+              type="number"
+              id="shop_sales_amex"
+              name="sales[shop_sales][amex]"
+              class="cash-sale form-control"
+              value="{{ report.amex_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_octopus">Octopus:</label>
+            <input
+              type="number"
+              id="shop_sales_octopus"
+              name="sales[shop_sales][octopus]"
+              class="cash-sale form-control"
+              value="{{ report.octopus_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+        </div>
+
+        <!-- Delivery Sales Section -->
+        <div id="deliverySalesContainer">
+          <h2>Delivery Sales 배달 수입</h2>
+          <div class="cash-sale-item form-group">
+            <label for="delivery_sales_foodpanda">Foodpanda:</label>
+            <input
+              type="number"
+              id="delivery_sales_foodpanda"
+              name="sales[delivery_sales][foodpanda]"
+              class="cash-sale form-control"
+              value="{{ report.foodpanda_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="delivery_sales_keeta">Keeta:</label>
+            <input
+              type="number"
+              id="delivery_sales_keeta"
+              name="sales[delivery_sales][keeta]"
+              class="cash-sale form-control"
+              value="{{ report.keeta_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="delivery_sales_openrice">Openrice:</label>
+            <input
+              type="number"
+              id="delivery_sales_openrice"
+              name="sales[delivery_sales][openrice]"
+              class="cash-sale form-control"
+              value="{{ report.openrice_sales | default(0) }}"
+              min="0"
+            />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Total Shop Sales 전체 가게 수입:</label>
+          <input
+            type="number"
+            id="totalShopSales"
+            class="form-control"
+            readonly
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Total Delivery Sales 전체 배달 수입:</label>
+          <input
+            type="number"
+            id="totalDeliverySales"
+            class="form-control"
+            readonly
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Total Sales 전체 수입:</label>
+          <input type="number" id="totalSales" class="form-control" readonly />
+        </div>
+
+        <!-- Shop Expenses Section -->
+        <h2>Shop Expenses 지출 내역</h2>
+
+        <div class="form-check mb-3">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="noExpenseCheckbox"
+            name="no_expense"
+            value="true"
+            {% if report and report.expenses == 0 %}
+              checked
+            {% endif %}
+          />
+          <label class="form-check-label" for="noExpenseCheckbox">
+            No Expenses / 지출 없음
+          </label>
+        </div>
+        <div class="table-responsive">
+          <table
+            id="shopExpensesContainer"
+            class="table table-bordered expense-table"
+          >
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Amount (HKD)</th>
+                <th>Remarks (비고)</th>
+                <th>Files</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Shop expense rows will be dynamically added here -->
+            </tbody>
+          </table>
+        </div>
+        <button
+          id="addExpenseButton"
+          type="button"
+          class="btn btn-success mb-3"
+        >
+          Add Expense / 비용 내역 추가
+        </button>
+
+        <div class="form-group">
+          <label>Total Shop Expense 지출 총계:</label>
+          <input type="number" id="grossTotal" class="form-control" readonly />
+        </div>
+
+        <div class="form-group">
+          <label for="bank_deposit">Bank Deposit 은행 예금:</label>
+          <input
+            type="number"
+            id="bank_deposit"
+            name="bank_deposit"
+            class="form-control"
+            placeholder="Enter Bank Deposit Amount / 은행 예금 금액을 기입하세요."
+            min="0"
+            required
+          />
+        </div>
+
+        <!-- Closing Drawer Section -->
+        <div class="form-group">
+          <label>Closing Cashier Drawer Balance / 정산 잔고:</label>
+          <input
+            type="number"
+            id="closing_balance"
+            name="closing_balance"
+            class="form-control"
+            readonly
+          />
+        </div>
+
+        <!-- Actual Cash Value Section -->
+        <div class="form-group">
+          <label>Actual Cash Value / 현금 실보유금:</label>
+          <div class="row">
+            <div class="col-md-2">
+              <label for="note1000">1000 HKD note:</label>
+              <input
+                type="number"
+                id="note1000"
+                name="actual_cash[note1000]"
+                class="form-control"
+                placeholder="1000 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note500">500 HKD note:</label>
+              <input
+                type="number"
+                id="note500"
+                name="actual_cash[note500]"
+                class="form-control"
+                placeholder="500 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note100">100 HKD note:</label>
+              <input
+                type="number"
+                id="note100"
+                name="actual_cash[note100]"
+                class="form-control"
+                placeholder="100 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note50">50 HKD note:</label>
+              <input
+                type="number"
+                id="note50"
+                name="actual_cash[note50]"
+                class="form-control"
+                placeholder="50 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note20">20 HKD note:</label>
+              <input
+                type="number"
+                id="note20"
+                name="actual_cash[note20]"
+                class="form-control"
+                placeholder="20 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note10">10 HKD note:</label>
+              <input
+                type="number"
+                id="note10"
+                name="actual_cash[note10]"
+                class="form-control"
+                placeholder="10 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="5coins">5 HKD Coins:</label>
+              <input
+                type="number"
+                id="5coins"
+                name="actual_cash[5coins]"
+                class="form-control"
+                placeholder="5 HKD Coins"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="2coins">2 HKD Coins:</label>
+              <input
+                type="number"
+                id="2coins"
+                name="actual_cash[2coins]"
+                class="form-control"
+                placeholder="2 HKD Coins"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="1coins">1 HKD Coins:</label>
+              <input
+                type="number"
+                id="1coins"
+                name="actual_cash[1coins]"
+                class="form-control"
+                placeholder="1 HKD Coins"
+                min="0"
+              />
+            </div>
+          </div>
+        </div>
+        {{ access_token }}
+        <!-- Total Actual Cash Value Section -->
+        <div class="form-group">
+          <label>Total Actual Cash Value / 현금 총계:</label>
+          <input
+            type="number"
+            id="total_actual_cash_value"
+            name="total_actual_cash_value"
+            class="form-control"
+            readonly
+          />
+          <span id="actualCashError" class="text-danger" style="display: none"
+            >Value doesn't match Closing Balance / 현금 잔액이 일치 하지
+            않습니다.</span
+          >
+        </div>
+
+        <!-- Submit Button -->
+        <button
+          id="submitReportButton"
+          type="submit"
+          class="btn btn-primary btn-block"
+        >
+          Submit Reports / 제출하기
+        </button>
+      </form>
+    </div>
+
+    <!-- Link to the JavaScript file -->
+    <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@latest/dist/browser-image-compression.min.js"></script>
+    <!-- Flatpickr JS -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+    <script>
+      document
+        .getElementById("submitReportButton")
+        .addEventListener("click", function () {
+          const requiredFields = document.querySelectorAll("input[required]");
+          let isValid = true;
+
+          requiredFields.forEach((field) => {
+            if (!field.value.trim()) {
+              isValid = false;
+              field.classList.add("is-invalid");
+              if (!field.nextElementSibling) {
+                const errorSpan = document.createElement("span");
+                errorSpan.className = "text-danger";
+                errorSpan.innerText = "This field is required.";
+                field.parentElement.appendChild(errorSpan);
+              }
+            } else {
+              field.classList.remove("is-invalid");
+              if (field.nextElementSibling) {
+                field.nextElementSibling.remove();
+              }
+            }
+          });
+
+          if (isValid) {
+            document.getElementById("dailyReportForm").submit();
+          }
+        });
+
+      setTimeout(() => {
+        $(".alert").alert("close");
+      }, 5000);
+    </script>
+  </body>
+</html>

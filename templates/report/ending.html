@@ -1,0 +1,2073 @@
+{# Constrained "Edit Report" mode for a SUBMITTED report: only non-balance
+   fields are editable. True only when ?report_edit=true AND this is a submitted
+   Report (a draft has status == 'draft'; a Report has no status attribute, so
+   the comparison is truthy for submitted reports). #}
+{% set is_report_edit_mode = request.args.get('report_edit') == 'true' and current_draft and not is_shared_link and current_draft.status != 'draft' %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Report Summary - Vine Consulting Limited</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+  <!-- Hover Effects Component -->
+  {% include 'components/hover_effects.html' %}
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+  
+  <!-- Pie Chart Component -->
+  {% include 'components/pie_chart.html' %}
+  
+  <!-- Bar Chart Component -->
+  {% include 'components/bar_chart.html' %}
+
+  <!-- Inter: match other report steps (opening→cash_count) so header typography is consistent -->
+  <link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <style>
+    /* Base styles */
+    .main-container {
+      width: 100%;
+      min-height: 100vh;
+    }
+    
+    /* Responsive container styles */
+    @media (min-width: 640px) and (max-width: 1024px) {
+      .main-container {
+        width: 640px;
+        margin: 0 auto;
+      }
+    }
+    
+    @media (min-width: 1024px) and (max-width: 1200px) {
+      .main-container {
+        width: 768px;
+        margin: 0 auto;
+      }
+    }
+    
+    @media (min-width: 1200px) {
+      .main-container {
+        width: 1024px;
+        margin: 0 auto;
+      }
+    }
+
+    
+    /* Ensure dropdown options match select field width */
+    select {
+      width: 100%;
+      max-width: 100%;
+    }
+    
+    select option {
+      width: 100%;
+      max-width: 100%;
+      word-wrap: break-word;
+    }
+    
+    /* Ensure side panel is hidden by default */
+    #sidePanel {
+      transform: translateX(100%);
+    }
+    
+    /* Side panel visible state */
+    #sidePanel.show {
+      transform: translateX(0px);
+    }
+
+    /* Simple sticky bottom section */
+    .sticky-bottom-section {
+      flex-shrink: 0;
+    }
+
+    /* Simple content area */
+    .content-scroll-area {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+
+  </style>
+  <script>
+    tailwind.config = {
+      theme: { 
+        extend: { 
+          fontFamily: { 
+            inter: ['Inter','ui-sans-serif','system-ui'] 
+          } 
+        } 
+      }
+    }
+  </script>
+</head>
+<body class="min-h-screen font-inter antialiased">
+
+<!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
+<script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/report_back_nav.js') }}"></script>
+<script>
+document.addEventListener('submit', function(e){
+  try{
+    const form = e.target;
+    const path = window.location.pathname;
+    let key = 'pending_generic';
+    if(path.includes('/sale')) key='pending_sales';
+    else if(path.includes('/expense')) key='pending_expenses';
+    else if(path.includes('/deposit')) key='pending_deposit';
+    else if(path.includes('/opening')) key='pending_opening';
+    else if(path.includes('/cash_count')) key='pending_cash_count';
+    else if(path.includes('/ending')) key='pending_ending';
+
+    const btn = e.submitter || form.querySelector('button[type="submit"]');
+    if(btn) BFCache.saveButtonState(btn);
+
+    const data = {};
+    try{ new FormData(form).forEach((v,k)=>{ if(data[k]){ if(Array.isArray(data[k])) data[k].push(v); else data[k]=[data[k],v]; } else data[k]=v }); }catch(e){}
+    BFCache.saveSnapshot(key, data);
+  }catch(e){}
+});
+</script>
+  <div class="flex min-h-screen items-center justify-center main-container">
+    <!-- Phone card -->
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          {% if not is_shared_link %}
+          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="/entity/{{org.id}}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+          {% else %}
+          <div class="w-6 h-6"></div>
+          {% endif %}
+        </div>
+        <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+          {% if display_date %}
+          <span class="px-3 py-1 rounded-full text-xs font-medium text-[#31B6BD] bg-[#CAF1F4]/50">
+            {{ transaction_date.strftime('%d %b').upper() or datenow.strftime('%d %b').upper()}}
+          </span>
+          {% endif %}
+          <h1 class="text-[#474747] text-lg font-medium">{{ entity_acronym }}</h1>
+          {% include 'components/report_draft_header_badge.html' %}
+        </div>
+        <div class="flex-1 flex justify-end">
+          {% if not is_shared_link %}
+          <div class="flex items-center gap-2">
+            {% set fn = (current_user.first_name or '')[:1] %}
+            {% set ln = (current_user.last_name or '')[:1] %}
+            {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+            <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
+              class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
+              aria-label="Open profile in Bills"
+              title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
+              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
+            </a>
+            <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
+                <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+              </svg>
+            </button>
+          </div>
+          {% else %}
+          <div class="w-8 h-8"></div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Progress Steps -->
+      {% if current_draft and not is_shared_link %}
+      <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
+        <!-- Flash Notification Area (from previous page saves) -->
+        <div id="flashNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
+          <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
+          <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
+            <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
+            <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+              <p class="font-[500] whitespace-nowrap" style="color: #E59218;">Warning</p>
+              <p class="font-[400] break-words w-full" style="color: #F0A93B;">You have unsaved changes. Please save your changes first.</p>
+            </div>
+            <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
+            {% for category, message in messages %}{% if category == 'success' %}
+              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
+                <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                  <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+                  <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
+                </div>
+                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            {% elif category == 'danger' or category == 'error' %}
+              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+                <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                  <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
+                  <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
+                </div>
+                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            {% endif %}{% endfor %}
+          {% endif %}{% endwith %}
+        </div>       
+        <!-- Include the reusable stepper component -->
+        {% if not is_shared_link %}
+        {% include 'components/stepper.html' %}
+        {% endif %}
+      </div>
+      {% endif %}  
+      <!-- Main Content Area -->
+      <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1 overflow-hidden">
+        {% if current_draft and not is_shared_link and current_draft.status is defined and (current_draft.status == 'draft' or current_draft.status is none) %}
+        <div class="flex items-start bg-[#EBEEF2] border-l-4 border-l-[#546881] rounded-[8px] px-4 py-3 mb-6 w-full max-w-full">
+          <svg class="flex-shrink-0 mt-0.5 mr-3" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="9" stroke="#546881" stroke-width="2" fill="#EBEEF2"/>
+            <rect x="9" y="8" width="2" height="5" rx="1" fill="#546881"/>
+            <rect x="9" y="5" width="2" height="2" rx="1" fill="#546881"/>
+          </svg>
+          <div>
+            <p class="font-semibold text-[#546881] text-sm mb-1">Draft report</p>
+            <p class="text-[#546881] text-sm leading-snug">
+              This report is still a draft and has not been submitted. Review the summary below, then complete submission when you are ready to finalise.
+            </p>
+          </div>
+        </div>
+        {% endif %}
+         <!-- Title -->
+         <div class="flex items-center justify-between mb-6">
+          <h2 class="text-lg sm:text-xl font-bold text-gray-700">Summary</h2>
+          <span class="text-sm sm:text-medium font-inter text-gray-300">HK$</span>
+        </div>  
+        <!-- Form Content -->
+        <form id="endingForm" method="post" action="{{ url_for('report.report_ending') }}?entity_id={{ org.id }}&transaction_date={{ transaction_date.strftime('%Y-%m-%d') if transaction_date else '' }}">
+          <input type="hidden" name="csrf_token" value="{{csrf_token()}}">
+          <input type="hidden" name="entity_id" value="{{ org.id }}">
+        
+          <input type="hidden" name="transaction_date" value="{{ transaction_date.strftime('%Y-%m-%d') if transaction_date else '' }}">
+          <!-- Single Form Container -->
+          <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
+          <!-- Total Sales Section -->
+            <div class="flex flex-col">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm sm:text-lg font-semibold text-gray-900">Total Sales</h3>
+              </div>
+              <span class="text-[30px] sm:text-[45px] font-semibold text-gray-900">{{ "{:,.2f}".format(total_sales) if total_sales else "0.00" }}</span>
+              <div class="flex items-center gap-2">
+                {% if yesterday_sales and yesterday_sales > 0 %}
+                  {% if is_sales_increase %}
+                    <!-- Green up arrow for increase -->
+                    <div class="flex items-center gap-0">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="w-[9px] h-[7px] sm:w-[12px] sm:h-[9px] md:w-[14px] md:h-[11px] flex-shrink-0 self-center" viewBox="0 0 9 7" fill="none">
+                        <path d="M3.66137 2.29115C4.05567 1.68409 4.94433 1.68409 5.33863 2.29115L7.3938 5.45529C7.8259 6.12057 7.34846 7 6.55517 7H2.44483C1.65154 7 1.17409 6.12057 1.6062 5.4553L3.66137 2.29115Z" fill="#00C896"/>
+                      </svg>
+                      <span class="text-sm sm:text-xl font-semibold" style="color: #00C896;">
+                        {{ "{:.1f}".format(sales_percentage_abs) }}%
+                      </span>
+                    </div>
+                    <span class="text-sm sm:text-xl font-semibold text-gray-400">Compared to Yesterday</span>
+                  {% else %}
+                    <!-- Red down arrow for decrease -->
+                    <div class="flex items-center gap-0">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="w-[9px] h-[7px] sm:w-[12px] sm:h-[9px] md:w-[14px] md:h-[11px] flex-shrink-0" viewBox="0 0 9 7" fill="none" style="transform: rotate(180deg);">
+                        <path d="M3.66137 2.29115C4.05567 1.68409 4.94433 1.68409 5.33863 2.29115L7.3938 5.45529C7.8259 6.12057 7.34846 7 6.55517 7H2.44483C1.65154 7 1.17409 6.12057 1.6062 5.4553L3.66137 2.29115Z" fill="#EF4444"/>
+                      </svg>
+                      <span class="text-sm sm:text-xl font-semibold" style="color: #EF4444;">
+                        {{ "{:.1f}".format(sales_percentage_abs) }}%
+                      </span>
+                    </div>
+                    <span class="text-sm sm:text-xl font-semibold text-gray-400">Compared to Yesterday</span>
+                  {% endif %}
+                {% else %}
+                  <!-- Default state when no yesterday data -->
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-[9px] h-[7px] sm:w-[12px] sm:h-[9px] md:w-[14px] md:h-[11px] flex-shrink-0" viewBox="0 0 9 7" fill="none">
+                    <path d="M3.66137 2.29115C4.05567 1.68409 4.94433 1.68409 5.33863 2.29115L7.3938 5.45529C7.8259 6.12057 7.34846 7 6.55517 7H2.44483C1.65154 7 1.17409 6.12057 1.6062 5.4553L3.66137 2.29115Z" fill="#00C896"/>
+                  </svg>
+                  <span class="text-sm sm:text-xl font-semibold text-gray-400">Compared to Yesterday</span>
+                {% endif %}
+              </div>
+            </div>
+             <div class="mt-6" id="salesBreakdown">
+               <div class="flex items-center justify-between">
+                   <div class="flex flex-col items-start flex-1">
+                     <span class="text-[12px] sm:text-lg font-base text-gray-400">Electronic Sales</span>
+                     <span class="text-[16px] sm:text-[20px] font-bold text-[#4B5563] mt-1" id="totalShopSales" name="totalShopSales">{{ "{:,.2f}".format(electronic_sales) if electronic_sales else "0.00" }}</span>
+                   </div>
+                   <div class="w-px h-12 bg-gray-100 mx-2"></div>
+                   <div class="flex flex-col items-start flex-1">
+                     <span class="text-[12px] sm:text-lg font-base text-gray-400">Delivery Sales</span>
+                     <span class="text-[16px] sm:text-[20px] font-bold text-[#4B5563] mt-1" id="totalDeliverySales" name="totalDeliverySales">{{ "{:,.2f}".format(delivery_sales) if delivery_sales else "0.00" }}</span>
+                   </div>
+                   <div class="w-px h-12 bg-gray-100 mx-2"></div>
+                   <div class="flex flex-col items-start flex-1">
+                     <span class="text-[12px] sm:text-lg font-base text-gray-400">Cash Sales</span>
+                     <span class="text-[16px] sm:text-[20px] font-bold text-[#4B5563] mt-1" id="totalSales" name="totalSales">{{ "{:,.2f}".format(cash_sales) if cash_sales else "0.00" }}</span>
+                   </div>
+               </div>
+               <!-- Horizontal separator (hidden by default) -->
+               <div id="salesSeparator" class="hidden border-t border-gray-100 mt-4 mb-4"></div>
+               <!-- Payment methods breakdown (hidden by default) -->
+               <div id="paymentMethodsBreakdown" class="hidden">
+                 <div class="flex gap-6">
+                   {% set sales_data = current_draft if current_draft else report_draft %}
+                   <!-- Column 1: Electronic Sales -->
+                   <div class="flex-1">
+                     <div>
+                       {% if sale_info %}
+                         {% set electronic_sales_list = sale_info | selectattr('type', 'equalto', 'Electronic') | list %}
+                         {% for sale in electronic_sales_list %}
+                           {% if sale.value_name and sale.value_name != 'deliveroo_sales' %}
+                             {% set sale_amount = sales_amounts.get(sale.value_name, 0) if sales_amounts else 0 %}
+                             {% set display_name = sale.sale_name or sale.value_name.replace('_sales', '').replace('_', ' ').title() %}
+                             <div class="flex items-center justify-between">
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ display_name }}</span>
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sale_amount or sale_amount == 0 else "{:,.2f}".format(sale_amount) }}</span>
+                             </div>
+                           {% endif %}
+                         {% endfor %}
+                       {% else %}
+                         <!-- Fallback to hardcoded list if sale_info is not available -->
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">Visa</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.visa_sales else "{:,.2f}".format(sales_data.visa_sales) }}</span>
+                         </div>
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">Alipay</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.alipay_sales else "{:,.2f}".format(sales_data.alipay_sales) }}</span>
+                         </div>
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">WeChat</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.wechat_sales else "{:,.2f}".format(sales_data.wechat_sales) }}</span>
+                         </div>
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">Mastercard</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.master_sales else "{:,.2f}".format(sales_data.master_sales) }}</span>
+                         </div>
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">UnionPay</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.unionpay_sales else "{:,.2f}".format(sales_data.unionpay_sales) }}</span>
+                         </div>
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">Amex</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.amex_sales else "{:,.2f}".format(sales_data.amex_sales) }}</span>
+                         </div>
+                         <div class="flex items-center justify-between">
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">Octopus</span>
+                           <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sales_data.octopus_sales else "{:,.2f}".format(sales_data.octopus_sales) }}</span>
+                         </div>
+                       {% endif %}
+                     </div>
+                   </div>
+                   <!-- Column 2: Delivery Sales and Cash Sales -->
+                   <div class="flex-1 space-y-4">
+                     <!-- Delivery Sales Payment Methods -->
+                     <div>
+                       <div>
+                         {% if sale_info %}
+                           {% set delivery_sales_list = sale_info | selectattr('type', 'equalto', 'Delivery') | list %}
+                           {% if delivery_sales_list %}
+                             {% for sale in delivery_sales_list %}
+                               {% if sale.value_name and sale.value_name != 'deliveroo_sales' %}
+                                 {% set sale_amount = sales_amounts.get(sale.value_name, 0) if sales_amounts else 0 %}
+                                 {% set display_name = sale.sale_name or sale.value_name.replace('_sales', '').replace('_', ' ').title() %}
+                                 {% if sale.value_name == 'foodpanda_sales' %}
+                                   {% set display_name = 'Food Panda' %}
+                                 {% elif sale.value_name == 'keeta_sales' %}
+                                   {% set display_name = 'Keeta' %}
+                                 {% elif sale.value_name == 'openrice_sales' %}
+                                   {% set display_name = 'OpenRice' %}
+                                 {% endif %}
+                                 <div class="flex items-center justify-between">
+                                   <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ display_name }}</span>
+                                   <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not sale_amount or sale_amount == 0 else "{:,.2f}".format(sale_amount) }}</span>
+                                 </div>
+                               {% endif %}
+                             {% endfor %}
+                           {% endif %}
+                         {% else %}
+                           <!-- Fallback to hardcoded list if sale_info is not available -->
+                           {% if sales_data.foodpanda_sales is not none or sales_data.keeta_sales is not none or sales_data.openrice_sales is not none %}
+                             <div class="flex items-center justify-between">
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">Foodpanda</span>
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if sales_data.foodpanda_sales is none or sales_data.foodpanda_sales == 0 else "{:,.2f}".format(sales_data.foodpanda_sales) }}</span>
+                             </div>
+                             <div class="flex items-center justify-between">
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">Keeta</span>
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if sales_data.keeta_sales is none or sales_data.keeta_sales == 0 else "{:,.2f}".format(sales_data.keeta_sales) }}</span>
+                             </div>
+                             <div class="flex items-center justify-between">
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">OpenRice</span>
+                               <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if sales_data.openrice_sales is none or sales_data.openrice_sales == 0 else "{:,.2f}".format(sales_data.openrice_sales) }}</span>
+                             </div>
+                           {% endif %}
+                         {% endif %}
+                       </div>
+                     </div>
+                     <!-- Cash Sales -->
+                     <div>
+                       <div class="flex items-center justify-between">
+                         <span class="text-[12px] sm:text-lg font-base text-gray-400">Cash Sales</span>
+                         <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not cash_sales else "{:,.2f}".format(cash_sales) }}</span>
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+               </div>
+               <!-- Show more button -->
+               <div class="flex justify-end mt-4">
+                 <button type="button" id="salesShowMore" class="flex items-center gap-1 text-sm text-[#54D3DA] hover:text-[#54D3DA]/80 transition-colors">
+                   <span>Show more</span>
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-[#54D3DA] transition-transform duration-200" id="salesShowMoreChevron">
+                     <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5" />
+                   </svg>
+                 </button>
+               </div>
+             </div>
+           <!-- Discrepancy Details Section -->
+          </div>
+          <!-- Sales History Chart -->
+          <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm sm:text-lg font-semibold text-gray-900">Sales History</h3>
+              </div>
+            </div>
+            <div id="salesHistoryChart" class="w-full h-[120px] sm:h-[240px] overflow-x-auto overflow-y-hidden"></div>
+          </div>
+          <div class="bg-white rounded-lg p-6 shadow-sm mb-6"> 
+              <!-- Total Expenses Section -->
+            <div class="flex items-center">
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm sm:text-lg font-semibold text-gray-900">Total Expenses</h3>
+              </div>
+            </div>
+            <div id="expensesBreakdown">
+              {% if existing_expenses and existing_expenses|length > 0 %}
+              <div class="flex flex-row">
+                <!-- Pie Chart Container -->
+                <div class="flex-1">
+                  <div class="flex justify-center items-center h-full">
+                    <div id="expensesPieChart" class="w-full aspect-square max-w-[200px] sm:max-w-[340px]"></div>
+                  </div>
+                </div>
+                <!-- Expenses List Container -->
+                <div class="flex-1 max-w-[50%] sm:max-w-none">
+                  <div class="flex flex-col items-center justify-center h-full">
+                    <div class="flex flex-col gap-1 w-full">
+                      {% set sorted_expenses = existing_expenses|sort(attribute='amount', reverse=True) %}
+                      {% set expenses_to_show = sorted_expenses[:7] %}
+                      {% for expense in expenses_to_show %}
+                      <div class="flex items-center gap-2 expense-item-{{ loop.index0 }} w-full">
+                        <div class="w-1 h-1 rounded-full flex-shrink-0 expense-color-{{ loop.index0 }}"></div>
+                        <div class="flex flex-col min-w-0 flex-1 overflow-hidden">
+                          <span class="text-[12px] sm:text-lg font-semibold text-gray-700 truncate block overflow-hidden text-ellipsis whitespace-nowrap">{{ (expense.item if expense.item else 'N/A')|replace('&', 'and') }}</span>
+                        </div>
+                      </div>
+                      {% endfor %}
+                      {% set other_expenses = sorted_expenses[7:] %}
+                      {% if other_expenses|length > 0 %}
+                      {% set other_total = 0 %}
+                      {% for exp in other_expenses %}
+                      {% set other_total = other_total + (exp.amount if exp.amount else 0) %}
+                      {% endfor %}
+                      <div class="flex items-center gap-2 expense-item-7 w-full">
+                        <div class="w-1 h-1 rounded-full flex-shrink-0 expense-color-7" style="background-color: #f1db37;"></div>
+                        <div class="flex flex-col min-w-0 flex-1 overflow-hidden">
+                          <span class="text-[12px] sm:text-lg font-semibold text-gray-700 truncate block overflow-hidden text-ellipsis whitespace-nowrap">Other expenses</span>
+                        </div>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Horizontal separator (hidden by default) -->
+              <div id="expensesSeparator" class="hidden border-t border-gray-100 mt-4 mb-4"></div>
+              <!-- Full expenses list (hidden by default) -->
+              <div id="fullExpensesList" class="hidden">
+                <div>
+                  {% for expense in existing_expenses %}
+                  <div class="flex items-center justify-between">
+                    <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ (expense.item if expense.item else 'N/A')|replace('&', 'and') }}</span>
+                    <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "{:,.2f}".format(expense.amount if expense.amount else 0) }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              <!-- Show more button -->
+              <div class="flex justify-end mt-4">
+                <button type="button" id="expensesShowMore" class="flex items-center gap-1 text-sm text-[#54D3DA] hover:text-[#54D3DA]/80 transition-colors">
+                  <span>Show more</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-[#54D3DA] transition-transform duration-200" id="expensesShowMoreChevron">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5" />
+                  </svg>
+                </button>
+              </div>
+              {% else %}
+              <div class="text-center py-4">
+                <p class="text-sm text-gray-500">No expenses recorded</p>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
+              <!-- Cash Balance Section -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">                
+                <h3 class="text-sm sm:text-lg font-semibold text-gray-900">Cash Balance</h3>
+              </div>
+              <span class="text-lg sm:text-2xl font-semibold text-gray-900">{{ "{:,.2f}".format(cash_balance) if cash_balance else "0.00" }}</span>
+            </div>
+            <!-- Horizontal separator (hidden by default) -->
+            <div id="cashBalanceSeparator" class="hidden border-t border-gray-100 mt-4 mb-4"></div>
+            <!-- Cash Balance Details (hidden by default) -->
+            <div id="cashBalanceDetails" class="hidden">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[12px] sm:text-lg font-base text-gray-400">Cash Till Balance</span>
+                  <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not total_actual_cash else "{:,.2f}".format(total_actual_cash) }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[12px] sm:text-lg font-base text-gray-400">Safebox</span>
+                  <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not (cashcount_draft and cashcount_draft.safe_box_balance) else "{:,.2f}".format(cashcount_draft.safe_box_balance) }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Show more button -->
+            <div class="flex justify-end mt-4">
+              <button type="button" id="cashBalanceShowMore" class="flex items-center gap-1 text-sm text-[#54D3DA] hover:text-[#54D3DA]/80 transition-colors">
+                <span>Show more</span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-[#54D3DA] transition-transform duration-200" id="cashBalanceShowMoreChevron">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {% if discrepancy_amount and discrepancy_amount != 0 %}
+          <!-- Discrepancy Details Section -->
+          <div class="{% if discrepancy_type == 'shortage' %}bg-red-50 {% else %}bg-green-50{% endif %} rounded-lg p-4 mb-6">
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6" style="color: {% if discrepancy_type == 'shortage' %}#EF4444{% else %}#22C55E{% endif %};">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <div class="ml-3 flex-1 min-w-0">
+                <h3 class="text-sm font-medium {% if discrepancy_type == 'shortage' %}text-red-800{% else %}text-green-800{% endif %}">
+                  {% if discrepancy_type == "shortage" %}
+                    Cash Shortage: <span class="break-all">${{ "{:,.2f}".format(discrepancy_amount|abs) }}</span>
+                  {% else %}
+                    Cash Surplus: <span class="break-all">${{ "{:,.2f}".format(discrepancy_amount) }}</span>
+                  {% endif %}
+                </h3>
+                {% if discrepancy_reason %}
+                  <p class="text-sm text-gray-600 mt-1">{{ discrepancy_reason }}</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endif %}
+          
+          
+          <!-- Action Buttons -->
+          {% if current_draft and current_draft.status == 'draft' %}
+          <div class="flex justify-center mt-6 mb-2">
+            <button 
+              type="button"
+              class="flex font-medium hover:text-[#54D3DA]/80 items-center justify-center min-h-[40px] px-4 py-2 text-[#54D3DA] text-sm transition-colors hover-slide-left-parent"
+              onclick="goBack()">
+              <svg width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg" class="mr-2 hover-slide-left">
+                <path d="M3.466 5.66477L7.83718 1.18659L6.68352 -9.53674e-07L0.362305 6.50026L6.68352 13L7.83718 11.8139L3.466 7.33576H13.3623V5.66477H3.466Z" fill="currentColor"/>
+              </svg>
+              <span>Back</span>
+            </button>
+          </div>
+          {% endif %}
+          
+          {% if current_draft and current_draft.status == 'draft' %}
+            <!-- For drafts: Show Finish button that submits the form -->
+            <button type="submit" id="finishReportBtn" onclick="showFinishLoading()" class="bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full" data-is-today="True">
+              <svg width="14" height="10" viewBox="0 0 14 10" fill="none" xmlns="http://www.w3.org/2000/svg" class="hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path d="M5.25 7.6412L12.8443 9.53674e-07L14 1.1794L5.25 10L0 4.701L1.15566 3.53821L5.25 7.6412Z" fill="white"/>
+              </svg>
+              <span id="finishReportText">Finish Daily Report</span>
+            </button>
+          {% elif is_latest_report %}
+            <!-- For submitted reports: Show Delete button only if this is the latest report -->
+            <!-- Note: Report objects don't have status field, so we check is_latest_report directly -->
+            
+            <!-- Export Buttons: Save as Image, Detailed PDF, and Share -->
+            {% if not is_shared_link %}
+            <div class="mt-6 flex items-start justify-center gap-8 sm:gap-12">
+              <!-- Save as Image -->
+              {#
+              <div class="flex flex-col items-center gap-2 sm:gap-3">
+                <a href="{{ url_for('report.report_screenshot', id=current_draft.id)}}" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift" target="_blank">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  </svg>
+                </a>
+                <span class="text-sm font-regular text-gray-700">Save as Image</span>
+              </div>
+              #}
+
+              <!-- Detailed PDF -->
+              {#
+              <div class="flex flex-col items-center gap-2 sm:gap-3">
+                <a href="{{ url_for('report.generate_pdf_report', id=current_draft.id)}}" onclick="handleDownloadPDF('{{ current_draft.id }}', '{{ url_for('report.generate_pdf_report', id=current_draft.id) }}'); return false;" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift" target="_blank">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                  </svg>
+                </a>
+                <span class="text-sm font-regular text-gray-700">Detailed PDF</span>
+              </div>
+              #}
+
+              <!-- Share Link -->
+              <div class="flex flex-col items-center gap-2 sm:gap-3">
+                <button type="button" onclick="generateShareLink()" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+                  </svg>
+                </button>
+                <span class="text-sm font-regular text-gray-700">Share</span>
+              </div>
+            </div>
+            {% endif %}
+            
+            {% if not is_shared_link %}
+            <button 
+              type="button"
+              id="deleteReportBtn"
+              onclick="deleteReport()" 
+              class="bg-[#FF6B6B] flex font-medium gap-2 hover:bg-[#FF6B6B]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6" data-is-latest="True">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path d="M11.7497 3.50003H15.5V5.00013H13.9996V14.75C13.9996 14.96 13.9274 15.1375 13.7824 15.2825C13.6375 15.4275 13.4601 15.5 13.2501 15.5H2.74994C2.53994 15.5 2.36258 15.4275 2.21759 15.2825C2.0726 15.1375 2.00038 14.96 2.00038 14.75V5.00013H0.5V3.50003H4.25031V1.2502C4.25031 1.04021 4.32253 0.862556 4.46752 0.717527C4.61252 0.5725 4.78988 0.5 4.99987 0.5H11.0001C11.2101 0.5 11.3875 0.5725 11.5325 0.717527C11.6775 0.862556 11.7497 1.04021 11.7497 1.2502V3.50003ZM12.4999 5.00013H3.50013V14.0001H12.4999V5.00013ZM5.75006 7.25011H7.24981V11.7501H5.75006V7.25011ZM8.75019 7.25011H10.2499V11.7501H8.75019V7.25011ZM5.75006 2.00009V3.50003H10.2499V2.00009H5.75006Z" fill="currentColor"/>
+              </svg>
+              <span>Delete Report</span>
+            </button>
+            <!-- Edit Report / Done editing: above Close, non-balance fields only -->
+            {% if is_report_edit_mode %}
+            <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span>Done editing</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('report.report_ending', id=current_draft.id, entity_id=request.args.get('entity_id') or org.id, report_edit='true') }}"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+              </svg>
+              <span>Edit Report</span>
+            </a>
+            {% endif %}
+            <!-- Close button below Delete Report (hidden in edit mode; "Done editing" closes) -->
+            {% if not is_report_edit_mode %}
+            <button
+              type="button"
+              onclick="closeReport()"
+              class="bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              <span>Close</span>
+            </button>
+            {% endif %}
+            {% endif %}
+            {% else %}
+            <!-- For older submitted reports (not draft, not latest): Show export buttons and close button -->
+            <!-- Export Buttons: Save as Image and Detailed PDF -->
+            {% if not is_shared_link %}
+            <div class="mt-6 flex items-start justify-center gap-8 sm:gap-12">
+              <!-- Save as Image -->
+              {#
+              <div class="flex flex-col items-center gap-2 sm:gap-3">
+                <a href="{{ url_for('report.report_screenshot', id=current_draft.id)}}" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift" target="_blank">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  </svg>
+                </a>
+                <span class="text-sm font-regular text-gray-700">Save as Image</span>
+              </div>
+              #}
+
+              <!-- Detailed PDF -->
+              {#
+              <div class="flex flex-col items-center gap-2 sm:gap-3">
+                <a href="{{ url_for('report.generate_pdf_report', id=current_draft.id)}}" onclick="handleDownloadPDF('{{ current_draft.id }}', '{{ url_for('report.generate_pdf_report', id=current_draft.id) }}'); return false;" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift" target="_blank">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                  </svg>
+                </a>
+                <span class="text-sm font-regular text-gray-700">Detailed PDF</span>
+              </div>
+              #}
+
+              <!-- Share Link -->
+              <div class="flex flex-col items-center gap-2 sm:gap-3">
+                <button type="button" onclick="generateShareLink()" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+                  </svg>
+                </button>
+                <span class="text-sm font-regular text-gray-700">Share</span>
+              </div>
+            </div>
+            {% endif %}
+            
+            <!-- Edit Report / Done editing: above Close, non-balance fields only -->
+            {% if not is_shared_link %}
+            {% if is_report_edit_mode %}
+            <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span>Done editing</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('report.report_ending', id=current_draft.id, entity_id=request.args.get('entity_id') or org.id, report_edit='true') }}"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+              </svg>
+              <span>Edit Report</span>
+            </a>
+            {% endif %}
+            <!-- Close button for older submitted reports (hidden in edit mode; "Done editing" closes) -->
+            {% if not is_report_edit_mode %}
+            <button
+              type="button"
+              onclick="closeReport()"
+              class="bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              <span>Close</span>
+            </button>
+            {% endif %}
+            {% endif %}
+          {% endif %}
+        </form>
+           
+      </div>
+
+        <!-- Loading Overlay -->
+        {% include 'components/loading_overlay_ending.html' %}
+
+        <!-- Include reusable sidepanel component -->
+        {% include 'components/sidepanel.html' %}
+
+        <!-- Delete Confirmation Modal -->
+        <div id="deleteReportModal" class="hidden absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40 p-4">
+          <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between mb-6">
+              <h2 class="text-xl font-bold text-gray-900">Delete Report</h2>
+              <button onclick="hideDeleteModal()" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Modal Content -->
+            <div class="bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4 mb-6">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#EF4444]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <p class="text-sm text-[#B91C1C]">
+                    <span class="font-bold">Warning:</span>
+                  </p>
+                  <p class="text-sm text-[#B91C1C] mt-1">
+                    Are you sure you want to delete this report? This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Modal Actions -->
+            <div class="flex space-x-3">
+              <button onclick="hideDeleteModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/10 transition-colors">
+                Cancel
+              </button>
+              <button onclick="confirmDelete()" id="confirmDeleteButton" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center gap-2">
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Share Link Modal -->
+        <div id="shareLinkModal" class="hidden absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-lg p-6 w-full max-w-md mx-auto">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between mb-6">
+              <h2 class="text-xl font-bold text-gray-900">Share Report</h2>
+              <button onclick="hideShareModal()" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Modal Content -->
+            <div class="mb-6">
+              <p class="text-sm text-gray-600 mb-4">
+                Share this link to allow others to view this report. The link will expire in 30 days.
+              </p>
+              <div class="flex items-center gap-2">
+                <input 
+                  type="text" 
+                  id="shareLinkInput" 
+                  readonly 
+                  class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50"
+                  placeholder="Generating link..."
+                />
+                <button 
+                  onclick="copyShareLink()" 
+                  id="copyShareBtn"
+                  class="px-4 py-2 bg-[#54D3DA] text-white rounded-lg font-medium hover:bg-[#54D3DA]/80 transition-colors whitespace-nowrap">
+                  Copy
+                </button>
+              </div>
+              <p id="copySuccessMessage" class="text-sm text-green-600 mt-2 hidden">Link copied to clipboard!</p>
+            </div>
+
+            <!-- Modal Actions -->
+            <div class="flex justify-end">
+              <button onclick="hideShareModal()" class="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+
+     </div>
+   </div>
+
+  <!-- Negative Balance Modal -->
+  {% set _opening_balance = current_draft.opening_balance or 0 %}
+  {% set _cash_addition = current_draft.cash_addition or 0 %}
+  {% set _cash_sales = current_draft.cash_sales or 0 %}
+  {% set _cash_expenses = current_draft.expenses or 0 %}
+  {% set _bank_deposit = current_draft.bank_deposit or 0 %}
+  {% set _expected_balance = _opening_balance + _cash_addition + _cash_sales - _cash_expenses - _bank_deposit %}
+  <div id="fixNegativeBalanceModal" class="absolute inset-0 bg-black bg-opacity-50 {% if _expected_balance < 0 and current_draft.status == 'draft' %}flex{% else %}hidden{% endif %} items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+      <div class="mb-6">
+        <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
+        <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
+        <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if _expected_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if _expected_balance < 0 %}(${{ "{:,.2f}".format(-_expected_balance) }}){% else %}${{ "{:,.2f}".format(_expected_balance) }}{% endif %}</p>
+        <p class="text-sm text-gray-600">Cash balance cannot be negative, let's go back to</p>
+      </div>
+      <div class="space-y-3">
+        <button onclick="navigateToFixStep('opening')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Opening</span>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(_cash_addition) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        <button onclick="navigateToFixStep('sales')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Sales</span>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(_cash_sales) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        <button onclick="navigateToFixStep('expenses')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Expenses</span>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(_cash_expenses) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        <button onclick="navigateToFixStep('deposit')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Deposit</span>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(_bank_deposit) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        <button onclick="navigateToFixStep('cash_count')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center whitespace-nowrap overflow-hidden">
+            <span class="flex-shrink-0">Cash Count</span>
+           
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+
+     // Shrink the negative-balance figure to fit on one line when it would
+     // otherwise overflow its popup. Keeps the default (CSS) size when it fits.
+     function fitBalanceText() {
+       document.querySelectorAll('[data-fit-balance]').forEach(function (el) {
+         el.style.fontSize = '';  // reset to the CSS-defined size first
+         const max = el.parentElement ? el.parentElement.clientWidth : el.clientWidth;
+         if (!max) return;
+         let size = parseFloat(window.getComputedStyle(el).fontSize);
+         while (el.scrollWidth > max && size > 12) {
+           size -= 1;
+           el.style.fontSize = size + 'px';
+         }
+       });
+     }
+     window.addEventListener('load', fitBalanceText);
+     window.addEventListener('resize', fitBalanceText);
+
+     // Function to handle PDF download
+     function handleDownloadPDF(reportId, pdfUrl) {
+       if (reportId && pdfUrl) {
+         // Show success notification after a short delay
+         setTimeout(() => {
+           showNotification('Report downloaded successfully!', 'success');
+         }, 500);
+         // Navigate to PDF generation route
+         window.location.href = pdfUrl;
+       } else {
+         showNotification('Unable to download report. Missing report information.', 'error');
+       }
+     }
+
+     // Function to show notifications
+     function showNotification(message, type = 'success') {
+       const toast = document.createElement('div');
+       toast.className = `absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40`;
+
+       let borderColor, bgColor, titleColor, subtextColor, iconSrc, label;
+
+       if (type === 'success') {
+         borderColor = '#a9d7cb';
+         bgColor = '#f1fffc';
+         titleColor = '#017155';
+         subtextColor = '#92c6b9';
+         iconSrc = "{{ url_for('static', filename='img/success-icon.png') }}";
+         label = 'Success';
+       } else if (type === 'info') {
+         borderColor = '#a9d3ff';
+         bgColor = '#f1f8ff';
+         titleColor = '#006FE6';
+         subtextColor = '#5ba2ee';
+         iconSrc = "{{ url_for('static', filename='img/info-icon.png') }}";
+         label = 'Information';
+       } else if (type === 'warning') {
+         borderColor = '#fee0aa';
+         bgColor = '#fffaf1';
+         titleColor = '#DA8700';
+         subtextColor = '#e8b765';
+         iconSrc = "{{ url_for('static', filename='img/warning-icon.png') }}";
+         label = 'Warning';
+       } else {
+         borderColor = '#ffcccc';
+         bgColor = '#fff1f1';
+         titleColor = '#F03D3D';
+         subtextColor = '#f57e7e';
+         iconSrc = "{{ url_for('static', filename='img/error-icon.png') }}";
+         label = 'Error';
+       }
+
+       toast.innerHTML = `
+         <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: ${borderColor}; background-color: ${bgColor};">
+           <img src="${iconSrc}" alt="${label}" class="shrink-0 w-[36px] h-[44px]" />
+           <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+             <p class="font-[500] whitespace-nowrap" style="color: ${titleColor};">${label}</p>
+             <p class="font-[400] break-words w-full" style="color: ${subtextColor};">${message}</p>
+           </div>
+           <button onclick="closeNotification(this)" class="toast-close shrink-0 p-1 hover:bg-gray-200 rounded">
+             <svg class="w-[14px] h-[14px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+             </svg>
+           </button>
+         </div>
+       `;
+       
+       const phoneCard = document.querySelector('.relative.h-screen.bg-white.shadow-xl');
+       if (phoneCard) {
+         phoneCard.appendChild(toast);
+       } else {
+         document.body.appendChild(toast);
+       }
+       
+       setTimeout(() => {
+         toast.classList.remove('translate-x-full');
+       }, 100);
+       
+       setTimeout(() => {
+         toast.classList.add('translate-x-full');
+         setTimeout(() => {
+           if (toast.parentElement) {
+             toast.remove();
+           }
+         }, 500);
+       }, 4000);
+     }
+
+     // Function to close notification
+     function closeNotification(closeButton) {
+       let toast = closeButton.parentElement;
+       while (toast && !toast.classList.contains('absolute')) {
+         toast = toast.parentElement;
+       }
+       
+       if (toast) {
+         toast.classList.add('translate-x-full');
+         setTimeout(() => {
+           if (toast.parentElement) {
+             toast.remove();
+           }
+         }, 500);
+       }
+     }
+
+     // Function to show continue report message
+     function showContinueReportMessage() {
+       alert('This feature is currently in progress, Stay Tuned!');
+     }
+     
+     function showCompleteReportMessage() {
+       alert('Please complete the current report before navigating away.');
+     }
+
+     // Function to go back to previous step
+     function goBack() {
+       navigateToStep('cash_count');
+     }
+
+     // Store the report ID to delete
+     let reportToDelete = null;
+
+    // Function to delete the current report
+    function deleteReport() {
+      // Check if this is the latest report before allowing deletion
+      const deleteButton = document.getElementById('deleteReportBtn');
+      const isLatest = deleteButton.getAttribute('data-is-latest') === 'True';
+      
+      if (!isLatest) {
+        alert('You can only delete the latest submitted report. A newer report exists.');
+        return;
+      }
+      
+      // Store original button content in data attribute for later use
+      const originalButtonContent = deleteButton.innerHTML;
+      deleteButton.setAttribute('data-original-content', originalButtonContent);
+      
+      reportToDelete = '{{ current_draft.id if current_draft and current_draft.id else request.args.get("id") or org.id }}';
+      showDeleteModal();
+    }
+
+     // Show delete confirmation modal
+     function showDeleteModal() {
+       const modal = document.getElementById('deleteReportModal');
+       if (modal) {
+         modal.classList.remove('hidden');
+         // Prevent body scroll
+         document.body.style.overflow = 'hidden';
+       }
+     }
+
+     // Hide delete confirmation modal
+     function hideDeleteModal() {
+       const modal = document.getElementById('deleteReportModal');
+       if (modal && !modal.classList.contains('hidden')) {
+         // Only reset button if modal was actually visible (user cancelled)
+         const deleteButton = document.getElementById('deleteReportBtn');
+         if (deleteButton && reportToDelete) {
+           const originalContent = deleteButton.getAttribute('data-original-content');
+           if (originalContent) {
+             deleteButton.disabled = false;
+             deleteButton.innerHTML = originalContent;
+             deleteButton.removeAttribute('data-original-content');
+           }
+         }
+         
+         modal.classList.add('hidden');
+         // Restore body scroll
+         document.body.style.overflow = '';
+         reportToDelete = null;
+       }
+     }
+
+    // Confirm delete and submit
+    function confirmDelete() {
+      if (reportToDelete) {
+        // Store the report ID before hiding modal (which resets reportToDelete)
+        const reportId = reportToDelete;
+        
+        // Get delete button and update to loading state
+        const deleteButton = document.getElementById('deleteReportBtn');
+        const confirmButton = document.getElementById('confirmDeleteButton');
+        const originalButtonContent = confirmButton ? confirmButton.innerHTML : '';
+        
+        // Update delete button
+        if (deleteButton) {
+          deleteButton.disabled = true;
+        }
+        
+        // Update confirm button
+        if (confirmButton) {
+          confirmButton.disabled = true;
+        }
+        
+        // Show loading overlay
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        if (loadingOverlay) {
+          loadingOverlay.classList.remove('hidden');
+          const loadingText = document.getElementById('loadingText');
+          if (loadingText) {
+            loadingText.textContent = 'Deleting report...';
+          }
+        }
+        
+        // Hide modal (but don't reset delete button yet - keep it in loading state)
+        const modal = document.getElementById('deleteReportModal');
+        if (modal) {
+          modal.classList.add('hidden');
+          document.body.style.overflow = '';
+        }
+        
+        // Get CSRF token
+        const csrfToken = document.querySelector('input[name="csrf_token"]');
+        
+        // Create FormData
+        const formData = new FormData();
+        if (csrfToken) {
+          formData.append('csrf_token', csrfToken.value);
+        }
+        
+        // Send delete request using stored reportId
+        fetch(`/report/delete/${reportId}`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include' // Ensure session cookies are sent
+        })
+        .then(response => {
+          // Server returns 302 redirect after setting flash message
+          // Accept both 200 (ok) and 302 (redirect) as success
+          if (response.ok || response.status === 302) {
+            // Clear ALL report-related sessionStorage when report is deleted
+            try {
+              var cacheKeys = [
+                'pending_expenses', 'refresh_expense_on_back',
+                'bf_pending_expenses', 'bf_pending_sales',
+                'bf_pending_deposit', 'bf_pending_opening',
+                'bf_pending_cash_count', 'bf_pending_ending',
+                'bf_pending_generic'
+              ];
+              cacheKeys.forEach(function(k) { sessionStorage.removeItem(k); });
+              try {
+                var clearState = { pendingExpenses: null };
+                ['pending_expenses','pending_sales','pending_deposit','pending_opening','pending_cash_count','pending_ending'].forEach(function(k) { clearState[k] = null; });
+                history.replaceState(Object.assign({}, history.state || {}, clearState), document.title);
+              } catch (e) { /* ignore */ }
+            } catch (e) {
+              console.warn('Error clearing sessionStorage:', e);
+            }
+            
+            // Update loading text to show success message
+            const loadingText = document.getElementById('loadingText');
+            if (loadingText) {
+              loadingText.textContent = 'Success, Redirecting to Dashboard...';
+            }
+            
+            // Wait a moment to show the success message, then redirect
+            setTimeout(() => {
+              window.location.href = '{{ url_for("entity.report_dashboard", id=request.args.get("entity_id") or org.id) }}';
+            }, 500);
+          } else {
+            // Hide loading overlay and reset buttons on error
+            if (loadingOverlay) {
+              loadingOverlay.classList.add('hidden');
+            }
+            
+            // Reset delete button on error
+            const deleteButton = document.getElementById('deleteReportBtn');
+            if (deleteButton) {
+              const originalContent = deleteButton.getAttribute('data-original-content');
+              if (originalContent) {
+                deleteButton.disabled = false;
+                deleteButton.innerHTML = originalContent;
+                deleteButton.removeAttribute('data-original-content');
+              }
+            }
+            
+            // Reset confirm button on error
+            if (confirmButton) {
+              confirmButton.disabled = false;
+              confirmButton.innerHTML = originalButtonContent;
+            }
+            
+            // Update loading text to show failed message
+            const loadingText = document.getElementById('loadingText');
+            if (loadingText) {
+              loadingText.textContent = 'Failed, Redirecting to Dashboard...';
+            }
+            
+            // Still redirect to dashboard even on error
+            setTimeout(() => {
+              window.location.href = '{{ url_for("entity.report_dashboard", id=request.args.get("entity_id") or org.id) }}';
+            }, 500);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting report:', error);
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('error', 'Error deleting report', { message: error && error.message });
+          }
+          // Hide loading overlay and reset buttons on error
+          if (loadingOverlay) {
+            loadingOverlay.classList.add('hidden');
+          }
+          
+          // Reset delete button on error
+          const deleteButton = document.getElementById('deleteReportBtn');
+          if (deleteButton) {
+            const originalContent = deleteButton.getAttribute('data-original-content');
+            if (originalContent) {
+              deleteButton.disabled = false;
+              deleteButton.innerHTML = originalContent;
+              deleteButton.removeAttribute('data-original-content');
+            }
+          }
+          
+          // Reset confirm button on error
+          if (confirmButton) {
+            confirmButton.disabled = false;
+            confirmButton.innerHTML = originalButtonContent;
+          }
+          
+          // Update loading text to show failed message
+          const loadingText = document.getElementById('loadingText');
+          if (loadingText) {
+            loadingText.textContent = 'Failed, Redirecting to Dashboard...';
+          }
+          
+          // Still redirect to dashboard even on error
+          setTimeout(() => {
+            window.location.href = '{{ url_for("entity.report_dashboard", id=request.args.get("entity_id") or org.id) }}';
+          }, 500);
+        });
+      }
+    }
+
+
+     // Function to close the report (for old reports)
+     function closeReport() {
+       // Navigate to report history
+       const entityId = '{{ request.args.get("entity_id") or org.id }}';
+       const reportHistoryUrl = '/entity/' + entityId + '/reports';
+       PageTransition.navigateWithFade(reportHistoryUrl);
+     }
+
+     // Function to generate share link
+     function generateShareLink() {
+       const entityId = '{{ request.args.get("entity_id") or org.id }}';
+       const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+       
+       if (!entityId || !transactionDate) {
+         showNotification('Missing entity or date information', 'error');
+         return;
+       }
+       
+       // Get CSRF token
+       const csrfToken = document.querySelector('input[name="csrf_token"]');
+       if (!csrfToken) {
+         showNotification('CSRF token not found', 'error');
+         return;
+       }
+       
+       // Show modal with loading state
+       const modal = document.getElementById('shareLinkModal');
+       const input = document.getElementById('shareLinkInput');
+       const copyBtn = document.getElementById('copyShareBtn');
+       const copySuccessMessage = document.getElementById('copySuccessMessage');
+       
+       if (modal) {
+         modal.classList.remove('hidden');
+         input.value = 'Generating link...';
+         input.disabled = true;
+         copyBtn.disabled = true;
+         copySuccessMessage.classList.add('hidden');
+         document.body.style.overflow = 'hidden';
+       }
+       
+       // Make API call to generate share link
+       fetch('/api/generate_share_link', {
+         method: 'POST',
+         headers: {
+           'Content-Type': 'application/json',
+           'X-CSRFToken': csrfToken.value
+         },
+         body: JSON.stringify({
+           entity_id: entityId,
+           transaction_date: transactionDate,
+           csrf_token: csrfToken.value
+         }),
+         credentials: 'include'
+       })
+       .then(response => response.json())
+       .then(data => {
+         if (data.url) {
+           input.value = data.url;
+           input.disabled = false;
+           copyBtn.disabled = false;
+         } else {
+           showNotification(data.error || 'Failed to generate share link', 'error');
+           hideShareModal();
+         }
+       })
+       .catch(error => {
+         console.error('Error generating share link:', error);
+         if (window.sendLogToDataDog) {
+           window.sendLogToDataDog('error', 'Error generating share link', { message: error && error.message });
+         }
+         showNotification('Failed to generate share link', 'error');
+         hideShareModal();
+       });
+     }
+
+     // Function to copy share link to clipboard
+     function copyShareLink() {
+       const input = document.getElementById('shareLinkInput');
+       const copySuccessMessage = document.getElementById('copySuccessMessage');
+       
+       if (input && input.value) {
+         input.select();
+         input.setSelectionRange(0, 99999); // For mobile devices
+         
+         try {
+           document.execCommand('copy');
+           copySuccessMessage.classList.remove('hidden');
+           setTimeout(() => {
+             copySuccessMessage.classList.add('hidden');
+           }, 3000);
+         } catch (err) {
+           // Fallback: try Clipboard API
+           if (navigator.clipboard) {
+             navigator.clipboard.writeText(input.value).then(() => {
+               copySuccessMessage.classList.remove('hidden');
+               setTimeout(() => {
+                 copySuccessMessage.classList.add('hidden');
+               }, 3000);
+             }).catch(() => {
+               if (window.sendLogToDataDog) {
+                 window.sendLogToDataDog('error', 'Failed to copy link');
+               }
+               showNotification('Failed to copy link', 'error');
+             });
+           } else {
+             if (window.sendLogToDataDog) {
+               window.sendLogToDataDog('error', 'Copy not supported in this browser');
+             }
+             showNotification('Copy not supported in this browser', 'error');
+           }
+         }
+       }
+     }
+
+     // Function to show share modal
+     function showShareModal() {
+       const modal = document.getElementById('shareLinkModal');
+       if (modal) {
+         modal.classList.remove('hidden');
+         document.body.style.overflow = 'hidden';
+       }
+     }
+
+     // Function to hide share modal
+     function hideShareModal() {
+       const modal = document.getElementById('shareLinkModal');
+       const input = document.getElementById('shareLinkInput');
+       const copySuccessMessage = document.getElementById('copySuccessMessage');
+       
+       if (modal) {
+         modal.classList.add('hidden');
+         document.body.style.overflow = '';
+         if (input) {
+           input.value = '';
+           input.disabled = false;
+         }
+         if (copySuccessMessage) {
+           copySuccessMessage.classList.add('hidden');
+         }
+       }
+     }
+
+     // Close share modal when clicking outside
+     document.getElementById('shareLinkModal')?.addEventListener('click', function(e) {
+       if (e.target === this) {
+         hideShareModal();
+       }
+     });
+
+    const PRE_DEPOSIT_BALANCE = {{ (current_draft.opening_balance or 0) + (current_draft.cash_addition or 0) + (current_draft.cash_sales or 0) - (current_draft.expenses or 0) - (current_draft.bank_deposit or 0) }};
+
+    const BASE_OPENING = '{{ url_for("report.report_opening") if current_draft.status == "draft" else url_for("report.report_opening", id=current_draft.id) }}';
+    const BASE_SALES = '{{ url_for("report.report_sale") if current_draft.status == "draft" else url_for("report.report_sale", id=current_draft.id) }}';
+    const BASE_EXPENSES = '{{ url_for("report.report_expense") if current_draft.status == "draft" else url_for("report.report_expense", id=current_draft.id) }}';
+    const BASE_DEPOSIT = '{{ url_for("report.report_deposit") if current_draft.status == "draft" else url_for("report.report_deposit", id=current_draft.id) }}';
+    const BASE_CASH_COUNT = '{{ url_for("report.report_cash_count") if current_draft.status == "draft" else url_for("report.report_cash_count", id=current_draft.id) }}';
+    const BASE_ENDING = '{{ url_for("report.report_ending") if current_draft.status == "draft" else url_for("report.report_ending", id=current_draft.id) }}';
+
+    // Store initial form values on page load
+    let initialFormValues = {};
+    let formTrackingInitialized = false;
+    
+    // Initialize form tracking on page load (with slight delay to ensure form is fully rendered)
+    function initializeFormTracking() {
+      if (formTrackingInitialized) return;
+      
+      const form = document.getElementById('endingForm');
+      if (form) {
+        const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
+        inputs.forEach(input => {
+          if (!input.readOnly && !input.hidden && input.type !== 'hidden') {
+            const inputId = input.name || input.id;
+            if (inputId) {
+              initialFormValues[inputId] = input.value || '';
+            }
+          }
+        });
+        formTrackingInitialized = true;
+      }
+    }
+    
+    // Try immediately and also on DOMContentLoaded
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(initializeFormTracking, 100);
+      });
+    } else {
+      setTimeout(initializeFormTracking, 100);
+    }
+
+    // Function to check if form has unsaved changes
+    function hasUnsavedChanges() {
+      const form = document.getElementById('endingForm');
+      if (!form) return false;
+      
+      const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
+      for (let input of inputs) {
+        if (input.readOnly || input.hidden || input.type === 'hidden') continue;
+        
+        const inputId = input.name || input.id;
+        if (!inputId) continue;
+        
+        const currentValue = input.value.trim().replace(/,/g, '');
+        const initialValue = (initialFormValues[inputId] || '').trim().replace(/,/g, '');
+        
+        // Normalize empty values
+        const normalizedCurrent = (currentValue === '' || currentValue === '-') ? '' : currentValue;
+        const normalizedInitial = (initialValue === '' || initialValue === '-') ? '' : initialValue;
+        
+        // Check if value has changed
+        if (normalizedCurrent !== normalizedInitial) {
+          // If current value is not empty and different from initial, it's a change
+          if (normalizedCurrent !== '') {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Function to show unsaved data alert
+    function showUnsavedDataAlert() {
+      const unsavedToast = document.getElementById('unsavedDataToast');
+      const flashNotification = document.getElementById('flashNotification');
+      
+      if (unsavedToast && flashNotification) {
+        // Hide any other toasts
+        const otherToasts = flashNotification.querySelectorAll('.toast:not(#unsavedDataToast)');
+        otherToasts.forEach(toast => toast.classList.add('hidden'));
+        
+        // Show the unsaved data toast
+        unsavedToast.classList.remove('hidden');
+        
+        // Show the notification container
+        flashNotification.classList.remove('translate-x-full');
+        flashNotification.classList.add('translate-x-0');
+        
+        // Auto-hide after 4 seconds
+        setTimeout(() => {
+          flashNotification.classList.remove('translate-x-0');
+          flashNotification.classList.add('translate-x-full');
+        }, 4000);
+      }
+    }
+
+    function navigateToStep(step) {
+     // Check if there are unsaved changes
+     if (hasUnsavedChanges()) {
+       showUnsavedDataAlert();
+     }
+     
+     const entityId = '{{ request.args.get("entity_id") or org.id }}';
+     const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+     const isEditMode = {{ 'true' if is_edit_mode else 'false' }};
+     const editParam = isEditMode ? '&edit=true' : '';
+     // Carry constrained "Edit Report" mode across step navigation.
+     const isReportEditMode = {{ 'true' if is_report_edit_mode else 'false' }};
+     const reportEditParam = isReportEditMode ? '&report_edit=true' : '';
+     const stepUrls = {
+       'opening': BASE_OPENING + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'sales': BASE_SALES + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'expenses': BASE_EXPENSES + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'deposit': BASE_DEPOSIT + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'cash_count': BASE_CASH_COUNT + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'ending': BASE_ENDING + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam
+     };
+     const url = stepUrls[step];
+     if (url) {
+       window.location.href = url;
+     }
+    }
+
+    // Calculate cash count totals from readonly inputs
+    function calculateCashCountTotals() {
+      // Notes calculations
+      const noteInputs = [
+        { id: 'note1000', value: 1000 },
+        { id: 'note500', value: 500 },
+        { id: 'note100', value: 100 },
+        { id: 'note50', value: 50 },
+        { id: 'note20', value: 20 },
+        { id: 'note10', value: 10 }
+      ];
+
+      let totalNotes = 0;
+      noteInputs.forEach(input => {
+        const element = document.getElementById(input.id);
+        if (element) {
+          const count = parseFloat(element.value) || 0;
+          const total = count * input.value;
+          totalNotes += total;
+        }
+      });
+
+      // Coins calculations
+      const coinInputs = [
+        { id: '5coins', value: 5 },
+        { id: '2coins', value: 2 },
+        { id: '1coins', value: 1 }
+      ];
+
+      let totalCoins = 0;
+      coinInputs.forEach(input => {
+        const element = document.getElementById(input.id);
+        if (element) {
+          const count = parseFloat(element.value) || 0;
+          const total = count * input.value;
+          totalCoins += total;
+        }
+      });
+
+      // Calculate total cash count (notes + coins)
+      const totalCashCount = totalNotes + totalCoins;
+
+      // Update Cash Count Balance (physical cash count only)
+      const formattedCashCountBalance = totalCashCount.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      const cashCountBalanceEl = document.getElementById('cash_count_balance');
+      if (cashCountBalanceEl) {
+        cashCountBalanceEl.textContent = `$${formattedCashCountBalance}`;
+      }
+
+      // Calculate Expected Cash Count Balance: opening balance + cash addition + cash sales - expense - deposit bank
+      const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
+      const cashAddition = {{ current_draft.cash_addition if current_draft and current_draft.cash_addition else 0 }};
+      const cashSales = {{ current_draft.cash_sales if current_draft and current_draft.cash_sales else 0 }};
+      const expenses = {{ current_draft.expenses if current_draft and current_draft.expenses else 0 }};
+      const depositBank = {{ current_draft.bank_deposit if current_draft and current_draft.bank_deposit else 0 }};
+      
+      const expectedCashCountBalance = openingBalance + cashAddition + cashSales - expenses - depositBank;
+      
+      // Update Expected Cash Count Balance display
+      const formattedExpectedCashCountBalance = expectedCashCountBalance.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      const expectedCashCountBalanceEl = document.getElementById('expected_cash_count_balance');
+      if (expectedCashCountBalanceEl) {
+        expectedCashCountBalanceEl.textContent = `$${formattedExpectedCashCountBalance}`;
+      }
+
+      // Calculate Variance: expected cash count balance - cash count balance
+      const variance = expectedCashCountBalance - totalCashCount;
+      const formattedVariance = variance.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      const varianceEl = document.getElementById('variance');
+      if (varianceEl) {
+        varianceEl.textContent = `$${formattedVariance}`;
+      }
+    }
+
+
+                       // Function to show finish loading state with timeout handling
+       function showFinishLoading() {
+         if (PRE_DEPOSIT_BALANCE < 0) {
+           checkNegativeBalanceAndRedirect();
+           return false;
+         }
+
+         const button = document.getElementById('finishReportBtn');
+         const text = document.getElementById('finishReportText');
+         const loadingOverlay = document.getElementById('loadingOverlay');
+         const loadingText = document.getElementById('loadingText');
+         
+         if (button && text && loadingOverlay) {
+           // Store original button state for potential reset
+           window.originalButtonState = {
+             disabled: button.disabled,
+             innerHTML: button.innerHTML,
+             textContent: text.textContent
+           };
+           
+           // Disable button
+           button.disabled = true;
+           
+           // Change text to "Finishing..."
+           text.textContent = 'Finishing...';
+           
+           // Show loading overlay
+           loadingOverlay.classList.remove('hidden');
+           if (loadingText) {
+             loadingText.textContent = 'Finishing...';
+           }
+           
+           // Set up timeout handling (30 seconds)
+           window.submissionTimeout = setTimeout(() => {
+             handleSubmissionTimeout();
+           }, 30000);
+           
+           // Set up progress indicator
+           let progress = 0;
+           window.progressInterval = setInterval(() => {
+             progress += 2;
+             if (loadingText) {
+               loadingText.textContent = `Finishing... ${Math.min(progress, 95)}%`;
+             }
+           }, 600);
+           
+           // Submit the form programmatically with page transition
+           const form = document.getElementById('endingForm');
+           if (form) {
+             // Add fade out transition before form submission
+             PageTransition.fadeOut(document.querySelector('.main-content'), 0, () => {
+               form.submit();
+             });
+           }
+           
+           // Prevent default form submission since we're submitting programmatically
+           return false;
+         }
+         return false;
+       }
+       
+       // Function to handle submission timeout
+       function handleSubmissionTimeout() {
+         const button = document.getElementById('finishReportBtn');
+         const text = document.getElementById('finishReportText');
+         const loadingOverlay = document.getElementById('loadingOverlay');
+         const loadingText = document.getElementById('loadingText');
+         
+         // Clear progress interval
+         if (window.progressInterval) {
+           clearInterval(window.progressInterval);
+         }
+         
+         // Show timeout error
+         if (loadingText) {
+           loadingText.textContent = 'Submission is taking longer than expected...';
+         }
+         
+         // Add retry button to loading overlay
+         const retryButton = document.createElement('button');
+         retryButton.className = 'mt-3 px-4 py-2 bg-[#54D3DA] text-white rounded-lg hover:bg-[#54D3DA]/80 transition-colors';
+         retryButton.textContent = 'Retry Submission';
+         retryButton.onclick = function() {
+           resetLoadingState();
+           showFinishLoading();
+         };
+         
+         // Add cancel button
+         const cancelButton = document.createElement('button');
+         cancelButton.className = 'mt-3 ml-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors';
+         cancelButton.textContent = 'Cancel';
+         cancelButton.onclick = function() {
+           resetLoadingState();
+         };
+         
+         // Add buttons to loading overlay
+         const loadingContent = loadingOverlay.querySelector('.bg-white');
+         if (loadingContent && !loadingContent.querySelector('button')) {
+           const buttonContainer = document.createElement('div');
+           buttonContainer.className = 'flex justify-center space-x-2';
+           buttonContainer.appendChild(retryButton);
+           buttonContainer.appendChild(cancelButton);
+           loadingContent.appendChild(buttonContainer);
+         }
+       }
+       
+       // Function to reset loading state
+       function resetLoadingState() {
+         const button = document.getElementById('finishReportBtn');
+         const text = document.getElementById('finishReportText');
+         const loadingOverlay = document.getElementById('loadingOverlay');
+         const loadingText = document.getElementById('loadingText');
+         
+         // Clear timeouts and intervals
+         if (window.submissionTimeout) {
+           clearTimeout(window.submissionTimeout);
+         }
+         if (window.progressInterval) {
+           clearInterval(window.progressInterval);
+         }
+         
+         // Reset button state
+         if (button && window.originalButtonState) {
+           button.disabled = window.originalButtonState.disabled;
+           button.innerHTML = window.originalButtonState.innerHTML;
+         }
+         
+         if (text && window.originalButtonState) {
+           text.textContent = window.originalButtonState.textContent;
+         }
+         
+         // Hide loading overlay
+         loadingOverlay.classList.add('hidden');
+         
+         // Reset loading text
+         if (loadingText) {
+           loadingText.textContent = 'Finishing...';
+         }
+         
+         // Remove any added buttons
+         const buttonContainer = loadingOverlay.querySelector('.flex.justify-center.space-x-2');
+         if (buttonContainer) {
+           buttonContainer.remove();
+         }
+       }
+
+     // Sales breakdown toggle functionality
+
+     // Sales show more toggle functionality
+     function toggleSalesShowMore(event) {
+       // Prevent form submission
+       event.preventDefault();
+       event.stopPropagation();
+       
+       const salesSeparator = document.getElementById('salesSeparator');
+       const paymentMethodsBreakdown = document.getElementById('paymentMethodsBreakdown');
+       const salesShowMoreChevron = document.getElementById('salesShowMoreChevron');
+       
+       if (salesSeparator && paymentMethodsBreakdown && salesShowMoreChevron) {
+         // Toggle visibility
+         if (paymentMethodsBreakdown.classList.contains('hidden')) {
+           // Opening: show content, chevron points down
+           salesSeparator.classList.remove('hidden');
+           paymentMethodsBreakdown.classList.remove('hidden');
+           salesShowMoreChevron.style.transform = 'rotate(0deg)';
+         } else {
+           // Closing: hide content, chevron points up
+           salesSeparator.classList.add('hidden');
+           paymentMethodsBreakdown.classList.add('hidden');
+           salesShowMoreChevron.style.transform = 'rotate(180deg)';
+         }
+       }
+     }
+
+     // Expenses show more toggle functionality
+     function toggleExpensesShowMore(event) {
+       // Prevent form submission
+       event.preventDefault();
+       event.stopPropagation();
+       
+       const expensesSeparator = document.getElementById('expensesSeparator');
+       const fullExpensesList = document.getElementById('fullExpensesList');
+       const expensesShowMoreChevron = document.getElementById('expensesShowMoreChevron');
+       
+       if (expensesSeparator && fullExpensesList && expensesShowMoreChevron) {
+         // Toggle visibility
+         if (fullExpensesList.classList.contains('hidden')) {
+           // Opening: show content, chevron points down
+           expensesSeparator.classList.remove('hidden');
+           fullExpensesList.classList.remove('hidden');
+           expensesShowMoreChevron.style.transform = 'rotate(0deg)';
+         } else {
+           // Closing: hide content, chevron points up
+           expensesSeparator.classList.add('hidden');
+           fullExpensesList.classList.add('hidden');
+           expensesShowMoreChevron.style.transform = 'rotate(180deg)';
+         }
+       }
+     }
+
+     // Cash Balance show more toggle functionality
+     function toggleCashBalanceShowMore(event) {
+       // Prevent form submission
+       event.preventDefault();
+       event.stopPropagation();
+       
+       const cashBalanceSeparator = document.getElementById('cashBalanceSeparator');
+       const cashBalanceDetails = document.getElementById('cashBalanceDetails');
+       const cashBalanceShowMoreChevron = document.getElementById('cashBalanceShowMoreChevron');
+       
+       if (cashBalanceSeparator && cashBalanceDetails && cashBalanceShowMoreChevron) {
+         // Toggle visibility
+         if (cashBalanceDetails.classList.contains('hidden')) {
+           // Opening: show content, chevron points down
+           cashBalanceSeparator.classList.remove('hidden');
+           cashBalanceDetails.classList.remove('hidden');
+           cashBalanceShowMoreChevron.style.transform = 'rotate(0deg)';
+         } else {
+           // Closing: hide content, chevron points up
+           cashBalanceSeparator.classList.add('hidden');
+           cashBalanceDetails.classList.add('hidden');
+           cashBalanceShowMoreChevron.style.transform = 'rotate(180deg)';
+         }
+       }
+     }
+
+    // Initialize page transition
+    PageTransition.init('.main-content', 'fadeIn', 10);
+
+     // Initialize on page load
+     document.addEventListener('DOMContentLoaded', function() {
+      console.log('Report Summary page loaded');
+      
+      // Add click event listener to sales show more button
+       const salesShowMore = document.getElementById('salesShowMore');
+       if (salesShowMore) {
+         salesShowMore.addEventListener('click', toggleSalesShowMore);
+       }
+       
+       // Set initial state: payment methods hidden, chevron pointing up
+       const salesShowMoreChevron = document.getElementById('salesShowMoreChevron');
+       if (salesShowMoreChevron) {
+         salesShowMoreChevron.style.transform = 'rotate(180deg)';
+       }
+       
+       // Add click event listener to expenses show more button
+       const expensesShowMore = document.getElementById('expensesShowMore');
+       if (expensesShowMore) {
+         expensesShowMore.addEventListener('click', toggleExpensesShowMore);
+       }
+       
+       // Set initial state: full expenses list hidden, chevron pointing up
+       const expensesShowMoreChevron = document.getElementById('expensesShowMoreChevron');
+       if (expensesShowMoreChevron) {
+         expensesShowMoreChevron.style.transform = 'rotate(180deg)';
+       }
+       
+       // Add click event listener to cash balance show more button
+       const cashBalanceShowMore = document.getElementById('cashBalanceShowMore');
+       if (cashBalanceShowMore) {
+         cashBalanceShowMore.addEventListener('click', toggleCashBalanceShowMore);
+       }
+       
+       // Set initial state: cash balance details hidden, chevron pointing up
+       const cashBalanceShowMoreChevron = document.getElementById('cashBalanceShowMoreChevron');
+       if (cashBalanceShowMoreChevron) {
+         cashBalanceShowMoreChevron.style.transform = 'rotate(180deg)';
+       }
+     });
+
+    // Close delete modal when clicking outside
+    document.getElementById('deleteReportModal')?.addEventListener('click', function(e) {
+      if (e.target === this) {
+        hideDeleteModal();
+      }
+    });
+
+    // Close modals with Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const deleteModal = document.getElementById('deleteReportModal');
+        
+        if (deleteModal && !deleteModal.classList.contains('hidden')) {
+          hideDeleteModal();
+        }
+      }
+    });
+
+    // Flash notification slider functions
+    function showFlashNotification() {
+      const notification = document.getElementById('flashNotification');
+      if (notification && notification.querySelector('.toast')) {
+        // Slide in
+        notification.style.transform = 'translateX(0)';
+        
+        // Auto hide after 5 seconds
+        setTimeout(() => {
+          hideFlashNotification();
+        }, 5000);
+      }
+    }
+
+    function hideFlashNotification() {
+      const notification = document.getElementById('flashNotification');
+      if (notification) {
+        // Slide out
+        notification.style.transform = 'translateX(100%)';
+      }
+    }
+
+    // Initialize Sales History Chart
+    function initializeSalesHistoryChart() {
+      // Use real sales history data from backend
+      const chartData = [
+        {% if sales_history %}
+        {% for day in sales_history %}
+        { date: '{{ day.date }}', value: {{ day.value }}, is_today: {% if day.is_today %}true{% else %}false{% endif %} },
+        {% endfor %}
+        {% else %}
+        // Fallback if no data available
+        { date: 'N/A', value: 0, is_today: false }
+        {% endif %}
+      ];
+      
+      // Find today's index for highlighting
+      const todayIndex = chartData.findIndex(day => day.is_today);
+      
+      initializeBarChart({
+        containerId: 'salesHistoryChart',
+        data: chartData,
+        colors: { default: '#E1F3F5', highlight: '#FF6B6B' },
+        labelColors: { default: '#b8b8b8', highlight: '#EF4444' },
+        borderRadius: 12,
+        highlightIndex: todayIndex >= 0 ? todayIndex : chartData.length - 1,
+        scrollable: true,
+        scrollToEnd: true
+      });
+    }
+
+    function initializeExpensesPieChart() {
+      {% if existing_expenses and existing_expenses|length > 0 %}
+      const allExpenses = [
+        {% for expense in existing_expenses %}
+        { item: '{{ (expense.item if expense.item else "N/A")|replace("&", "and") }}', amount: {{ expense.amount if expense.amount else 0 }} },
+        {% endfor %}
+      ];
+      
+      allExpenses.sort((a, b) => b.amount - a.amount);
+      
+      const topExpenses = allExpenses.slice(0, 7);
+      
+      const otherExpenses = allExpenses.slice(7);
+      const otherTotal = otherExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+      
+      const expenseData = [...topExpenses];
+      if (otherTotal > 0) {
+        expenseData.push({ item: 'Other expenses', amount: otherTotal });
+      }
+      
+      const colors = ['#278CF4', '#F1B337', '#F2822C', '#B8E467', '#67e4c0', '#9f67e4', '#e4679d', '#f1db37', '#9CA3AF'];
+      
+      initializePieChart({
+        containerId: 'expensesPieChart',
+        data: expenseData,
+        colors: colors,
+        colorClassPrefix: 'expense-color',
+        itemClassPrefix: 'expense-item'
+      });
+      {% endif %}
+    }
+
+    function checkNegativeBalanceAndRedirect() {
+      if (PRE_DEPOSIT_BALANCE >= 0) return false;
+      showFixNegativeBalanceModal();
+      return true;
+    }
+
+    function showFixNegativeBalanceModal() {
+      const modal = document.getElementById('fixNegativeBalanceModal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    function hideFixNegativeBalanceModal() {
+      const modal = document.getElementById('fixNegativeBalanceModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.style.overflow = '';
+      }
+    }
+
+    function navigateToFixStep(step) {
+      hideFixNegativeBalanceModal();
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const loadingText = document.getElementById('loadingText');
+      if (loadingOverlay && loadingText) {
+        loadingText.textContent = 'Redirecting...';
+        loadingOverlay.classList.remove('hidden');
+      }
+      navigateToStep(step);
+    }
+
+    // Show flash notification on page load if it exists and calculate cash count totals
+    document.addEventListener('DOMContentLoaded', function() {
+      {% if get_flashed_messages() %}
+        showFlashNotification();
+      {% endif %}
+      calculateCashCountTotals();
+      initializeSalesHistoryChart();
+      initializeExpensesPieChart();
+
+      {% if current_draft and current_draft.status == 'draft' %}
+      checkNegativeBalanceAndRedirect();
+      {% endif %}
+    });
+
+  </script>
+</body>
+</html>

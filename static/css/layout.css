@@ -1,0 +1,78 @@
+    /* Colors */
+      :root {
+        --primary-color: #567a5c;
+        --primary-opaque: #567a5c82;
+        --secondary-color: #a2c594;
+        --dark-color: #1f2024;
+        --dark-mid-color: #414246;
+        --gray-color: #c5c6cc;
+        --gray-mid-color: #f3f4f6;
+        --gray-light-color: #f8f9fe;
+        --light-color: #fff;
+        --success-color: #2ead5d;
+        --success-mid-color: #66b483;
+        --warning-color: #e86339;
+        --error-color: #ef4444;
+        --error-mid-color: #e78383;
+        --shadow-color: rgba(0, 0, 0, 0.1);
+        --shadow-green-color: rgba(86, 122, 92, 0.2);
+        --font-bold: bold;
+        --font-mid-bold: 500;
+        --size-8: 8px;
+        --size-16: 16px;
+        --size-24: 24px;
+      }
+
+       /* Container  */
+      .main-container {
+        width: 100%;
+        position: absolute;
+        left: 50%;
+        height: 100vh;
+        background-color: var(--gray-light-color);
+        transform: translateX(-50%);
+      }
+      
+      
+     /* Main content */
+      .main-content {
+        position: fixed;
+        top: 56px;
+        height: calc(100vh - 120px);
+        width: 100%;
+        overflow-y: scroll;
+        padding: 16px;
+      }
+
+      .main-content::-webkit-scrollbar{
+        display: none;
+        width: 0;
+      }
+  
+
+      .main-content::webkit-scrollbar{
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+        overflow: auto;
+      }
+
+         @media (min-width: 640px) and (max-width: 1024px) {
+        .main-container {
+          width: 640px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1024px) and (max-width: 1200px) {
+        .main-container {
+          width: 768px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1200px) {
+        .main-container {
+          width: 1024px;
+          margin: 0 auto;
+        }
+      }

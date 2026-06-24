@@ -1,0 +1,59 @@
+{# Report flow header status — colors/labels match report_history.html (Published > Draft > Submitted). #}
+{% set _xo = false %}
+{# Xero publish updates Report.xero_integrated_yes; expense step passes header_xero_integrated_yes when current_draft is ReportDraft. #}
+{% if header_xero_integrated_yes is defined and header_xero_integrated_yes %}
+  {% set _xo = true %}
+{% endif %}
+{% if not _xo and current_draft is defined and current_draft %}
+  {% if current_draft.xero_integrated_yes is defined and current_draft.xero_integrated_yes %}
+    {% set _xo = true %}
+  {% endif %}
+{% endif %}
+{% if not _xo and report is defined and report %}
+  {% if report is mapping %}
+    {% if report.get('xero_integrated_yes') %}
+      {% set _xo = true %}
+    {% endif %}
+  {% elif report.xero_integrated_yes is defined and report.xero_integrated_yes %}
+    {% set _xo = true %}
+  {% endif %}
+{% endif %}
+
+{# Partial Xero publish — some transactions landed in Xero, some did not. #}
+{% set _partial = false %}
+{% if not _xo %}
+  {% if header_publishing_status is defined and header_publishing_status == 'partially_published' %}
+    {% set _partial = true %}
+  {% elif current_draft is defined and current_draft and current_draft.publishing_status is defined and current_draft.publishing_status == 'partially_published' %}
+    {% set _partial = true %}
+  {% elif report is defined and report %}
+    {% if report is mapping %}
+      {% if report.get('publishing_status') == 'partially_published' %}
+        {% set _partial = true %}
+      {% endif %}
+    {% elif report.publishing_status is defined and report.publishing_status == 'partially_published' %}
+      {% set _partial = true %}
+    {% endif %}
+  {% endif %}
+{% endif %}
+
+{% set _has_draft_row = current_draft is defined and current_draft and current_draft.status is defined and current_draft.status == 'draft' %}
+{% set _opening_before_first_save = current_section is defined and current_section == 'opening' and (draft_id is not defined or not draft_id) %}
+{% set _is_draft = _has_draft_row or _opening_before_first_save %}
+
+{% set _cn = current_draft.__class__.__name__ if current_draft else '' %}
+{% set _show_submitted = (not _xo) and (not _is_draft) and (
+  (draft_id is defined and draft_id)
+  or (_cn == 'Report')
+  or (_cn == 'Row')
+) %}
+
+{% if _xo %}
+<span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#E6F2FF] text-[#007BFF]">Published</span>
+{% elif _partial %}
+<span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#E6F2FF] text-[#007BFF]">Partially Published</span>
+{% elif _is_draft %}
+<span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#EBEEF2] text-[#546881]">Draft</span>
+{% elif _show_submitted %}
+<span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#FFF0F0] text-[#FF6B6B]">Submitted</span>
+{% endif %}

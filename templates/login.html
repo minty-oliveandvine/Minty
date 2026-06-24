@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login</title>
+    <!-- Add csrf_token when calling post endpoints in xero in auth process -->
+    <meta name="csrf_token" content="{{ csrf_token() }}" />
+    <!-- Bootstrap CSS -->
+    <link
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+    <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+    <!-- Custom Button Styles -->
+    <style>
+      body,
+      .container,
+      .form-control,
+      .btn,
+      .modal-content,
+      h1, h2, h3, h4, h5, h6,
+      label,
+      p,
+      a {
+        font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      .btn-primary,
+      .btn-xero {
+        border-radius: 9999px !important;
+      }
+      .btn-xero {
+        background-color: #06b3e8;
+        color: white;
+      }
+
+      .btn-xero:hover {
+        color: white;
+        background-color: #12bcf0;
+      }
+      .btn-primary {
+        background-color: #4a7c59;
+        border-color: #4a7c59;
+      }
+
+      .btn-primary:hover {
+        background-color: #36543a;
+        border-color: #36543a;
+      }
+
+      .btn-block {
+        width: 100%;
+      }
+
+      .logo {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        width: 80px;
+        height: auto;
+      }
+
+      @media (max-width: 768px) {
+        .logo {
+          width: 60px;
+        }
+
+        .btn-block {
+          font-size: 1rem;
+        }
+      }
+
+      #token_redirect {
+        display: none;
+        visibility: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Flash message display section - Shows alert messages with category styling and dismiss button -->
+    {% with messages = get_flashed_messages(with_categories=true) %} {% if
+    messages %} {% for category, message in messages %}
+    <div
+      class="alert alert-{{ category }} text-center col-6 mx-auto position-absolute fixed-top d-flex justify-content-between align-items-center flash-message"
+    >
+      {{ message }}
+      <button
+        type="button"
+        class="close btn btn-{{ category }} btn-sm col-1 mt-0"
+        data-dismiss="alert"
+        aria-label="Close"
+      >
+        <span aria-hidden="true">&times;</span>
+      </button>
+    </div>
+    {% endfor %} {% endif %} {% endwith %}
+    <div class="container">
+      <img
+        src="{{ url_for('static', filename='img/logo.png') }}"
+        class="logo"
+        alt="Logo"
+      />
+      <h1 class="text-center">Login</h1>
+      <form action="{{ url_for('auth.login') }}" method="POST" class="mt-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="form-group">
+          <label for="username">{{ form.username.label }}</label>
+          {{ form.username(class_='form-control', size=32) }}
+        </div>
+        <div class="form-group">
+          <label for="password">{{ form.password.label }}</label>
+          {{ form.password(class_='form-control', size=32) }}
+        </div>
+        <div class="d-flex">
+          <div class="forgot-password mr-3">
+            <a href="{{ url_for('auth.reset_request') }}" id="forgotPasswordLink"
+              >Forgot Password?</a
+            >
+          </div>
+          <div class="forgot-userid">
+            <a href="{{ url_for('user_management.find_user') }}">Find User ID</a>
+          </div>
+        </div>
+        <div class="text-center">
+          {{ form.submit(class_='btn btn-primary') }}
+        </div>
+      </form>
+      <p class="text-center">or</p>
+
+      <a href="{{url_for('xero_auth')}}" class="btn btn-sm btn-xero col-12"
+        >Xero Login</a
+      >
+      <a
+        href="{{ url_for('auth.register') }}"
+        class="btn btn-sm btn-primary col-12 mt-3"
+        >Register</a
+      >
+    </div>
+
+    <!-- Password Reset Modal -->
+    <div
+      class="modal fade"
+      id="resetPasswordModal"
+      tabindex="-1"
+      role="dialog"
+      aria-labelledby="resetPasswordModalLabel"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="resetPasswordModalLabel">
+              Reset Password
+            </h5>
+            <button
+              type="button"
+              class="close col-3"
+              data-dismiss="modal"
+              aria-label="Close"
+            >
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <form
+              id="resetPasswordForm"
+              action="{{ url_for('auth.reset_request') }}"
+              method="POST"
+            >
+              <input
+                type="hidden"
+                name="csrf_token"
+                value="{{ csrf_token() }}"
+              />
+              <div class="form-group">
+                <label for="resetUsername">Username</label>
+                <input
+                  type="text"
+                  class="form-control"
+                  id="resetUsername"
+                  name="username"
+                  required
+                />
+              </div>
+              <div class="form-group">
+                <label for="email">Email</label>
+                <input
+                  type="email"
+                  class="form-control"
+                  id="resetEmail"
+                  name="email"
+                  required
+                />
+              </div>
+              <button type="submit" class="btn btn-primary btn-block">
+                Send Reset Link
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+    {{b64code}} {{code}} {{grant_type}} {{redirect_uri}}
+    <form method="post" id="token_redirect">
+      <input
+        type="hidden"
+        name="csrf_token"
+        value="{{ csrf_token() }}"
+        id="csrf_token"
+      />
+      <input
+        type="hidden"
+        name="code"
+        id="code"
+        value="{{code}}"
+        data-code="{{code}}"
+      />
+      <input
+        type="hidden"
+        name="grant_type"
+        id="grant_type"
+        value="{{grant_type}}"
+      />
+      <input
+        type="hidden"
+        name="redirect_uri"
+        id="redirect_uri"
+        value="{{redirect_uri}}"
+      />
+      <input
+        type="hidden"
+        name="b64code"
+        id="b64code"
+        value="{{b64code}}"
+        data-b64code="{{b64code}}"
+      />
+    </form>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Open reset password modal when clicking "Forgot Password?"
+        document
+          .getElementById("forgotPasswordLink")
+          .addEventListener("click", function (e) {
+            e.preventDefault();
+            $("#resetPasswordModal").modal("show");
+
+            // Pre-fill username if it's already entered in the login form
+            const loginUsername = document.querySelector(
+              'input[name="username"]'
+            ).value;
+            if (loginUsername) {
+              document.getElementById("resetUsername").value = loginUsername;
+            }
+          });
+
+        setTimeout(() => {
+          $(".alert").alert("close");
+        }, 5000);
+
+        if (document.getElementById("code").dataset.code) {
+          const url = "https://identity.xero.com/connect/token";
+          const data = {
+            csrf_token: document.getElementById("csrf_token").value,
+            code: document.getElementById("code").dataset.code,
+            grant_type:
+              document.getElementById("grant_type").dataset.grant_type,
+            redirect_uri:
+              document.getElementById("redirect_uri").dataset.redirect_uri,
+            b64code: document.getElementById("b64code").dataset.b64code,
+          };
+
+          const options = {
+            method: "POST",
+            headers: {
+              "X-CSRFToken": document.getElementById("csrf_token").value,
+              Authorization:
+                "Basic " + document.getElementById("b64code").dataset.b64code,
+              "Content-Type": "application/x-www-form-urlencoded",
+              Connection: "keep-alive",
+              "Accept-Encoding": "gzip, deflate, br",
+              Accept: "*/*",
+            },
+            body: JSON.stringify(data),
+          };
+
+          fetch(url, options)
+            .then((response) => {
+              if (!response.ok) {
+                console.error("Send Error", "Error Sending");
+                if (window.sendLogToDataDog) {
+                  window.sendLogToDataDog('error', 'Login send error', { status: response.status });
+                }
+              }
+
+              return response.json();
+            })
+            .then((resonseData) => {
+              console.log("Success", responseData);
+              if (window.sendLogToDataDog) {
+                window.sendLogToDataDog('info', 'Login success');
+              }
+            })
+            .catch((error) => {
+              console.error("Error", error);
+              if (window.sendLogToDataDog) {
+                window.sendLogToDataDog('error', 'Login error', { message: error && error.message });
+              }
+            });
+        }
+      });
+    </script>
+  </body>
+</html>

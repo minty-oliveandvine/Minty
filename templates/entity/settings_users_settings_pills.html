@@ -1,0 +1,24 @@
+         <div class="flex flex-wrap gap-2">
+           <!-- Users Tab (Active) -->
+           <button type="button" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80 transition-colors">
+             Users
+           </button>
+           <!-- Entity & Integration Tab -->
+           <a href="{{ url_for('entity_settings', entity_id=org.id) }}{{ bills_settings_query }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
+             Entity & Integration
+           </a>
+           <!-- Petty Cash Settings Tab -->
+           <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}{{ bills_settings_query }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
+             Petty Cash Settings
+           </a>
+           {% if is_billing_enabled(org.id) %}
+           <a href="{{ bill_settings_url }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center shrink-0" rel="noopener noreferrer">
+             Bill Settings
+           </a>
+           {% endif %}
+          <!-- Module & Subscription pill -->
+        <a href="{{ url_for('entity_settings_module', org_id=org.id) }}"
+           class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
+          Module &amp; Subscription
+        </a>
+         </div>

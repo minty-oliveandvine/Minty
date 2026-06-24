@@ -1,0 +1,167 @@
+{# Injected before </body> by pettycash.core.consent_gate for un-consented
+   users. Self-contained + Minty-themed using the auth/onboarding mint palette
+   (templates/login/index.html): accent #36c3b4 / hover #2cb0a2 / ink #1b1d1c /
+   lines #ececea, font Plus Jakarta Sans. Critical layout uses inline styles and
+   a scoped <style> block so it renders on-brand even on pages that don't load
+   the app's Tailwind color config. #}
+<style>
+  #terms-consent-overlay,
+  #terms-consent-overlay * {
+    font-family: "Plus Jakarta Sans", "Inter", system-ui, -apple-system,
+      "Segoe UI", sans-serif;
+    box-sizing: border-box;
+  }
+  #terms-consent-overlay #terms-consent-accept:not(:disabled):hover {
+    background: #2cb0a2;
+  }
+  #terms-consent-overlay #terms-consent-checkbox {
+    accent-color: #36c3b4;
+    width: 16px;
+    height: 16px;
+  }
+  #terms-consent-overlay #terms-consent-logout:hover {
+    color: #0f7a6e;
+  }
+  #terms-consent-overlay #terms-consent-body::-webkit-scrollbar {
+    width: 8px;
+  }
+  #terms-consent-overlay #terms-consent-body::-webkit-scrollbar-thumb {
+    background: #d9d9d6;
+    border-radius: 9999px;
+  }
+</style>
+<div
+  id="terms-consent-overlay"
+  style="position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);padding:16px;"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="terms-consent-title"
+>
+  <div
+    style="background:#ffffff;border-radius:14px;width:100%;max-width:680px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);overflow:hidden;border:1px solid #ececea;"
+  >
+    <div style="padding:20px 24px;border-bottom:1px solid #ececea;background:#ffffff;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <img
+          src="{{ url_for('static', filename='img/minty-logo.png') }}"
+          alt="Minty"
+          style="height:28px;width:auto;"
+        />
+        <span style="font-size:18px;font-weight:700;color:#1b1d1c;">Minty</span>
+      </div>
+      <h2 id="terms-consent-title" style="margin:0;font-size:17px;font-weight:600;color:#1b1d1c;">
+        Terms &amp; Conditions
+      </h2>
+      <p style="margin:4px 0 0;font-size:12px;color:#8a8d8b;">Version {{ terms_label }}</p>
+    </div>
+
+    <div
+      id="terms-consent-body"
+      style="padding:20px 24px;overflow-y:auto;flex:1 1 auto;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.6;color:#4a4d4b;background:#ffffff;"
+    >{{ terms_content }}</div>
+
+    <div style="padding:16px 24px;border-top:1px solid #ececea;background:#f5f5f3;">
+      <label id="terms-consent-label" style="display:flex;align-items:flex-start;gap:10px;font-size:13px;color:#1b1d1c;cursor:default;font-weight:500;opacity:0.5;transition:opacity .15s ease;">
+        <input type="checkbox" id="terms-consent-checkbox" disabled style="margin-top:2px;" />
+        <span>I have read and understand the terms and conditions of using Minty</span>
+      </label>
+      <p id="terms-consent-hint" style="margin:8px 0 0;font-size:12px;color:#8a8d8b;">Please scroll to the bottom of the terms to continue.</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;gap:12px;">
+        <a
+          id="terms-consent-logout"
+          href="{{ url_for('auth.logout') }}"
+          style="font-size:13px;color:#8a8d8b;text-decoration:underline;font-weight:500;"
+        >Logout</a>
+        <button
+          type="button"
+          id="terms-consent-accept"
+          disabled
+          style="background:#36c3b4;color:#0b3b35;border:none;border-radius:12px;padding:11px 22px;font-size:14px;font-weight:700;cursor:not-allowed;opacity:0.45;transition:background .15s ease,opacity .15s ease;"
+        >I Accept</button>
+      </div>
+      <p id="terms-consent-error" style="display:none;margin:10px 0 0;font-size:12px;color:#b42318;font-weight:500;"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var overlay = document.getElementById("terms-consent-overlay");
+    if (!overlay) return;
+    var termsBody = document.getElementById("terms-consent-body");
+    var label = document.getElementById("terms-consent-label");
+    var hint = document.getElementById("terms-consent-hint");
+    var checkbox = document.getElementById("terms-consent-checkbox");
+    var acceptBtn = document.getElementById("terms-consent-accept");
+    var errorEl = document.getElementById("terms-consent-error");
+    var csrfToken = "{{ csrf_token() }}";
+
+    // Lock background scroll while the gate is up.
+    document.body.style.overflow = "hidden";
+
+    function setEnabled(on) {
+      acceptBtn.disabled = !on;
+      acceptBtn.style.cursor = on ? "pointer" : "not-allowed";
+      acceptBtn.style.opacity = on ? "1" : "0.45";
+    }
+
+    // Gate the checkbox (and therefore the Accept button) until the terms have
+    // been scrolled to the bottom. If the content is too short to scroll, there
+    // is nothing to read past — enable immediately.
+    var scrolledToEnd = false;
+    function unlockCheckbox() {
+      if (scrolledToEnd) return;
+      scrolledToEnd = true;
+      checkbox.disabled = false;
+      label.style.opacity = "1";
+      label.style.cursor = "pointer";
+      if (hint) hint.style.display = "none";
+    }
+    function checkScroll() {
+      var noScroll = termsBody.scrollHeight - termsBody.clientHeight <= 4;
+      var atBottom =
+        termsBody.scrollTop + termsBody.clientHeight >=
+        termsBody.scrollHeight - 4;
+      if (noScroll || atBottom) unlockCheckbox();
+    }
+    termsBody.addEventListener("scroll", checkScroll);
+    window.addEventListener("resize", checkScroll);
+    checkScroll(); // initial: covers short content
+
+    checkbox.addEventListener("change", function () {
+      if (checkbox.disabled) return;
+      setEnabled(checkbox.checked);
+    });
+
+    acceptBtn.addEventListener("click", function () {
+      if (!checkbox.checked || acceptBtn.disabled) return;
+      errorEl.style.display = "none";
+      setEnabled(false);
+      acceptBtn.textContent = "Saving...";
+      fetch("/consent/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+        body: JSON.stringify({ accepted: true }),
+        credentials: "include",
+      })
+        .then(function (r) {
+          return r.json().then(function (data) {
+            return { ok: r.ok, data: data };
+          });
+        })
+        .then(function (res) {
+          if (res.ok && res.data.status === "success") {
+            window.location.reload();
+          } else {
+            throw new Error((res.data && res.data.message) || "Could not save your acceptance.");
+          }
+        })
+        .catch(function (err) {
+          errorEl.textContent = err.message || "Could not save your acceptance. Please try again.";
+          errorEl.style.display = "block";
+          acceptBtn.textContent = "I Accept";
+          setEnabled(checkbox.checked);
+        });
+    });
+  })();
+</script>

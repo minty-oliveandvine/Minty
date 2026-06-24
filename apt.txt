@@ -1,0 +1,5 @@
+pandoc
+texlive-xetex
+texlive-latex-recommended
+texlive-fonts-recommended
+libreoffice

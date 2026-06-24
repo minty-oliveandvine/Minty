@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Company Details</title>
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: { primary: "#4B6455", secondary: "#E8ECE9" },
+            borderRadius: {
+              none: "0px",
+              sm: "4px",
+              DEFAULT: "8px",
+              md: "12px",
+              lg: "16px",
+              xl: "20px",
+              "2xl": "24px",
+              "3xl": "32px",
+              full: "9999px",
+              button: "8px",
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/remixicon/4.6.0/remixicon.min.css"
+    />
+    <style>
+      :where([class^="ri-"])::before {
+        content: "\f3c2";
+      }
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #f9fafb;
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+        width: 100%;
+        margin: 0 auto;
+      }
+      .modal-overlay {
+        background-color: rgba(0, 0, 0, 0.5);
+        transition: opacity 0.3s ease;
+      }
+      .modal-content {
+        transform: translateY(100%);
+        transition: transform 0.3s ease;
+      }
+      .modal-content.show {
+        transform: translateY(0);
+      }
+
+      
+      /* Main content */
+      .main-content {
+        position: fixed;
+        top: 56px;
+        height: calc(100vh - 120px);
+        width: 100%;
+        overflow-y: scroll;
+        padding: 16px;
+      }
+
+      .main-content::-webkit-scrollbar{
+        display: none;
+        width: 0;
+      }
+
+       /* Container  */
+      .main-container {
+        width: 100%;
+        position: absolute;
+        left: 50%;
+        height: 100vh;
+        background-color: var(--gray-light-color);
+        transform: translateX(-50%);
+      }
+  
+
+      .main-content::webkit-scrollbar{
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+        overflow: auto;
+      }
+
+
+      @media (min-width: 640px) and (max-width: 1024px) {
+        .main-container {
+          width: 640px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1024px) and (max-width: 1200px) {
+        .main-container {
+          width: 768px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1200px) {
+        .main-container {
+          width: 1024px;
+          margin: 0 auto;
+        }
+      }
+      
+    </style>
+  </head>
+  <body class="bg-white">
+   <div class="main-container">
+     <!-- Header -->
+    <header class="fixed w-full top-0 bg-white z-10">
+      <div class="flex items-center justify-between px-4 py-3">
+        <button class="w-8 h-8 flex items-center justify-center" disabled>
+          <!-- <i class="ri-menu-line text-xl"></i> -->
+        </button>
+        <h1 class="text-xl font-semibold">Select Company</h1>
+        <div
+          class="w-8 h-8 rounded-full bg-black flex items-center justify-center"
+        >
+          <span class="font-['Pacifico'] text-white text-sm">logo</span>
+        </div>
+      </div>
+    </header>
+    <!-- Main content -->
+    <main class="pt-[56px] pb-20 px-4 h-screen overflow-y-auto main-content">
+        <div class="absolute top-[50%] -translate-y-[50%]">
+ <div class="flex flex-col gap-3 items-center align-center p-5 ">
+        <i
+          class="ri-building-line bg-secondary rounded rounded-full px-5 py-4 text-primary"
+        ></i>
+        <strong>No Entity Found</strong>
+        <p class="text-center">
+          You don't have any entities created yet. Connect to Xero to get
+          started and manage your business entities.
+        </p>
+      </div>
+
+      <div class="px-6 mb-6 mt-6">
+        <button
+          class="w-full border border-primary text-primary py-3 rounded-button flex items-center justify-center gap-2 cursor-pointer hover:bg-secondary/20 transition-colors"
+        >
+          <div class="w-5 h-5 flex items-center justify-center">
+            <i class="ri-xero-fill ri-lg"></i>
+          </div>
+          <span class="w-fit">Connect to Xero Entity</span>
+        </button>
+      </div>
+        </div>
+    </main>
+
+    <!-- Floating action button -->
+    <div class="fixed right-4 bottom-4">
+      <button
+        class="addEntityBtn w-16 h-16 bg-primary rounded-full shadow-lg flex items-center justify-center cursor-pointer"
+      >
+        <i class="ri-add-line text-white text-2xl"></i>
+      </button>
+    </div>
+   </div>
+   <script>
+    document.addEventListener('DOMContentLoaded', function(){
+        const addEntityBtn = document.querySelector('.addEntityBtn')
+        addEntityBtn.addEventListener('click', function(e){
+            window.location.href = './Entity-Creation.html'
+        })
+    })
+   </script> 
+  </body>
+</html>

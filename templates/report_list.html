@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Access Denied - Petty Cash</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+
+  <!-- Inter font -->
+  <link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+  <style>
+    @media (min-width: 640px) and (max-width: 1024px) {
+      .main-container {
+        width: 640px;
+        margin: 0 auto;
+      }
+    }
+
+    @media (min-width: 1024px) and (max-width: 1200px) {
+      .main-container {
+        width: 768px;
+        margin: 0 auto;
+      }
+    }
+
+    @media (min-width: 1200px) {
+      .main-container {
+        width: 1024px;
+        margin: 0 auto;
+      }
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            inter: ['Inter','ui-sans-serif','system-ui']
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="min-h-screen font-inter antialiased">
+  <!-- Toast notifications -->
+  {% with errors = get_flashed_messages(with_categories=True) %}{% if errors %}
+    {% for category, error in errors %}{% if category == 'success' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100px; z-index: 99; border-color: #a9d7cb; background-color: #f1fffc;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+          <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% elif category =='error' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100px; z-index: 99; border-color: #ffcccc; background-color: #fff1f1;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
+          <p class="font-[400] break-words w-full" style="color: #f57e7e;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% elif category =='info' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100px; z-index: 99; border-color: #a9d3ff; background-color: #f1f8ff;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/info-icon.png') }}" alt="Information" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #006FE6;">Information</p>
+          <p class="font-[400] break-words w-full" style="color: #5ba2ee;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% elif category =='warning' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); top: 100px; z-index: 99; border-color: #fee0aa; background-color: #fffaf1;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/warning-icon.png') }}" alt="Warning" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #DA8700;">Warning</p>
+          <p class="font-[400] break-words w-full" style="color: #e8b765;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% endif %}{% endfor %}
+  {% endif %}{% endwith %}
+
+  <div class="flex min-h-screen items-center justify-center main-container">
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          <div class="w-6 h-6"></div>
+        </div>
+        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">Access Denied</h1>
+        <div class="flex-1 flex justify-end">
+          <div class="flex items-center gap-2">
+            {% set fn = (current_user.first_name or '')[:1] %}
+            {% set ln = (current_user.last_name or '')[:1] %}
+            {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+            <a href="{{ bills_app_profile_unscoped_url() }}" rel="noopener noreferrer"
+              class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
+              aria-label="Open profile in Bills"
+              title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
+              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
+            </a>
+            <button onclick="toggleMenu()" class="hover-rotate text-[#474747]">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 10H23V11.625H9V10ZM9 15.6875H23V17.3125H9V15.6875ZM9 21.375H23V23H9V21.375Z" fill="#474747"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Content Area -->
+      <div class="bg-gray-50 main-content p-6 pb-40 flex-1 overflow-y-auto">
+        <div class="flex flex-col items-center justify-center h-full">
+          <div class="flex flex-col gap-8 items-center align-center p-5">
+            <!-- Lock / access denied icon -->
+            <div class="flex size-20 items-center justify-center rounded-full bg-red-100 text-red-600 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" class="size-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-900">Access Denied</h1>
+            <p class="text-center text-gray-600 max-w-sm">
+              You don't have permission to view this page. Please contact your administrator or go back to the entity list.
+            </p>
+          </div>
+          <div class="px-6 mb-6 mt-6 w-full max-w-md">
+            <a href="{{ url_for('entity.entity_list') }}" class="bg-[#54D3DA] flex font-medium gap-2 hover-scale hover:bg-[#54D3DA]/80 items-center justify-center py-3 rounded-xl shadow-md text-white transition-colors w-full" onclick="PageTransition.navigateWithFade(this.href); return false;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span class="w-fit">Back to Entity List</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {% include 'components/sidepanel.html' %}
+    </div>
+  </div>
+
+  {% include 'components/hover_effects.html' %}
+
+  <script>
+    PageTransition.init('.main-content', 'fadeIn', 10);
+
+    document.addEventListener("DOMContentLoaded", function () {
+      const toastCloseButtons = document.querySelectorAll(".toast-close");
+      toastCloseButtons.forEach(function(button) {
+        button.addEventListener("click", function () {
+          const toast = this.closest(".toast");
+          if (toast) {
+            toast.style.transition = "opacity 0.5s ease-out";
+            toast.style.opacity = "0";
+            setTimeout(() => { toast.style.display = "none"; }, 500);
+          }
+        });
+      });
+
+      setTimeout(() => {
+        const toasts = document.querySelectorAll(".toast");
+        toasts.forEach(function(toast) {
+          toast.style.transition = "opacity 0.5s ease-out";
+          toast.style.opacity = "0";
+          setTimeout(() => { toast.style.display = "none"; }, 500);
+        });
+      }, 3000);
+    });
+  </script>
+</body>
+</html>

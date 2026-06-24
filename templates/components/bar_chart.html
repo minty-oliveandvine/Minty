@@ -1,0 +1,182 @@
+{# 
+  Reusable Bar Chart Component
+  
+  Usage:
+  {% include 'components/bar_chart.html' %}
+  
+  Then call:
+  initializeBarChart({
+    containerId: 'salesHistoryChart',
+    data: [{ date: 'DEC 1', value: 270000 }, ...],
+    colors: { default: '#E1F3F5', highlight: '#FF6B6B' },
+    labelColors: { default: '#b8b8b8', highlight: '#EF4444' }
+  });
+#}
+
+<script>
+  function initializeBarChart(config) {
+    const {
+      containerId,
+      data,
+      colors = { default: '#E1F3F5', highlight: '#FF6B6B' },
+      labelColors = { default: '#b8b8b8', highlight: '#EF4444' },
+      borderRadius = 12,
+      highlightLast = true,
+      highlightIndex = null,
+      scrollable = false,
+      visibleBarsWhenScrollable = 7,
+      scrollToEnd = false
+    } = config;
+    
+    const chartContainer = document.getElementById(containerId);
+    if (!chartContainer || !data || data.length === 0) return;
+    
+    // Clear previous chart
+    chartContainer.innerHTML = '';
+    
+    // Extract dates and values from data
+    const dates = data.map(item => item.date || item.label || '');
+    const values = data.map(item => item.value || 0);
+    
+    // Get container dimensions
+    const containerWidth = chartContainer.offsetWidth;
+    const containerHeight = chartContainer.offsetHeight;
+    const isMobile = window.innerWidth < 640;
+    
+    const padding = { top: isMobile ? 25 : 30, right: 0, bottom: isMobile ? 30 : 35, left: 0 };
+    const baseChartWidth = containerWidth - padding.left - padding.right;
+    const chartHeight = containerHeight - padding.top - padding.bottom;
+    
+    // Calculate max value for scaling
+    const maxValue = Math.max(...values);
+    if (maxValue === 0) return;
+    
+    // Scale factor ensures tallest bar reaches the top of chart area
+    const scaleFactor = chartHeight / maxValue;
+    
+    // Bar spacing - maximize space usage
+    const barCount = values.length;
+    const barSpacing = scrollable
+      ? baseChartWidth / Math.max(1, visibleBarsWhenScrollable)
+      : baseChartWidth / barCount;
+    const barWidth = isMobile ? barSpacing * 0.85 : barSpacing * 0.9;
+    const chartWidth = scrollable
+      ? ((barCount - 1) * barSpacing) + barWidth
+      : barSpacing * barCount;
+    const totalSvgWidth = chartWidth + padding.left + padding.right;
+    
+    // Create SVG
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', scrollable ? `${totalSvgWidth}` : '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('viewBox', `0 0 ${totalSvgWidth} ${containerHeight}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.style.overflow = 'visible';
+    if (scrollable) {
+      svg.style.display = 'block';
+    }
+    
+    // Create group for chart elements
+    const chartGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    chartGroup.setAttribute('transform', `translate(${padding.left}, ${padding.top})`);
+    
+    // Draw bars and labels
+    values.forEach((value, index) => {
+      // Calculate bar height based on value
+      const barHeight = value * scaleFactor;
+      // First bar starts at 0
+      const x = scrollable
+        ? index * barSpacing
+        : index * barSpacing + (barSpacing - barWidth) / 2;
+      // Position bar from bottom
+      const y = chartHeight - barHeight;
+      
+      // Determine if this bar should be highlighted
+      // Priority: highlightIndex > highlightLast
+      const isHighlighted = highlightIndex !== null && highlightIndex !== undefined
+        ? index === highlightIndex
+        : (highlightLast && index === values.length - 1);
+      const barColor = isHighlighted ? colors.highlight : colors.default;
+      const labelColor = isHighlighted ? labelColors.highlight : labelColors.default;
+      
+      // Draw bar
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', x);
+      rect.setAttribute('y', y);
+      rect.setAttribute('width', barWidth);
+      rect.setAttribute('height', barHeight);
+      rect.setAttribute('fill', barColor);
+      // Use border radius 8 on mobile, otherwise use config value
+      const barBorderRadius = isMobile ? 8 : borderRadius;
+      rect.setAttribute('rx', barBorderRadius);
+      rect.setAttribute('ry', barBorderRadius);
+      chartGroup.appendChild(rect);
+      
+      // Value label above bar
+      const labelValue = value >= 1000 ? (value / 1000).toFixed(1) + 'k' : value.toString();
+      
+      const valueText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      valueText.setAttribute('x', x + barWidth / 2);
+      valueText.setAttribute('y', y - 5);
+      valueText.setAttribute('text-anchor', 'middle');
+      valueText.setAttribute('dominant-baseline', 'auto');
+      valueText.setAttribute('fill', labelColor);
+      valueText.setAttribute('font-size', isMobile ? '10' : '12');
+      valueText.setAttribute('font-weight', '500');
+      valueText.textContent = labelValue;
+      chartGroup.appendChild(valueText);
+      
+      if (dates[index]) {
+        const dateParts = dates[index].split(' ');
+        const dateMonth = dateParts.slice(0, -1).join(' '); 
+        const dayName = dateParts[dateParts.length - 1]; 
+        
+        const dateText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        dateText.setAttribute('x', x + barWidth / 2);
+        dateText.setAttribute('y', chartHeight + (isMobile ? 12 : 15));
+        dateText.setAttribute('text-anchor', 'middle');
+        dateText.setAttribute('fill', '#6B7280');
+        dateText.setAttribute('font-size', isMobile ? '10' : '12');
+        dateText.textContent = dateMonth;
+        chartGroup.appendChild(dateText);
+        
+        if (dayName) {
+          const dayText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          dayText.setAttribute('x', x + barWidth / 2);
+          dayText.setAttribute('y', chartHeight + (isMobile ? 24 : 28));
+          dayText.setAttribute('text-anchor', 'middle');
+          dayText.setAttribute('fill', '#6B7280');
+          dayText.setAttribute('font-size', isMobile ? '10' : '12');
+          dayText.textContent = dayName;
+          chartGroup.appendChild(dayText);
+        }
+      }
+    });
+    
+    svg.appendChild(chartGroup);
+    chartContainer.appendChild(svg);
+
+    // For timeline charts, optionally anchor to the latest point on the right.
+    if (scrollable && scrollToEnd) {
+      chartContainer.scrollLeft = chartContainer.scrollWidth;
+    }
+    
+    // Handle window resize
+    let resizeTimer;
+    const handleResize = function() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function() {
+        initializeBarChart(config);
+      }, 100);
+    };
+    
+    // Remove old listener if exists
+    const handlerKey = `${containerId}-resize-handler`;
+    if (window[handlerKey]) {
+      window.removeEventListener('resize', window[handlerKey]);
+    }
+    window[handlerKey] = handleResize;
+    window.addEventListener('resize', handleResize);
+  }
+</script>
+

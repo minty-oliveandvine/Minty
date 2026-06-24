@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="{{ url_for('static', filename='img/logo_v2.webp') }}"
+    />
+    <title>Petty Cash {% block title %}{% endblock %}</title>
+    <script
+      src="https://code.jquery.com/jquery-3.7.1.min.js"
+      integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+      crossorigin="anonymous"
+    ></script>
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: "#294882",
+              secondary: "#E8ECE9",
+              success: "#166534",
+              successBg: "#F0FDF4",
+              successBorder: "#22C55E",
+              errorBorder: "#EF4444",
+              errorBg: "#FEF2F2",
+              error: "#991B1B",
+              infoBorder: "#3B82F6",
+              infoBg: "#EFF6FF",
+              info: "#1E40AF",
+              warningBorder: "#F97316",
+              warningBg: "#FFF7ED",
+              warning: "#9A3412",
+              lightBlue: "#007BFF",
+            },
+            borderRadius: {
+              none: "0px",
+              sm: "4px",
+              DEFAULT: "8px",
+              md: "12px",
+              lg: "16px",
+              xl: "20px",
+              "2xl": "24px",
+              "3xl": "32px",
+              full: "9999px",
+              button: "8px",
+            },
+          },
+        },
+      };
+    </script>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/main.css') }}"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload"
+      as="font"
+      href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/remixicon/4.6.0/remixicon.min.css"
+    />
+    {% block styles %}{% endblock %}
+  </head>
+
+  <body>
+    <div class="main-container">
+      {% with errors = get_flashed_messages(with_categories=True) %}{% if errors %}
+        {% for category, error in errors %}{% if category == 'success' %}
+          {{
+            components.toast(icon='img/success.webp', type='Success', message=error,
+            toastBorder='successBorder', toastBg='successBg', toastColor='success')
+          }}
+        {% elif category =='error' or category == 'danger' %}
+                     {{
+             components.toast(icon='img/error.webp',
+             type='Error', message=error, toastBorder='errorBorder', toastBg='errorBg',
+             toastColor='error')
+           }}
+        {% elif category =='info' %}
+                     {{
+             components.toast(icon='img/info.webp', type='Information', message=error,
+             toastBorder='infoBorder', toastBg='infoBg', toastColor='info')
+           }}
+        {%
+            elif
+            category =='warning'
+          %}
+                     {{
+             components.toast(icon='img/warning.svg',
+             type='Warning', message=error, toastBorder='warningBorder',
+             toastBg='warningBg', toastColor='warning')
+           }}
+        {% endif %}{% endfor %}
+      {% endif %}{% endwith %}
+      <header class="main-header">{% block header %}{% endblock %}</header>
+      <main class="main-content">{% block content %}{% endblock %}</main>
+      <footer class="main-footer">{% block footer %}{% endblock %}</footer>
+      {% block scripts %}
+                 <script>
+           document.addEventListener("DOMContentLoaded", function () {
+             // Handle all toast close buttons
+             const toastCloseButtons = document.querySelectorAll(".toast-close");
+             
+             toastCloseButtons.forEach(function(button) {
+               button.addEventListener("click", function () {
+                 // Find the parent toast and hide it
+                 const toast = this.closest(".toast");
+                 if (toast) {
+                   toast.style.display = "none";
+                 }
+               });
+             });
+
+             // Auto-hide toasts after 4 seconds
+             setTimeout(() => {
+               const toasts = document.querySelectorAll(".toast");
+               toasts.forEach(function(toast) {
+                 toast.style.display = "none";
+               });
+             }, 4000);
+           });
+         </script>
+      {% endblock %}
+    </div>
+    <!-- Idle auto-logout (also ends the Xero session). Placed outside the
+         overridable scripts block so child templates can't drop it. -->
+    <script>
+      window.IDLE_TIMEOUT_SECONDS = {{ config.get('IDLE_TIMEOUT_SECONDS', 1800) }};
+      window.IDLE_LOGOUT_URL = "{{ url_for('auth.logout') }}?reason=idle";
+    </script>
+    <script src="{{ url_for('static', filename='js/idle-logout.js') }}"></script>
+  </body>
+</html>

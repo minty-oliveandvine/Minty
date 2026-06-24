@@ -1,0 +1,751 @@
+# Entity create routes.
+
+
+import os
+from collections.abc import Iterable
+from datetime import datetime, timedelta, timezone
+from typing import Protocol, cast
+from urllib.parse import urlencode
+
+import jwt
+import pycountry
+from flask import (current_app, flash, jsonify, make_response, redirect,
+                   render_template, request, url_for)
+from flask_login import current_user, login_required
+from iso4217 import Currency
+from loguru import logger
+
+from blueprints.entity import entity_bp
+from blueprints.entity.forms import CreateEntityForm
+from blueprints.entity.services.payment_methods import (
+    list_sales_methods_grouped, replace_sales_methods)
+from blueprints.entity.services.shared import create_entity_for_user
+
+
+class _PyCountryCountry(Protocol):
+    alpha_2: str
+    name: str
+
+
+# --- Onboarding handoff helpers -------------------------------------------
+
+def _onboarding_base_url() -> str:
+    return os.environ.get("ONBOARDING_APP_URL", "http://localhost:3001").rstrip("/")
+
+
+def _mint_onboarding_token(user_id) -> str:
+    """Short-lived JWT the onboarding app sends back to create the entity."""
+    secret = current_app.config.get("SECRET_KEY")
+    payload = {
+        "user_id": str(user_id),
+        "scope": "onboarding",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=60),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, secret, algorithm="HS256")
+
+
+def onboarding_launch_url(
+    user, *, entity_name: str = "", entity_id: str = "", fresh: bool = False
+) -> str:
+    """Launch URL into the onboarding wizard for an already-authenticated user.
+
+    Mints the short-lived onboarding JWT (the same token the ``/api/onboarding/*``
+    endpoints accept) and passes the user's name so the wizard boots
+    authenticated without a fresh email round-trip. The app hydrates ``token``,
+    ``first``, ``last``, ``entity_name``, ``entity_id`` and ``fresh`` from these
+    query params (see the onboarding app). When ``entity_name`` is given
+    (resuming an in-progress entity) it pre-fills Step 1.
+
+    Pass ``entity_id`` when resuming an in-progress entity: the wizard binds the
+    existing entity (fetching its saved state via ``GET /api/onboarding/state``)
+    instead of starting fresh, and the freshly minted token authorizes those
+    calls. This makes resume work with no browser localStorage (fresh browser /
+    incognito / different device).
+
+    Pass ``fresh=True`` for the "+" / "create new entity" action: it emits
+    ``fresh=1`` so the wizard MUST start a brand-new onboarding and ignore any
+    previously-saved session in localStorage. Without this, the app rehydrates
+    its single global session blob and "+" resumes the last in-progress entity
+    instead of creating a new one — which also makes it impossible to have more
+    than one in-progress entity. ``fresh`` and ``entity_id`` are mutually
+    exclusive (resume binds an entity; fresh forbids any).
+    """
+    params = {
+        "token": _mint_onboarding_token(user.id),
+        "first": (getattr(user, "first_name", "") or "").strip(),
+        "last": (getattr(user, "last_name", "") or "").strip(),
+    }
+    if entity_name:
+        params["entity_name"] = entity_name
+    if entity_id:
+        params["entity_id"] = entity_id
+    if fresh and not entity_id:
+        params["fresh"] = "1"
+    query = urlencode({k: v for k, v in params.items() if v})
+    return f"{_onboarding_base_url()}/?{query}"
+
+
+def _user_id_from_bearer():
+    """Decode the onboarding JWT from the Authorization header → user_id."""
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None
+    token = header[len("Bearer "):].strip()
+    try:
+        decoded = jwt.decode(
+            token, current_app.config.get("SECRET_KEY"), algorithms=["HS256"]
+        )
+        return decoded.get("user_id")
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
+        return None
+
+
+def _cors(resp):
+    """Allow the onboarding origin to call the API cross-origin (token auth)."""
+    resp.headers["Access-Control-Allow-Origin"] = _onboarding_base_url()
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    return resp
+
+
+def _resolve_country_code(value: str) -> str:
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) == 2:
+        return v.upper()
+    try:
+        return pycountry.countries.lookup(v).alpha_2
+    except Exception:  # noqa: BLE001
+        return v
+
+
+def _resolve_currency_code(value: str) -> str:
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) == 3 and v.isupper():
+        return v
+    try:
+        for c in Currency:
+            if c.currency_name.lower() == v.lower():
+                return c.code
+    except Exception:  # noqa: BLE001
+        pass
+    return v
+
+
+# --- Routes ---------------------------------------------------------------
+
+@entity_bp.route("/entity/success")
+@login_required
+def entity_create_success():
+    entity_id = request.args.get("entity_id") or ""
+    return render_template("entity/entity_create_success.html", entity_id=entity_id)
+
+
+@entity_bp.route("/entity/create", methods=["GET", "POST"])
+@login_required
+def entity_create():
+    # New entities are created through the onboarding wizard (Step 1). Send the
+    # authenticated user straight there; the legacy POST handler below stays as
+    # a server-side fallback but is no longer reached via the UI.
+    #
+    # fresh=True → emits ?fresh=1 so the wizard starts a brand-new onboarding and
+    # ignores any saved session in localStorage. This is the "+" / create-new
+    # action: it must NOT resume a previously in-progress entity (that only
+    # happens by clicking the in-progress entity row, which passes entity_id).
+    if request.method == "GET":
+        return redirect(onboarding_launch_url(current_user, fresh=True))
+
+    form = CreateEntityForm()
+    countries = cast(Iterable[_PyCountryCountry], pycountry.countries)
+    country_code = [
+        {"country_code": c.alpha_2, "country_name": c.name} for c in countries
+    ]
+    currency_iterable = list(Currency)
+    currencies = [
+        {"currency_code": c.code, "currency_name": c.currency_name}
+        for c in currency_iterable
+    ]
+
+    if request.method == "POST":
+        if form.validate_on_submit():
+            entity, error = create_entity_for_user(
+                current_user.id,
+                form.entity_name.data,
+                form.country_code.data,
+                form.currency_code.data,
+            )
+            if error:
+                form.entity_name.errors = [*form.entity_name.errors, error]
+                flash(error, "danger")
+                return redirect(url_for("entity.entity_create"))
+            return redirect(url_for("entity.entity_create_success", entity_id=entity.id))
+
+    return render_template(
+        "entity/entity_create.html",
+        country_code=country_code,
+        currencies=currencies,
+        form=form,
+    )
+
+
+@entity_bp.route("/api/onboarding/state", methods=["GET", "OPTIONS"])
+def onboarding_state():
+    """Token-authenticated resume state for the onboarding app.
+
+    GET ?entity_id=… → the full wizard picture reconstructed from the DB
+    (basic info, modules, Xero, invites) plus a derived ``current_step`` /
+    ``max_reached``. The ``entities`` row is the source of truth, so resume
+    works with no browser localStorage (fresh browser / incognito / different
+    device). Same JWT/CORS/membership contract as the other onboarding routes.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    entity_id = (request.args.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_state import get_onboarding_state
+
+    data, status = get_onboarding_state(user_id, entity_id)
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/create", methods=["POST", "OPTIONS"])
+def onboarding_create_entity():
+    """Token-authenticated entity creation for the onboarding app (Step 1).
+
+    Authenticated by a short-lived onboarding JWT (sent as
+    ``Authorization: Bearer <token>``), so it works cross-origin without a
+    session cookie. Reuses ``create_entity_for_user``.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    data = request.get_json(silent=True) or {}
+    entity_name = data.get("entity_name") or data.get("name") or ""
+    country_code = _resolve_country_code(data.get("country_code") or data.get("country") or "")
+    currency_code = _resolve_currency_code(data.get("currency_code") or data.get("currency") or "")
+
+    entity, error = create_entity_for_user(user_id, entity_name, country_code, currency_code)
+    if error:
+        resp = jsonify({"error": error})
+        resp.status_code = 409 if "exist" in error.lower() else 400
+        return _cors(resp)
+
+    from models.db import db as _db
+    entity.status = "onboarding"
+    _db.session.commit()
+
+    resp = jsonify({"entity_id": entity.id, "name": entity.name})
+    resp.status_code = 201
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/modules", methods=["POST", "OPTIONS"])
+def onboarding_modules():
+    """Token-authenticated module selection (onboarding Step 2).
+
+    POST {entity_id, module: "PETTY_CASH" | "BILL"} → upserts both rows in
+    ``entity_function_map`` (selected → is_enabled=true, the other → false).
+    Returns {"modules": {code: bool, ...}} reflecting the resulting state.
+
+    Same JWT/CORS contract as the other ``/api/onboarding/*`` routes. We
+    enforce that the calling user is a member of the entity (the onboarding
+    flow always satisfies this because Step 1 just created the entity under
+    them, but the check is here as a defence against replay with a different
+    entity_id).
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    # Multi-select: prefer the `modules` array; fall back to the legacy
+    # `module` single string so any older caller still works.
+    modules_list = payload.get("modules")
+    if isinstance(modules_list, list):
+        selected = [str(m or "").strip().upper() for m in modules_list if (m or "").strip()]
+    else:
+        legacy = (payload.get("module") or "").strip().upper()
+        selected = [legacy] if legacy else []
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+    if not selected:
+        resp = jsonify({"error": "at least one module is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    # Lazy imports — these touch the db module which pulls in the full model
+    # graph, and create.py is imported early in blueprint loading.
+    from blueprints.entity.services.modules import (ACTOR_ONBOARDING,
+                                                    apply_module_selections)
+    from models.db import UserEntity
+
+    membership = UserEntity.query.filter(
+        UserEntity.user_id == str(user_id),
+        UserEntity.entity_id == entity_id,
+    ).first()
+    if not membership:
+        resp = jsonify({"error": "You don't have access to this entity"})
+        resp.status_code = 403
+        return _cors(resp)
+
+    data, status = apply_module_selections(
+        entity_id, selected, actor=ACTOR_ONBOARDING
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/finalize", methods=["POST", "OPTIONS"])
+def onboarding_finalize():
+    """Clear the mid-onboarding flag so the entity routes to its dashboard
+    on the next entity-list click instead of bouncing back to onboarding.
+
+    Called from the onboarding app's finishOnboarding handler at the end
+    of the wizard. Same JWT/CORS contract as the other /api/onboarding/*
+    routes.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from models.db import Entity, UserEntity, db as _db
+    membership = UserEntity.query.filter(
+        UserEntity.user_id == str(user_id),
+        UserEntity.entity_id == entity_id,
+    ).first()
+    if not membership:
+        resp = jsonify({"error": "You don't have access to this entity"})
+        resp.status_code = 403
+        return _cors(resp)
+
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        resp = jsonify({"error": "Entity not found"})
+        resp.status_code = 404
+        return _cors(resp)
+
+    if entity.status == "onboarding":
+        entity.status = "active"
+        _db.session.commit()
+
+    resp = jsonify({"status": "success"})
+    resp.status_code = 200
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/sales-methods", methods=["GET", "POST", "OPTIONS"])
+def onboarding_sales_methods():
+    """Token-authenticated petty-cash Sales Setting (onboarding Step 4).
+
+    GET  ?entity_id=…  → {"electronic": [...], "delivery": [...]} of enabled names.
+    POST {entity_id, electronic: [...], delivery: [...]} → reconciles SaleInfo.
+
+    Same JWT/CORS contract as ``onboarding_create_entity``; the underlying
+    services enforce SALES_METHOD_* permission for the token's user on the
+    entity, so an entity not owned by the user yields 403.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    if request.method == "GET":
+        entity_id = (request.args.get("entity_id") or "").strip()
+        if not entity_id:
+            resp = jsonify({"error": "entity_id is required"})
+            resp.status_code = 400
+            return _cors(resp)
+        data, status = list_sales_methods_grouped(user_id, entity_id)
+        resp = jsonify(data)
+        resp.status_code = status
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    data, status = replace_sales_methods(
+        user_id,
+        entity_id,
+        payload.get("electronic") or [],
+        payload.get("delivery") or [],
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/opening-balance", methods=["POST", "OPTIONS"])
+def onboarding_opening_balance():
+    """Token-authenticated petty-cash opening balance (onboarding Step 4).
+
+    POST {entity_id, opening_date, cash_addition} → seeds the first 'opening'
+    report draft for that date with the beginning amount recorded as
+    cash_addition. Same JWT/CORS contract as the other onboarding endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.report.services.shared import seed_opening_draft
+
+    data, status = seed_opening_draft(
+        user_id,
+        entity_id,
+        payload.get("opening_date") or payload.get("transaction_date"),
+        payload.get("cash_addition", payload.get("opening_balance", 0)),
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/account-codes", methods=["GET", "POST", "OPTIONS"])
+def onboarding_account_codes():
+    """Token-authenticated petty-cash Account Code settings (onboarding Step 5).
+
+    GET  ?entity_id=…  → Xero-sourced option lists + current selections.
+    POST {entity_id, expense_codes: [...], mapping: {pettycash, deposit,
+         director, cash_sale, discrepancy}} → persists the selection.
+
+    Xero-dependent: returns 409 (connected: false) until the entity has a live
+    Xero connection from Step 3. Same JWT/CORS contract as the other endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_account_codes import (
+        get_account_code_options, save_account_codes)
+
+    if request.method == "GET":
+        entity_id = (request.args.get("entity_id") or "").strip()
+        if not entity_id:
+            resp = jsonify({"error": "entity_id is required"})
+            resp.status_code = 400
+            return _cors(resp)
+        data, status = get_account_code_options(user_id, entity_id)
+        resp = jsonify(data)
+        resp.status_code = status
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    data, status = save_account_codes(
+        user_id,
+        entity_id,
+        expense_codes=payload.get("expense_codes") or [],
+        mapping=payload.get("mapping") or {},
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/contacts", methods=["POST", "OPTIONS"])
+def onboarding_contacts():
+    """Token-authenticated petty-cash contact mappings (onboarding Step 6 / Others).
+
+    POST {entity_id, contacts: {director, cash_sale, discrepancy}} of Xero
+    contact ids → persists into entity_pettycash_settings. Same JWT/CORS
+    contract as the other onboarding endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_account_codes import save_contacts
+
+    data, status = save_contacts(user_id, entity_id, payload.get("contacts") or {})
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/contacts/create", methods=["POST", "OPTIONS"])
+def onboarding_contacts_create():
+    """Token-authenticated creation of a NEW Xero contact (onboarding Step 6).
+
+    POST {entity_id, name} → creates the contact in the entity's Xero org,
+    mirrors it into xero_contact_sync, and returns {"id", "label"} so the
+    wizard can append it to the contact dropdown and select it. Use this when
+    the desired contact doesn't exist yet; ``/api/onboarding/contacts`` only
+    maps already-existing contacts. Same JWT/CORS contract as the other
+    onboarding endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_account_codes import create_contact
+
+    data, status = create_contact(
+        user_id, entity_id, payload.get("name") or payload.get("contact_name") or ""
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/xero/disconnect", methods=["POST", "OPTIONS"])
+def onboarding_xero_disconnect():
+    """Token-authenticated Xero disconnect for the onboarding app (Step 4).
+
+    POST {entity_id} → revokes the entity's connection on Xero
+    (DELETE /connections) and clears the local connection + token state, then
+    leaves the entity in the onboarding flow with Xero shown as not connected.
+    Mirrors the session-authenticated ``disconnect_from_xero`` route. Same
+    JWT/CORS contract as the other onboarding endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_xero import disconnect_entity_xero
+
+    data, status = disconnect_entity_xero(user_id, entity_id)
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/bill-codes", methods=["GET", "POST", "OPTIONS"])
+def onboarding_bill_codes():
+    """Token-authenticated Bill Account Code settings (onboarding Step 7).
+
+    GET  ?entity_id=…  → Xero-sourced bill codes + current active selection.
+    POST {entity_id, selected_codes: [...]} → persists which codes appear when
+         adding a bill (entity_bill_account_xero.is_active).
+
+    Xero-dependent: returns 409 (connected: false) until the entity has a live
+    Xero connection from Step 3. Same JWT/CORS contract as the other endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_bill_codes import (
+        get_bill_code_options, save_bill_codes)
+
+    if request.method == "GET":
+        entity_id = (request.args.get("entity_id") or "").strip()
+        if not entity_id:
+            resp = jsonify({"error": "entity_id is required"})
+            resp.status_code = 400
+            return _cors(resp)
+        data, status = get_bill_code_options(user_id, entity_id)
+        resp = jsonify(data)
+        resp.status_code = status
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    data, status = save_bill_codes(
+        user_id, entity_id, payload.get("selected_codes") or []
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/invite", methods=["GET", "POST", "OPTIONS"])
+def onboarding_invite():
+    """Token-authenticated user invitations for the onboarding app (Step 8).
+
+    GET  ?entity_id=…  → {"invitations": [...]} of pending invites.
+    POST {entity_id, email, role} → creates and emails an invitation.
+
+    Same JWT/CORS contract as the other onboarding endpoints; the underlying
+    service enforces USER_INVITE permission and role-rank limits for the
+    token's user on the entity.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_invites import (list_invites,
+                                                               send_invite)
+
+    if request.method == "GET":
+        entity_id = (request.args.get("entity_id") or "").strip()
+        if not entity_id:
+            resp = jsonify({"error": "entity_id is required"})
+            resp.status_code = 400
+            return _cors(resp)
+        data, status = list_invites(user_id, entity_id)
+        resp = jsonify(data)
+        resp.status_code = status
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    data, status = send_invite(
+        user_id,
+        entity_id,
+        payload.get("email") or "",
+        payload.get("role") or "",
+    )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/invite/cancel", methods=["POST", "OPTIONS"])
+def onboarding_invite_cancel():
+    """Token-authenticated cancellation of a pending onboarding invitation.
+
+    POST {invitation_id} → cancels it. Same JWT/CORS contract as the other
+    onboarding endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    invitation_id = (payload.get("invitation_id") or "").strip()
+    if not invitation_id:
+        resp = jsonify({"error": "invitation_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_invites import cancel_invite
+
+    data, status = cancel_invite(user_id, invitation_id)
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)

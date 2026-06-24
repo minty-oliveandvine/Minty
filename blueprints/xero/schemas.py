@@ -1,0 +1,1 @@
+"""Xero schema placeholders for xero blueprint."""

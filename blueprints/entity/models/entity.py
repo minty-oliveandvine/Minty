@@ -1,0 +1,50 @@
+import uuid
+
+from models.db import db
+
+
+class Entity(db.Model):
+    __tablename__ = "entities"
+    __table_args__ = {"schema": "pettycashv2"}
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    country_code = db.Column(db.String(3))
+    currency_code = db.Column(db.String(10))
+    name = db.Column(db.String(100), nullable=False)
+    minimum_qty = db.Column(db.Integer)
+    deposit_frequency = db.Column(db.Integer)
+    deposit_day = db.Column(db.Integer)
+    contact_option = db.Column(db.String(36))
+    xero_org_id = db.Column(db.String(36))
+    xero_short_code = db.Column(db.String(50))
+    currency_format = db.Column(db.String(30))
+    timezone = db.Column(db.String(30))
+    note = db.Column(db.Text)
+    status = db.Column(db.String(20), default="active")
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
+    last_connected_at = db.Column(db.TIMESTAMP, nullable=True)
+    period_lock_date = db.Column(db.Date, nullable=True)
+    end_of_year_lock_date = db.Column(db.Date, nullable=True)
+    xero_tenant_name = db.Column(db.String(255), nullable=True)
+    connected_by_user_id = db.Column(
+        db.String(36),
+        db.ForeignKey("pettycashv2.user.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    xero_contact = db.relationship(
+        "XeroContactSync", cascade="all, delete-orphan", backref="xero_contact", lazy=True
+    )
+    account_info = db.relationship(
+        "AccountInfo", cascade="all, delete-orphan", backref="entity", lazy=True
+    )
+    report_detail = db.relationship(
+        "ReportDetail", cascade="all, delete-orphan", backref="entity", lazy=True
+    )
+    report_v2 = db.relationship(
+        "ReportV2", cascade="all, delete-orphan", backref="entity", lazy=True
+    )
+    sale_info = db.relationship(
+        "SaleInfo", cascade="all, delete-orphan", backref="entity", lazy=True
+    )
+    entity_cash_detail_v2 = db.relationship(
+        "EntityCashDetailV2", cascade="all, delete-orphan", backref="entity", lazy=True
+    )

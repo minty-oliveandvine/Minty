@@ -1,0 +1,2010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Report History - Vine Consulting Limited</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+
+  <!-- Flatpickr (date range picker) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+
+  <!-- Inter font -->
+<link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <style>
+    @media (min-width: 640px) and (max-width: 1024px) {
+      .main-container {
+        width: 640px;
+        margin: 0 auto;
+      }
+    }
+
+    @media (min-width: 1024px) and (max-width: 1200px) {
+      .main-container {
+        width: 768px;
+        margin: 0 auto;
+      }
+    }
+
+    @media (min-width: 1200px) {
+      .main-container {
+        width: 1024px;
+        margin: 0 auto;
+      }
+    }
+
+    /* Toast styling */
+    .toast {
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    .toast-close:hover {
+      background-color: rgba(0, 0, 0, 0.1);
+    }
+
+     /* Report entry button styling */
+     .arrow-button:hover {
+       transform: translateX(2px);
+       transition: transform 0.2s ease-in-out;
+     }
+
+     .download-button:hover {
+       transform: scale(1.05);
+       transition: transform 0.2s ease-in-out;
+     }
+
+     /* Simple date input placeholder */
+     .date-input-wrapper {
+       position: relative;
+     }
+     
+     .date-placeholder {
+       position: absolute;
+       top: 50%;
+       left: 7px;
+       transform: translateY(-50%);
+       color: #9CA3AF;
+       cursor: pointer;
+       font-size: 14px;
+       background: white;
+       padding: 8px 15px;
+       z-index: 10;
+       max-width: calc(100% - 36px);
+       border-radius: 8px;
+     }
+
+     .date-input-wrapper input[type="date"] {
+       cursor: pointer;
+       font-size: 14px;
+     }
+     
+     /* Hide browser default placeholder when empty */
+     .date-input-wrapper input[type="date"]:invalid {
+       color: transparent;
+     }
+     
+     /* Show text when focused or has value */
+     .date-input-wrapper input[type="date"]:focus,
+     .date-input-wrapper input[type="date"]:valid {
+       color: #374151;
+     }
+     
+     /* Hide webkit date parts only when empty */
+     .date-input-wrapper input[type="date"]:invalid::-webkit-datetime-edit-text,
+     .date-input-wrapper input[type="date"]:invalid::-webkit-datetime-edit-month-field,
+     .date-input-wrapper input[type="date"]:invalid::-webkit-datetime-edit-day-field,
+     .date-input-wrapper input[type="date"]:invalid::-webkit-datetime-edit-year-field,
+     .date-input-wrapper input[type="date"]:invalid::-webkit-datetime-edit {
+       color: transparent !important;
+     }
+     
+     /* Show webkit date parts when focused or has value */
+     .date-input-wrapper input[type="date"]:focus::-webkit-datetime-edit-text,
+     .date-input-wrapper input[type="date"]:focus::-webkit-datetime-edit-month-field,
+     .date-input-wrapper input[type="date"]:focus::-webkit-datetime-edit-day-field,
+     .date-input-wrapper input[type="date"]:focus::-webkit-datetime-edit-year-field,
+     .date-input-wrapper input[type="date"]:focus::-webkit-datetime-edit,
+     .date-input-wrapper input[type="date"]:valid::-webkit-datetime-edit-text,
+     .date-input-wrapper input[type="date"]:valid::-webkit-datetime-edit-month-field,
+     .date-input-wrapper input[type="date"]:valid::-webkit-datetime-edit-day-field,
+     .date-input-wrapper input[type="date"]:valid::-webkit-datetime-edit-year-field,
+     .date-input-wrapper input[type="date"]:valid::-webkit-datetime-edit {
+       color: #374151 !important;
+     }
+
+     /* Chrome-specific z-index fix - applied via JavaScript detection */
+     body.is-chrome .settings-menu-dropdown:not(.hidden),
+     body.is-chrome .mobile-menu-dropdown:not(.hidden) {
+       z-index: 100 !important;
+     }
+
+     /* ---- Flatpickr range picker theming (brand colours) ---- */
+     .flatpickr-calendar { font-family: 'Inter', ui-sans-serif, system-ui; box-shadow: 0 8px 24px rgba(0,0,0,0.12); border-radius: 12px; }
+     .flatpickr-day.selected,
+     .flatpickr-day.startRange,
+     .flatpickr-day.endRange {
+       background: #54D3DA !important;
+       border-color: #54D3DA !important;
+       color: #fff !important;
+     }
+     .flatpickr-day.selected:hover,
+     .flatpickr-day.startRange:hover,
+     .flatpickr-day.endRange:hover { background: #3fc3ca !important; border-color: #3fc3ca !important; }
+     /* Days between start and end */
+     .flatpickr-day.inRange {
+       background: #E6FAFB !important;
+       border-color: #E6FAFB !important;
+       box-shadow: -5px 0 0 #E6FAFB, 5px 0 0 #E6FAFB !important;
+       color: #0f766e !important;
+     }
+     .flatpickr-day.today { border-color: #54D3DA; }
+     .flatpickr-day:hover { background: #f1fbfc; }
+     .flatpickr-months .flatpickr-month { color: #374151; }
+     .flatpickr-current-month { font-weight: 600; }
+     /* Align day columns with the weekday headers and stop the last (partial)
+        row from spreading edge-to-edge: each day is exactly 1/7, left-aligned. */
+     .flatpickr-calendar .dayContainer { justify-content: flex-start; }
+     .flatpickr-calendar .flatpickr-day {
+       max-width: 14.2857%;
+       flex-basis: 14.2857%;
+     }
+     /* Footer action buttons inside the calendar popup */
+     .fp-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid #f0f0f0; }
+     .fp-search-btn {
+       background: #54D3DA; color: #fff; font-weight: 600; font-size: 14px;
+       padding: 8px 20px; border-radius: 10px; cursor: pointer; border: none;
+       transition: background 0.15s ease;
+     }
+     .fp-search-btn:hover { background: #3fc3ca; }
+     .fp-clear-btn {
+       background: transparent; color: #6b7280; font-weight: 600; font-size: 14px;
+       padding: 8px 16px; border-radius: 10px; cursor: pointer; border: 1px solid #e5e7eb;
+       transition: background 0.15s ease, color 0.15s ease;
+     }
+     .fp-clear-btn:hover { background: #f3f4f6; color: #374151; }
+
+     /* ---- Mobile: make the single-month calendar fill the screen nicely ---- */
+     @media (max-width: 639px) {
+       .flatpickr-calendar {
+         width: calc(100vw - 24px) !important;
+         max-width: 360px !important;
+         left: 12px !important;
+         right: 12px !important;
+       }
+       .flatpickr-calendar .flatpickr-rContainer,
+       .flatpickr-calendar .flatpickr-days { width: 100% !important; }
+       .flatpickr-calendar .dayContainer {
+         width: 100% !important;
+         min-width: 100% !important;
+         max-width: 100% !important;
+       }
+       /* Let the 7 day cells share the row evenly and stay tap-friendly */
+       .flatpickr-calendar .flatpickr-day {
+         max-width: 14.2857%;
+         height: 42px;
+         line-height: 42px;
+       }
+       .flatpickr-weekdaycontainer { width: 100%; }
+       .flatpickr-weekday { flex: 1; }
+       .fp-search-btn, .fp-clear-btn { padding: 10px 18px; }
+     }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: { 
+        extend: { 
+          fontFamily: { 
+            inter: ['Inter','ui-sans-serif','system-ui'] 
+          } 
+        } 
+      }
+    }
+  </script>
+</head>
+<body class="min-h-screen font-inter antialiased">
+  <!-- Full-screen Publishing Overlay -->
+  <div id="publishingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[9999] hidden items-center justify-center" style="display:none;">
+    <div class="bg-white rounded-2xl p-8 shadow-2xl w-[320px] max-w-[90vw] flex flex-col items-center">
+      <svg class="animate-spin h-10 w-10 text-[#54D3DA] mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span id="publishingOverlayText" class="text-gray-800 font-semibold text-base mb-3">Publishing to Xero...</span>
+      <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
+        <div id="publishingProgressBar" class="bg-[#54D3DA] h-3 rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+      </div>
+      <span id="publishingProgressText" class="text-gray-500 text-sm font-medium">0%</span>
+      <p class="text-gray-400 text-xs mt-3 text-center">Please do not close or navigate away.</p>
+    </div>
+  </div>
+
+  <!-- Loading Overlay (for non-publish actions like delete) -->
+  <div id="loadingOverlay" class="absolute inset-0 bg-black bg-opacity-30 z-50 hidden flex items-center justify-center">
+    <div class="bg-white rounded-lg p-4 shadow-lg">
+      <div class="flex items-center space-x-3">
+        <svg class="animate-spin h-5 w-5 text-[#54D3DA]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span id="loadingText" class="text-gray-700 font-medium">Processing...</span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="main-container">
+    <!-- Phone card -->
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          <a href="{{ url_for('entity.report_dashboard', id=entity_id) }}" class="text-[#474747] transition-colors hover-slide-left" onclick="PageTransition.navigateWithFade(this.href); return false;">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+        </div>
+        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">{{ entity_acronym }}</h1>
+        <div class="flex-1 flex justify-end">
+          <div class="flex items-center gap-2">
+            {% set fn = (current_user.first_name or '')[:1] %}
+            {% set ln = (current_user.last_name or '')[:1] %}
+            {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+            <a href="{{ bills_app_profile_url(entity_id) }}" rel="noopener noreferrer"
+              class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
+              aria-label="Open profile in Bills"
+              title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
+              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
+            </a>
+            <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
+                <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Sticky Date Range Selection -->
+      <div class="sticky top-0 bg-gray-50 px-6 py-2 relative z-40">
+        <div class="mb-6">
+           <div class="flex items-end gap-2 mb-4" id="dateRange">
+             <div class="flex-1 min-w-0">
+               <label for="startDateDisplay" class="block text-xs font-semibold text-[#54D3DA] mb-1">Start Date</label>
+               <input type="text" id="startDateDisplay" readonly placeholder="DD/MMM/YYYY"
+                 class="w-full px-3 py-3 border border-gray-300 rounded-xl text-gray-700 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent text-sm placeholder-gray-400">
+             </div>
+             <div class="flex-1 min-w-0">
+               <label for="endDateDisplay" class="block text-xs font-semibold text-[#54D3DA] mb-1">End Date</label>
+               <input type="text" id="endDateDisplay" readonly placeholder="DD/MMM/YYYY"
+                 class="w-full px-3 py-3 border border-gray-300 rounded-xl text-gray-700 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent text-sm placeholder-gray-400">
+             </div>
+             <!-- Anchor input the range calendar attaches to (kept out of the layout) -->
+             <input type="text" id="dateRangePicker" class="sr-only" tabindex="-1" aria-hidden="true">
+             <!-- Hidden fields keep the existing search / CSV / pagination logic working -->
+             <input type="hidden" id="startDate">
+             <input type="hidden" id="endDate">
+           </div>
+          
+          <!-- Action Buttons (Search lives inside the calendar popup) -->
+          <div class="flex space-x-2">
+             <button id="csvBtn" class="flex-1 px-4 py-3 bg-[#54D3DA] text-white rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+               <svg width="15" height="16" viewBox="0 0 11 12" fill="none" xmlns="http://www.w3.org/2000/svg" class="mr-2">
+                 <path d="M0.501831 10.3763H10.9981V11.543H0.501831V10.3763ZM6.33308 6.9813L9.87848 3.43464L10.6949 4.26297L5.74996 9.20964L0.805056 4.26297L1.62143 3.43464L5.16683 6.9813V0.459636H6.33308V6.9813Z" fill="white"/>
+               </svg>
+               CSV
+             </button>
+          </div>
+        </div>
+      </div>
+      <!-- Hidden CSRF token for delete functionality -->
+      <form style="display: none;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      </form>
+
+      <!-- Include reusable sidepanel component -->
+      {% include 'components/sidepanel.html' %}
+
+      <!-- Flash Notification Area (Slider) -->
+      <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40">
+        {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
+          {% for category, message in messages %}{% if category == 'success' %}
+            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
+              <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+                <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
+              </div>
+              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          {% elif category == 'danger' or category == 'error' %}
+            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+              <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
+                <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
+              </div>
+              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          {% endif %}{% endfor %}
+        {% endif %}{% endwith %}
+      </div>
+    <!-- Delete Confirmation Modal -->
+      <div id="deleteReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-bold text-gray-900">Delete Report</h2>
+            <button onclick="hideDeleteModal()" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Modal Content -->
+          <div class="bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4 mb-6">
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#EF4444]">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-[#B91C1C]">
+                  <span class="font-bold">Warning:</span>
+                </p>
+                <p class="text-sm text-[#B91C1C] mt-1">
+                  Are you sure you want to delete this report? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal Actions -->
+          <div class="flex space-x-3">
+            <button onclick="hideDeleteModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/10 transition-colors">Cancel</button>
+            <button onclick="confirmDelete()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Dialog (stays open until the user clicks OK) -->
+      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+          <div class="flex items-start mb-6">
+            <div class="flex-shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              </svg>
+            </div>
+            <div class="ml-3">
+              <h2 class="text-lg font-bold text-gray-900">Error</h2>
+              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
+            </div>
+          </div>
+          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+            OK
+          </button>
+        </div>
+      </div>
+
+      <!-- Republish Report Confirmation Modal -->
+      <div id="republishReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-bold text-gray-900">Republish Report</h2>
+            <button onclick="hideRepublishModal()" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Modal Content -->
+          <div class="bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4 mb-6">
+            <div class="flex items-start">
+              <div class="flex-shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#EF4444]">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-[#B91C1C]">
+                  <span class="font-bold">Warning:</span>
+                </p>
+                <div id="republishDuplicateWarning" class="hidden">
+                  <p class="text-sm text-[#B91C1C] mt-1">
+                    The <span id="republishReportDate" class="font-semibold"></span> report was previously published to Xero. Republishing sends all of its transactions to Xero again and may create duplicates.
+                  </p>
+                  <p class="text-sm text-[#B91C1C] mt-2">
+                    Before continuing, please open Xero and delete the previously published transactions for this report.
+                  </p>
+                </div>
+                <p class="text-sm text-[#B91C1C] mt-2">
+                  Are you sure you want to republish this report to Xero?
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal Actions -->
+          <div class="flex space-x-3">
+            <button onclick="hideRepublishModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/10 transition-colors">
+              Cancel
+            </button>
+            <button onclick="confirmRepublish()" id="confirmRepublishButton" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center gap-2">
+              <span>Confirm</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+
+      <!-- Content -->
+       <div class="main-content flex-1 overflow-y-auto pb-40">
+        <!-- Report Results -->
+         <div class="bg-gray-50 p-6 pt-8 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-gray-900">Report Results</h2>
+          </div>
+          
+         {% for report in report_history  %}
+       <div class="report-entry bg-white rounded-2xl p-4" data-report-id="{{ report.id }}" data-report-date="{{ report.transaction_date.strftime('%Y-%m-%d') }}" data-report-status="{{ report.status }}">
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="flex items-center justify-between gap-0.5 min-[414px]:gap-1 min-[640px]:gap-2">
+                  <div class="flex flex-col items-center gap-1 min-[414px]:gap-1.5 min-[640px]:gap-2">
+                    <span class="text-[8px] min-[414px]:text-[9px] min-[640px]:text-[10px] min-[1024px]:text-sm text-gray-600">{{report.transaction_date.strftime('%d %b %Y').upper()}}</span>
+                    <div class="{% if report.transaction_date.strftime('%a').upper() in ['SAT', 'SUN'] %}bg-[#F1B337]{% else %}bg-[#54D3DA]{% endif %} text-white rounded-full w-[40px] h-[40px] min-[414px]:w-[45px] min-[414px]:h-[45px] min-[640px]:w-[50px] min-[640px]:h-[50px] flex items-center justify-center">
+                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm font-semibold">{{report.transaction_date.strftime('%a').upper()}}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-4 min-[414px]:gap-4 min-[640px]:gap-12 min-[1024px]:gap-16 min-[1280px]:gap-40 flex-1 justify-center">
+                    <div class="flex flex-col">
+                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-xl font-semibold text-gray-600">Sales</span>
+                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg font-semibold text-[#00C896]">{% set sales = report.total_sales or 0 %}{% if sales == 0 %}-{% else %}${{ "{:,.2f}".format(sales) }}{% endif %}</span>
+                    </div>
+                    <div class="flex flex-col">
+                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-xl font-semibold text-gray-600">Expenses</span>
+                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg font-semibold text-[#EF4444]">{% set expenses = report.expenses or 0 %}{% if expenses == 0 %}-{% else %}${{ "{:,.2f}".format(expenses) }}{% endif %}</span>
+                    </div>
+                  </div>
+                  <div class="flex flex-col min-[414px]:mr-4 min-[640px]:mr-6 min-[1024px]:mr-20">
+                    <div class="relative {% if report.publishing_status == 'partially_published' and report.publish_reasons %}group cursor-help{% endif %} px-1.5 py-1 min-[414px]:px-2 min-[414px]:py-1.5 min-[640px]:px-3 min-[640px]:py-2 rounded-lg inline-flex flex-col w-fit {% if report.xero_integrated_yes == True %}bg-[#E6F2FF]{% elif report.publishing_status == 'partially_published' %}bg-[#E6F2FF]{% elif report.status == 'draft' %}bg-[#EBEEF2]{% elif report.status == 'posted' %}bg-[#FFF0F0]{% endif %}">
+                      <span class="text-[9px] min-[414px]:text-[10px] min-[640px]:text-xs font-medium whitespace-nowrap inline-flex items-center {% if report.xero_integrated_yes == True %}text-[#007BFF]{% elif report.publishing_status == 'partially_published' %}text-[#007BFF]{% elif report.status == 'draft' %}text-[#546881]{% elif report.status == 'posted' %}text-[#FF6B6B]{% endif %}">{% if report.xero_integrated_yes == True %}Published{% elif report.publishing_status == 'partially_published' %}Partially Published{% elif report.status == 'posted' %}Submitted{% else %}{{report.status.capitalize()}}{% endif %}{% if report.publishing_status == 'partially_published' and report.publish_reasons %}<svg class="w-3 h-3 ml-1 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>{% endif %}</span>
+                      {% if report.publishing_status == 'partially_published' and report.publish_reasons %}
+                      <div class="absolute hidden group-hover:block z-[60] right-0 top-full mt-2 w-max max-w-[16rem] min-[640px]:max-w-[18rem] bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-xl normal-case font-normal text-left">
+                        <span class="absolute -top-1 right-3 w-2 h-2 rotate-45 bg-gray-900"></span>
+                        <p class="font-semibold mb-1">Publish issues:</p>
+                        <ul class="space-y-1 whitespace-normal break-words">{% for reason in report.publish_reasons %}<li class="flex items-start gap-1.5 {% if reason.resolved %}bg-green-500/20 rounded px-1 py-0.5{% endif %}">{% if reason.resolved %}<svg class="w-3 h-3 mt-px shrink-0 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.3 3.3 6.8-6.8a1 1 0 011.4 0z" clip-rule="evenodd"/></svg><span class="line-through text-green-300">{{ reason.text }}</span>{% else %}<svg class="w-3 h-3 mt-px shrink-0 text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 8.586 5.707 4.293 4.293 5.707 8.586 10l-4.293 4.293 1.414 1.414L10 11.414l4.293 4.293 1.414-1.414L11.414 10l4.293-4.293-1.414-1.414L10 8.586z" clip-rule="evenodd"/></svg><span>{{ reason.text }}</span>{% endif %}</li>{% endfor %}</ul>
+                      </div>
+                      {% endif %}
+                    </div>
+                    <div class="flex flex-col text-[8px] min-[414px]:text-[9px] min-[640px]:text-[10px] min-[1024px]:text-sm text-gray-600 mt-0.5 min-[414px]:mt-1">
+                      <span class="timestamp-display" data-timestamp="{% if report.xero_integrated_yes == True %}{% set published_history = report.report_histories|selectattr('action', 'equalto', 'published')|first %}{{ published_history.timestamp.isoformat() if published_history and published_history.timestamp else (report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp.isoformat() if (report.report_histories|selectattr('action', 'equalto', 'posted')|first) and (report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp else (report.date.isoformat() if report.date else '') }}{% elif report.status == 'posted' %}{% set posted_history = report.report_histories|selectattr('action', 'equalto', 'posted')|first %}{{ posted_history.timestamp.isoformat() if posted_history and posted_history.timestamp else (report.date.isoformat() if report.date else '') }}{% else %}{{ report.date.isoformat() if report.date else '' }}{% endif %}">{% if report.xero_integrated_yes == True %}{% set published_history = report.report_histories|selectattr('action', 'equalto', 'published')|first %}{{ published_history.timestamp.strftime('%d %b %Y %H:%M') if published_history and published_history.timestamp else ((report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp.strftime('%d %b %Y %H:%M') if (report.report_histories|selectattr('action', 'equalto', 'posted')|first) and (report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp else (report.date.strftime('%d %b %Y %H:%M') if report.date else '')) }}{% elif report.status == 'posted' %}{% set posted_history = report.report_histories|selectattr('action', 'equalto', 'posted')|first %}{{ posted_history.timestamp.strftime('%d %b %Y %H:%M') if posted_history and posted_history.timestamp else (report.date.strftime('%d %b %Y %H:%M') if report.date else '') }}{% else %}{{ report.date.strftime('%d %b %Y %H:%M') if report.date else '' }}{% endif %}</span>
+                      <span>by {{report.first_name}}</span>
+                    </div>
+                  </div>
+                  <div class="flex flex-col items-center space-y-2">
+                    <div class="mobile-menu-button w-8 h-8 bg-[#F9FAFB] rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-50 transition-colors cursor-pointer relative" title="Actions" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); toggleMobileMenu(this)">
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="10" cy="5" r="1.5" fill="currentColor"/>
+                        <circle cx="10" cy="10" r="1.5" fill="currentColor"/>
+                        <circle cx="10" cy="15" r="1.5" fill="currentColor"/>
+                      </svg>
+                      
+                      <!-- Dropdown menu (hidden by default) -->
+                      <div class="mobile-menu-dropdown absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-40 hidden min-w-[152px]" 
+                           onclick="event.stopPropagation()">
+                        <div class="flex flex-col">
+                          <!-- Edit - latest non-draft report, only when the user can edit (entity-wide perm or they uploaded it). -->
+                          {% if report.id == latest_report_id and report.status != 'draft' and (can_edit_entity_reports or report.uploaded_by == current_user.username) %}
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                            <span class="text-sm font-medium">Edit</span>
+                          </div>
+                          {% endif %}
+
+                          <!-- Edit (older reports) - non-latest non-draft report the user can edit. Opens the constrained "Edit Report" inline mode on the ending page. -->
+                          {% if report.id != latest_report_id and report.status != 'draft' and (can_edit_entity_reports or report.uploaded_by == current_user.username) %}
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); PageTransition.navigateWithFade('/entity/{{ entity_id }}/ending/{{ report.id }}?report_edit=true'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                            <span class="text-sm font-medium">Edit</span>
+                          </div>
+                          {% endif %}
+
+                          <!-- Delete - only show if this is the latest report and user owns it or has entity-level delete -->
+                          {% if report.id == latest_report_id and (can_delete_entity_reports or report.uploaded_by == current_user.username) %}
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Delete Report" data-report-id="{{ report.id }}" data-is-latest="True" onclick="event.stopPropagation(); deleteReport('{{ report.id }}'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                            <span class="text-sm font-medium">Delete</span>
+                          </div>
+                          {% endif %}
+                          
+                          <!-- Download CSV -->
+                          <!-- <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600 {% if report.status == 'draft' %}opacity-50 cursor-not-allowed{% endif %}" title="{% if report.status == 'draft' %}Please Finish report{% else %}Download CSV{% endif %}" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); {% if report.status != 'draft' %}handleDownloadExcel('{{ report.id }}', '{{ entity_id }}'); toggleMobileMenu(this.closest('.mobile-menu-button')){% endif %}">
+                            <span class="text-sm font-medium">Download CSV</span>
+                          </div> -->
+                          
+                          <!-- View Report -->
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" 
+                               title="View Report"
+                               onclick="event.stopPropagation(); 
+                               {% if report.status == 'draft' %}
+                                 const resumeUrl = '/report/resume?entity_id={{ entity_id }}&transaction_date={{ report.transaction_date.strftime('%Y-%m-%d') }}';
+                                 PageTransition.navigateWithFade(resumeUrl);
+                               {% else %}
+                                 const url = '/entity/{{ entity_id }}/ending/{{ report.id }}';
+                                 PageTransition.navigateWithFade(url);
+                               {% endif %}
+                               toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                            <span class="text-sm font-medium">View</span>
+                          </div>
+                          {% if can_publish %}
+                          {% if not report.xero_integrated_yes and report.publishing_status != 'partially_published' %}
+                          <div class="w-full px-4 py-3 transition-colors flex items-center justify-left gap-2 text-gray-600 {% if report.status != 'draft' %}hover:bg-gray-50 cursor-pointer{% else %}opacity-50 cursor-not-allowed{% endif %}" title="{% if report.status == 'draft' %}Please finish the report before publishing{% else %}Publish to Xero{% endif %}" data-report-id="{{ report.id }}" data-publishing-state="idle" onclick="event.stopPropagation(); {% if report.status != 'draft' %}handlePublish('{{ report.id }}', '{{ entity_id }}', this, {{ 'true' if report.publishing_status == 'completed' else 'false' }}, '{{ report.transaction_date.strftime('%d %b %Y').upper() }}'){% endif %}">
+                            <svg class="animate-spin h-4 w-4 text-gray-600 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" data-spinner>
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span class="text-sm font-medium" data-button-text>Publish</span>
+                          </div>
+                          {% else %}
+                          <div class="w-full px-4 py-3 transition-colors flex items-center justify-left gap-2 text-gray-600 hover:bg-gray-50 cursor-pointer" title="Republish to Xero" data-report-id="{{ report.id }}" data-xero-integrated="true" data-publishing-state="idle" onclick="event.stopPropagation(); handleRepublish('{{ report.id }}', '{{ entity_id }}', this, {{ 'true' if report.xero_integrated_yes else 'false' }}, '{{ report.transaction_date.strftime('%d %b %Y').upper() }}')">
+                            <svg class="animate-spin h-4 w-4 text-gray-600 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" data-spinner>
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span class="text-sm font-medium" data-button-text>Republish</span>
+                          </div>
+                          {% endif %}
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <!-- Chevron right arrow - navigate to ending report -->
+                    <a href="#" class="w-8 h-8 flex items-center justify-center text-gray-400 transition-colors cursor-pointer hover-slide-parent" title="View Report" onclick="event.stopPropagation(); 
+                     {% if report.status == 'draft' %}
+                       const resumeUrl = '/report/resume?entity_id={{ entity_id }}&transaction_date={{ report.transaction_date.strftime('%Y-%m-%d') }}';
+                       PageTransition.navigateWithFade(resumeUrl);
+                     {% else %}
+                       const url = '/entity/{{ entity_id }}/ending/{{ report.id }}';
+                       PageTransition.navigateWithFade(url);
+                     {% endif %}
+                     return false;">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 hover-slide">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+      {% endfor %}
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="px-4 sm:px-6 py-4 border-t border-gray-200">
+          <!-- Mobile: Stack vertically, Desktop: Horizontal -->
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <!-- Results text - responsive sizing -->
+            <div class="text-xs sm:text-sm text-gray-600 text-center sm:text-left whitespace-nowrap">
+              <span class="hidden sm:inline">Showing </span>
+              <span class="font-medium">{{ ((page - 1) * 10) + 1 }}</span>
+              <span class="hidden sm:inline"> to </span>
+              <span class="sm:hidden">-</span>
+              <span class="font-medium">{{ [page * 10, total_count]|min }}</span>
+              <span class="hidden sm:inline"> of </span>
+              <span class="sm:hidden">/</span>
+              <span class="font-medium">{{ total_count }}</span>
+              <span class="hidden sm:inline"> reports</span>
+            </div>
+            
+            <!-- Pagination controls -->
+            <div class="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap">
+              {% if page > 1 %}
+                <a href="{{ url_for('report.entity_report_history', entity_id=entity_id, page=page-1, start_date=start_date, end_date=end_date) }}" 
+                   class="px-3 sm:px-4 py-2 sm:py-2 text-sm sm:text-base border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors font-medium min-w-[70px] sm:min-w-auto text-center">
+                  Previous
+                </a>
+              {% else %}
+                <span class="px-3 sm:px-4 py-2 sm:py-2 text-sm sm:text-base border border-gray-300 rounded-xl text-gray-400 cursor-not-allowed opacity-50 font-medium min-w-[70px] sm:min-w-auto text-center">
+                  Previous
+                </span>
+              {% endif %}
+
+              <div class="flex items-center gap-1 sm:gap-1.5">
+                {% for p in range(1, total_pages + 1) %}
+                  {% if p == page %}
+                    <span class="px-3 sm:px-4 py-2 sm:py-2 text-sm sm:text-base bg-[#54D3DA] text-white rounded-xl font-medium min-w-[36px] sm:min-w-[44px] text-center">
+                      {{ p }}
+                    </span>
+                  {% elif p <= 2 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
+                    <a href="{{ url_for('report.entity_report_history', entity_id=entity_id, page=p, start_date=start_date, end_date=end_date) }}" 
+                       class="px-3 sm:px-4 py-2 sm:py-2 text-sm sm:text-base border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors min-w-[36px] sm:min-w-[44px] text-center">
+                      {{ p }}
+                    </a>
+                  {% elif p == page - 2 or p == page + 2 %}
+                    <span class="px-1 sm:px-2 text-gray-400 text-sm sm:text-base">...</span>
+                  {% endif %}
+                {% endfor %}
+              </div>
+
+              {% if page < total_pages %}
+                <a href="{{ url_for('report.entity_report_history', entity_id=entity_id, page=page+1, start_date=start_date, end_date=end_date) }}" 
+                   class="px-3 sm:px-4 py-2 sm:py-2 text-sm sm:text-base border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors font-medium min-w-[70px] sm:min-w-auto text-center">
+                  Next
+                </a>
+              {% else %}
+                <span class="px-3 sm:px-4 py-2 sm:py-2 text-sm sm:text-base border border-gray-300 rounded-xl text-gray-400 cursor-not-allowed opacity-50 font-medium min-w-[70px] sm:min-w-auto text-center">
+                  Next
+                </span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Empty State (hidden by default) -->
+        <div id="emptyState" class="hidden text-center py-12">
+          <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          </svg>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
+          <p class="text-gray-500">Try adjusting your date range or search criteria.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Detect Chrome browser and add class for Chrome-specific fixes
+    (function() {
+      const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+      if (isChrome) {
+        document.body.classList.add('is-chrome');
+      }
+    })();
+
+    // Initialize page transition
+    PageTransition.init('.main-content', 'fadeIn', 10);
+
+    // Initialise the combined date-range picker
+     document.addEventListener('DOMContentLoaded', function() {
+
+       const start_date = document.getElementById('startDate');
+       const end_date = document.getElementById('endDate');
+
+       // Format a local Date as YYYY-MM-DD (matches what the backend expects)
+       function toYMD(d) {
+         const y = d.getFullYear();
+         const m = String(d.getMonth() + 1).padStart(2, '0');
+         const day = String(d.getDate()).padStart(2, '0');
+         return `${y}-${m}-${day}`;
+       }
+
+       // Pre-fill from URL parameters if a filter was already applied
+       const urlParams = new URLSearchParams(window.location.search);
+       const startDateParam = urlParams.get('start_date');
+       const endDateParam = urlParams.get('end_date');
+
+       const defaultRange = [];
+       if (startDateParam) { start_date.value = startDateParam; defaultRange.push(startDateParam); }
+       if (endDateParam)   { end_date.value = endDateParam;     defaultRange.push(endDateParam); }
+
+       const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+       const startDisplay = document.getElementById('startDateDisplay');
+       const endDisplay = document.getElementById('endDateDisplay');
+
+       // Render a Date as DD/MMM/YYYY (e.g. 22/Jun/2026) for the labelled fields
+       function formatDisplay(d) {
+         if (!d) return '';
+         const day = String(d.getDate()).padStart(2, '0');
+         return `${day}/${MONTHS[d.getMonth()]}/${d.getFullYear()}`;
+       }
+
+       // Mirror the calendar selection into the Start/End fields + hidden inputs
+       function syncRange(selectedDates) {
+         const s = selectedDates[0] || null;
+         const e = selectedDates[1] || selectedDates[0] || null;  // single pick => same day both ends
+         startDisplay.value = formatDisplay(s);
+         endDisplay.value = selectedDates.length ? formatDisplay(e) : '';
+         start_date.value = s ? toYMD(s) : '';
+         end_date.value = (selectedDates.length ? toYMD(e) : '');
+         enableButtons(start_date.value, end_date.value);
+       }
+
+       // One month on phones, two side-by-side once there's room
+       function monthsForViewport() { return window.innerWidth >= 640 ? 2 : 1; }
+
+       // Two-month side-by-side range calendar, anchored under the fields
+       const fp = flatpickr('#dateRangePicker', {
+         mode: 'range',
+         showMonths: monthsForViewport(),
+         dateFormat: 'Y-m-d',
+         closeOnSelect: false,         // keep the calendar open after the end date is picked
+         disableMobile: true,          // always use our themed calendar, never the native mobile picker
+         positionElement: document.getElementById('dateRange'),
+         defaultDate: defaultRange.length ? defaultRange : null,
+         onChange: function(selectedDates) { syncRange(selectedDates); },
+         onReady: function(selectedDates, dateStr, instance) {
+           syncRange(selectedDates);
+
+           // Footer actions inside the calendar popup
+           const footer = document.createElement('div');
+           footer.className = 'fp-footer';
+
+           // "Clear" resets the range -> back to showing all reports
+           const clearBtn = document.createElement('button');
+           clearBtn.type = 'button';
+           clearBtn.className = 'fp-clear-btn';
+           clearBtn.textContent = 'Clear';
+           clearBtn.addEventListener('click', function() {
+             instance.clear();           // fires onChange -> syncRange([]) empties fields
+             instance.close();
+             clearReportFilter();         // navigate back to the unfiltered list if needed
+           });
+
+           // "Search Report" applies the selected range (like the sample's Continue)
+           const searchFpBtn = document.createElement('button');
+           searchFpBtn.type = 'button';
+           searchFpBtn.className = 'fp-search-btn';
+           searchFpBtn.textContent = 'Search Report';
+           searchFpBtn.addEventListener('click', function() {
+             instance.close();
+             runReportSearch();
+           });
+
+           footer.appendChild(clearBtn);
+           footer.appendChild(searchFpBtn);
+           instance.calendarContainer.appendChild(footer);
+         }
+       });
+
+       // Open the calendar from either labelled field
+       startDisplay.addEventListener('click', function() { fp.open(); });
+       endDisplay.addEventListener('click', function() { fp.open(); });
+
+       // Keep the month count in sync when the viewport crosses the breakpoint
+       // (e.g. phone rotation or resize) without losing the current selection.
+       let resizeTimer;
+       window.addEventListener('resize', function() {
+         clearTimeout(resizeTimer);
+         resizeTimer = setTimeout(function() {
+           const wanted = monthsForViewport();
+           if (fp.config.showMonths !== wanted) {
+             fp.set('showMonths', wanted);
+             fp.redraw();
+           }
+         }, 150);
+       });
+
+       enableButtons(start_date.value, end_date.value);
+
+       // Wire the standalone "Search report" button to the shared search routine
+       const searchBtn = document.getElementById('searchBtn');
+       if (searchBtn) {
+         searchBtn.addEventListener('click', runReportSearch);
+       }
+     });
+
+    // Validate the selected range and navigate to the filtered results
+    function runReportSearch() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+
+      if (!startDate || !endDate) {
+        showNotification('Please choose or enter a valid date range', 'error');
+        return;
+      }
+
+      if (new Date(startDate) > new Date(endDate)) {
+        showNotification('Start date cannot be after end date', 'error');
+        return;
+      }
+
+      const searchBtn = document.getElementById('searchBtn');
+      if (searchBtn) {
+        searchBtn.textContent = 'Searching...';
+        searchBtn.disabled = true;
+      }
+
+      const entityId = '{{ entity_id }}';
+      const url = `/entity/${entityId}/reports?start_date=${startDate}&end_date=${endDate}&page=1`;
+      window.location.href = url;
+    }
+
+    // Reset the date filter and show all reports again
+    function clearReportFilter() {
+      const startDisplay = document.getElementById('startDateDisplay');
+      const endDisplay = document.getElementById('endDateDisplay');
+      if (startDisplay) startDisplay.value = '';
+      if (endDisplay) endDisplay.value = '';
+      document.getElementById('startDate').value = '';
+      document.getElementById('endDate').value = '';
+      enableButtons('', '');
+
+      // If a filter is currently applied (URL has date params), reload the full list
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('start_date') || params.has('end_date')) {
+        window.location.href = `/entity/{{ entity_id }}/reports`;
+      }
+    }
+
+    function enableButtons(start_date, end_date) {
+      let searchBtn = document.getElementById('searchBtn')
+      let csvBtn = document.getElementById('csvBtn')
+
+      if (start_date && end_date) {
+        if (searchBtn) searchBtn.disabled = false;
+        if (csvBtn) csvBtn.disabled = false;
+      } else if (!start_date && !end_date) {
+        if (searchBtn) searchBtn.disabled = true;
+        if (csvBtn) csvBtn.disabled = true;
+      }
+    }
+
+
+    // CSV Export functionality
+    document.getElementById('csvBtn').addEventListener('click', function() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      
+      if (!startDate || !endDate) {
+        showNotification('Please select both start and end dates before exporting', 'error');
+        return;
+      }
+      
+      // Validate date range
+      if (new Date(startDate) > new Date(endDate)) {
+        showNotification('Start date cannot be after end date', 'error');
+        return;
+      }
+      
+      // Show loading state
+      const originalText = this.innerHTML;
+      this.innerHTML = '<svg class="animate-spin w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Exporting...';
+      this.disabled = true;
+      
+      // Construct download URL
+      const entityId = '{{ entity_id }}';
+      const downloadUrl = `/entity/${entityId}/reports/download-csv?start_date=${startDate}&end_date=${endDate}`;
+      
+      // Create a temporary link to trigger download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      
+      // Trigger download
+      link.click();
+      
+      // Clean up
+      setTimeout(() => {
+        document.body.removeChild(link);
+        this.innerHTML = originalText;
+        this.disabled = false;
+        
+        // Show success message
+        showNotification('CSV export started successfully!', 'success');
+      }, 1000);
+    });
+
+    // Function to show search results
+    function showSearchResults() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+
+      if (!startDate || !endDate) {
+        showNotification('Please select both start and end dates', 'error');
+        return;
+      }
+
+      if (new Date(startDate) > new Date(endDate)) {
+        showNotification('Start date cannot be after end date', 'error');
+        return;
+      }
+
+      // Make actual API call to filter reports
+      const entityId = '{{ entity_id }}';
+      const url = `/entity/${entityId}/reports?start_date=${startDate}&end_date=${endDate}`;
+      
+      // Navigate to the filtered results
+      window.location.href = url;
+    }
+
+    // Function to close notification with slide-out animation
+    function closeNotification(closeButton) {
+      // Find the toast container (the element with 'absolute' class that contains the toast)
+      let toast = closeButton.parentElement; // Go to the .toast div
+      while (toast && !toast.classList.contains('absolute')) {
+        toast = toast.parentElement;
+      }
+      
+      if (toast) {
+        // Slide out
+        toast.classList.add('translate-x-full');
+        // Remove after animation completes (500ms matches transition duration)
+        setTimeout(() => {
+          if (toast.parentElement) {
+            toast.remove();
+          }
+        }, 500);
+      }
+    }
+
+    // Function to show notifications
+    function showNotification(message, type = 'info') {
+      // Errors are blocking: show a dialog that stays open until the user
+      // clicks OK, rather than a toast that auto-dismisses.
+      if (type === 'error') {
+        showErrorDialog(message);
+        return;
+      }
+
+      const toast = document.createElement('div');
+      toast.className = `absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40`;
+
+      let borderColor, bgColor, titleColor, subtextColor, iconSrc, label;
+      if (type === 'success') {
+        borderColor = '#a9d7cb';
+        bgColor = '#f1fffc';
+        titleColor = '#017155';
+        subtextColor = '#92c6b9';
+        iconSrc = "{{ url_for('static', filename='img/success-icon.png') }}";
+        label = 'Success';
+      } else if (type === 'error') {
+        borderColor = '#ffcccc';
+        bgColor = '#fff1f1';
+        titleColor = '#F03D3D';
+        subtextColor = '#f57e7e';
+        iconSrc = "{{ url_for('static', filename='img/error-icon.png') }}";
+        label = 'Error';
+      } else if (type === 'warning') {
+        borderColor = '#fee0aa';
+        bgColor = '#fffaf1';
+        titleColor = '#DA8700';
+        subtextColor = '#e8b765';
+        iconSrc = "{{ url_for('static', filename='img/warning-icon.png') }}";
+        label = 'Warning';
+      } else {
+        borderColor = '#a9d3ff';
+        bgColor = '#f1f8ff';
+        titleColor = '#006FE6';
+        subtextColor = '#5ba2ee';
+        iconSrc = "{{ url_for('static', filename='img/info-icon.png') }}";
+        label = 'Information';
+      }
+
+      toast.innerHTML = `
+        <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: ${borderColor}; background-color: ${bgColor};">
+          <img src="${iconSrc}" alt="${label}" class="shrink-0 w-[36px] h-[44px]" />
+          <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+            <p class="font-[500] whitespace-nowrap" style="color: ${titleColor};">${label}</p>
+            <p class="font-[400] break-words w-full" style="color: ${subtextColor};">${message}</p>
+          </div>
+          <button onclick="closeNotification(this)" class="toast-close shrink-0 p-1 hover:bg-gray-200 rounded ml-2">
+            <svg class="w-[14px] h-[14px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      `;
+       
+      const phoneCard = document.querySelector('.relative.h-screen.bg-gray-50.shadow-xl');
+      if (phoneCard) {
+        phoneCard.appendChild(toast);
+      } else {
+        document.body.appendChild(toast);
+      }
+      
+      // Animate in
+      setTimeout(() => {
+        toast.classList.remove('translate-x-full');
+      }, 100);
+      
+      // Auto-hide after 4 seconds
+      setTimeout(() => {
+        toast.classList.add('translate-x-full');
+        setTimeout(() => {
+          if (toast.parentElement) {
+            toast.remove();
+          }
+        }, 500);
+      }, 4000);
+    }
+
+    // Blocking error dialog — stays open until the user clicks OK.
+    function showErrorDialog(message) {
+      const dialog = document.getElementById('errorDialog');
+      if (!dialog) { alert(message); return; }
+      const msgEl = document.getElementById('errorDialogMessage');
+      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
+      dialog.classList.remove('hidden');
+      dialog.classList.add('flex');
+    }
+
+    function hideErrorDialog() {
+      const dialog = document.getElementById('errorDialog');
+      if (!dialog) return;
+      dialog.classList.add('hidden');
+      dialog.classList.remove('flex');
+    }
+
+    // Handle report entry container click
+    function handleReportEntryClick(event, reportId, entityId, reportStatus, reportDate) {
+      // Check if the click was on a child element that should not trigger navigation
+      const target = event.target;
+      const isClickableChild = target.closest('a') || 
+                               target.closest('.arrow-button') || 
+                               target.closest('.trash-button') || 
+                               target.closest('.trash-button-mobile') ||
+                               target.closest('.republish-button') ||
+                               target.closest('.republish-button-mobile') ||
+                               target.closest('.download-button-mobile') ||
+                               target.closest('.mobile-menu-button') ||
+                               target.closest('.mobile-menu-dropdown') ||
+                               target.closest('a[title="Export Options"]') ||
+                               target.closest('.settings-menu-dropdown') ||
+                               target.closest('button');
+      
+      if (isClickableChild) {
+        return; // Don't navigate if clicking on a child element
+      }
+      
+      // Navigate to ending report page
+      reportStatus = (reportStatus || '').toLowerCase();
+      
+      if (reportStatus === 'draft') {
+        if (entityId && reportDate) {
+          const resumeUrl = `/report/resume?entity_id=${entityId}&transaction_date=${reportDate}`;
+          console.log('Resuming draft report at:', resumeUrl);
+          PageTransition.navigateWithFade(resumeUrl);
+        } else {
+          console.error('Missing resume values:', { entityId: !!entityId, reportDate: !!reportDate });
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('warn', 'Resume draft missing info', { entityId: !!entityId, reportDate: !!reportDate });
+          }
+          showNotification('Unable to resume draft. Missing information.', 'error');
+        }
+        return;
+      }
+      
+      // Navigate to entity-specific ending page
+      if (reportId && entityId) {
+        const url = `/entity/${entityId}/ending/${reportId}`;
+        console.log('Navigating to:', url);
+        PageTransition.navigateWithFade(url);
+      } else {
+        console.error('Missing values:', { reportId: !!reportId, entityId: !!entityId });
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('warn', 'Open report missing info', { reportId: !!reportId, entityId: !!entityId });
+        }
+        showNotification('Unable to open report. Missing information.', 'error');
+      }
+    }
+
+    // Add click handlers for report entries
+    document.querySelectorAll('.report-entry').forEach((entry, index) => {
+      // Arrow button click - only for the arrow icon container
+      const arrowButton = entry.querySelector('.arrow-button');
+      if (arrowButton) {
+        arrowButton.addEventListener('click', function(e) {
+          e.stopPropagation(); // Prevent event bubbling
+          console.log(`Viewing report ${index + 1} details`);
+          const entityId = '{{ entity_id }}'; // Get entity_id from template context
+          const reportId = entry.dataset.reportId;
+          const reportDate = entry.dataset.reportDate; // Get report date from data attribute
+          const reportStatus = (entry.dataset.reportStatus || '').toLowerCase();
+          
+          console.log('Debug values:', { reportId, entityId, reportDate, reportStatus });
+          
+          if (reportStatus === 'draft') {
+            if (entityId && reportDate) {
+              const resumeUrl = `/report/resume?entity_id=${entityId}&transaction_date=${reportDate}`;
+              console.log('Resuming draft report at:', resumeUrl);
+              showNotification(`Resuming draft report from ${reportDate}...`, 'success');
+              PageTransition.navigateWithFade(resumeUrl);
+            } else {
+              console.error('Missing resume values:', { entityId: !!entityId, reportDate: !!reportDate });
+              if (window.sendLogToDataDog) {
+                window.sendLogToDataDog('warn', 'Resume draft missing info', { entityId: !!entityId, reportDate: !!reportDate });
+              }
+              showNotification('Unable to resume draft. Missing information.', 'error');
+            }
+            return;
+          }
+          
+          // Navigate to entity-specific ending page
+          if (reportId && entityId) {
+            const url = `/entity/${entityId}/ending/${reportId}`;
+            console.log('Navigating to:', url);
+            showNotification(`Opening report ${index + 1} details...`, 'success');
+            PageTransition.navigateWithFade(url);
+          } else {
+            console.error('Missing values:', { reportId: !!reportId, entityId: !!entityId });
+            if (window.sendLogToDataDog) {
+              window.sendLogToDataDog('warn', 'Open report missing info', { reportId: !!reportId, entityId: !!entityId });
+            }
+            showNotification('Unable to open report. Missing information.', 'error');
+          }
+        });
+      }
+      
+      // Republish button click - only for republish buttons
+      const republishButton = entry.querySelector('.republish-button');
+      if (republishButton) {
+        republishButton.addEventListener('click', function(e) {
+          e.stopPropagation(); // Prevent event bubbling
+          
+          const reportId = this.dataset.reportId;
+          const entityId = '{{ entity_id }}';
+          const isXeroIntegrated = this.dataset.xeroIntegrated === 'true';
+          
+          if (!reportId || !entityId) {
+            showNotification('Unable to publish report. Missing report information.', 'error');
+            return;
+          }
+          
+          // If already published to Xero, show republish modal
+          if (isXeroIntegrated) {
+            showRepublishModal(reportId, entityId);
+          } else {
+            // If not published, navigate to submitted page to publish
+            window.location.href = `/report/${reportId}/submitted?entity_id=${entityId}`;
+          }
+        });
+      }
+      
+    });
+
+         // Note: Hover effects are handled by Tailwind CSS classes (hover:bg-blue-50, hover:bg-blue-700, etc.)
+
+    // Add keyboard navigation
+    document.addEventListener('keydown', function(e) {
+      const activeId = document.activeElement && document.activeElement.id;
+      if (e.key === 'Enter' && (activeId === 'startDateDisplay' || activeId === 'endDateDisplay')) {
+        runReportSearch();
+      }
+    });
+
+
+    // Function to show continue report message
+    function showContinueReportMessage() {
+      alert('This feature is currently in progress, Stay Tuned!');
+    }
+
+
+     // Delete buttons are now conditionally rendered in the template based on latest_report_id
+     // No need for JavaScript to show/hide them
+
+     // Check if filter is applied (URL has date parameters) and show toast
+     const urlParams = new URLSearchParams(window.location.search);
+     if (urlParams.has('start_date') && urlParams.has('end_date')) {
+       setTimeout(() => {
+         showNotification('Filter applied', 'info');
+       }, 500);
+     }
+
+     // Check if report was just deleted and show toast after reload
+     if (sessionStorage.getItem('reportDeleted') === 'true') {
+       // Clear the flag
+       sessionStorage.removeItem('reportDeleted');
+       
+       // Show success toast notification after page loads
+       setTimeout(() => {
+         showNotification('Report deleted successfully!', 'success');
+       }, 500);
+     }
+
+    // Check if publishing succeeded and show success toast after redirect
+    const publishSuccessMsg = sessionStorage.getItem('publishSuccess');
+    if (publishSuccessMsg) {
+      sessionStorage.removeItem('publishSuccess');
+      setTimeout(() => {
+        showNotification(publishSuccessMsg, 'success');
+      }, 500);
+    }
+
+    // Check if publishing failed and show error toast after redirect back
+    const publishFailedMsg = sessionStorage.getItem('publishFailed');
+    if (publishFailedMsg) {
+      sessionStorage.removeItem('publishFailed');
+      setTimeout(() => {
+        showNotification(publishFailedMsg, 'error');
+      }, 500);
+    }
+
+    // Check if publishing was only partial and show a warning toast after redirect back
+    const publishPartialMsg = sessionStorage.getItem('publishPartial');
+    if (publishPartialMsg) {
+      sessionStorage.removeItem('publishPartial');
+      setTimeout(() => {
+        showNotification(publishPartialMsg, 'warning');
+      }, 500);
+    }
+
+    // Store the report ID to delete
+    let reportToDelete = null;
+
+    // Store the report ID and entity ID to republish
+    let reportToRepublish = null;
+    let entityToRepublish = null;
+
+
+    // Function to edit a report
+    function handleEditReport(reportId, entityId, transactionDate) {
+      console.log('Edit report:', reportId, 'for date:', transactionDate);
+      // Navigate to the report ending page for editing
+      const editUrl = `/entity/${entityId}/ending/${reportId}?edit=true&transaction_date=${transactionDate}`;
+      console.log('Navigating to edit URL:', editUrl);
+      PageTransition.navigateWithFade(editUrl);
+    }
+
+    // Function to delete a report
+    function deleteReport(reportId) {
+      reportToDelete = reportId;
+      // Close any open mobile menu dropdowns
+      const openDropdowns = document.querySelectorAll('.mobile-menu-dropdown:not(.hidden)');
+      openDropdowns.forEach(dropdown => {
+        dropdown.classList.add('hidden');
+      });
+      showDeleteModal();
+    }
+
+    // Show delete confirmation modal
+    function showDeleteModal() {
+      const modal = document.getElementById('deleteReportModal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        // Prevent body scroll
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    // Hide delete confirmation modal
+    function hideDeleteModal() {
+      const modal = document.getElementById('deleteReportModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        // Restore body scroll
+        document.body.style.overflow = '';
+        reportToDelete = null;
+      }
+    }
+
+    // Confirm delete and submit
+    function confirmDelete() {
+      if (reportToDelete) {
+        // Store the report ID before hiding modal (which resets reportToDelete)
+        const reportId = reportToDelete;
+        
+        // Show loading overlay
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        if (loadingOverlay) {
+          loadingOverlay.classList.remove('hidden');
+          const loadingText = document.getElementById('loadingText');
+          if (loadingText) {
+            loadingText.textContent = 'Deleting report...';
+          }
+        }
+        
+        // Hide modal
+        hideDeleteModal();
+        
+        // Get CSRF token
+        const csrfToken = document.querySelector('input[name="csrf_token"]');
+        
+        // Create FormData
+        const formData = new FormData();
+        if (csrfToken) {
+          formData.append('csrf_token', csrfToken.value);
+        }
+        
+        // Send delete request using stored reportId
+        fetch(`/report/delete/${reportId}`, {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => {
+          if (response.ok) {
+            // Clear ALL report-related sessionStorage when report is deleted
+            try {
+              var cacheKeys = [
+                'pending_expenses', 'refresh_expense_on_back',
+                'bf_pending_expenses', 'bf_pending_sales',
+                'bf_pending_deposit', 'bf_pending_opening',
+                'bf_pending_cash_count', 'bf_pending_ending',
+                'bf_pending_generic'
+              ];
+              cacheKeys.forEach(function(k) { sessionStorage.removeItem(k); });
+              // Clear history.state snapshots if possible
+              try {
+                var clearState = { pendingExpenses: null };
+                ['pending_expenses','pending_sales','pending_deposit','pending_opening','pending_cash_count','pending_ending'].forEach(function(k) { clearState[k] = null; });
+                history.replaceState(Object.assign({}, history.state || {}, clearState), document.title);
+              } catch (e) { /* ignore */ }
+            } catch (e) {
+              console.warn('Error clearing sessionStorage:', e);
+            }
+            
+            // Hide loading overlay
+            if (loadingOverlay) {
+              loadingOverlay.classList.add('hidden');
+            }
+            
+            // Set flag to show toast after reload
+            sessionStorage.setItem('reportDeleted', 'true');
+            
+            // Reload the page immediately after delete
+            window.location.reload();
+          } else {
+            // Hide loading overlay on error (response not ok - need to read body for message)
+            if (loadingOverlay) {
+              loadingOverlay.classList.add('hidden');
+            }
+            if (window.sendLogToDataDog) {
+              window.sendLogToDataDog('error', 'Error deleting report', { reportId, status: response.status });
+            }
+            showNotification('Error deleting report. Please try again.', 'error');
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting report:', error);
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('error', 'Error deleting report', { reportId, message: error && error.message });
+          }
+          // Hide loading overlay on error
+          if (loadingOverlay) {
+            loadingOverlay.classList.add('hidden');
+          }
+          showNotification('Error deleting report. Please try again.', 'error');
+        });
+      }
+    }
+
+    // Show republish confirmation modal
+    function showRepublishModal(reportId, entityId, buttonElement = null, wasFullyPublished = false, reportDate = '') {
+      reportToRepublish = reportId;
+      entityToRepublish = entityId;
+      window.republishButtonElement = buttonElement; // Store button element globally
+      // Only fully-published reports risk duplicate transactions on republish (a full
+      // re-send). Partially-published reports use selective re-publish, so skip the warning.
+      const dupWarning = document.getElementById('republishDuplicateWarning');
+      if (dupWarning) dupWarning.classList.toggle('hidden', !wasFullyPublished);
+      // Name the specific report (by date) in the duplicate warning.
+      const dateEl = document.getElementById('republishReportDate');
+      if (dateEl) dateEl.textContent = reportDate || 'this';
+      const modal = document.getElementById('republishReportModal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        // Prevent body scroll
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    // Hide republish confirmation modal
+    function hideRepublishModal() {
+      const modal = document.getElementById('republishReportModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        // Restore body scroll
+        document.body.style.overflow = '';
+        reportToRepublish = null;
+        entityToRepublish = null;
+      }
+    }
+
+    // Confirm republish and proceed
+    function confirmRepublish() {
+      if (reportToRepublish && entityToRepublish) {
+        const reportId = reportToRepublish;
+        const entityId = entityToRepublish;
+        
+        hideRepublishModal();
+        republishToXero(reportId, entityId, window.republishButtonElement || null);
+        window.republishButtonElement = null;
+      } else {
+        console.error('Missing republish data:', { reportToRepublish, entityToRepublish });
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('warn', 'Republish missing info', { reportToRepublish: !!reportToRepublish, entityToRepublish: !!entityToRepublish });
+        }
+        showNotification('Unable to republish report. Missing information.', 'error');
+      }
+    }
+
+    // Helper function to update button state
+    function updateButtonState(buttonElement, state, text) {
+      if (!buttonElement) return;
+      
+      const spinner = buttonElement.querySelector('[data-spinner]');
+      const buttonText = buttonElement.querySelector('[data-button-text]');
+      
+      if (spinner && buttonText) {
+        if (state === 'publishing' || state === 'republishing') {
+          spinner.classList.remove('hidden');
+          buttonText.textContent = text;
+          buttonElement.setAttribute('data-publishing-state', state);
+          buttonElement.classList.add('opacity-50', 'cursor-not-allowed');
+          buttonElement.classList.remove('hover:bg-gray-50', 'cursor-pointer');
+        } else if (state === 'completed') {
+          spinner.classList.add('hidden');
+          buttonElement.setAttribute('data-publishing-state', 'idle');
+          buttonElement.classList.remove('opacity-50', 'cursor-not-allowed');
+        } else if (state === 'idle') {
+          spinner.classList.add('hidden');
+          buttonText.textContent = text;
+          buttonElement.setAttribute('data-publishing-state', 'idle');
+          buttonElement.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+    }
+
+    // ── Publishing overlay helpers ──
+    const ENTITY_PAGE_URL = "{{ url_for('entity.report_dashboard', id=entity_id) }}";
+    const REPORT_HISTORY_URL = window.location.pathname + window.location.search;
+
+    function showPublishingOverlay(label) {
+      const overlay = document.getElementById('publishingOverlay');
+      const text = document.getElementById('publishingOverlayText');
+      const bar = document.getElementById('publishingProgressBar');
+      const pct = document.getElementById('publishingProgressText');
+      if (text) text.textContent = label || 'Publishing to Xero...';
+      if (bar) bar.style.width = '0%';
+      if (pct) pct.textContent = '0%';
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        overlay.style.display = 'flex';
+      }
+      document.body.style.overflow = 'hidden';
+      document.body.style.pointerEvents = 'none';
+      if (overlay) overlay.style.pointerEvents = 'auto';
+    }
+
+    function hidePublishingOverlay() {
+      const overlay = document.getElementById('publishingOverlay');
+      if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.style.display = 'none';
+      }
+      document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
+    }
+
+    function setPublishingProgress(percent, label) {
+      const bar = document.getElementById('publishingProgressBar');
+      const pct = document.getElementById('publishingProgressText');
+      const text = document.getElementById('publishingOverlayText');
+      const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+      if (bar) bar.style.width = clamped + '%';
+      if (pct) pct.textContent = clamped + '%';
+      if (label && text) text.textContent = label;
+    }
+
+    function publishingSuccess(entityId) {
+      setPublishingProgress(100, 'Published successfully!');
+      sessionStorage.setItem('publishSuccess', 'Report published to Xero successfully!');
+      setTimeout(() => {
+        hidePublishingOverlay();
+        window.location.href = REPORT_HISTORY_URL;
+      }, 600);
+    }
+
+    function publishingFailed(errorMsg) {
+      hidePublishingOverlay();
+      sessionStorage.setItem('publishFailed', errorMsg || 'Publishing to Xero failed. Please try again.');
+      window.location.href = REPORT_HISTORY_URL;
+    }
+
+    function publishingPartial(entityId, reasons) {
+      setPublishingProgress(100, 'Partially published');
+      const reasonText = (Array.isArray(reasons) && reasons.length)
+        ? reasons.join('; ')
+        : 'some entries could not be published';
+      sessionStorage.setItem('publishPartial', 'Xero publish is done partially due to ' + reasonText);
+      setTimeout(() => {
+        hidePublishingOverlay();
+        window.location.href = REPORT_HISTORY_URL;
+      }, 600);
+    }
+
+    // Polls /api/report/<id>/publishing_status with simulated progress
+    function pollPublishStatus(reportId, entityId, isRepublish) {
+      let attempts = 0;
+      const maxAttempts = 90;
+      let progress = 15;
+      const label = isRepublish ? 'Republishing to Xero...' : 'Publishing to Xero...';
+
+      const interval = setInterval(() => {
+        attempts++;
+
+        // Gradually increment progress while polling
+        if (progress < 85) {
+          progress += Math.max(1, Math.round((85 - progress) / 12));
+          setPublishingProgress(progress, label);
+        }
+
+        fetch(`/api/report/${reportId}/publishing_status`)
+          .then(r => r.json())
+          .then(data => {
+            const ps = data.publishing_status;
+            const integrated = data.xero_integrated_yes;
+
+            if (ps === 'completed' || integrated) {
+              clearInterval(interval);
+              publishingSuccess(entityId);
+            } else if (ps === 'partially_published') {
+              clearInterval(interval);
+              publishingPartial(entityId, data.failure_reasons);
+            } else if (ps === 'failed') {
+              clearInterval(interval);
+              // Prefer the server's specific reason (e.g. Xero lock-date
+              // violation) over the generic fallback message.
+              publishingFailed(
+                (data.failure_reason
+                  ? 'Publishing to Xero failed: ' + data.failure_reason
+                  : 'Publishing to Xero failed. Please try again.')
+              );
+            } else if (attempts >= maxAttempts) {
+              clearInterval(interval);
+              publishingFailed('Publishing is taking longer than expected. Please check again later.');
+            }
+          })
+          .catch(err => {
+            console.error('Poll error:', err);
+            if (window.sendLogToDataDog) {
+              window.sendLogToDataDog('error', 'Error polling publish status', { reportId, message: err && err.message });
+            }
+            if (attempts >= maxAttempts) {
+              clearInterval(interval);
+              publishingFailed('Error checking publishing status. Please try again.');
+            }
+          });
+      }, 2000);
+    }
+
+    // Shared publish/republish request handler
+    function executePublishRequest(reportId, entityId, isRepublish) {
+      const actionLabel = isRepublish ? 'Republishing to Xero...' : 'Publishing to Xero...';
+      showPublishingOverlay(actionLabel);
+      setPublishingProgress(5, 'Initiating...');
+
+      const csrfToken = document.querySelector('input[name="csrf_token"]');
+      const formData = new FormData();
+      if (csrfToken) formData.append('csrf_token', csrfToken.value);
+
+      setPublishingProgress(10, 'Sending request to Xero...');
+
+      fetch(`/report/submitted/publish_to_xero?entity_id=${entityId}&report_id=${reportId}`, {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => {
+        if (response.status === 409) {
+          return response.json().then(data => {
+            hidePublishingOverlay();
+            showNotification(data.message || 'This report is already being published. Please wait...', 'error');
+            return { handled: true };
+          });
+        }
+        if (!response.ok && response.status !== 202) {
+          return response.json().then(data => {
+            throw new Error(data.message || data.error || 'Publishing failed');
+          });
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.handled) return;
+
+        if (data.status === 'success') {
+          publishingSuccess(entityId);
+        } else if (data.status === 'processing') {
+          setPublishingProgress(15, actionLabel);
+          pollPublishStatus(reportId, entityId, isRepublish);
+        } else {
+          const msg = data.message || data.error || 'Publishing failed. Please try again.';
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('error', 'Publish/Republish error', { reportId, entityId, message: msg });
+          }
+          publishingFailed(msg);
+        }
+      })
+      .catch(error => {
+        console.error('Publish request error:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Publish/Republish error', { reportId, entityId, message: error && error.message });
+        }
+        publishingFailed(error.message || 'Error publishing to Xero. Please try again.');
+      });
+    }
+
+    // Function to handle publish button click
+    function handlePublish(reportId, entityId, buttonElement, wasPreviouslyPublished, reportDate) {
+      if (!reportId || !entityId) {
+        showNotification('Unable to publish report. Missing information.', 'error');
+        return;
+      }
+      // A report that was edited after a prior full publish shows as "Submitted"
+      // with a "Publish" action, but re-pushing it re-sends every transaction to
+      // Xero. Warn about duplicates first (same modal as Republish).
+      if (wasPreviouslyPublished) {
+        showRepublishModal(reportId, entityId, buttonElement, true, reportDate);
+      } else {
+        executePublishRequest(reportId, entityId, false);
+      }
+    }
+
+    // Function to handle republish button click (from menu)
+    function handleRepublish(reportId, entityId, buttonElement, wasFullyPublished, reportDate) {
+      if (!reportId || !entityId) {
+        showNotification('Unable to republish report. Missing information.', 'error');
+        return;
+      }
+      showRepublishModal(reportId, entityId, buttonElement, wasFullyPublished, reportDate);
+    }
+
+    // Function to republish report to Xero
+    function republishToXero(reportId, entityId, buttonElement) {
+      if (!reportId || !entityId) {
+        showNotification('Unable to republish report. Missing information.', 'error');
+        const confirmButton = document.getElementById('confirmRepublishButton');
+        if (confirmButton) {
+          confirmButton.disabled = false;
+          confirmButton.innerHTML = '<span>Confirm</span>';
+        }
+        return;
+      }
+      executePublishRequest(reportId, entityId, true);
+    }
+
+    // Mobile menu functions
+    function toggleMobileMenu(button) {
+      const dropdown = button.querySelector('.mobile-menu-dropdown');
+      if (dropdown) {
+        // Close all other open menus first (both mobile menu and settings menu)
+        document.querySelectorAll('.mobile-menu-dropdown, .settings-menu-dropdown').forEach(menu => {
+          if (menu !== dropdown) {
+            menu.classList.add('hidden');
+          }
+        });
+        
+        // Toggle current menu
+        dropdown.classList.toggle('hidden');
+      }
+    }
+
+    function closeMobileMenu(button) {
+      if (button) {
+        const dropdown = button.querySelector('.mobile-menu-dropdown');
+        if (dropdown) {
+          dropdown.classList.add('hidden');
+        }
+      }
+    }
+
+    // Settings menu functions
+    function handleExportButtonClick(button, reportStatus) {
+      // Check if button is disabled (report is draft)
+      if (reportStatus === 'draft') {
+        showNotification('Please finish the report before exporting.', 'error');
+        return;
+      }
+      
+      // If not draft, open the settings menu
+      toggleSettingsMenu(button);
+    }
+    
+    function toggleSettingsMenu(button) {
+      const dropdown = button.querySelector('.settings-menu-dropdown');
+      if (dropdown) {
+        // Close all other open menus first
+        document.querySelectorAll('.mobile-menu-dropdown, .settings-menu-dropdown').forEach(menu => {
+          if (menu !== dropdown) {
+            menu.classList.add('hidden');
+          }
+        });
+        
+        // Toggle current menu
+        dropdown.classList.toggle('hidden');
+      }
+    }
+
+    function closeSettingsMenu(button) {
+      if (button) {
+        const dropdown = button.querySelector('.settings-menu-dropdown');
+        if (dropdown) {
+          dropdown.classList.add('hidden');
+        }
+      }
+    }
+
+    function handleSaveImage(reportId) {
+      if (reportId) {
+        // TODO: Implement save image functionality
+        console.log('Save image for report:', reportId);
+        showNotification('Save image functionality coming soon!', 'info');
+        // You can add your save image logic here
+      }
+    }
+
+    function handleDownloadPDF(reportId, pdfUrl) {
+      if (reportId && pdfUrl) {
+        // Show success notification after a short delay
+        setTimeout(() => {
+          showNotification('Report downloaded successfully!', 'success');
+        }, 500);
+        // Navigate to PDF generation route
+        window.location.href = pdfUrl;
+      } else {
+        showNotification('Unable to download report. Missing report information.', 'error');
+      }
+    }
+
+    function handleDownloadExcel(reportId, entityId) {
+      if (reportId && entityId) {
+        // Show success notification after a short delay
+        setTimeout(() => {
+          showNotification('Report downloaded successfully!', 'success');
+        }, 500);
+        // Use CSV download endpoint with report_id parameter
+        window.location.href = `/entity/${entityId}/reports/download-csv?report_id=${reportId}`;
+      } else {
+        showNotification('Unable to download report. Missing report information.', 'error');
+      }
+    }
+
+    // Function to handle editing submitted reports (Testing Only)
+    // Converts posted report to draft, then navigates to opening page
+    async function handleEditReport(reportId, entityId, transactionDate) {
+      if (!reportId || !entityId) {
+        showNotification('Unable to edit report. Missing report information.', 'error');
+        return;
+      }
+
+      try {
+        // Show loading notification
+        showNotification('Converting report to draft...', 'info');
+        
+        // Get CSRF token
+        const csrfToken = document.querySelector('input[name="csrf_token"]');
+        
+        // Create FormData for POST request
+        const formData = new FormData();
+        if (csrfToken) {
+          formData.append('csrf_token', csrfToken.value);
+        }
+        
+        // Call backend to convert report to draft
+        const response = await fetch(`/report/${reportId}/convert-to-draft`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+          // Show success notification
+          showNotification('Report converted to draft. Opening for editing...', 'success');
+          
+          // Navigate to opening page with the draft (now treated as draft)
+          const editUrl = `{{ url_for('report.report_opening') }}?entity_id=${entityId}&transaction_date=${data.transaction_date || transactionDate}`;
+          
+          setTimeout(() => {
+            PageTransition.navigateWithFade(editUrl);
+          }, 500);
+        } else {
+          showNotification(data.message || 'Failed to convert report to draft.', 'error');
+        }
+      } catch (error) {
+        console.error('Error converting report to draft:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Error converting to draft', { reportId, entityId, message: error && error.message });
+        }
+        showNotification('An error occurred while converting the report. Please try again.', 'error');
+      }
+    }
+
+    function handleMobileDownload(reportId, index) {
+      if (reportId) {
+        // Show success notification after a short delay
+        setTimeout(() => {
+          showNotification(`Report ${index + 1} download started successfully!`, 'success');
+        }, 500);
+        window.location.href = `/report/download/${reportId}`;
+      } else {
+        showNotification('Unable to download report. Missing report information.', 'error');
+      }
+    }
+
+    // Function to handle mobile republish with notifications
+    function handleMobileRepublish(reportId, entityId, xeroIntegrated, menuButton) {
+      // Check if report is published to Xero (handle both string 'true'/'false' and boolean)
+      const isPublished = xeroIntegrated === true || xeroIntegrated === 'true';
+      
+      // Close mobile menu
+      if (menuButton) {
+        closeMobileMenu(menuButton);
+      }
+      
+      if (isPublished) {
+        // Find the republish button element in the menu
+        const menuDropdown = menuButton ? menuButton.querySelector('.mobile-menu-dropdown') : null;
+        const republishButton = menuDropdown ? menuDropdown.querySelector('[data-xero-integrated="true"]') : null;
+        
+        // If already published, show republish confirmation modal with button element
+        showRepublishModal(reportId, entityId, republishButton);
+      } else {
+        // Find the publish button element in the menu
+        const menuDropdown = menuButton ? menuButton.querySelector('.mobile-menu-dropdown') : null;
+        const publishButton = menuDropdown ? menuDropdown.querySelector('[data-publishing-state="idle"]') : null;
+        
+        // If not published, handle publish with button element
+        if (publishButton) {
+          handlePublish(reportId, entityId, publishButton);
+        } else {
+          // Fallback to navigation
+          window.location.href = `/report/${reportId}/submitted?entity_id=${entityId}`;
+        }
+      }
+    }
+
+    // Close mobile menus and settings menus when clicking outside
+    document.addEventListener('click', function(e) {
+      const target = e.target;
+      const isClickableChild = target.closest('.mobile-menu-button') ||
+                              target.closest('.mobile-menu-dropdown') ||
+                              target.closest('a[data-report-status]') ||
+                              target.closest('.settings-menu-dropdown') ||
+                              target.closest('button');
+      
+      if (!isClickableChild) {
+        document.querySelectorAll('.mobile-menu-dropdown, .settings-menu-dropdown').forEach(menu => {
+          menu.classList.add('hidden');
+        });
+      }
+    });
+
+    // Close modal when clicking outside
+    document.getElementById('deleteReportModal')?.addEventListener('click', function(e) {
+      if (e.target === this) {
+        hideDeleteModal();
+      }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const modal = document.getElementById('deleteReportModal');
+        if (modal && !modal.classList.contains('hidden')) {
+          hideDeleteModal();
+        }
+      }
+    });
+
+    // Flash notification slider functions
+    function showFlashNotification() {
+      const notification = document.getElementById('flashNotification');
+      if (notification && notification.querySelector('.toast')) {
+        // Slide in using Tailwind classes
+        notification.classList.remove('translate-x-full');
+        notification.classList.add('translate-x-0');
+        
+        // Auto-hide after 4 seconds
+        setTimeout(() => {
+          hideFlashNotification();
+        }, 4000);
+      }
+    }
+
+    function hideFlashNotification() {
+      const notification = document.getElementById('flashNotification');
+      if (notification) {
+        // Slide out using Tailwind classes
+        notification.classList.remove('translate-x-0');
+        notification.classList.add('translate-x-full');
+        
+        // Hide all toast elements after animation
+        setTimeout(() => {
+          const allToasts = notification.querySelectorAll('.toast');
+          allToasts.forEach(toast => {
+            toast.classList.add('hidden');
+          });
+        }, 500);
+      }
+    }
+
+    // Show flash notification on page load if it exists
+    document.addEventListener('DOMContentLoaded', function() {
+      {% if get_flashed_messages() %}
+        showFlashNotification();
+      {% endif %}
+      
+      // Format timestamps to Hong Kong timezone
+      formatTimestampsToHKTime();
+    });
+    
+    // Fallback initialization - run after a delay regardless of DOMContentLoaded
+    setTimeout(() => {
+      {% if get_flashed_messages() %}
+        showFlashNotification();
+      {% endif %}
+      
+      // Format timestamps to Hong Kong timezone
+      formatTimestampsToHKTime();
+    }, 100);
+    
+    // Function to format timestamps to Hong Kong timezone (always)
+    function formatTimestampsToHKTime() {
+      const timestampElements = document.querySelectorAll('.timestamp-display[data-timestamp]:not([data-formatted])');
+      
+      timestampElements.forEach(element => {
+        const timestamp = element.getAttribute('data-timestamp');
+        
+        // Skip if no timestamp or empty timestamp - keep the template's original text
+        if (!timestamp || timestamp.trim() === '') {
+          element.setAttribute('data-formatted', 'true');
+          return;
+        }
+        
+        try {
+          // Parse the timestamp (should include timezone info from backend)
+          const serverDate = new Date(timestamp);
+          
+          // Only format if we got a valid date
+          if (isNaN(serverDate.getTime())) {
+            element.setAttribute('data-formatted', 'true');
+            return; // Keep original text if date is invalid
+          }
+          
+          // Extract components in HK timezone
+          const hkDateStr = serverDate.toLocaleString('en-US', {
+            timeZone: 'Asia/Hong_Kong',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
+          
+          // Parse: format is "MM/DD/YYYY, HH:MM"
+          const [datePart, timePart] = hkDateStr.split(', ');
+          const [month, day, year] = datePart.split('/');
+          const [hours, minutes] = timePart.split(':');
+          
+          // Month names array
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const monthName = monthNames[parseInt(month) - 1];
+          
+          // Format: "DD MMM YYYY HH:MM" in Hong Kong time
+          const formatted = `${day} ${monthName} ${year} ${hours}:${minutes}`;
+          element.textContent = formatted;
+          
+          // Mark as formatted to prevent re-formatting
+          element.setAttribute('data-formatted', 'true');
+        } catch (error) {
+          console.error('Error formatting timestamp:', error);
+          element.setAttribute('data-formatted', 'true');
+        }
+      });
+    }
+  </script>
+</body>
+</html>

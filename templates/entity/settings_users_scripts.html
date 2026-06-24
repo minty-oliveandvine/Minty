@@ -1,0 +1,1034 @@
+    // Bills UI: inline banners + full-screen saving overlay (entity / Xero bills pattern)
+    function isUsersBillsUi() {
+      return !!document.getElementById('usersBillsInlineRoot');
+    }
+
+    function hideAllBillsInlineBanners() {
+      ['Success', 'Error', 'Info'].forEach(function (suffix) {
+        var el = document.getElementById('usersBillsNotify' + suffix);
+        if (el) el.classList.add('hidden');
+      });
+      if (window._usersBillsBannerTimer) {
+        clearTimeout(window._usersBillsBannerTimer);
+        window._usersBillsBannerTimer = null;
+      }
+    }
+
+    function showBillsInlineBanner(kind, message) {
+      if (!isUsersBillsUi()) return false;
+      // Surface via the new-design slide-in toast (settings_flash_toast.html)
+      // instead of the old inline banners.
+      var type = kind === 'Error' ? 'error' : (kind === 'Info' ? 'info' : 'success');
+      if (typeof window.showSettingsFlashToast === 'function') {
+        window.showSettingsFlashToast(message || '', type);
+        return true;
+      }
+      return false;
+    }
+
+    function showUsersBillsSaving(text) {
+      if (!isUsersBillsUi()) return;
+      var ov = document.getElementById('loadingOverlay');
+      var lt = document.getElementById('loadingText');
+      if (!ov || !lt) return;
+      lt.textContent = text || 'Saving…';
+      ov.classList.remove('hidden');
+      ov.classList.add('z-[320]');
+    }
+
+    function hideUsersBillsSaving() {
+      var ov = document.getElementById('loadingOverlay');
+      if (!ov) return;
+      ov.classList.add('hidden');
+      ov.classList.remove('z-[320]');
+    }
+
+    // Role labels and dropdown positioning (server JSON avoids Jinja/JS syntax errors)
+    window.USER_ENTITY_ROLE_OPTIONS = {{ entity_user_role_options|tojson }};
+
+    function normalizeEntityRoleSlug(s) {
+      return String(s || '').toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_').trim();
+    }
+
+    function displayNameForEntityRoleSlug(slug) {
+      var n = normalizeEntityRoleSlug(slug);
+      var opts = window.USER_ENTITY_ROLE_OPTIONS || [];
+      for (var i = 0; i < opts.length; i++) {
+        if (normalizeEntityRoleSlug(opts[i].value) === n) return opts[i].name;
+      }
+      return String(slug || '')
+        .replace(/_/g, ' ')
+        .replace(/\w\S*/g, function (txt) { return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase(); });
+    }
+
+    // Move panel to body so it is not clipped/stacked under modal siblings (overflow, button row).
+    function portalRoleDropdownToBody(panelEl) {
+      if (!panelEl || panelEl.parentNode === document.body) return;
+      if (!panelEl._usersRolePortalParent) {
+        panelEl._usersRolePortalParent = panelEl.parentNode;
+        panelEl._usersRolePortalNext = panelEl.nextSibling;
+      }
+      document.body.appendChild(panelEl);
+    }
+
+    function restoreRoleDropdownFromBody(panelEl) {
+      if (!panelEl || !panelEl._usersRolePortalParent) return;
+      var p = panelEl._usersRolePortalParent;
+      var n = panelEl._usersRolePortalNext;
+      try {
+        if (n && n.parentNode === p) p.insertBefore(panelEl, n);
+        else p.appendChild(panelEl);
+      } catch (e) {
+        p.appendChild(panelEl);
+      }
+    }
+
+    function clearRoleDropdownBox(panelEl) {
+      if (!panelEl) return;
+      panelEl.style.position = '';
+      panelEl.style.left = '';
+      panelEl.style.top = '';
+      panelEl.style.width = '';
+      panelEl.style.zIndex = '';
+      panelEl.style.maxHeight = '';
+    }
+
+    function positionFixedRoleDropdown(inputEl, panelEl) {
+      if (!inputEl || !panelEl) return;
+      panelEl.classList.remove('hidden');
+      panelEl.removeAttribute('hidden');
+      portalRoleDropdownToBody(panelEl);
+      var r = inputEl.getBoundingClientRect();
+      var maxH = 240;
+      panelEl.style.position = 'fixed';
+      panelEl.style.left = r.left + 'px';
+      panelEl.style.width = r.width + 'px';
+      panelEl.style.zIndex = '10050';
+      panelEl.style.maxHeight = maxH + 'px';
+
+      function place() {
+        var h = Math.min(panelEl.offsetHeight || maxH, maxH);
+        var spaceBelow = window.innerHeight - r.bottom - 8;
+        var spaceAbove = r.top - 8;
+        if (h <= spaceBelow || spaceBelow >= spaceAbove) {
+          panelEl.style.top = (r.bottom + 4) + 'px';
+        } else {
+          panelEl.style.top = Math.max(8, r.top - 4 - h) + 'px';
+        }
+      }
+      panelEl.style.top = (r.bottom + 4) + 'px';
+      requestAnimationFrame(function () {
+        requestAnimationFrame(place);
+      });
+    }
+
+    function hideEditRoleDropdownPanel() {
+      var rs = document.getElementById('editRoleSuggestions');
+      var ic = document.getElementById('editRoleDropdownIcon');
+      if (rs) {
+        rs.classList.add('hidden');
+        clearRoleDropdownBox(rs);
+        restoreRoleDropdownFromBody(rs);
+      }
+      if (ic) ic.classList.remove('rotate-180');
+    }
+
+    // Function to show continue report message
+    function showContinueReportMessage() {
+      showErrorToast('This feature is currently in progress, Stay Tuned!');
+    }
+
+    // Function to handle tab switching
+    function switchTab(tabName) {
+      // Remove active state from all tabs
+      const tabs = document.querySelectorAll('[data-tab]');
+      tabs.forEach(tab => {
+        tab.classList.remove('bg-blue-600', 'text-white');
+        tab.classList.add('bg-gray-200', 'text-gray-700');
+      });
+      
+      // Add active state to clicked tab
+      const activeTab = document.querySelector(`[data-tab="${tabName}"]`);
+      if (activeTab) {
+        activeTab.classList.remove('bg-gray-200', 'text-gray-700');
+        activeTab.classList.add('bg-blue-600', 'text-white');
+      }
+      
+      // Here you would typically show/hide content based on the selected tab
+      console.log(`Switched to ${tabName} tab`);
+    }
+
+    // Initialize page transition (classic settings shell only)
+    {% if not bills_ui %}
+    PageTransition.init('.main-content', 'fadeIn', 10);
+    {% endif %}
+
+    // Add event listeners for tab switching
+    document.addEventListener('DOMContentLoaded', function() {
+      const tabs = document.querySelectorAll('[data-tab]');
+      tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+          const tabName = this.getAttribute('data-tab');
+          switchTab(tabName);
+        });
+      });
+    });
+
+    // Filter Modal Functions
+    function toggleFilterModal() {
+      const modal = document.getElementById('filterModal');
+      const chevron = document.getElementById('filterChevron');
+      
+      if (modal.classList.contains('hidden')) {
+        modal.classList.remove('hidden');
+        chevron.style.transform = 'rotate(180deg)';
+      } else {
+        modal.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+      }
+    }
+
+         function selectPermission(permission) {
+       // Get all role buttons
+       const allRoleButtons = document.querySelectorAll('#roleFilterButtons button[data-role], #allBtn');
+       
+       // Reset all buttons to unselected state
+       allRoleButtons.forEach(btn => {
+         if (btn.id === 'allBtn') {
+           btn.className = 'px-4 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-gray-700 hover:bg-[#F3F4F6]/80 transition-colors';
+         } else {
+           btn.className = 'px-4 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-gray-700 hover:bg-[#F3F4F6]/80 transition-colors';
+         }
+       });
+       
+       // Set selected button to active state
+       if (permission === null) {
+         const allBtn = document.getElementById('allBtn');
+         if (allBtn) {
+           allBtn.className = 'px-4 py-2 rounded-full text-sm font-medium bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80 transition-colors';
+         }
+       } else {
+         const selectedBtn = document.getElementById(permission + 'Btn');
+         if (selectedBtn) {
+           selectedBtn.className = 'px-4 py-2 rounded-full text-sm font-medium bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80 transition-colors';
+         }
+       }
+     }
+
+         function resetFilters() {
+       // Reset to default state (All selected)
+       selectPermission(null);
+       
+       // Show all users (reset filter)
+       filterUsers(null);
+       
+       // Show the filter reset toast notification
+       showResetToast();
+     }
+
+         function applyFilters() {
+       // Get the selected permission level
+       const allRoleButtons = document.querySelectorAll('#roleFilterButtons button[data-role], #allBtn');
+       let selectedRole = null;
+       
+       allRoleButtons.forEach(btn => {
+         if (btn.classList.contains('bg-[#54D3DA]')) {
+           if (btn.id === 'allBtn') {
+             selectedRole = null;
+           } else {
+             selectedRole = btn.getAttribute('data-role');
+           }
+         }
+       });
+       
+       // Filter users based on selected role
+       filterUsers(selectedRole);
+       
+       // Close the modal after applying
+       toggleFilterModal();
+       
+       // Show the filter applied toast notification
+       showFilterToast(selectedRole);
+     }
+
+     function showFilterToast(selectedRole) {
+       var line;
+       if (selectedRole === null) {
+         line = 'Showing all users';
+       } else {
+         var roleName = selectedRole.charAt(0).toUpperCase() + selectedRole.slice(1);
+         line = 'Users filtered by ' + roleName + ' permission';
+       }
+       if (showBillsInlineBanner('Info', line)) return;
+
+       const toast = document.getElementById('filterToast');
+       if (!toast) return;
+       const messageElement = toast.querySelector('.font-\\[400\\]');
+       if (messageElement) messageElement.textContent = line;
+
+       setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
+       setTimeout(() => { closeFilterToast(); }, 4000);
+     }
+
+    function closeFilterToast() {
+      if (isUsersBillsUi()) {
+        var info = document.getElementById('usersBillsNotifyInfo');
+        if (info) info.classList.add('hidden');
+        return;
+      }
+      const toast = document.getElementById('filterToast');
+      if (toast) toast.classList.add('translate-x-full');
+    }
+
+    function showSuccessToast(message) {
+      if (showBillsInlineBanner('Success', message)) return;
+
+      const toast = document.getElementById('successToast');
+      if (!toast) return;
+      const messageElement = document.getElementById('successToastMessage');
+      if (messageElement && message) messageElement.textContent = message;
+
+      setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
+      setTimeout(() => { closeSuccessToast(); }, 4000);
+    }
+
+    function closeSuccessToast() {
+      if (isUsersBillsUi()) {
+        var el = document.getElementById('usersBillsNotifySuccess');
+        if (el) el.classList.add('hidden');
+        return;
+      }
+      const toast = document.getElementById('successToast');
+      if (toast) toast.classList.add('translate-x-full');
+    }
+
+    function showErrorToast(message) {
+      if (showBillsInlineBanner('Error', message)) return;
+
+      const toast = document.getElementById('errorToast');
+      if (!toast) return;
+      const messageElement = document.getElementById('errorToastMessage');
+      if (messageElement && message) messageElement.textContent = message;
+
+      setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
+      setTimeout(() => { closeErrorToast(); }, 4000);
+    }
+
+    function closeErrorToast() {
+      if (isUsersBillsUi()) {
+        var el = document.getElementById('usersBillsNotifyError');
+        if (el) el.classList.add('hidden');
+        return;
+      }
+      const toast = document.getElementById('errorToast');
+      if (toast) toast.classList.add('translate-x-full');
+    }
+
+    // Add New User Modal Functions
+    function addNewUser() {
+      const modal = document.getElementById('addUserModal');
+      if (modal) {
+        // Remove hidden class and ensure visibility
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        modal.style.visibility = 'visible';
+        
+        // Prevent body scroll on mobile
+        document.body.style.overflow = 'hidden';
+        
+        // Initialize role dropdown
+        initializeRoleDropdown();
+        
+        // Focus on the first input field (with delay for mobile)
+        setTimeout(() => {
+          const firstNameInput = document.getElementById('firstName');
+          if (firstNameInput) {
+            firstNameInput.focus();
+          }
+        }, 100);
+      }
+    }
+
+    function closeAddUserModal() {
+      hideRoleSuggestions();
+      const modal = document.getElementById('addUserModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        modal.style.visibility = 'hidden';
+        
+        // Restore body scroll
+        document.body.style.overflow = '';
+        
+        // Reset form
+        const form = document.getElementById('addUserForm');
+        if (form) {
+          form.reset();
+        }
+      }
+    }
+
+    // Handle form submission — send invitation
+    document.getElementById('addUserForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      const firstName = document.getElementById('firstName').value.trim();
+      const lastName = document.getElementById('lastName').value.trim();
+      const emailAddress = document.getElementById('emailAddress').value.trim();
+      const companyUuid = document.getElementById('companyUuid').value.trim();
+      const userRole = document.getElementById('userRole_value').value;
+      
+      if (!firstName) { showErrorToast('Please enter a first name.'); return; }
+      if (!lastName) { showErrorToast('Please enter a last name.'); return; }
+      if (!emailAddress) { showErrorToast('Please enter an email address.'); return; }
+      if (!companyUuid) { showErrorToast('Company UUID is required.'); return; }
+      if (!userRole) { showErrorToast('Please select a role.'); return; }
+      
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(emailAddress)) { showErrorToast('Please enter a valid email address.'); return; }
+      
+      const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
+      if (!csrfToken) { showErrorToast('CSRF token not found. Please refresh the page.'); return; }
+
+      showUsersBillsSaving('Sending invitation…');
+
+      fetch('/minty/api/invitation/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify({
+          entity_id: companyUuid,
+          email: emailAddress,
+          first_name: firstName,
+          last_name: lastName,
+          role: userRole
+        }),
+        credentials: 'include'
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === "success") {
+          if (window.sendLogToDataDog) { window.sendLogToDataDog('info', 'Invitation sent'); }
+          showSuccessToast(data.message || 'Invitation sent successfully!');
+          closeAddUserModal();
+          loadPendingInvitations();
+        } else {
+          if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to send invitation', { message: data.message }); }
+          showErrorToast(data.message || 'Unknown error.');
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to send invitation', { message: error && error.message }); }
+        showErrorToast('Failed to send invitation: ' + error.message);
+      })
+      .finally(function () { hideUsersBillsSaving(); });
+    });
+
+    // Close modal when clicking outside
+    document.getElementById('addUserModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeAddUserModal();
+      }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const modal = document.getElementById('addUserModal');
+        if (modal && !modal.classList.contains('hidden')) {
+          closeAddUserModal();
+        }
+      }
+    });
+
+    // Role dropdown functionality
+    function initializeRoleDropdown() {
+      const roleInput = document.getElementById('userRole');
+      const roleSuggestions = document.getElementById('roleSuggestions');
+      
+      if (!roleInput) return;
+      
+      const rolesRaw = window.USER_ENTITY_ROLE_OPTIONS || [];
+      const excludedRoleValues = ['entity_base', 'super_admin'];
+      const roles = rolesRaw.filter(function (r) {
+        return r && !excludedRoleValues.includes(normalizeEntityRoleSlug(r.value));
+      });
+      
+      // Add click event listener to show all roles
+      roleInput.addEventListener('click', function() {
+        showRoleSuggestions(roles);
+      });
+
+      // Hide suggestions when clicking outside (single listener)
+      if (!document.body.dataset.usersAddRoleOutsideInit) {
+        document.body.dataset.usersAddRoleOutsideInit = '1';
+        document.addEventListener('click', function (event) {
+          var ri = document.getElementById('userRole');
+          var rs = document.getElementById('roleSuggestions');
+          if (!ri || !rs || rs.classList.contains('hidden')) return;
+          if (!ri.contains(event.target) && !rs.contains(event.target)) hideRoleSuggestions();
+        });
+        window.addEventListener('resize', function () {
+          var ri = document.getElementById('userRole');
+          var rs = document.getElementById('roleSuggestions');
+          if (ri && rs && !rs.classList.contains('hidden')) positionFixedRoleDropdown(ri, rs);
+        });
+        window.addEventListener('scroll', function () {
+          var ri = document.getElementById('userRole');
+          var rs = document.getElementById('roleSuggestions');
+          if (ri && rs && !rs.classList.contains('hidden')) positionFixedRoleDropdown(ri, rs);
+        }, true);
+      }
+    }
+
+    // Show role suggestions
+    function showRoleSuggestions(roles) {
+      const roleInput = document.getElementById('userRole');
+      const suggestions = document.getElementById('roleSuggestions');
+      const dropdownIcon = document.getElementById('roleDropdownIcon');
+      if (!suggestions || !roleInput) return;
+      suggestions.innerHTML = '';
+      if (!roles.length) {
+        var emptyRow = document.createElement('div');
+        emptyRow.className = 'px-4 py-2 text-sm text-gray-500';
+        emptyRow.textContent = 'No roles available';
+        suggestions.appendChild(emptyRow);
+      } else {
+        roles.forEach(function (role) {
+          var option = document.createElement('div');
+          option.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+          var label = document.createElement('div');
+          label.className = 'text-gray-700';
+          label.textContent = role.name != null ? String(role.name) : '';
+          option.appendChild(label);
+          option.addEventListener('click', function () {
+            selectRole(role.value, role.name != null ? String(role.name) : '');
+          });
+          suggestions.appendChild(option);
+        });
+      }
+      positionFixedRoleDropdown(roleInput, suggestions);
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide role suggestions
+    function hideRoleSuggestions() {
+      const suggestions = document.getElementById('roleSuggestions');
+      const dropdownIcon = document.getElementById('roleDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+        clearRoleDropdownBox(suggestions);
+        restoreRoleDropdownFromBody(suggestions);
+      }
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+    }
+
+    // Select a role
+    function selectRole(roleValue, roleName) {
+      const roleInput = document.getElementById('userRole');
+      const roleValueInput = document.getElementById('userRole_value');
+      
+      roleInput.value = roleName;
+      roleValueInput.value = roleValue;
+      
+      hideRoleSuggestions();
+    }
+
+     function showResetToast() {
+       if (showBillsInlineBanner('Info', 'Filters have been reset to default')) return;
+
+       const toast = document.getElementById('filterToast');
+       if (!toast) return;
+       const messageElement = toast.querySelector('.font-\\[400\\]');
+       if (messageElement) messageElement.textContent = 'Filters have been reset to default';
+
+       setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
+       setTimeout(() => { closeFilterToast(); }, 4000);
+     }
+
+     // User filtering function
+     function filterUsers(role) {
+       const userCards = document.querySelectorAll('.space-y-3 > div');
+       let visibleCount = 0;
+       
+       userCards.forEach(card => {
+         // Skip the empty state div if it exists
+         if (card.classList.contains('text-center')) {
+           return;
+         }
+         
+         const roleSpan = card.querySelector('span[data-role]');
+         const userRole = roleSpan ? roleSpan.getAttribute('data-role') : '';
+         
+         if (role === null || userRole === role) {
+           card.style.display = 'block';
+           visibleCount++;
+         } else {
+           card.style.display = 'none';
+         }
+       });
+       
+       // Update user count display
+       updateUserCount(visibleCount);
+     }
+     
+     function updateUserCount(count) {
+       const countElement = document.querySelector('.text-sm.text-gray-500');
+       if (countElement) {
+         countElement.textContent = `${count} user${count !== 1 ? 's' : ''}`;
+       }
+     }
+
+     // ── Edit User Modal ──────────────────────────────────────────────
+     function openEditUserModal(userId, firstName, lastName, email, role) {
+       var currentId = window.CURRENT_USER_ID != null ? String(window.CURRENT_USER_ID) : '';
+       var isSelf = String(userId) === currentId;
+       var fn = document.getElementById('editFirstName');
+       var ln = document.getElementById('editLastName');
+
+       document.getElementById('editUserId').value = userId;
+       fn.value = firstName;
+       ln.value = lastName;
+       document.getElementById('editUserEmail').value = email;
+
+       document.getElementById('editUserRole').value = displayNameForEntityRoleSlug(role);
+       document.getElementById('editUserRole_value').value = normalizeEntityRoleSlug(role);
+
+       var readonlyFieldClasses = ['bg-gray-100', 'text-gray-600', 'cursor-not-allowed', 'focus:ring-0'];
+       if (isSelf) {
+         fn.readOnly = false;
+         ln.readOnly = false;
+         fn.setAttribute('required', 'required');
+         ln.setAttribute('required', 'required');
+         fn.classList.remove.apply(fn.classList, readonlyFieldClasses);
+         ln.classList.remove.apply(ln.classList, readonlyFieldClasses);
+         fn.classList.add('text-gray-900', 'focus:ring-2', 'focus:ring-[#54D3DA]');
+         ln.classList.add('text-gray-900', 'focus:ring-2', 'focus:ring-[#54D3DA]');
+       } else {
+         fn.readOnly = true;
+         ln.readOnly = true;
+         fn.removeAttribute('required');
+         ln.removeAttribute('required');
+         fn.classList.remove('text-gray-900', 'focus:ring-2', 'focus:ring-[#54D3DA]');
+         ln.classList.remove('text-gray-900', 'focus:ring-2', 'focus:ring-[#54D3DA]');
+         fn.classList.add.apply(fn.classList, readonlyFieldClasses);
+         ln.classList.add.apply(ln.classList, readonlyFieldClasses);
+       }
+
+       const modal = document.getElementById('editUserModal');
+       modal.classList.remove('hidden');
+       modal.style.display = 'flex';
+       modal.style.visibility = 'visible';
+       document.body.style.overflow = 'hidden';
+
+       initializeEditRoleDropdown();
+       setTimeout(function () {
+         if (isSelf) {
+           fn.focus();
+         } else {
+           document.getElementById('editUserRole').focus();
+         }
+       }, 100);
+     }
+
+     function closeEditUserModal() {
+       hideEditRoleDropdownPanel();
+       const modal = document.getElementById('editUserModal');
+       modal.classList.add('hidden');
+       modal.style.display = 'none';
+       modal.style.visibility = 'hidden';
+       document.body.style.overflow = '';
+       document.getElementById('editUserForm').reset();
+     }
+
+     function initializeEditRoleDropdown() {
+       const roleInput = document.getElementById('editUserRole');
+       const roleSuggestions = document.getElementById('editRoleSuggestions');
+       if (!roleInput || !roleSuggestions) return;
+
+       const rolesRaw = window.USER_ENTITY_ROLE_OPTIONS || [];
+       const excludedRoleValues = ['entity_base', 'super_admin'];
+       const roles = rolesRaw.filter(function (r) {
+         return r && !excludedRoleValues.includes(normalizeEntityRoleSlug(r.value));
+       });
+
+       roleInput.onclick = function (ev) {
+         ev.stopPropagation();
+         const dd = document.getElementById('editRoleSuggestions');
+         const icon = document.getElementById('editRoleDropdownIcon');
+         if (!dd) return;
+         dd.innerHTML = '';
+         if (!roles.length) {
+           var emptyRow = document.createElement('div');
+           emptyRow.className = 'px-4 py-2 text-sm text-gray-500';
+           emptyRow.textContent = 'No roles available';
+           dd.appendChild(emptyRow);
+         } else {
+           roles.forEach(function (r) {
+             var opt = document.createElement('div');
+             opt.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+             var label = document.createElement('div');
+             label.className = 'text-gray-700';
+             label.textContent = r.name != null ? String(r.name) : '';
+             opt.appendChild(label);
+             opt.addEventListener('click', function () {
+               document.getElementById('editUserRole').value = r.name != null ? String(r.name) : '';
+               document.getElementById('editUserRole_value').value = normalizeEntityRoleSlug(r.value);
+               hideEditRoleDropdownPanel();
+             });
+             dd.appendChild(opt);
+           });
+         }
+         if (icon) icon.classList.add('rotate-180');
+         positionFixedRoleDropdown(roleInput, dd);
+       };
+
+       if (!document.body.dataset.usersEditRoleOutsideInit) {
+         document.body.dataset.usersEditRoleOutsideInit = '1';
+         document.addEventListener('click', function (e) {
+           var ri = document.getElementById('editUserRole');
+           var rs = document.getElementById('editRoleSuggestions');
+           if (!ri || !rs || rs.classList.contains('hidden')) return;
+           if (!ri.contains(e.target) && !rs.contains(e.target)) {
+             hideEditRoleDropdownPanel();
+           }
+         });
+         window.addEventListener('resize', function () {
+           var ri = document.getElementById('editUserRole');
+           var rs = document.getElementById('editRoleSuggestions');
+           if (ri && rs && !rs.classList.contains('hidden')) positionFixedRoleDropdown(ri, rs);
+         });
+         window.addEventListener('scroll', function () {
+           var ri = document.getElementById('editUserRole');
+           var rs = document.getElementById('editRoleSuggestions');
+           if (ri && rs && !rs.classList.contains('hidden')) positionFixedRoleDropdown(ri, rs);
+         }, true);
+       }
+     }
+
+     document.getElementById('editUserForm').addEventListener('submit', function(e) {
+       e.preventDefault();
+       const userId = document.getElementById('editUserId').value;
+       const entityId = document.getElementById('editEntityId').value;
+       const firstName = document.getElementById('editFirstName').value.trim();
+       const lastName = document.getElementById('editLastName').value.trim();
+       const role = document.getElementById('editUserRole_value').value;
+       const isSelf = String(userId) === String(window.CURRENT_USER_ID != null ? window.CURRENT_USER_ID : '');
+
+       if (isSelf) {
+         if (!firstName) { showErrorToast('First name is required.'); return; }
+         if (!lastName) { showErrorToast('Last name is required.'); return; }
+       }
+       if (!role) { showErrorToast('Please select a role.'); return; }
+
+       const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
+
+       const body = { entity_id: entityId, role: role };
+       if (isSelf) {
+         body.first_name = firstName;
+         body.last_name = lastName;
+       }
+
+       showUsersBillsSaving('Saving changes…');
+
+       fetch('/minty/api/users/' + userId, {
+         method: 'PATCH',
+         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+         body: JSON.stringify(body),
+         credentials: 'include'
+       })
+       .then(r => r.json())
+       .then(data => {
+         if (data.status === 'success') {
+           showSuccessToast(data.message || 'User updated successfully.');
+           closeEditUserModal();
+           setTimeout(() => location.reload(), 600);
+         } else {
+           showErrorToast(data.message || 'Failed to update user.');
+         }
+       })
+       .catch(err => showErrorToast('Error: ' + err.message))
+       .finally(function () { hideUsersBillsSaving(); });
+     });
+
+     // ── Delete User Modal ─────────────────────────────────────────────
+     function openDeleteUserModal(userId, fullName) {
+       document.getElementById('deleteUserId').value = userId;
+       document.getElementById('deleteUserName').textContent = fullName;
+       const modal = document.getElementById('deleteUserModal');
+       modal.classList.remove('hidden');
+       modal.style.display = 'flex';
+       modal.style.visibility = 'visible';
+       document.body.style.overflow = 'hidden';
+     }
+
+     function closeDeleteUserModal() {
+       const modal = document.getElementById('deleteUserModal');
+       modal.classList.add('hidden');
+       modal.style.display = 'none';
+       modal.style.visibility = 'hidden';
+       document.body.style.overflow = '';
+     }
+
+     function confirmDeleteUser() {
+       const userId = document.getElementById('deleteUserId').value;
+       const entityId = '{{ org.id }}';
+       const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
+
+       showUsersBillsSaving('Removing user…');
+
+       fetch('/minty/api/users/' + userId + '/role', {
+         method: 'DELETE',
+         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+         body: JSON.stringify({ entity_id: entityId }),
+         credentials: 'include'
+       })
+       .then(r => r.json())
+       .then(data => {
+         if (data.status === 'success') {
+           showSuccessToast(data.message || 'User removed successfully.');
+           closeDeleteUserModal();
+           setTimeout(() => location.reload(), 600);
+         } else {
+           showErrorToast(data.message || 'Failed to remove user.');
+         }
+       })
+       .catch(err => showErrorToast('Error: ' + err.message))
+       .finally(function () { hideUsersBillsSaving(); });
+     }
+
+     // Close modals with Escape key
+     document.addEventListener('keydown', function(e) {
+       if (e.key === 'Escape') {
+         const editModal = document.getElementById('editUserModal');
+         if (editModal && !editModal.classList.contains('hidden')) { closeEditUserModal(); return; }
+         const deleteModal = document.getElementById('deleteUserModal');
+         if (deleteModal && !deleteModal.classList.contains('hidden')) { closeDeleteUserModal(); return; }
+         const cancelInviteModal = document.getElementById('cancelInvitationModal');
+         if (cancelInviteModal && !cancelInviteModal.classList.contains('hidden')) { closeCancelInvitationModal(); return; }
+       }
+     });
+
+     // Pending invitations
+     function loadPendingInvitations() {
+       const entityId = document.getElementById('companyUuid').value;
+       const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
+       fetch('/minty/api/invitation/' + entityId + '/pending', {
+         method: 'GET',
+         headers: { 'X-CSRFToken': csrfToken },
+         credentials: 'include'
+       })
+       .then(r => r.json())
+       .then(data => {
+         const section = document.getElementById('pendingInvitationsSection');
+         const list = document.getElementById('pendingInvitationsList');
+         if (data.status === 'success' && data.invitations && data.invitations.length > 0) {
+           section.classList.remove('hidden');
+           list.innerHTML = data.invitations.map(inv => `
+             <div class="bg-white rounded-lg p-4 border-l-4 border-amber-400 flex items-center shadow-sm justify-between">
+               <div class="flex items-center space-x-3">
+                 <div class="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center">
+                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                   </svg>
+                 </div>
+                 <div>
+                   <p class="text-sm font-medium text-gray-900">${inv.email}</p>
+                   <div class="flex items-center gap-2">
+                     <span class="px-1.5 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-medium rounded-full">${inv.role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
+                     <span class="text-[10px] text-gray-400">Pending</span>
+                   </div>
+                 </div>
+               </div>
+               <div class="flex items-center space-x-2">
+                 <button id="resend-${inv.id}" data-resend-cooldown="${inv.resend_cooldown || 0}" onclick="resendInvitation('${inv.id}')"
+                         class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#54D3DA] border border-[#54D3DA] rounded-lg hover:bg-[#54D3DA]/10 transition-colors">
+                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                   </svg>
+                   <span class="resend-label">Resend</span>
+                 </button>
+                 <button onclick="openCancelInvitationModal('${inv.id}', '${inv.email}')"
+                         class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                   </svg>
+                   <span>Cancel</span>
+                 </button>
+               </div>
+             </div>
+           `).join('');
+           initResendCooldowns();
+         } else {
+           section.classList.add('hidden');
+           list.innerHTML = '';
+         }
+       })
+       .catch(() => {});
+     }
+
+     // ── Resend cooldown countdown ────────────────────────────────────────
+     let _resendCooldownTimer = null;
+
+     function applyResendCooldown(btn, seconds) {
+       const label = btn.querySelector('.resend-label');
+       if (seconds > 0) {
+         btn.disabled = true;
+         btn.classList.add('opacity-50', 'cursor-not-allowed');
+         btn.classList.remove('hover:bg-[#54D3DA]/10');
+         if (label) label.textContent = 'Resend in ' + seconds + 's';
+       } else {
+         btn.disabled = false;
+         btn.classList.remove('opacity-50', 'cursor-not-allowed');
+         btn.classList.add('hover:bg-[#54D3DA]/10');
+         if (label) label.textContent = 'Resend';
+       }
+     }
+
+     function initResendCooldowns() {
+       const btns = document.querySelectorAll('[data-resend-cooldown]');
+       let anyActive = false;
+       btns.forEach(function (btn) {
+         const remaining = parseInt(btn.getAttribute('data-resend-cooldown'), 10) || 0;
+         applyResendCooldown(btn, remaining);
+         if (remaining > 0) anyActive = true;
+       });
+       if (anyActive) startResendCooldownTicker();
+     }
+
+     function startResendCooldownTicker() {
+       if (_resendCooldownTimer) return;
+       _resendCooldownTimer = setInterval(function () {
+         let anyActive = false;
+         document.querySelectorAll('[data-resend-cooldown]').forEach(function (btn) {
+           let remaining = parseInt(btn.getAttribute('data-resend-cooldown'), 10) || 0;
+           if (remaining > 0) {
+             remaining -= 1;
+             btn.setAttribute('data-resend-cooldown', remaining);
+             applyResendCooldown(btn, remaining);
+             if (remaining > 0) anyActive = true;
+           }
+         });
+         if (!anyActive) { clearInterval(_resendCooldownTimer); _resendCooldownTimer = null; }
+       }, 1000);
+     }
+
+     // ── Cancel Invitation Modal ──────────────────────────────────────────
+     function openCancelInvitationModal(invitationId, email) {
+       document.getElementById('cancelInvitationId').value = invitationId;
+       document.getElementById('cancelInvitationEmail').textContent = email || 'this user';
+       const modal = document.getElementById('cancelInvitationModal');
+       modal.classList.remove('hidden');
+       modal.style.display = 'flex';
+       modal.style.visibility = 'visible';
+       document.body.style.overflow = 'hidden';
+     }
+
+     function closeCancelInvitationModal() {
+       const modal = document.getElementById('cancelInvitationModal');
+       modal.classList.add('hidden');
+       modal.style.display = 'none';
+       modal.style.visibility = 'hidden';
+       document.body.style.overflow = '';
+     }
+
+     function confirmCancelInvitation() {
+       const invitationId = document.getElementById('cancelInvitationId').value;
+       const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
+       closeCancelInvitationModal();
+       showUsersBillsSaving('Saving changes…');
+       fetch('/minty/api/invitation/' + invitationId + '/cancel', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+         credentials: 'include'
+       })
+       .then(r => r.json())
+       .then(data => {
+         if (data.status === 'success') {
+           if (window.sendLogToDataDog) { window.sendLogToDataDog('info', 'Invitation cancelled', { invitation_id: invitationId }); }
+           showSuccessToast('Invitation cancelled.');
+           loadPendingInvitations();
+         } else {
+           if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to cancel invitation', { invitation_id: invitationId, message: data.message }); }
+           showErrorToast(data.message || 'Failed to cancel invitation.');
+         }
+       })
+       .catch(err => {
+         if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to cancel invitation', { invitation_id: invitationId, message: err && err.message }); }
+         showErrorToast('Error: ' + err.message);
+       })
+       .finally(function () { hideUsersBillsSaving(); });
+     }
+
+     function resendInvitation(invitationId) {
+       const btn = document.getElementById('resend-' + invitationId);
+       if (btn && btn.disabled) return;
+       const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
+       showUsersBillsSaving('Resending invitation…');
+       fetch('/minty/api/invitation/' + invitationId + '/resend', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+         credentials: 'include'
+       })
+       .then(r => r.json())
+       .then(data => {
+         if (data.status === 'success') {
+           if (window.sendLogToDataDog) { window.sendLogToDataDog('info', 'Invitation resent', { invitation_id: invitationId }); }
+           showSuccessToast('Invitation resent. The previous link is no longer valid.');
+           loadPendingInvitations();
+         } else {
+           // Start the local countdown immediately when rate-limited so the
+           // button reflects the server cooldown without a reload.
+           const cooldown = data.retry_after || data.resend_cooldown || 0;
+           if (btn && cooldown > 0) {
+             btn.setAttribute('data-resend-cooldown', cooldown);
+             applyResendCooldown(btn, cooldown);
+             startResendCooldownTicker();
+           }
+           if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to resend invitation', { invitation_id: invitationId, message: data.message, retry_after: cooldown }); }
+           showErrorToast(data.message || 'Failed to resend invitation.');
+         }
+       })
+       .catch(err => {
+         if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to resend invitation', { invitation_id: invitationId, message: err && err.message }); }
+         showErrorToast('Error: ' + err.message);
+       })
+       .finally(function () { hideUsersBillsSaving(); });
+     }
+
+     document.addEventListener('DOMContentLoaded', function() { loadPendingInvitations(); });
+
+     // Function to handle Save Changes button
+     function handleSaveChanges() {
+       const saveButton = document.getElementById('saveButton');
+       const loadingOverlay = document.getElementById('loadingOverlay');
+       const loadingText = document.getElementById('loadingText');
+       
+       // Disable button
+       saveButton.disabled = true;
+       
+       // Show loading overlay
+       if (loadingOverlay) {
+         loadingOverlay.classList.remove('hidden');
+         if (loadingText) {
+           loadingText.textContent = 'Saving Changes...';
+         }
+       }
+       
+       // TODO: Implement actual save functionality here
+      
+       // For now, just simulate a save operation
+       setTimeout(() => {
+         if (loadingOverlay) {
+           loadingOverlay.classList.add('hidden');
+         }
+         saveButton.disabled = false;
+         // You can add a success notification here if needed
+       }, 1000);
+     }
+

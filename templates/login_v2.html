@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login</title>
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: { primary: "#567A5C", secondary: "#CCEDC5" },
+            borderRadius: {
+              none: "0px",
+              sm: "4px",
+              DEFAULT: "8px",
+              md: "12px",
+              lg: "16px",
+              xl: "20px",
+              "2xl": "24px",
+              "3xl": "32px",
+              full: "9999px",
+              button: "8px",
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/remixicon/4.6.0/remixicon.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      :where([class^="ri-"])::before {
+        content: "\f3c2";
+      }
+      body {
+        font-family: "Inter", sans-serif;
+      }
+      .input-container {
+        position: relative;
+      }
+      .input-container label {
+        position: absolute;
+        left: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        transition: all 0.2s ease-in-out;
+        pointer-events: none;
+        color: #9ca3af;
+      }
+      .input-container input:focus ~ label,
+      .input-container input:not(:placeholder-shown) ~ label {
+        top: 0.5rem;
+        font-size: 0.75rem;
+        color: #567a5c;
+      }
+      .password-toggle {
+        position: absolute;
+        right: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        cursor: pointer;
+      }
+      input::-webkit-outer-spin-button,
+      input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body class="bg-white min-h-screen flex flex-col">
+    <div class="flex-1 flex flex-col justify-center items-center px-6 py-12">
+      <div class="w-full max-w-md space-y-8">
+        <!-- Logo -->
+        <div class="text-center flex flex-col items-center justify-center">
+          <img
+            src="{{ url_for('static', filename='img/logo.png') }}"
+            width="200"
+            data-i18n="logo"
+          />
+          <h2
+            class="mt-6 text-2xl font-semibold text-gray-900"
+            data-i18n="welcome_back"
+          >
+            Welcome
+          </h2>
+          <p class="mt-2 text-sm text-gray-600" data-i18n="sign_in_continue">
+            Sign in to your account to continue
+          </p>
+        </div>
+        <a
+          type="button"
+          id="xeroLoginBtn"
+          class="w-full flex justify-center items-center py-3 px-4 border border-gray-300 rounded-button text-base font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition-all !rounded-button cursor-pointer"
+        >
+          <div class="w-5 h-5 mr-3 flex items-center justify-center">
+            <i class="ri-xero-fill ri-lg text-[#567A5C]"></i>
+          </div>
+          <span data-i18n="login_with_xero" class="font-semibold"
+            >Log in with Xero</span
+          >
+        </a>
+        <!-- Sign Up Link -->
+        <div class="text-center mt-6">
+          <p class="text-sm text-gray-600">
+            <span data-i18n="no_account">Don't have an account?</span>
+            <a
+              href="{{ url_for('xero_auth')}}"
+              id="signupLink"
+              class="font-medium text-primary hover:text-primary/80 cursor-pointer"
+            >
+              <span data-i18n="sign_up" class="font-semibold"
+                >Sign up with Xero</span
+              >
+            </a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Success Modal -->
+    <div
+      id="successModal"
+      class="absolute inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden"
+    >
+      <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+        <div class="text-center">
+          <div
+            class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-[#CCEDC5] mb-4"
+          >
+            <div class="w-6 h-6 flex items-center justify-center">
+              <i class="ri-check-line ri-lg text-[#567A5C]"></i>
+            </div>
+          </div>
+          <h3
+            class="text-lg font-medium text-gray-900 mb-2"
+            id="successTitle"
+            data-i18n="success"
+          >
+            Success!
+          </h3>
+          <p
+            class="text-sm text-gray-600 mb-4"
+            id="successMessage"
+            data-i18n="operation_success"
+          >
+            Operation completed successfully.
+          </p>
+          <button
+            id="closeSuccessModal"
+            class="w-full inline-flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-button text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary !rounded-button cursor-pointer"
+          >
+            <span data-i18n="close">Close</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Toggle password visibility
+        const togglePassword = document.getElementById("togglePassword");
+        const password = document.getElementById("password");
+        togglePassword.addEventListener("click", function () {
+          const type =
+            password.getAttribute("type") === "password" ? "text" : "password";
+          password.setAttribute("type", type);
+          // Toggle eye icon
+          const eyeIcon = togglePassword.querySelector("i");
+          if (type === "password") {
+            eyeIcon.classList.remove("ri-eye-off-line");
+            eyeIcon.classList.add("ri-eye-line");
+          } else {
+            eyeIcon.classList.remove("ri-eye-line");
+            eyeIcon.classList.add("ri-eye-off-line");
+          }
+        });
+      });
+      document.addEventListener("DOMContentLoaded", function () {
+        // Form validation
+        const loginForm = document.getElementById("loginForm");
+        const usernameInput = document.getElementById("username");
+        const passwordInput = document.getElementById("password");
+        const usernameError = document.getElementById("usernameError");
+        const passwordError = document.getElementById("passwordError");
+        const loginText = document.getElementById("loginText");
+        const loginSpinner = document.getElementById("loginSpinner");
+        loginForm.addEventListener("submit", function (e) {
+          e.preventDefault();
+          // Reset errors
+          usernameError.classList.add("hidden");
+          passwordError.classList.add("hidden");
+          let isValid = true;
+          // Validate username
+          if (usernameInput.value.trim() === "") {
+            usernameError.textContent = "Username is required";
+            usernameError.classList.remove("hidden");
+            isValid = false;
+          }
+          // Validate password
+          if (passwordInput.value.length < 8) {
+            passwordError.textContent =
+              "Password must be at least 8 characters";
+            passwordError.classList.remove("hidden");
+            isValid = false;
+          }
+          if (isValid) {
+            // Show loading state
+            loginText.classList.add("hidden");
+            loginSpinner.classList.remove("hidden");
+            // Simulate login (replace with actual login logic)
+            setTimeout(function () {
+              loginText.classList.remove("hidden");
+              loginSpinner.classList.add("hidden");
+              // Show success message
+              document.getElementById("successTitle").textContent =
+                "Login Successful!";
+              document.getElementById("successMessage").textContent =
+                "Redirecting to dashboard...";
+              document
+                .getElementById("successModal")
+                .classList.remove("hidden");
+              // Redirect after a delay (in a real app)
+              setTimeout(function () {
+                window.location.href = "./Index.html";
+                document.getElementById("successModal").classList.add("hidden");
+              }, 2000);
+            }, 1500);
+          }
+        });
+      });
+      document.addEventListener("DOMContentLoaded", function () {
+        // Xero login button
+        const xeroLoginBtn = document.getElementById("xeroLoginBtn");
+        xeroLoginBtn.addEventListener("click", function () {
+          // In a real app, this would redirect to Xero OAuth
+          document.getElementById("successTitle").textContent =
+            "Redirecting to Xero";
+          document.getElementById("successMessage").textContent =
+            "You will be redirected to Xero for authentication.";
+          document.getElementById("successModal").classList.remove("hidden");
+          setTimeout(function () {
+            document.getElementById("successModal").classList.add("hidden");
+            window.location.href =
+              "https://login.xero.com/identity/connect/authorize?";
+          }, 2000);
+        });
+      });
+      document.addEventListener("DOMContentLoaded", function () {
+        // Forgot password
+        const forgotPasswordLink =
+          document.getElementById("forgotPasswordLink");
+        const resetPasswordModal =
+          document.getElementById("resetPasswordModal");
+        const closeResetModal = document.getElementById("closeResetModal");
+        const resetPasswordForm = document.getElementById("resetPasswordForm");
+        const resetEmailInput = document.getElementById("resetEmail");
+        const resetEmailError = document.getElementById("resetEmailError");
+        const resetText = document.getElementById("resetText");
+        const resetSpinner = document.getElementById("resetSpinner");
+        forgotPasswordLink.addEventListener("click", function (e) {
+          e.preventDefault();
+          resetPasswordModal.classList.remove("hidden");
+        });
+        closeResetModal.addEventListener("click", function () {
+          resetPasswordModal.classList.add("hidden");
+        });
+        resetPasswordForm.addEventListener("submit", function (e) {
+          e.preventDefault();
+          resetEmailError.classList.add("hidden");
+          // Simple email validation
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(resetEmailInput.value)) {
+            resetEmailError.textContent = "Please enter a valid email address";
+            resetEmailError.classList.remove("hidden");
+            return;
+          }
+          // Show loading state
+          resetText.classList.add("hidden");
+          resetSpinner.classList.remove("hidden");
+          // Simulate sending reset email
+          setTimeout(function () {
+            resetText.classList.remove("hidden");
+            resetSpinner.classList.add("hidden");
+            resetPasswordModal.classList.add("hidden");
+            // Show success message
+            document.getElementById("successTitle").textContent =
+              "Reset Link Sent!";
+            document.getElementById(
+              "successMessage"
+            ).textContent = `We've sent a password reset link to ${resetEmailInput.value}. Please check your inbox.`;
+            document.getElementById("successModal").classList.remove("hidden");
+          }, 1500);
+        });
+      });
+      document.addEventListener("DOMContentLoaded", function () {
+        // Success modal close button
+        const closeSuccessModal = document.getElementById("closeSuccessModal");
+        closeSuccessModal.addEventListener("click", function () {
+          document.getElementById("successModal").classList.add("hidden");
+        });
+        // <span data-i18n="sign_up">Sign up</span> link
+        const signupLink = document.getElementById("signupLink");
+        signupLink.addEventListener("click", function (e) {
+          e.preventDefault();
+          // In a real app, this would redirect to the signup page
+          document.getElementById("successTitle").textContent = "Redirecting";
+          document.getElementById("successMessage").textContent =
+            "Taking you to the sign up page...";
+          document.getElementById("successModal").classList.remove("hidden");
+          setTimeout(function () {
+            document.getElementById("successModal").classList.add("hidden");
+            window.location.href = window.location.origin + "/xero_auth";
+          }, 1500);
+        });
+      });
+    </script>
+  </body>
+</html>

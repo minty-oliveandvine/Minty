@@ -1,0 +1,44 @@
+{# Delete Confirmation Modal used by Electronic + Delivery removal flows. #}
+  <!-- Delete Confirmation Modal -->
+  <div id="deleteConfirmModal" class="absolute inset-0 bg-black bg-opacity-50 z-40 hidden flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between mb-6">
+        <h2 id="deleteModalTitle" class="text-xl font-bold text-gray-900">Delete Method</h2>
+        <button onclick="hideDeleteConfirmModal()" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Modal Content -->
+      <div class="bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4 mb-6">
+        <div class="flex items-start">
+          <div class="flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#EF4444]">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+            </svg>
+          </div>
+          <div class="ml-3">
+            <p class="text-sm text-[#B91C1C]">
+              <span class="font-bold">Warning:</span>
+            </p>
+            <p id="deleteModalMessage" class="text-sm text-[#B91C1C] mt-1">
+              Are you sure you want to delete this method? This action cannot be undone.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Actions -->
+      <div class="flex space-x-3">
+        <button onclick="hideDeleteConfirmModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/10 transition-colors">
+          Cancel
+        </button>
+        <button onclick="confirmDelete()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Xero Access Required - Minty</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+  <link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <style>
+    .main-container { width: 100%; min-height: 100vh; }
+    @media (min-width: 640px) and (max-width: 1024px) { .main-container { width: 640px; margin: 0 auto; } }
+    @media (min-width: 1024px) and (max-width: 1200px) { .main-container { width: 768px; margin: 0 auto; } }
+    @media (min-width: 1200px) { .main-container { width: 1024px; margin: 0 auto; } }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { inter: ['Inter','ui-sans-serif','system-ui'] } } }
+    }
+  </script>
+</head>
+<body class="min-h-screen font-inter antialiased bg-gray-50">
+  <div class="flex min-h-screen items-center justify-center main-container">
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          <a class="text-[#474747] transition-colors" href="{{ url_for('entity.entity_list') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+        </div>
+        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">{{ entity_acronym }}</h1>
+        <div class="flex-1"></div>
+      </div>
+
+      <!-- Main Content -->
+      <div class="flex-1 flex items-center justify-center px-6 py-12">
+        <div class="max-w-md w-full text-center">
+          <!-- Icon -->
+          <div class="mx-auto w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+            </svg>
+          </div>
+
+          <h2 class="text-xl font-bold text-gray-900 mb-3">Connected to {{ entity_name }}</h2>
+
+          <div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
+            <p class="text-gray-600 text-sm leading-relaxed mb-4">
+              You have been successfully added to <strong class="text-gray-900">{{ entity_name }}</strong> on Minty.
+            </p>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p class="text-amber-800 text-sm font-medium mb-2">Xero Access Required</p>
+              <p class="text-amber-700 text-xs leading-relaxed">
+                Your account is <strong>not yet invited</strong> to this entity's Xero organization. 
+                You need to be invited on the Xero side first with the appropriate access level 
+                (e.g. <strong>Standard</strong>, <strong>Advisor</strong>, etc.) before you can 
+                fully use all features.
+              </p>
+            </div>
+          </div>
+
+          <p class="text-gray-500 text-xs mb-6">
+            Please contact your organization administrator to invite you to the Xero organization.
+          </p>
+
+          <a href="{{ url_for('entity.entity_list') }}"
+             class="inline-flex items-center justify-center w-full bg-[#54D3DA] text-white py-3 px-6 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Back to Entity List
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

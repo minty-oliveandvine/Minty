@@ -1,0 +1,119 @@
+{# New-design slide-in toast for flash + client notifications on the bills-UI
+   mapped pages. Mirrors the classic settings pages (border-[5px] rounded-full
+   pill + PNG icon), decodes the icon before showing so it never flashes the
+   wrong icon, and sits at the top-right on the pills row (kept below the title
+   row so it can't overlap the company name / menu). Slides in/out from the
+   right. #}
+<div id="settingsFlashToast"
+     class="pointer-events-none fixed right-4 z-[100] transition-transform duration-500 ease-in-out"
+     style="top: 84px; transform: translateX(calc(100% + 1.5rem));">
+  <div id="settingsFlashToastCard"
+       class="pointer-events-auto toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative"
+       style="border-color: #a9d7cb; background-color: #f1fffc;">
+    <img id="settingsFlashToastIcon"
+         src="{{ url_for('static', filename='img/success-icon.png') }}"
+         alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+    <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+      <p id="settingsFlashToastTitle" class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+      <p id="settingsFlashToastMessage" class="font-[400] break-words w-full" style="color: #92c6b9;"></p>
+    </div>
+    <button type="button" class="toast-close shrink-0" onclick="hideSettingsFlashToast()" aria-label="Dismiss">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+</div>
+<script>
+  (function () {
+    var TONES = {
+      success: { border: '#a9d7cb', bg: '#f1fffc', title: '#017155', sub: '#92c6b9', icon: "{{ url_for('static', filename='img/success-icon.png') }}", label: 'Success' },
+      error:   { border: '#ffcccc', bg: '#fff1f1', title: '#F03D3D', sub: '#f57e7e', icon: "{{ url_for('static', filename='img/error-icon.png') }}", label: 'Error' },
+      warning: { border: '#fee0aa', bg: '#fffaf1', title: '#DA8700', sub: '#e8b765', icon: "{{ url_for('static', filename='img/warning-icon.png') }}", label: 'Warning' },
+      info:    { border: '#a9d3ff', bg: '#f1f8ff', title: '#006FE6', sub: '#5ba2ee', icon: "{{ url_for('static', filename='img/info-icon.png') }}", label: 'Information' }
+    };
+    var hideTimer = null;
+
+    // Vertically: sit on the pills row (header's lower band), bottom edge just
+    // above the header's bottom edge — but never rise above the title row, so
+    // it can't overlap the company name / menu.
+    function positionToast() {
+      var wrap = document.getElementById('settingsFlashToast');
+      var card = document.getElementById('settingsFlashToastCard');
+      if (!wrap) return;
+      var header = document.querySelector('header');
+      if (!header) { wrap.style.top = '84px'; return; }
+      var cardH = (card && card.offsetHeight) ? card.offsetHeight : 64;
+      var headerBottom = header.getBoundingClientRect().bottom;
+      var titleRow = header.firstElementChild;
+      var titleBottom = titleRow ? titleRow.getBoundingClientRect().bottom : (headerBottom - cardH - 8);
+      wrap.style.top = Math.max(titleBottom + 4, headerBottom - cardH - 8) + 'px';
+    }
+    if (document.readyState !== 'loading') {
+      positionToast();
+    } else {
+      document.addEventListener('DOMContentLoaded', positionToast);
+    }
+    window.addEventListener('resize', positionToast);
+
+    window.hideSettingsFlashToast = function () {
+      var wrap = document.getElementById('settingsFlashToast');
+      if (wrap) wrap.style.transform = 'translateX(calc(100% + 1.5rem))';
+    };
+
+    window.showSettingsFlashToast = function (message, type) {
+      var wrap = document.getElementById('settingsFlashToast');
+      var card = document.getElementById('settingsFlashToastCard');
+      var icon = document.getElementById('settingsFlashToastIcon');
+      var title = document.getElementById('settingsFlashToastTitle');
+      var msg = document.getElementById('settingsFlashToastMessage');
+      if (!wrap || !card || !icon || !title || !msg) return;
+
+      var tone = TONES[type] || TONES.success;
+      card.style.borderColor = tone.border;
+      card.style.backgroundColor = tone.bg;
+      icon.alt = tone.label;
+      title.style.color = tone.title;
+      title.textContent = tone.label;
+      msg.style.color = tone.sub;
+      msg.textContent = message;
+      icon.src = tone.icon;
+
+      positionToast();
+
+      // Decode the swapped icon before sliding in so the toast never flashes
+      // the previously rendered icon for a frame.
+      var reveal = function () {
+        wrap.style.transform = 'translateX(0)';
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(window.hideSettingsFlashToast, 4000);
+      };
+      if (typeof icon.decode === 'function') {
+        icon.decode().then(reveal).catch(reveal);
+      } else {
+        reveal();
+      }
+    };
+
+    // Aliases so existing per-page handlers (Xero mapping contact creation,
+    // users add/remove) surface this toast instead of the old inline banners.
+    window.showSuccessToast = function (m) { window.showSettingsFlashToast(m || 'Success', 'success'); };
+    window.showErrorToast = function (m) { window.showSettingsFlashToast(m || 'Error', 'error'); };
+    window.showWarningToast = function (m) { window.showSettingsFlashToast(m || 'Warning', 'warning'); };
+    window.showInfoToast = function (m) { window.showSettingsFlashToast(m || 'Information', 'info'); };
+    window.hideSettingsNotification = window.hideSettingsFlashToast;
+  })();
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        document.addEventListener('DOMContentLoaded', function () {
+          showSettingsFlashToast(
+            {{ message|tojson }},
+            {{ ('error' if category in ('error', 'danger') else ('warning' if category == 'warning' else ('info' if category == 'info' else 'success')))|tojson }}
+          );
+        });
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</script>

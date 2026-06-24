@@ -1,0 +1,1 @@
+"""Flask CLI commands registered onto the app in ``bootstrap.py``."""

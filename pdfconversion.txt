@@ -1,0 +1,4 @@
+sudo apt update
+sudo apt install pandoc
+sudo apt install texlive-xetex texlive-latex-recommended texlive-fonts-recommende
+sudo apt install libreoffice

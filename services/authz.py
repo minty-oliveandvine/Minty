@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+from functools import wraps
+from typing import Any
+
+from flask import flash, jsonify, redirect, request, url_for
+from flask.typing import ResponseReturnValue
+from flask_login import current_user
+
+from services.permission_policy import Permission, has_entity_access, has_permission
+
+
+def _wants_json_response() -> bool:
+    if request.path.startswith("/api"):
+        return True
+    if request.is_json:
+        return True
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return True
+    accept_header = (request.headers.get("Accept") or "").lower()
+    return "application/json" in accept_header
+
+
+def _auth_redirect() -> ResponseReturnValue:
+    if _wants_json_response():
+        return jsonify({"status": "error", "message": "Authentication required"}), 401
+    return redirect(url_for("auth.home"))
+
+
+def _forbidden(message: str, entity_id: str | None = None) -> ResponseReturnValue:
+    if _wants_json_response():
+        return jsonify({"status": "error", "message": message}), 403
+    flash(message, "danger")
+    target_kwargs = {"entity_id": entity_id} if entity_id else {}
+    return redirect(url_for("auth.no_permission", **target_kwargs))
+
+
+def permission_denied(
+    message: str, *, entity_id: str | None = None
+) -> ResponseReturnValue:
+    return _forbidden(message, entity_id=entity_id)
+
+
+def _bad_request(message: str) -> ResponseReturnValue:
+    if _wants_json_response():
+        return jsonify({"status": "error", "message": message}), 400
+    flash(message, "warning")
+    return redirect(url_for("auth.index"))
+
+
+def _extract_entity_id(
+    kwargs: dict[str, Any],
+    *,
+    entity_arg: str | None,
+    entity_keys: Iterable[str] | None,
+) -> str | None:
+    if entity_arg and kwargs.get(entity_arg):
+        return str(kwargs[entity_arg])
+
+    request_keys = tuple(entity_keys or ("entity_id", "org_id"))
+    for key in request_keys:
+        if kwargs.get(key):
+            return str(kwargs[key])
+
+    for key in request_keys:
+        value = request.args.get(key) or request.form.get(key)
+        if value:
+            return str(value)
+
+    json_payload = request.get_json(silent=True) or {}
+    for key in request_keys:
+        value = json_payload.get(key)
+        if value:
+            return str(value)
+
+    return None
+
+
+def extract_entity_id(
+    *,
+    kwargs: dict[str, Any] | None = None,
+    entity_arg: str | None = None,
+    entity_keys: Iterable[str] | None = None,
+) -> str | None:
+    return _extract_entity_id(
+        kwargs or {},
+        entity_arg=entity_arg,
+        entity_keys=entity_keys,
+    )
+
+
+def require_entity_access(
+    *,
+    entity_arg: str | None = None,
+    entity_keys: Iterable[str] | None = None,
+    message: str = "You do not have access to this entity.",
+):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not getattr(current_user, "is_authenticated", False):
+                return _auth_redirect()
+
+            entity_id = _extract_entity_id(
+                kwargs, entity_arg=entity_arg, entity_keys=entity_keys
+            )
+            if not entity_id:
+                return _bad_request("Entity context is required.")
+
+            if not has_entity_access(current_user, entity_id):
+                return _forbidden(message, entity_id=entity_id)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def require_permission(
+    permission: Permission,
+    *,
+    entity_arg: str | None = None,
+    entity_keys: Iterable[str] | None = None,
+    message: str = "Not authorized",
+):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not getattr(current_user, "is_authenticated", False):
+                return _auth_redirect()
+
+            entity_id = _extract_entity_id(
+                kwargs, entity_arg=entity_arg, entity_keys=entity_keys
+            )
+            if not has_permission(current_user, permission, entity_id=entity_id):
+                return _forbidden(message, entity_id=entity_id)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

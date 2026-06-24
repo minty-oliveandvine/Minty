@@ -1,0 +1,2694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Entity Dashboard - Vine Consulting Limited</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+  <!-- Hover Effects Component -->
+  {% include 'components/hover_effects.html' %}
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+
+     <!-- Inter font -->
+ <link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+    <style>
+      @media (min-width: 640px) and (max-width: 1024px) {
+        .main-container {
+          width: 640px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1024px) and (max-width: 1200px) {
+        .main-container {
+          width: 768px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1200px) {
+        .main-container {
+          width: 1024px;
+          margin: 0 auto;
+        }
+      }
+
+      /* Stepper step hover effects */
+      .stepper-step {
+        transition: all 0.2s ease-in-out;
+        cursor: pointer;
+      }
+      
+      .stepper-step:hover {
+        transform: translateY(-2px);
+      }
+      
+      .stepper-step:hover .stepper-circle {
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+      }
+      
+      .stepper-step:hover .stepper-label {
+        color: #2563eb;
+      }
+
+             /* Disabled stepper step styling */
+       .disabled-stepper-step {
+         pointer-events: none; /* Disable clicks */
+         cursor: default; /* Change cursor to default */
+         opacity: 0.6; /* Visually indicate disabled state */
+       }
+
+       /* Radio button hover effects - only on the radio button itself */
+       .radio-option input[type="radio"]:hover {
+         border-color: #3b82f6;
+         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+         transition: all 0.2s ease-in-out;
+       }
+
+       /* Scroll snap for dashboard sections */
+       .snap-scroll-y {
+         scroll-snap-type: y proximity;
+         scroll-behavior: smooth;
+         scroll-padding-top: 16px;
+       }
+
+       .snap-scroll-y .snap-item {
+         scroll-snap-align: start;
+         scroll-margin-top: 16px;
+       }
+
+    </style>
+  <script>
+    tailwind.config = {
+      theme: { 
+        extend: { 
+          fontFamily: { 
+            inter: ['Inter','ui-sans-serif','system-ui'] 
+          } 
+        } 
+      }
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(event) {
+      const dropdown = document.getElementById('bankAccountDropdown');
+      const options = document.getElementById('bankAccountOptions');
+      
+      if (dropdown && options && !dropdown.contains(event.target) && !options.contains(event.target)) {
+        options.classList.add('hidden');
+        dropdown.classList.remove('ring-2', 'ring-blue-500');
+      }
+    });
+  </script>
+</head>
+<body class="min-h-screen font-inter antialiased">
+  <div class="flex min-h-screen items-center justify-center main-container">
+         <!-- Phone card -->
+     <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          <a href="/entity" class="text-[#474747] transition-colors hover-slide-left" onclick="PageTransition.navigateWithFade(this.href); return false;">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+        </div>
+        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">{{ entity_acronym }}</h1>
+        <div class="flex-1 flex justify-end">
+        <div class="flex items-center gap-2">
+          {% set fn = (current_user.first_name or '')[:1] %}
+          {% set ln = (current_user.last_name or '')[:1] %}
+          {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+          <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
+            class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
+            aria-label="Open profile in Bills"
+            title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
+          </a>
+          <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
+              <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+            </svg>
+          </button>
+        </div>
+        </div>
+      </div>
+
+      <!-- Include reusable sidepanel component -->
+      {% include 'components/sidepanel.html' %}
+
+      <!-- Flash Notification Area (Slider) -->
+      <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40">
+        {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
+          {% for category, message in messages %}{% if category == 'success' %}
+            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
+              <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+                <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
+              </div>
+              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          {% elif category == 'danger' or category == 'error' %}
+            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+              <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
+                <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
+              </div>
+              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          {% endif %}{% endfor %}
+        {% endif %}{% endwith %}
+      </div>
+
+      <!-- Error Dialog (stays open until the user clicks OK) -->
+      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+          <div class="flex items-start mb-6">
+            <div class="flex-shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              </svg>
+            </div>
+            <div class="ml-3">
+              <h2 class="text-lg font-bold text-gray-900">Error</h2>
+              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
+            </div>
+          </div>
+          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+            OK
+          </button>
+        </div>
+      </div>
+
+      <!-- Toast Notification Area (Slider) -->
+      <div id="toastNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40 hidden">
+        <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+          <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+          <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+            <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Validation Error</p>
+            <p id="toastMessage" class="font-[400] break-words w-full" style="color: #f57e7e;">Please select a bank account</p>
+          </div>
+          <button class="toast-close shrink-0" onclick="hideToast()">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+       <!-- Start New Report Modal -->
+       <div id="startNewReportModal" class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-30 p-4 hidden">
+        <div class="bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] sm:max-h-[80vh] overflow-y-auto" style="min-width: 0;" onclick="event.stopPropagation()">
+          <!-- Modal Header -->
+          <div class="mb-6">
+            <div class="flex items-center justify-between">
+              <h2 class="text-xl font-bold text-gray-900">Before You Start</h2>
+              <button onclick="hideStartNewReportModal()" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+            </div>
+            <p class="previous_report_submitter_caption text-sm text-gray-500 mt-1">Previous report submitted by {% if latest_report_submitter_first_name %}{{ latest_report_submitter_first_name }}{% else %}—{% endif %}</p>
+          </div>
+
+          <!-- Modal Content -->
+          <div class="space-y-6">
+            <!-- Report Details Section -->
+            <div class="space-y-3">
+              <div class="flex justify-between items-center">
+                <span class="deposit_submitter_label text-sm text-gray-600">Deposited</span>
+                <span class="deposit_amount text-sm font-bold text-gray-900">${{ "{:,.2f}".format(org.latest_deposit) }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-sm text-gray-600">To</span>
+                <span class="deposit_bank_account text-sm font-regular text-gray-900">{{ org.latest_deposit_bank_name }} ({{ org.latest_deposit_bank_number }})</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-sm text-gray-600">On</span>
+                <span class="deposit_date text-sm font-regular text-gray-900">{{ org.latest_date.strftime('%d %b %Y') if org.latest_date else 'No date' }}</span>
+              </div>
+            </div>
+
+            {% set deposit_correction_blocked = (org.latest_deposit and org.latest_deposit > 0 and not org.can_correct_latest_deposit) %}
+            {% if deposit_correction_blocked %}
+            <div class="bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#EF4444]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <p class="text-sm font-bold text-[#B91C1C]">Deposit cannot be corrected</p>
+                  <p class="text-sm text-[#B91C1C] mt-1">
+                    The following entity setting(s) are not configured:
+                    <span class="font-semibold">{{ org.deposit_correction_missing_settings | join(', ') }}</span>.
+                    Configure them in
+                    <a href="{{ url_for('entity_settings', entity_id=org.id) }}" class="underline font-semibold">Settings → Petty Cash</a>
+                    before changing or removing this deposit.
+                  </p>
+                </div>
+              </div>
+            </div>
+            {% endif %}
+
+                    <!-- Confirmation Radio Buttons -->
+            <div class="space-y-3">
+              <div class="flex items-center">
+                <input type="radio" id="confirm-yes" name="confirmation" value="yes" class="w-4 h-4 text-[#54D3DA] bg-gray-100 border-gray-300 focus:ring-[#54D3DA]" onchange="toggleNoteMessage()">
+                <label for="confirm-yes" class="ml-2 text-sm text-gray-700">Yes, amount deposited as stated</label>
+              </div>
+              <div class="flex items-center">
+                <input type="radio" id="confirm-change" name="confirmation" value="change" class="w-4 h-4 text-[#54D3DA] bg-gray-100 border-gray-300 focus:ring-[#54D3DA] disabled:opacity-50 disabled:cursor-not-allowed" onchange="toggleNoteMessage()" {% if deposit_correction_blocked %}disabled{% endif %}>
+                <label for="confirm-change" class="ml-2 text-sm {% if deposit_correction_blocked %}text-gray-400{% else %}text-gray-700{% endif %}">No, there was a change in the details</label>
+              </div>
+              <div class="flex items-center">
+                <input type="radio" id="confirm-no" name="confirmation" value="no" class="w-4 h-4 text-[#54D3DA] bg-gray-100 border-gray-300 focus:ring-[#54D3DA] disabled:opacity-50 disabled:cursor-not-allowed" onchange="toggleNoteMessage()" {% if deposit_correction_blocked %}disabled{% endif %}>
+                <label for="confirm-no" class="ml-2 text-sm {% if deposit_correction_blocked %}text-gray-400{% else %}text-gray-700{% endif %}">No, there was no deposit</label>
+              </div>
+            </div>
+
+                    <!-- Please Note Information Box -->
+            <div id="noteMessage" class="bg-[#FFF3D4] rounded-lg p-4 hidden">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#FBBF24]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <p class="text-sm text-[#92400E]">
+                    <span class="font-bold">Please Note:</span>
+                  </p>
+                  <p id="noteText" class="text-sm text-[#92400E] mt-1">
+                    By proceeding, you confirm that the stated deposit is accurate and has been deposited to the specified bank.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal Footer -->
+          <div class="flex gap-3 mt-6">
+            <button onclick="hideStartNewReportModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors">
+              Back
+            </button>
+            <button onclick="saveStartNewReportModal()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
+              Proceed
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Setup Settings Modal (Non-dismissible) -->
+      <div id="setupSettingsModal" class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 {% if has_complete_xero_settings %}hidden{% endif %}">
+        <div class="bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] sm:max-h-[80vh] overflow-y-auto" style="min-width: 0;">
+          <!-- Modal Header -->
+          <div class="mb-6">
+            <h2 class="text-xl font-bold text-gray-900">Setup Required</h2>
+            <p class="text-sm text-gray-600 mt-2">Please complete your entity settings before proceeding.</p>
+          </div>
+
+          <!-- Modal Content -->
+          <div class="space-y-4">
+            <div class="bg-[#FFF3D4] rounded-lg p-4 border-l-4 border-l-[#FBBF24]">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#FBBF24]">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                  </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                  <p class="text-sm font-semibold text-[#92400E] mb-2">Missing Settings:</p>
+                  <ul class="list-disc list-inside space-y-1 text-sm text-[#92400E]">
+                    {% if missing_settings_fields %}
+                      {% for field in missing_settings_fields %}
+                        <li>{{ field }}</li>
+                      {% endfor %}
+                    {% else %}
+                      <li>One or more required settings are missing</li>
+                    {% endif %}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal Footer -->
+          <div class="mt-6">
+            <a href="{{ url_for('entity_settings', entity_id=org.id) }}" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors" onclick="PageTransition.navigateWithFade(this.href); return false;">
+              Set Up Settings
+            </a>
+          </div>
+        </div>
+      </div>
+
+      
+      <!-- Main Content Area -->
+      <div class="bg-gray-50 main-content snap-scroll-y p-6 pb-40 flex-1 overflow-y-auto relative">
+        {{balance_sheet}}
+        <!-- Top Section - Report Summary -->
+        <div class="snap-item mb-6">
+          <!-- Warning notification for missing yesterday report -->
+          <div id="warningNotification" class="hidden mb-4">
+            <div class="mb-10 flex w-full items-start rounded-[8px] border-l-4 border-l-[#fea81d] bg-[#FFF3D4] px-4 py-3">
+              <svg class="flex-shrink-0 mt-0.5 mr-3" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <circle cx="10" cy="10" r="9" stroke="#FBBF24" stroke-width="2" fill="#FFF3D4"/>
+                <rect x="9" y="8" width="2" height="5" rx="1" fill="#FBBF24"/>
+                <rect x="9" y="5" width="2" height="2" rx="1" fill="#FBBF24"/>
+              </svg>
+              <div>
+                <p class="font-bold text-[#92400E] text-sm mb-1">Warning</p>
+                <p class="text-[#92400E] text-sm leading-snug">
+                  Report cannot be generated until previous dates have been completed. Please review before proceeding.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Today's report completed section (only show when no continue report and today equals latest report date) -->
+          {% if not org.has_existing_draft and today_is_latest_report %}
+          <div class="today_report_completed_section mb-6">
+            <!-- Section Title -->
+            <div class="flex items-center gap-3 mb-6">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center" style="background-color: #16A34A1A;">
+                <svg width="16" height="14" viewBox="0 0 16 14" fill="none" xmlns="http://www.w3.org/2000/svg" class="size-5" style="color: #16A34A;">
+                  <g clip-path="url(#clip0_4153_9941)">
+                    <path d="M6.25 9.6412L13.8443 2L15 3.1794L6.25 12L1 6.701L2.15566 5.53821L6.25 9.6412Z" fill="#00C896"/>
+                  </g>
+                  <defs>
+                    <clipPath id="clip0_4153_9941">
+                      <rect width="14.5781" height="14" fill="white" transform="translate(0.703125)"/>
+                    </clipPath>
+                  </defs>
+                </svg>
+              </div>
+              <h2 class="text-xl font-bold text-gray-900">Today's report is submitted</h2>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Submitted Report Until and Current Balance (only show when no continue report) -->
+          {% if not org.has_existing_draft %}
+          <div class="flex flex-row justify-between items-center gap-4 mb-6">
+            <!-- Submitted Report Until -->
+            <div class="submitted_report_until">
+              <label class="block text-sm font-regular text-gray-500 mb-1">Report in Progress</label>
+              <div class="text-lg font-semibold text-gray-900">{{org.transaction_date.strftime('%d %b %Y') if org.transaction_date else 'Today'}}</div>
+            </div>
+
+            <!-- Current Balance -->
+            <div class="current_balance">
+              <label class="block text-sm font-regular text-gray-500 mb-1">Current balance</label>
+                <div class="current_balance_amount text-lg font-semibold text-gray-900 text-right">${{ "{:,.2f}".format(org.closing_balance or 0) }}</div>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Pick up where you left off section (only show if there's a continue report) -->
+          {% if org.has_existing_draft %}
+          <div class="pick_up_section mb-16">
+            <!-- Section Title -->
+            <div class="flex items-center gap-3 mb-10">
+              <div class="w-10 h-10 rounded-full flex items-center justify-center" style="background-color: #FFF0F0;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5" style="color: #FF6B6B;">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </div>
+              <h2 class="text-xl font-bold text-gray-900">Pick up where you left off</h2>
+            </div>
+
+            <!-- Daily Report Progress Card -->
+            <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+              <!-- Card Header -->
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-semibold text-gray-900">Daily Report Progress</h3>
+                <span class="text-sm font-medium text-[#16A34A]">{{ org.draft_progress_completed }}/6 Complete</span>
+              </div>
+
+              <!-- Date -->
+              <p class="text-sm text-gray-600 mb-4">{{ org.draft_date.strftime('%d %b %Y %a') if org.draft_date else 'Today' }}</p>
+
+              <!-- Progress Stepper -->
+              <div class="mb-4">
+                {% set completed_sections = org.draft_completed_sections %}
+                {% set current_section = org.draft_current_section %}
+                {% include 'components/stepper.html' %}
+              </div>
+
+              <!-- Continue Report Button -->
+              <button onclick="continueExistingReport()" class="w-full bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-slide-parent items-center justify-center mb-12 px-4 py-3 rounded-xl shadow-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" {% if is_readonly_for(org.id) %}disabled title="Read-only access"{% endif %}>
+                <svg class="hover-slide" width="27" height="28" viewBox="0 0 21 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12.8761 11.4957L7.36113 7.83543V15.156L12.8761 11.4957ZM15.4441 11.8566L6.30984 17.9227C6.20643 17.9914 6.09728 18.0143 5.98238 17.9914C5.86749 17.9685 5.77557 17.9055 5.70663 17.8024C5.66067 17.7336 5.6377 17.6534 5.6377 17.5618V5.42961C5.6377 5.30359 5.68078 5.20049 5.76695 5.12029C5.85313 5.0401 5.95366 5 6.06855 5C6.16047 5 6.2409 5.02291 6.30984 5.06874L15.4441 11.1348C15.536 11.2036 15.5963 11.2952 15.625 11.4098C15.6537 11.5243 15.6336 11.6332 15.5647 11.7363C15.5302 11.7821 15.49 11.8222 15.4441 11.8566Z" fill="white"/>
+                </svg>
+                <span>Continue Report</span>
+              </button>
+
+              <!-- Last Edit Info -->
+              <p class="text-xs text-gray-500 text-right">
+                Last edit 
+                {% if org.draft_last_edit_seconds < 60 %}
+                  {{ org.draft_last_edit_seconds }} sec{{ 's' if org.draft_last_edit_seconds != 1 else '' }} ago
+                {% elif org.draft_last_edit_seconds < 3600 %}
+                  {{ (org.draft_last_edit_seconds // 60) }} min{{ 's' if (org.draft_last_edit_seconds // 60) != 1 else '' }} ago
+                {% elif org.draft_last_edit_seconds < 86400 %}
+                  {{ (org.draft_last_edit_seconds // 3600) }} hour{{ 's' if (org.draft_last_edit_seconds // 3600) != 1 else '' }} ago
+                {% else %}
+                  {{ (org.draft_last_edit_seconds // 86400) }} day{{ 's' if (org.draft_last_edit_seconds // 86400) != 1 else '' }} ago
+                {% endif %}
+              </p>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Start New Report / View Report Button (fallback for when no continue report) -->
+          {% if not org.has_existing_draft %}
+          <div class="start_new_report_container mb-10">
+            {% if today_has_report %}
+            <!-- View Report Button -->
+            <button onclick="viewTodayReport()" class="view_report_btn w-full bg-[#00C896] shadow-md text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center hover:bg-[#00C896]/80 transition-colors hover-scale-parent">
+              <span>View Report</span>
+            </button>
+            {% else %}
+            <!-- Start New Report Button -->
+              <button onclick="showStartNewReportMessage()" class="start_new_report_btn bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full disabled:opacity-50 disabled:cursor-not-allowed" {% if is_readonly_for(org.id) %}disabled title="Read-only access"{% endif %}>
+                <svg class="hover-scale" width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="white"/>
+                </svg>
+                <span>Start New Report</span>
+              </button>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Quick Actions Section -->
+        <div class="quick_actions_section snap-item mb-6">
+          <!-- Section Header -->
+          <div class="quick_actions_header mb-4 flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900">Quick Actions</h2>
+            <span class="text-sm text-gray-500">
+              {% set user_count = org.users|length + 1 %}
+              {{ user_count }} user{% if user_count != 1 %}s{% endif %}
+            </span>
+          </div>
+
+          <!-- Quick Actions Grid -->
+          <div class="quick_actions_grid grid grid-cols-2 gap-4 mb-8">
+            <!-- View Reports Card -->
+            <div class="view_reports_card quick_action_card bg-white rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+              <div class="flex items-start gap-3">
+                <div class="view_reports_icon quick_action_icon bg-[#F3E8FF] rounded-full w-10 h-10 flex items-center justify-center">
+                  <svg width="21" height="28" viewBox="0 0 15 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2.38956 11.291H3.55581V16.541H2.38956V11.291ZM11.7196 8.95768H12.8858V16.541H11.7196V8.95768ZM7.05456 5.45768H8.22081V16.541H7.05456V5.45768Z" fill="#9333EA"/>
+                  </svg>
+                </div>
+                <a href="{{ url_for('report.entity_report_history', entity_id=org.id) }}" class="view_reports_content flex-1" onclick="PageTransition.navigateWithFade(this.href); return false;">
+                  <h3 class="text-xs sm:text-sm view_reports_title font-semibold text-gray-900 text-sm">View History</h3>
+                  <p class="view_reports_subtitle text-gray-500 text-xs">Reports & Summary</p>
+                </a>
+              </div>
+            </div>
+
+            <!-- Sync Xero Card -->
+            <!-- <div class="sync_xero_card quick_action_card bg-white rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+              <div class="flex items-start gap-3">
+                <div class="sync_xero_icon quick_action_icon bg-[#DBEAFE] rounded-full w-10 h-10 flex items-center justify-center">
+                  <svg width="24" height="30" viewBox="0 0 16 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4.32407 6.59065C4.845 6.13954 5.42812 5.78954 6.07345 5.54065C6.73432 5.29176 7.42241 5.16732 8.13771 5.16732C8.93076 5.16732 9.68882 5.31898 10.4119 5.62232C11.1039 5.91787 11.72 6.33593 12.2604 6.87648C12.8008 7.41704 13.2187 8.03343 13.5141 8.72565C13.8173 9.44898 13.969 10.2073 13.969 11.0007C13.969 11.6151 13.8757 12.2101 13.6891 12.7857C13.5102 13.3457 13.2498 13.8668 12.9077 14.349L11.0533 11.0007H12.8027C12.8027 10.1529 12.5889 9.36732 12.1613 8.64398C11.7492 7.94398 11.1933 7.38787 10.4935 6.97565C9.77046 6.54787 8.98518 6.33398 8.13771 6.33398C7.52348 6.33398 6.93258 6.45065 6.36501 6.68398C5.82076 6.90954 5.33482 7.22454 4.9072 7.62898L4.32407 6.59065ZM11.9513 15.4107C11.4304 15.8618 10.8473 16.2118 10.202 16.4607C9.54109 16.7095 8.85301 16.834 8.13771 16.834C7.34466 16.834 6.5866 16.6823 5.86352 16.379C5.17155 16.0834 4.55538 15.6654 4.01501 15.1248C3.47465 14.5843 3.05675 13.9679 2.7613 13.2757C2.45807 12.5523 2.30646 11.794 2.30646 11.0007C2.30646 10.3862 2.39976 9.79121 2.58636 9.21565C2.76518 8.65565 3.02565 8.13454 3.36775 7.65232L5.22208 11.0007H3.47271C3.47271 11.8484 3.68652 12.634 4.11415 13.3573C4.52622 14.0573 5.08213 14.6134 5.78188 15.0257C6.50496 15.4534 7.29023 15.6673 8.13771 15.6673C8.75193 15.6673 9.34283 15.5507 9.91041 15.3173C10.4547 15.0918 10.9406 14.7768 11.3682 14.3723L11.9513 15.4107Z" fill="#2563EB"/>
+                  </svg>
+                </div>
+                <a href="{{ url_for('entity_settings', entity_id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;" class="sync_xero_content flex-1 cursor-pointer">
+                  <h3 class="text-xs sm:text-sm sync_xero_title font-semibold text-gray-900 text-sm">Sync Xero</h3>
+                  <p class="sync_xero_subtitle text-gray-500 text-xs">Update Xero Integration</p>
+                </a>
+              </div>
+            </div> -->
+
+            <!-- Generate Report Card -->
+            <!-- <div class="generate_report_card quick_action_card bg-white rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+              <div class="flex items-start gap-3">
+                <div class="generate_report_icon quick_action_icon bg-[#DBEAFE] rounded-full w-10 h-10 flex items-center justify-center">
+                  <svg width="21" height="28" viewBox="0 0 15 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12.8858 8.66732V16.2507C12.8858 16.414 12.8294 16.552 12.7167 16.6648C12.604 16.7776 12.466 16.834 12.3027 16.834H2.97268C2.80941 16.834 2.6714 16.7776 2.55866 16.6648C2.44593 16.552 2.38956 16.414 2.38956 16.2507V5.75065C2.38956 5.58732 2.44593 5.44926 2.55866 5.33648C2.6714 5.22371 2.80941 5.16732 2.97268 5.16732H9.38706L12.8858 8.66732ZM11.7196 9.25065H8.80393V6.33398H3.55581V15.6673H11.7196V9.25065ZM5.30518 8.08398H7.05456V9.25065H5.30518V8.08398ZM5.30518 10.4173H9.97018V11.584H5.30518V10.4173ZM5.30518 12.7507H9.97018V13.9173H5.30518V12.7507Z" fill="#2563EB"/>
+                  </svg>
+                </div>
+                <a href="{{ url_for('entity_settings_users', org_id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;" class="generate_report_content flex-1 cursor-pointer">
+                  <h3 class="text-xs sm:text-sm generate_report_title font-semibold text-gray-900 text-sm">User Settings</h3>
+                  <p class="generate_report_subtitle text-gray-500 text-xs">Invite & Manage Users</p>
+                </a>
+              </div>
+            </div> -->
+
+            <!-- Submit Report Card -->
+            <div class="submit_report_card quick_action_card bg-white rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow">
+              <div class="flex items-start gap-3">
+                <div class="submit_report_icon quick_action_icon bg-[#FFEDD5] rounded-full w-10 h-10 flex items-center justify-center">
+                  <svg width="24" height="30" viewBox="0 0 16 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6.38833 5.16732V6.33398H9.88708V5.16732H11.0533V6.33398H13.3858C13.5491 6.33398 13.6871 6.39037 13.7999 6.50315C13.9126 6.61593 13.969 6.75398 13.969 6.91732V16.2507C13.969 16.414 13.9126 16.552 13.7999 16.6648C13.6871 16.7776 13.5491 16.834 13.3858 16.834H2.88958C2.72631 16.834 2.5883 16.7776 2.47556 16.6648C2.36283 16.552 2.30646 16.414 2.30646 16.2507V6.91732C2.30646 6.75398 2.36283 6.61593 2.47556 6.50315C2.5883 6.39037 2.72631 6.33398 2.88958 6.33398H5.22208V5.16732H6.38833ZM12.8027 10.4173H3.47271V15.6673H12.8027V10.4173ZM9.91041 11.0823L10.7268 11.9107L7.84615 14.7923L5.78188 12.7273L6.60992 11.9107L7.84615 13.1473L9.91041 11.0823ZM5.22208 7.50065H3.47271V9.25065H12.8027V7.50065H11.0533V8.08398H9.88708V7.50065H6.38833V8.08398H5.22208V7.50065Z" fill="#EA580C"/>
+                  </svg>
+                </div>
+                <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;" class="submit_report_content flex-1 cursor-pointer">
+                  <h3 class="text-xs sm:text-sm submit_report_title font-semibold text-gray-900 text-sm">Entity Settings</h3>
+                  <p class="submit_report_subtitle text-gray-500 text-xs">Edit Sales Method</p>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Section - Report Calendar -->
+        <div class="report_calendar_section snap-item">
+          <!-- Calendar Header -->
+          <div class="calendar_header mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Report Calendar</h2>
+          </div>
+
+          <!-- Month and Year Display -->
+          <div class="month_year_display bg-gray-50 rounded-lg px-4 py-3">
+            <div class="flex items-center justify-between">
+              <button id="prevMonthBtn" class="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10 12L6 8L10 4" stroke="#6B7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div id="currentMonthYear" class="text-center text-lg font-semibold text-gray-700"></div>
+              <button id="nextMonthBtn" class="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6 4L10 8L6 12" stroke="#6B7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Calendar Grid -->
+          <div class="calendar_grid bg-white rounded-lg p-4">
+            <!-- Days of Week Header -->
+            <div class="calendar_week_header grid grid-cols-7 gap-1 mb-2">
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Sun</div>
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Mon</div>
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Tue</div>
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Wed</div>
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Thu</div>
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Fri</div>
+              <div class="text-center text-xs font-semibold text-gray-600 py-2">Sat</div>
+            </div>
+
+            <!-- Calendar Dates -->
+            <div id="calendarDates" class="calendar_dates_grid grid grid-cols-7 gap-1">
+              <!-- Calendar dates will be generated by JavaScript -->
+            </div>
+          </div>
+          
+          <!-- Legend -->
+          <div class="calendar_legend mt-4">
+            <div class="legend_container bg-gray-50 rounded-lg px-4 py-3">
+              <div class="legend_items flex flex-wrap justify-center gap-2 sm:gap-4 text-xs">
+                <div class="legend_item_published flex items-center gap-1 sm:gap-2">
+                  <div class="legend_dot_published w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-[#EBEEF2]"></div>
+                  <span class="text-gray-700">Submitted</span>
+                </div>
+                <div class="legend_item_not_published flex items-center gap-1 sm:gap-2">
+                  <div class="legend_dot_not_published w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-[#FF6B6B]"></div>
+                  <span class="text-gray-700">Not Submitted</span>
+                </div>
+                <div class="legend_item_today flex items-center gap-1 sm:gap-2">
+                  <div class="legend_dot_today w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-[#00C896]"></div>
+                  <span class="text-gray-700">Today</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+     </div>
+   </div>
+
+   <!-- Success Modal -->
+   {% if request.args.get('success') == 'true' %}
+   <div id="successModal" class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+     <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+       <!-- Modal Header -->
+       <div class="flex items-center justify-left mb-6">
+         <h2 class="text-xl font-bold text-gray-900">Congratulations!</h2>
+       </div>
+
+       <!-- Modal Content -->
+       <div class="bg-[#F0FDF4] rounded-lg p-4 mb-6">
+         <div class="flex items-start">
+           <div class="flex-shrink-0">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#16A34A]">
+               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+             </svg>
+           </div>
+           <div class="ml-3">
+             <p class="text-sm text-[#166534]">
+               <span class="font-bold">Entity Connected Successfully:</span>
+             </p>
+             <p class="text-sm text-[#166534] mt-1">
+               You have successfully connected your entity to Xero. You can now publish reports at the end of your daily reports.
+             </p>
+           </div>
+         </div>
+       </div>
+
+       <!-- Modal Footer -->
+       <div class="mt-6">
+         <button onclick="hideSuccessModal()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
+           <span>Proceed</span>
+         </button>
+       </div>
+     </div>
+   </div>
+   {% endif %}
+
+   <script>
+    // Read-only mode flag (true when a superuser is viewing an entity they
+    // have no user_entity row on). Used by button toggles below so that the
+    // start_new_report_btn — which JS repurposes into "View Report" when a
+    // date with a report is selected — can be re-enabled for read actions.
+    const IS_READONLY = {{ is_readonly_for(org.id) | tojson }};
+
+    // Function to continue existing report
+    function continueExistingReport() {
+      // Direct navigation to resume route with entity ID to continue the existing draft
+      const orgId = '{{ org.id }}';
+      const transactionDate = '{{ org.draft_date }}';
+      window.location.href = '/report/resume?entity_id=' + orgId + '&transaction_date=' + transactionDate;
+    }
+    
+    // Function to show view report button for past dates with reports
+    function showViewReportButton(dateString) {
+      // Try to find either button type - .view_report_btn or .start_new_report_btn
+      let targetBtn = document.querySelector('.view_report_btn') || document.querySelector('.start_new_report_btn');
+      
+      // If no button exists, create one
+      if (!targetBtn) {
+        const container = document.querySelector('.start_new_report_container');
+        if (container) {
+          targetBtn = document.createElement('button');
+          targetBtn.className = 'view_report_btn w-full bg-[#A3ADBB] shadow-md text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#A3ADBB]/80 transition-colors hover-scale-parent';
+          container.appendChild(targetBtn);
+        }
+      }
+      
+      if (targetBtn) {
+        // Clear any existing onclick handlers
+        targetBtn.onclick = null;
+
+        // View is a read action — always enable, even for readonly superusers
+        // who had the source button disabled by the template.
+        targetBtn.removeAttribute('disabled');
+        targetBtn.removeAttribute('title');
+
+        // Update button className to View Report style
+        targetBtn.className = 'view_report_btn w-full bg-[#00C896] shadow-md text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center hover:bg-[#00C896]/80 transition-colors hover-scale-parent';
+
+        // Change button text to "View Report"
+        targetBtn.innerHTML = `
+          <span>View Report</span>
+        `;
+        
+        // Update the "Submitted report until" date display
+        const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
+        if (submittedReportDate) {
+          const selectedDate = new Date(dateString);
+          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const day = selectedDate.getDate().toString().padStart(2, '0');
+          const year = selectedDate.getFullYear();
+          submittedReportDate.textContent = `${day} ${monthAbbr} ${year}`;
+        }
+        
+        // Set the new onclick to view the report (no deposit popup)
+        targetBtn.onclick = function() {
+          const orgId = '{{ org.id }}';
+          const redirectUrl = `/entity/${orgId}/ending?entity_id=${orgId}&transaction_date=${dateString}`;
+          console.log('View Report redirect URL:', redirectUrl);
+          PageTransition.navigateWithFade(redirectUrl);
+          window.location.href = redirectUrl;
+        };
+        
+        console.log('View Report button set up for date:', dateString);
+      } else {
+        console.log('No button found to update for view report');
+      }
+    }
+
+    // Function to show start new report message
+    function showStartNewReportMessage() {
+      // Check if there's a selected date from calendar, default to today if none
+      let selectedDate = window.selectedDateString;
+      
+      // If no date selected, default to today's date and clear the explicit selection flag
+      if (!selectedDate) {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        const day = today.getDate();
+        selectedDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        window.dateExplicitlySelected = false; // Clear flag when defaulting to today
+        console.log('No date selected, defaulting to today:', selectedDate);
+      }
+      
+      // Validate selected date based on business rules
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      // Use local date formatting instead of toISOString() to avoid timezone issues
+      const todayYear = today.getFullYear();
+      const todayMonth = String(today.getMonth() + 1).padStart(2, '0');
+      const todayDay = String(today.getDate()).padStart(2, '0');
+      const todayString = `${todayYear}-${todayMonth}-${todayDay}`;
+
+      const selectedDateObj = new Date(selectedDate);
+      selectedDateObj.setHours(0, 0, 0, 0);
+      const isPastDate = selectedDateObj < today;
+      const isFutureDate = selectedDateObj > today;
+
+      // Calculate 7 days ago for lookback restriction
+      const sevenDaysAgo = new Date(today);
+      sevenDaysAgo.setDate(today.getDate() - 7);
+      sevenDaysAgo.setHours(0, 0, 0, 0);
+
+      // Xero lock-date check first — a locked period is a hard Xero constraint,
+      // so verify it before navigating to the opening form.
+      if (isReportDateLocked(selectedDate)) {
+        return; // Stop — don't navigate to the opening form
+      }
+
+      let isValidDate = false;
+      let errorMessage = '';
+
+      if (latestReportDate) {
+        // If reports exist: only allow dates after the last submitted report
+        const lastReportDateObj = new Date(latestReportDate + 'T00:00:00');
+        if (selectedDateObj <= lastReportDateObj) {
+          errorMessage = `Transaction date must be after ${latestReportDate}. You can only start reports after your last submitted report date.`;
+        } else {
+          isValidDate = true; // Future dates after last report are valid
+        }
+      } else {
+        // If no reports exist: allow dates within 7 days from today (past) or any future date
+        if (isPastDate && selectedDateObj < sevenDaysAgo) {
+          errorMessage = `Transaction date must be within 7 days from today. You can only create reports for dates on or after ${sevenDaysAgo.toISOString().split('T')[0]}.`;
+        } else {
+          isValidDate = true; // Dates within 7 days (past) or any future date are valid
+        }
+      }
+
+      if (!isValidDate) {
+        showToast(errorMessage);
+        return; // Stop execution, don't proceed with report creation
+      }
+      
+      // Check if user is trying to create today's report but yesterday is missing
+      if (selectedDate === todayString) {
+        const yesterday = new Date(today);
+        yesterday.setDate(today.getDate() - 1);
+        // Use local date formatting instead of toISOString() to avoid timezone issues
+        const yesterdayYear = yesterday.getFullYear();
+        const yesterdayMonth = String(yesterday.getMonth() + 1).padStart(2, '0');
+        const yesterdayDay = String(yesterday.getDate()).padStart(2, '0');
+        const yesterdayString = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
+        
+        // Check if yesterday has a published report
+        const hasYesterdayReport = publishedDates.includes(yesterdayString);
+        
+        // Check if there's an earliest report date (meaning they've started reporting)
+        const hasStartedReporting = earliestReportDate !== null;
+        
+        // Check if yesterday is between the earliest report date and today (gap in sequence)
+        const isGapInSequence = earliestReportDate && yesterdayString >= earliestReportDate && yesterdayString < todayString;
+        
+        if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
+          // Show toast notification about missing previous report
+          showToast('Please complete previous report before starting today\'s report');
+          return; // Stop execution, don't proceed with report creation
+        }
+      }
+      
+      // Log the start new report action
+      console.log('=== START NEW REPORT MESSAGE LOG ===');
+      console.log('Current URL:', window.location.href);
+      console.log('Selected Date:', selectedDate);
+      console.log('Published Dates:', publishedDates);
+      console.log('Published Dates Length:', publishedDates.length);
+      
+      // Check if user has any published/submitted reports
+      // If user has no reports (0 reports), skip the modal and go directly to opening screen
+      const hasNoReports = publishedDates.length === 0 || earliestReportDate === null;
+      const orgId = '{{ org.id }}';
+      
+      if (hasNoReports) {
+        // User has no reports - go directly to opening screen without showing modal
+        console.log('User has no reports - skipping modal, going directly to opening screen');
+        PageTransition.navigateWithFade('/report/opening?entity_id=' + orgId + '&transaction_date=' + selectedDate);
+        const redirectUrl = '/report/opening?entity_id=' + orgId + '&transaction_date=' + selectedDate;
+        console.log('Redirect URL (No Reports):', redirectUrl);
+        window.location.href = redirectUrl;
+      } else {
+        // User has at least one submitted report - show deposit confirmation modal
+        console.log('User has submitted reports - showing deposit confirmation modal');
+        showDepositConfirmationForDate(selectedDate);
+      }
+      
+      console.log('=== END START NEW REPORT MESSAGE LOG ===');
+    }
+
+         function setDepositSubmitterLabel(el) {
+           if (!el) return;
+           el.textContent = 'Deposited';
+         }
+         function setPreviousReportCaption(el, firstName) {
+           if (!el) return;
+           el.textContent = 'Previous report submitted by ' + (firstName || '—');
+         }
+
+         // Function to show start new report modal
+     function showStartNewReportModal() {
+       const modal = document.getElementById('startNewReportModal');
+       if (modal) {
+         // Update deposit date, amount, and bank account based on whether date was explicitly selected from calendar
+         const depositDateElement = modal.querySelector('.deposit_date');
+         const depositAmountElement = modal.querySelector('.deposit_amount');
+         const depositBankAccountElement = modal.querySelector('.deposit_bank_account');
+         const depositSubmitterLabel = modal.querySelector('.deposit_submitter_label');
+         const previousReportCaption = modal.querySelector('.previous_report_submitter_caption');
+         const defaultSubmitterFirstName = {{ latest_report_submitter_first_name | tojson }};
+         
+         if (depositDateElement || depositAmountElement || depositBankAccountElement) {
+           // If date was explicitly selected from calendar, show yesterday's date and deposit relative to selected date
+           if (window.dateExplicitlySelected && window.selectedDateString) {
+             // Calculate yesterday's date relative to the selected date
+             const selectedDate = new Date(window.selectedDateString);
+             const yesterday = new Date(selectedDate);
+             yesterday.setDate(selectedDate.getDate() - 1);
+             
+             // Format yesterday's date as "YYYY-MM-DD" for lookup
+             const yesterdayYear = yesterday.getFullYear();
+             const yesterdayMonth = String(yesterday.getMonth() + 1).padStart(2, '0');
+             const yesterdayDay = String(yesterday.getDate()).padStart(2, '0');
+             const yesterdayString = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
+             
+            // Look up deposit amount for yesterday's date
+            const yesterdayReport = publishedReportsDict[yesterdayString];
+            const depositAmount = yesterdayReport && yesterdayReport.bank_deposit ? yesterdayReport.bank_deposit : 0.0;
+            window.previousDepositAmount = depositAmount;
+             
+             // Format as "DD MMM YYYY" for display
+             const monthAbbr = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+             const month = monthAbbr[yesterday.getMonth()];
+             const day = String(yesterday.getDate()).padStart(2, '0');
+             const year = yesterday.getFullYear();
+             
+             if (depositDateElement) {
+               depositDateElement.textContent = `${day} ${month} ${year}`;
+             }
+             
+             if (depositAmountElement) {
+               depositAmountElement.textContent = `$${depositAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+             }
+             
+             // Update bank account - show bank account if there's a deposit, otherwise show "No deposit"
+             if (depositBankAccountElement) {
+               if (depositAmount > 0) {
+                 // Show the bank account (from entity settings, same for all deposits)
+                 const bankName = '{{ org.latest_deposit_bank_name }}';
+                 const bankNumber = '{{ org.latest_deposit_bank_number }}';
+                 depositBankAccountElement.textContent = bankName && bankNumber ? `${bankName} (${bankNumber})` : (bankName || 'Unknown Bank');
+               } else {
+                 depositBankAccountElement.textContent = 'No deposit';
+               }
+             }
+             if (depositSubmitterLabel) {
+               const fn = yesterdayReport && yesterdayReport.submitter_first_name;
+               setDepositSubmitterLabel(depositSubmitterLabel);
+             }
+             if (previousReportCaption) {
+               const fn = yesterdayReport && yesterdayReport.submitter_first_name;
+               setPreviousReportCaption(previousReportCaption, fn || null);
+             }
+           } else {
+             // If no date explicitly selected (button clicked directly), show the original latest date, deposit, and bank account
+             const originalDate = '{{ org.latest_date.strftime("%d %b %Y") if org.latest_date else "No date" }}';
+            const originalDeposit = {{ org.latest_deposit | tojson }} || 0.0;
+            window.previousDepositAmount = originalDeposit;
+            const originalBankName = '{{ org.latest_deposit_bank_name }}';
+             const originalBankNumber = '{{ org.latest_deposit_bank_number }}';
+             
+             if (depositDateElement) {
+               depositDateElement.textContent = originalDate;
+             }
+             
+             if (depositAmountElement) {
+               depositAmountElement.textContent = `$${originalDeposit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+             }
+             
+             if (depositBankAccountElement) {
+               if (originalDeposit > 0 && originalBankName && originalBankNumber) {
+                 depositBankAccountElement.textContent = `${originalBankName} (${originalBankNumber})`;
+               } else if (originalDeposit > 0 && originalBankName) {
+                 depositBankAccountElement.textContent = originalBankName;
+               } else {
+                 depositBankAccountElement.textContent = 'No deposit';
+               }
+             }
+             if (depositSubmitterLabel) {
+               setDepositSubmitterLabel(depositSubmitterLabel);
+             }
+             if (previousReportCaption) {
+               setPreviousReportCaption(previousReportCaption, defaultSubmitterFirstName || null);
+             }
+           }
+         }
+         
+         modal.classList.remove('hidden');
+         disableBodyScroll(); // Disable scroll when modal is shown
+         // Show note message since no option is pre-selected
+         toggleNoteMessage();
+       }
+     }
+
+    // Function to hide start new report modal
+    function hideStartNewReportModal() {
+      const modal = document.getElementById('startNewReportModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        enableBodyScroll(); // Re-enable scroll when modal is hidden
+      }
+    }
+
+         // Function to save start new report modal
+     function saveStartNewReportModal() {
+       const selectedConfirmation = document.querySelector('input[name="confirmation"]:checked');
+       
+       // Log the modal save action
+       console.log('=== SAVE START NEW REPORT MODAL LOG ===');
+       console.log('Current URL:', window.location.href);
+       console.log('Selected Date:', window.selectedDateString);
+       console.log('Confirmation Value:', selectedConfirmation ? selectedConfirmation.value : 'None');
+       
+      // Validate required fields
+      if (!selectedConfirmation) {
+        showFlashErrorToast('Please select a confirmation option');
+        return;
+      }
+       
+       
+       const confirmationValue = selectedConfirmation.value;
+       
+                // Handle different confirmation options
+       if (confirmationValue === 'yes') {
+         // Proceed with the deposit as stated
+         console.log('Proceeding with deposit confirmation');
+         hideStartNewReportModal();
+         
+         // Check if we have a selected date string (from date selection)
+         const selectedDate = window.selectedDateString;
+         if (selectedDate) {
+           // Redirect to opening form with the selected date
+           PageTransition.navigateWithFade('/report/opening?entity_id={{org.id}}&transaction_date=' + selectedDate);
+           const yesWithDateUrl = '/report/opening?entity_id={{ org.id }}&transaction_date=' + selectedDate;
+           console.log('Redirect URL (Yes with Date):', yesWithDateUrl);
+           window.location.href = yesWithDateUrl;
+           // Clear the stored date
+           window.selectedDateString = null;
+         } else {
+           // If there's an existing draft, continue it; otherwise start new
+           {% if org.has_existing_draft %}
+           PageTransition.navigateWithFade('/report/resume?entity_id={{ org.id }}');
+           const yesContinueUrl = '/report/resume?entity_id={{ org.id }}';
+           console.log('Redirect URL (Yes - Continue Draft):', yesContinueUrl);
+           window.location.href = yesContinueUrl;
+           {% else %}
+           PageTransition.navigateWithFade('/report/opening?entity_id={{ org.id }}');
+           const yesStartNewUrl = '/report/opening?entity_id={{ org.id }}';
+           console.log('Redirect URL (Yes - Start New):', yesStartNewUrl);
+           window.location.href = yesStartNewUrl;
+           {% endif %}
+         }
+       } else if (confirmationValue === 'change') {
+         // Show deposit modal for changes
+         console.log('Action: Show Deposit Modal for Changes');
+         hideStartNewReportModal();
+         showDepositModal();
+       } else if (confirmationValue === 'no') {
+         // Handle no deposit: set previous-day deposit to 0 and (if published)
+         // reverse the Xero bank transfer. The server decides whether to touch
+         // Xero based on report.publishing_status.
+         console.log('No deposit made');
+         hideStartNewReportModal();
+         submitDepositCorrection({ amount: 0, kind: 'no' });
+       }
+       
+       console.log('=== END SAVE START NEW REPORT MODAL LOG ===');
+     }
+
+           // Function to toggle note message visibility based on radio button selection
+      function toggleNoteMessage() {
+        const noteMessage = document.getElementById('noteMessage');
+        const selectedConfirmation = document.querySelector('input[name="confirmation"]:checked');
+        const modalContainer = document.querySelector('#startNewReportModal .bg-white');
+        
+        if (selectedConfirmation) {
+          noteMessage.classList.remove('hidden');
+          
+          // Update note message based on selected option
+          const noteText = document.getElementById('noteText');
+          const noteTitle = noteMessage.querySelector('p:first-of-type');
+          const noteIcon = noteMessage.querySelector('svg');
+          
+          if (selectedConfirmation.value === 'yes') {
+            noteText.textContent = 'By proceeding, you confirm that the stated deposit is accurate and has been deposited to the specified bank.';
+            // Apply default styling for deposit confirmation
+            noteMessage.className = 'bg-[#FFF3D4] rounded-lg p-4';
+            noteIcon.className = 'w-5 h-5';
+            noteIcon.style.color = '#FBBF24';
+            noteTitle.className = 'text-sm text-[#92400E]';
+            noteText.className = 'text-sm text-[#92400E] mt-1';
+            
+            // Reset modal to normal size
+            if (modalContainer) {
+              modalContainer.className = 'bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] sm:max-h-[80vh] overflow-y-auto';
+            }
+          } else if (selectedConfirmation.value === 'change' || selectedConfirmation.value === 'no') {
+            noteText.textContent = 'By proceeding, you confirm that stated deposit amount will be reversed in Xero.';
+            // Apply different styling for Xero reversal
+            noteMessage.className = 'bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4';
+            noteIcon.className = 'w-5 h-5';
+            noteIcon.style.color = '#EF4444';
+            noteTitle.className = 'text-sm text-[#B91C1C]';
+            noteText.className = 'text-sm text-[#B91C1C] mt-1';
+            
+            // Make modal phone-sized for change option
+            if (modalContainer && selectedConfirmation.value === 'change') {
+              modalContainer.className = 'bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm max-h-[90vh] overflow-y-auto mx-auto';
+            } else if (modalContainer) {
+              // Reset to normal size for 'no' option
+              modalContainer.className = 'bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] sm:max-h-[80vh] overflow-y-auto';
+            }
+          }
+        } else {
+          noteMessage.classList.add('hidden');
+        }
+      }
+
+    // Function to show deposit modal
+    function showDepositModal() {
+      document.getElementById('depositModal').classList.remove('hidden');
+      
+      // Check if "change" option was selected in the start modal
+      const selectedConfirmation = document.querySelector('input[name="confirmation"]:checked');
+      const bankAccountField = document.getElementById('bankAccountField');
+      const depositDateField = document.getElementById('depositDateField');
+      
+      if (selectedConfirmation && selectedConfirmation.value === 'change') {
+        // Hide bank account and deposit date fields for change option
+        if (bankAccountField) bankAccountField.style.display = 'none';
+        if (depositDateField) depositDateField.style.display = 'none';
+      } else {
+        // Show bank account and deposit date fields for other options
+        if (bankAccountField) bankAccountField.style.display = 'block';
+        if (depositDateField) depositDateField.style.display = 'block';
+      }
+    }
+
+    // Function to hide deposit modal
+    function hideDepositModal() {
+      document.getElementById('depositModal').classList.add('hidden');
+    }
+
+    // Function to go back to start modal
+    function goBackToStartModal() {
+      hideDepositModal();
+      showStartNewReportModal();
+    }
+
+    // Function to show deposit confirmation for a specific date
+    // Returns true (and shows the blocking error dialog) when the given report
+    // date falls on or before the Xero lock date. Callers MUST stop on true.
+    // Centralised so every "start new report" entry point enforces it. The
+    // opening route and publishing re-validate against Xero as the authoritative
+    // guards.
+    function isReportDateLocked(dateString) {
+      if (!effectiveLockDate || !dateString) return false;
+      const sel = new Date(dateString + 'T00:00:00');
+      const lock = new Date(effectiveLockDate + 'T00:00:00');
+      if (sel <= lock) {
+        const readable = `${lock.getDate()} ${monthNames[lock.getMonth()]} ${lock.getFullYear()}`;
+        showToast(
+          `The selected transaction date is in a locked accounting period. ` +
+          `Xero only allows transactions dated after ${readable}. ` +
+          `Please choose a later date.`
+        );
+        return true;
+      }
+      return false;
+    }
+
+    function showDepositConfirmationForDate(dateString) {
+      // Store the selected date for later use
+      window.selectedDateString = dateString;
+
+      // Block locked dates before any navigation/modal (calendar-selected dates
+      // reach this path directly, bypassing showStartNewReportMessage).
+      if (isReportDateLocked(dateString)) return;
+
+      // Check if user has any published/submitted reports
+      // If user has no reports (0 reports), skip the modal and go directly to opening screen
+      const hasNoReports = publishedDates.length === 0 || earliestReportDate === null;
+      const orgId = '{{ org.id }}';
+      
+      if (hasNoReports) {
+        // User has no reports - go directly to opening screen without showing modal
+        console.log('User has no reports - skipping modal, going directly to opening screen');
+        PageTransition.navigateWithFade('/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString);
+        const redirectUrl = '/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString;
+        console.log('Redirect URL (No Reports):', redirectUrl);
+        window.location.href = redirectUrl;
+      } else {
+        // Calculate previous day relative to the selected date
+        const selectedDate = new Date(dateString);
+        const previousDay = new Date(selectedDate);
+        previousDay.setDate(selectedDate.getDate() - 1);
+        
+        // Format previous day as "YYYY-MM-DD" for lookup
+        const previousDayYear = previousDay.getFullYear();
+        const previousDayMonth = String(previousDay.getMonth() + 1).padStart(2, '0');
+        const previousDayDay = String(previousDay.getDate()).padStart(2, '0');
+        const previousDayString = `${previousDayYear}-${previousDayMonth}-${previousDayDay}`;
+        
+        // Check if previous day has a deposit
+        const previousDayReport = publishedReportsDict[previousDayString];
+        const previousDayDeposit = previousDayReport && previousDayReport.bank_deposit ? previousDayReport.bank_deposit : 0;
+        const hasPreviousDayDeposit = previousDayDeposit > 0;
+        
+        console.log('Previous day check:', {
+          selectedDate: dateString,
+          previousDay: previousDayString,
+          hasReport: !!previousDayReport,
+          depositAmount: previousDayDeposit,
+          hasDeposit: hasPreviousDayDeposit
+        });
+        
+        if (hasPreviousDayDeposit) {
+          // Previous day has a deposit - show deposit confirmation modal
+          console.log('Previous day has deposit - showing deposit confirmation modal');
+          showStartNewReportModal();
+        } else {
+          // Previous day has no deposit - skip modal and go directly to opening screen
+          console.log('Previous day has no deposit - skipping modal, going directly to opening screen');
+          PageTransition.navigateWithFade('/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString);
+          const redirectUrl = '/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString;
+          console.log('Redirect URL (No Previous Deposit):', redirectUrl);
+          window.location.href = redirectUrl;
+        }
+      }
+    }
+
+    // Submit a deposit correction (change or no-deposit) to the server. The
+    // server updates the previous-day report locally and, if that report was
+    // already published to Xero, deletes/recreates the BankTransfer accordingly.
+    async function submitDepositCorrection({ amount, kind, buttonSelector }) {
+      const orgLatestDate = '{{ org.latest_date.strftime("%Y-%m-%d") if org.latest_date else "" }}';
+      if (!orgLatestDate) {
+        showFlashErrorToast('No previous report date available to update');
+        return;
+      }
+
+      const proceedButton = buttonSelector
+        ? document.querySelector(buttonSelector)
+        : null;
+      let restoreButton = () => {};
+      if (proceedButton) {
+        const originalButtonText = proceedButton.textContent;
+        proceedButton.disabled = true;
+        proceedButton.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Please wait...';
+        proceedButton.style.opacity = '0.7';
+        restoreButton = () => {
+          proceedButton.disabled = false;
+          proceedButton.textContent = originalButtonText;
+          proceedButton.style.opacity = '1';
+        };
+      }
+
+      try {
+        const response = await fetch(`/api/check-dept-bank-yest/${encodeURIComponent('{{ org.id }}')}`, {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': '{{ csrf_token() }}',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            amount: amount,
+            date: orgLatestDate,
+            kind: kind,
+          }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.status === 'error') {
+          throw new Error((data && data.message) || `HTTP ${response.status}`);
+        }
+
+        if (data.status === 'warning' && data.message) {
+          showFlashErrorToast(data.message);
+        }
+
+        if (data.redirect_url) {
+          window.location.href = data.redirect_url;
+          return;
+        }
+        restoreButton();
+      } catch (error) {
+        console.error('Error submitting deposit correction:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Deposit correction failed', { message: error && error.message });
+        }
+        showFlashErrorToast(error.message || 'An error occurred while processing your request. Please try again.');
+        restoreButton();
+      }
+    }
+
+    // Function to save deposit modal (option 2 — change in deposit amount)
+    async function saveDepositModal() {
+      const modalInput = document.querySelector('#depositModal input[type="text"]');
+      let amount = parseFloat(modalInput.value.replace(/,/g, '')) || 0;
+      if (modalInput.value === '-') {
+        amount = 0;
+      }
+
+      const prevDeposit = window.previousDepositAmount || 0;
+      if (amount > prevDeposit) {
+        hideDepositModal();
+        showToast('Deposit cannot be higher than previous deposit amount', 'error');
+        return;
+      }
+
+      await submitDepositCorrection({
+        amount: amount,
+        kind: 'change',
+        buttonSelector: 'button[onclick="saveDepositModal()"]',
+      });
+    }
+
+    // Custom dropdown functions
+    function toggleBankAccountDropdown() {
+      const options = document.getElementById('bankAccountOptions');
+      const dropdown = document.getElementById('bankAccountDropdown');
+      
+      if (options.classList.contains('hidden')) {
+        options.classList.remove('hidden');
+        dropdown.classList.add('ring-2', 'ring-blue-500');
+      } else {
+        options.classList.add('hidden');
+        dropdown.classList.remove('ring-2', 'ring-blue-500');
+      }
+    }
+
+    function selectBankAccount(value, displayText) {
+      document.getElementById('bankAccountValue').value = value;
+      document.getElementById('bankAccountDisplay').textContent = displayText;
+      document.getElementById('bankAccountDisplay').classList.remove('text-gray-500');
+      document.getElementById('bankAccountDisplay').classList.add('text-gray-700');
+      document.getElementById('bankAccountOptions').classList.add('hidden');
+      document.getElementById('bankAccountDropdown').classList.remove('ring-2', 'ring-blue-500');
+    }
+
+    // Function to format currency input for modal (with comma formatting and dash for zero)
+    function formatCurrencyModal(input) {
+      // Store cursor position
+      const cursorPosition = input.selectionStart;
+      
+      // Remove any non-numeric characters except decimal point
+      let value = input.value.replace(/[^\d.]/g, '');
+      
+      // Ensure only one decimal point
+      const parts = value.split('.');
+      if (parts.length > 2) {
+        value = parts[0] + '.' + parts.slice(1).join('');
+      }
+      
+      // Limit to 2 decimal places
+      if (parts.length === 2 && parts[1].length > 2) {
+        value = parts[0] + '.' + parts[1].substring(0, 2);
+      }
+      
+      // Show dash for zero value
+      if (value === '0' || value === '0.0' || value === '0.00' || value === '') {
+        input.value = '-';
+        input.setSelectionRange(1, 1);
+        return;
+      }
+      
+      // Format with commas for display
+      if (parts.length > 0 && parts[0] !== '') {
+        const wholeNumber = parts[0];
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '');
+      }
+      
+      // Only update if value actually changed
+      if (input.value !== value) {
+        const oldValue = input.value;
+        input.value = value;
+        
+        // Calculate new cursor position
+        let newCursorPosition = cursorPosition;
+        
+        // Count commas before cursor in old value
+        const commasBeforeCursorOld = (oldValue.substring(0, cursorPosition).match(/,/g) || []).length;
+        
+        // Count commas before cursor in new value
+        const commasBeforeCursorNew = (value.substring(0, cursorPosition).match(/,/g) || []).length;
+        
+        // Adjust cursor position based on comma difference
+        newCursorPosition += (commasBeforeCursorNew - commasBeforeCursorOld);
+        
+        // Ensure cursor position is within bounds
+        newCursorPosition = Math.min(newCursorPosition, value.length);
+        input.setSelectionRange(newCursorPosition, newCursorPosition);
+      }
+    }
+
+    // Format with commas on blur for modal
+    function formatWithCommasModal(input) {
+      let value = input.value;
+      
+      // Skip if empty or dash
+      if (value === '' || value === '-') {
+        return;
+      }
+      
+      // Remove existing commas and format
+      value = value.replace(/,/g, '');
+      const parts = value.split('.');
+      
+      if (parts.length > 0 && parts[0] !== '') {
+        const wholeNumber = parts[0];
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        // Add .00 if no decimal part
+        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
+      }
+      
+      // Only update if we have a valid number
+      if (value !== '' && value !== '-') {
+        input.value = value;
+      }
+    }
+
+    // Calendar functio nality
+    let currentDate = new Date();
+    let currentMonth = currentDate.getMonth();
+    let currentYear = currentDate.getFullYear();
+
+    // Published dates and report IDs from backend
+    const publishedDates = {{ published_dates | tojson }} || [];
+    const publishedReportsDict = {{ published_reports_dict | tojson }} || {};
+
+    // Effective Xero lock date (YYYY-MM-DD) or null. Dates on or before this are
+    // locked in Xero and cannot be reported on.
+    const effectiveLockDate = {{ effective_lock_date | tojson }};
+
+    console.log('Published Dates:', publishedDates);
+    console.log('Published Reports Dict:', publishedReportsDict);
+    
+    
+    // Find the latest report date (most recent date in publishedDates)
+    const latestReportDate = publishedDates.length > 0 ? [...publishedDates].sort().pop() : null;
+    
+    // Find the earliest report date (first date in publishedDates)
+    const earliestReportDate = publishedDates.length > 0 ? [...publishedDates].sort().shift() : null;
+
+    // Month names
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    // Initialize calendar
+    function initCalendar() {
+      updateCalendarDisplay();
+      generateCalendar();
+    }
+
+    // Update month/year display
+    function updateCalendarDisplay() {
+      const monthYearElement = document.getElementById('currentMonthYear');
+      monthYearElement.textContent = `${monthNames[currentMonth]} ${currentYear}`;
+    }
+
+    // Month navigation functions
+    function goToPreviousMonth() {
+      currentMonth--;
+      if (currentMonth < 0) {
+        currentMonth = 11;
+        currentYear--;
+      }
+      updateCalendarDisplay();
+      generateCalendar();
+    }
+
+    function goToNextMonth() {
+      currentMonth++;
+      if (currentMonth > 11) {
+        currentMonth = 0;
+        currentYear++;
+      }
+      updateCalendarDisplay();
+      generateCalendar();
+    }
+
+    function goToCurrentMonth() {
+      const today = new Date();
+      currentMonth = today.getMonth();
+      currentYear = today.getFullYear();
+      updateCalendarDisplay();
+      generateCalendar();
+    }
+
+    // Generate calendar dates
+    function generateCalendar() {
+      const calendarDatesElement = document.getElementById('calendarDates');
+      calendarDatesElement.innerHTML = '';
+
+      const today = new Date();
+      const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
+      const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
+      const firstDayOfWeek = firstDayOfMonth.getDay();
+      const daysInMonth = lastDayOfMonth.getDate();
+
+      // Previous month's trailing days
+      const prevMonth = new Date(currentYear, currentMonth, 0);
+      const daysInPrevMonth = prevMonth.getDate();
+      
+      for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+        const day = daysInPrevMonth - i;
+        const dayElement = createCalendarDay(day, 'prev-month');
+        calendarDatesElement.appendChild(dayElement);
+      }
+
+      // Current month's days
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dayElement = createCalendarDay(day, 'current-month', day, currentMonth, currentYear, today);
+        calendarDatesElement.appendChild(dayElement);
+      }
+
+      // Next month's leading days
+      const remainingCells = 42 - (firstDayOfWeek + daysInMonth); // 42 = 6 rows * 7 days
+      for (let day = 1; day <= remainingCells; day++) {
+        const dayElement = createCalendarDay(day, 'next-month');
+        calendarDatesElement.appendChild(dayElement);
+      }
+    }
+
+    // Create calendar day element
+    function createCalendarDay(day, type, actualDay = null, month = null, year = null, today = null) {
+      const dayElement = document.createElement('div');
+      dayElement.className = 'text-center text-sm py-2 flex items-center justify-center h-10';
+      
+      if (type === 'prev-month' || type === 'next-month') {
+        dayElement.className += ' text-gray-300';
+      } else if (type === 'current-month') {
+        // Add data attributes for selection
+        dayElement.setAttribute('data-day', actualDay);
+        dayElement.setAttribute('data-month', month);
+        dayElement.setAttribute('data-year', year);
+        dayElement.classList.add('calendar-day');
+        
+        // Create date string for comparison
+        const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(actualDay).padStart(2, '0')}`;
+        
+        // Check if this date has a published report
+        const isPublished = publishedDates.includes(dateString);
+        
+        // Check if this date has been published to Xero
+        const reportData = publishedReportsDict[dateString];
+        const isPublishedToXero = reportData && reportData.xero_integrated_yes === true;
+        
+        // Check if this is today
+        const isToday = today && actualDay === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+        
+        // Check if this is the latest report date
+        const isLatestReport = dateString === latestReportDate;
+        
+        // Check if this date is in the past (before today)
+        const isPastDateString = dateString < today.toISOString().split('T')[0];
+        
+        // Check if this date should have a report but doesn't (between earliest and today)
+        const shouldHaveReport = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0];
+        const isMissingReport = shouldHaveReport && !isPublished;
+        
+        // Check if this date is clickable
+        const clickedDate = new Date(year, month, actualDay);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        
+        const isTomorrow = clickedDate.toDateString() === tomorrow.toDateString();
+        const isPastDate = clickedDate < today;
+        const isFutureDate = clickedDate > today;
+        const isMissingReportClick = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0] && !isPublished;
+        
+        // Calculate 7 days ago for lookback restriction
+        const sevenDaysAgo = new Date(today);
+        sevenDaysAgo.setDate(today.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+        
+        // Check if future date is after last submitted report (if reports exist)
+        const isFutureAfterLastReport = isFutureDate && (!latestReportDate || clickedDate > new Date(latestReportDate + 'T00:00:00'));
+        // Check if past date is within 7-day window (ONLY when no reports exist)
+        // If reports exist, past dates should only be clickable if they have published reports (for viewing)
+        const isPastWithin7Days = isPastDate && !latestReportDate && clickedDate >= sevenDaysAgo;
+        
+        // Missing reports should only be clickable if they're after the earliest report but before today
+        // But if latestReportDate exists, we shouldn't allow creating reports before it
+        const isMissingReportClickValid = earliestReportDate && 
+                                         dateString >= earliestReportDate && 
+                                         dateString < today.toISOString().split('T')[0] && 
+                                         !isPublished &&
+                                         (!latestReportDate || dateString > latestReportDate);
+        
+        // Allow clicking on: today, future dates after last report, past dates within 7 days (no reports) or with reports (for viewing), valid missing reports
+        const isClickable = isToday || 
+                            (isFutureAfterLastReport) || 
+                            (isPastWithin7Days && !isPublished) || 
+                            (isPastDate && isPublished) || 
+                            (isFutureDate && isPublished) || 
+                            isMissingReportClickValid;
+        
+        if (isToday) {
+          // Today's date - always green background (regardless of published status)
+          dayElement.className = 'calendar-day text-center text-sm py-2 bg-[#00C896] cursor-pointer rounded-lg flex items-center justify-center h-10 text-white font-medium hover:bg-[#00C896]/80';
+        } else if (isPublished) {
+          // Published reports get gray background (regardless of Xero status, but not if it's today)
+          dayElement.className = 'calendar-day text-center text-sm py-2 bg-[#EBEEF2] cursor-pointer rounded-lg flex items-center justify-center h-10 text-gray-500 font-medium hover:bg-[#EBEEF2]/80';
+        } else if (isMissingReport) {
+          // Missing reports get red background
+          dayElement.className = 'calendar-day text-center text-sm py-2 bg-[#FF6B6B] cursor-pointer rounded-lg flex items-center justify-center h-10 text-white font-medium hover:bg-[#FF6B6B]/80';
+        } else if (isClickable) {
+          // Clickable dates (past dates within window, missing reports, etc.) - normal color with cursor
+          dayElement.className = 'calendar-day text-center text-sm py-2 text-gray-500 hover:bg-gray-50 cursor-pointer rounded-lg flex items-center justify-center h-10';
+        } else {
+          // Non-clickable dates - grayed out with no cursor
+          dayElement.className = 'calendar-day text-center text-sm py-2 text-gray-400 rounded-lg flex items-center justify-center h-10';
+        }
+        
+        // Add click handler for current month days
+        dayElement.onclick = () => handleDateClick(actualDay, month, year);
+      }
+      
+      dayElement.textContent = day;
+      return dayElement;
+    }
+
+    // Track selected date
+    let selectedDate = null;
+
+    // Handle date click
+    function handleDateClick(day, month, year) {
+
+      const clickedDate = new Date(year, month, day);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset time to compare dates only
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      
+      // Create date string for comparison with published dates
+      const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      // Use local date formatting instead of toISOString() to avoid timezone issues
+      const todayYear = today.getFullYear();
+      const todayMonth = String(today.getMonth() + 1).padStart(2, '0');
+      const todayDay = String(today.getDate()).padStart(2, '0');
+      const todayString = `${todayYear}-${todayMonth}-${todayDay}`;
+      const isPublished = publishedDates.includes(dateString);
+      
+      // Check if this date is clickable
+      const isToday = clickedDate.toDateString() === today.toDateString();
+      const isTomorrow = clickedDate.toDateString() === tomorrow.toDateString();
+      const isPastDate = clickedDate < today;
+      
+      // Calculate 10 days ago (allowed lookback period)
+      const tenDaysAgo = new Date(today);
+      tenDaysAgo.setDate(today.getDate() - 62);
+      tenDaysAgo.setHours(0, 0, 0, 0);
+      const tenDaysAgoString = tenDaysAgo.toISOString().split('T')[0];
+      
+      // Check if date is within the 10-day lookback window (today or up to 10 days in the past)
+      const isWithin10DayWindow = clickedDate >= tenDaysAgo && clickedDate <= today;
+      
+      // Calculate 7 days ago for lookback restriction
+      const sevenDaysAgo = new Date(today);
+      sevenDaysAgo.setDate(today.getDate() - 7);
+      sevenDaysAgo.setHours(0, 0, 0, 0);
+      
+      // Only allow clicks on:
+      // 1. Today (for creating/viewing today's report)
+      // 2. Dates within 7-day window (ONLY when no reports exist)
+      // 3. Past dates that have published reports (for viewing)
+      // 4. Missing reports (red dates) - but only if after latestReportDate
+      // 5. Future dates after last submitted report
+      const isMissingReportClick = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0] && !isPublished;
+      const isFutureDate = clickedDate > today;
+      
+      // Check if future date is after last submitted report (if reports exist)
+      const isFutureAfterLastReport = isFutureDate && (!latestReportDate || clickedDate > new Date(latestReportDate + 'T00:00:00'));
+      // Check if past date is within 7-day window (ONLY when no reports exist)
+      // If reports exist, past dates should only be clickable if they have published reports (for viewing) - handled separately
+      const isPastWithinWindow = isPastDate && !latestReportDate && clickedDate >= sevenDaysAgo;
+      
+      let isNextDayAfterLatestReport = false;
+      if (latestReportDate && !isPublished) {
+        const latestReportDateObj = new Date(latestReportDate + 'T00:00:00');
+        const nextDayAfterLatest = new Date(latestReportDateObj);
+        nextDayAfterLatest.setDate(latestReportDateObj.getDate() + 1);
+        nextDayAfterLatest.setHours(0, 0, 0, 0);
+        
+        const clickedDateStr = dateString;
+        const nextDayStr = `${nextDayAfterLatest.getFullYear()}-${String(nextDayAfterLatest.getMonth() + 1).padStart(2, '0')}-${String(nextDayAfterLatest.getDate()).padStart(2, '0')}`;
+        
+        if (clickedDateStr === nextDayStr) {
+          isNextDayAfterLatestReport = true;
+        }
+      }
+      
+      // Missing reports should only be clickable if they're after the earliest report but before today
+      // But if latestReportDate exists, we shouldn't allow creating reports before it
+      const isMissingReportClickValid = earliestReportDate && 
+                                       dateString >= earliestReportDate && 
+                                       dateString < today.toISOString().split('T')[0] && 
+                                       !isPublished &&
+                                       (!latestReportDate || dateString > latestReportDate);
+      
+      const isClickable = isToday || 
+                          (isFutureAfterLastReport) || 
+                          (isPastWithinWindow) || 
+                          (isPastDate && isPublished) || 
+                          (isFutureDate && isPublished) || 
+                          isMissingReportClickValid ||
+                          isNextDayAfterLatestReport;
+      
+      console.log('Date clickability check:', {
+        dateString,
+        isToday,
+        isTomorrow,
+        isPastDate,
+        isFutureDate,
+        isPublished,
+        isMissingReportClick,
+        isClickable
+      });
+      
+      if (!isClickable) {
+        console.log('Date not clickable:', dateString);
+        return; // Do nothing for non-clickable dates
+      }
+      
+      // Log the selected date data
+      console.log('=== DATE SELECTION LOG ===');
+      console.log('Selected Date:', {
+        day: day,
+        month: month,
+        year: year,
+        dateString: dateString,
+        isPublished: isPublished,
+        clickedDate: clickedDate.toDateString(),
+        today: today.toISOString().split('T')[0],
+        publishedDates: publishedDates,
+        earliestReportDate: earliestReportDate
+      });
+      
+      // Update selected date
+      selectedDate = { day, month, year, dateString, isPublished };
+      
+      // Store selected date globally for use by other functions
+      window.selectedDateString = dateString;
+      // Flag to indicate date was explicitly selected from calendar
+      window.dateExplicitlySelected = true;
+      
+      // Update calendar highlighting
+      updateCalendarHighlighting();
+      
+      // Simple logic: Does this date have a report?
+      if (isPublished) {
+        // Date has a report - show view report button
+        console.log('Action: Show View Report Button');
+        updateUIForDateWithReport(dateString);
+        showViewReportButton(dateString);
+        
+      } else {
+        // Check if it's today and yesterday is missing (validation before UI update)
+        // Only validate this for today's date, not for dates within the 10-day window
+        if (isToday) {
+          const yesterday = new Date(today);
+          yesterday.setDate(today.getDate() - 1);
+          // Use local date formatting instead of toISOString() to avoid timezone issues
+          const yesterdayYear = yesterday.getFullYear();
+          const yesterdayMonth = String(yesterday.getMonth() + 1).padStart(2, '0');
+          const yesterdayDay = String(yesterday.getDate()).padStart(2, '0');
+          const yesterdayString = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
+          
+          // Check if yesterday has a published report
+          const hasYesterdayReport = publishedDates.includes(yesterdayString);
+          
+          // Check if there's an earliest report date (meaning they've started reporting)
+          const hasStartedReporting = earliestReportDate !== null;
+          
+          // Check if yesterday is between the earliest report date and today (gap in sequence)
+          const isGapInSequence = earliestReportDate && yesterdayString >= earliestReportDate && yesterdayString < todayString;
+          
+          if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
+            // Show toast notification about missing previous report
+            showToast('Please complete previous report before starting today\'s report');
+            return; // Stop execution - don't allow starting today's report
+          }
+        }
+        
+        // Date doesn't have a report - update UI to show latest report's closing balance and selected date
+        console.log('Action: Update UI for Date Without Report');
+        updateUIForDateWithoutReport(day, month, year, dateString);
+      }
+      
+      console.log('=== END DATE SELECTION LOG ===');
+    }
+
+    // Function to find the latest report before a given date
+    function findLatestReportBeforeDate(targetDateString) {
+      // Sort published dates to find the latest one before the target date
+      const sortedDates = [...publishedDates].sort();
+      
+      // Find the latest date that is before the target date
+      let latestDateBefore = null;
+      for (let i = sortedDates.length - 1; i >= 0; i--) {
+        if (sortedDates[i] < targetDateString) {
+          latestDateBefore = sortedDates[i];
+          break;
+        }
+      }
+      
+      // Return the report data for the latest date before target, or null if none found
+      return latestDateBefore ? publishedReportsDict[latestDateBefore] : null;
+    }
+
+    // Update UI for dates without reports
+    function updateUIForDateWithoutReport(day, month, year, dateString) {
+      // Hide the completion status section
+      const completionSection = document.querySelector('.today_report_completed_section');
+      if (completionSection) {
+        completionSection.style.display = 'none';
+      }
+      
+      // Reset balance to today's balance (but don't reset the date)
+      const currentBalanceAmount = document.querySelector('.current_balance_amount');
+      if (currentBalanceAmount) {
+        const orgClosingBalance = {{ org.closing_balance | tojson }} || 0;
+        currentBalanceAmount.textContent = '$' + orgClosingBalance.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+      }
+      
+      // Try to find either button type - .view_report_btn or .start_new_report_btn
+      let targetBtn = document.querySelector('.view_report_btn') || document.querySelector('.start_new_report_btn');
+      
+      // If no button exists, create one
+      if (!targetBtn) {
+        const container = document.querySelector('.start_new_report_container');
+        if (container) {
+          targetBtn = document.createElement('button');
+          targetBtn.className = 'start_new_report_btn bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full';
+          container.appendChild(targetBtn);
+        }
+      }
+      
+      if (targetBtn) {
+        // Update button className to Start New Report style
+        targetBtn.className = 'start_new_report_btn bg-[#54D3DA] flex font-medium gap-2 hover:bg-[#54D3DA]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full disabled:opacity-50 disabled:cursor-not-allowed';
+
+        // Start New Report is a write action: re-disable for readonly users
+        // when toggling back from a View-mode state.
+        if (IS_READONLY) {
+          targetBtn.setAttribute('disabled', 'disabled');
+          targetBtn.setAttribute('title', 'Read-only access');
+        } else {
+          targetBtn.removeAttribute('disabled');
+          targetBtn.removeAttribute('title');
+        }
+
+        // Change button text and icon to "Start New Report"
+        targetBtn.innerHTML = `
+          <svg class="hover-scale" width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="white"/>
+          </svg>
+          <span>Start New Report</span>
+        `;
+        
+        // Update the "Submitted report until" date display
+        const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
+        if (submittedReportDate) {
+          // Format the date as "DD Nov YYYY"
+          const selectedDate = new Date(year, month, day);
+          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const dayPadded = selectedDate.getDate().toString().padStart(2, '0');
+          const selectedYear = selectedDate.getFullYear();
+          submittedReportDate.textContent = `${dayPadded} ${monthAbbr} ${selectedYear}`;
+          console.log('updateUIForDateWithoutReport: Updated submitted report until to:', `${dayPadded} ${monthAbbr} ${selectedYear}`);
+        } else {
+          console.log('updateUIForDateWithoutReport: Could not find submitted report until element');
+        }
+        
+        // Find the latest report before this date and use its closing balance
+        const latestReportBefore = findLatestReportBeforeDate(dateString);
+        const currentBalanceAmount = document.querySelector('.current_balance_amount');
+        if (currentBalanceAmount) {
+          if (latestReportBefore && latestReportBefore.closing_balance !== undefined) {
+            currentBalanceAmount.textContent = '$' + latestReportBefore.closing_balance.toLocaleString('en-US', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            });
+            console.log('Using closing balance from latest report before:', latestReportBefore.closing_balance);
+          } else {
+            // If no previous report found, use 0
+            currentBalanceAmount.textContent = '$0.00';
+            console.log('No previous report found, using $0.00');
+          }
+        }
+        
+        // Change the onclick to show deposit confirmation for the selected date
+        targetBtn.onclick = function() {
+          showDepositConfirmationForDate(dateString);
+        };
+      }
+    }
+
+    // Update UI for dates with existing reports
+    function updateUIForDateWithReport(dateString) {
+      // Get the report data for this date
+      const reportData = publishedReportsDict[dateString];
+      
+      if (reportData) {
+        // Update the date display
+        const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
+        if (submittedReportDate) {
+          const selectedDate = new Date(dateString);
+          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const day = selectedDate.getDate().toString().padStart(2, '0');
+          const year = selectedDate.getFullYear();
+          submittedReportDate.textContent = `${day} ${monthAbbr} ${year}`;
+        }
+        
+        // Update the current balance amount
+        const currentBalanceAmount = document.querySelector('.current_balance_amount');
+        if (currentBalanceAmount && reportData.closing_balance !== undefined) {
+          currentBalanceAmount.textContent = '$' + reportData.closing_balance.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+        }
+        
+        // Update the transaction date display
+        const transactionDateDisplay = document.querySelector('.text-lg.font-semibold.text-gray-900');
+        if (transactionDateDisplay) {
+          const selectedDate = new Date(dateString);
+          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const day = selectedDate.getDate().toString().padStart(2, '0');
+          const year = selectedDate.getFullYear();
+          transactionDateDisplay.textContent = `${day} ${monthAbbr} ${year}`;
+        }
+        
+        console.log('Updated UI for date with report:', dateString, reportData);
+      }
+    }
+
+    // Reset UI to current state (today's data)
+    function resetUIToCurrentState() {
+      // Reset the date display to today
+      const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
+      if (submittedReportDate) {
+        const today = new Date();
+        const monthAbbr = today.toLocaleDateString(undefined, { month: 'short' });
+        const day = today.getDate().toString().padStart(2, '0');
+        const year = today.getFullYear();
+        submittedReportDate.textContent = `${day} ${monthAbbr} ${year}`;
+      }
+      
+      // Reset the current balance amount to today's balance
+      const currentBalanceAmount = document.querySelector('.current_balance_amount');
+      if (currentBalanceAmount) {
+        const orgClosingBalance = {{ org.closing_balance | tojson }} || 0;
+        currentBalanceAmount.textContent = '$' + orgClosingBalance.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+      }
+      
+      // Reset the transaction date display to today
+      const transactionDateDisplay = document.querySelector('.text-lg.font-semibold.text-gray-900');
+      if (transactionDateDisplay) {
+        const today = new Date();
+        const monthAbbr = today.toLocaleDateString(undefined, { month: 'short' });
+        const day = today.getDate().toString().padStart(2, '0');
+        const year = today.getFullYear();
+        transactionDateDisplay.textContent = `${day} ${monthAbbr} ${year}`;
+      }
+      
+      console.log('Reset UI to current state');
+    }
+
+    // Show completion section when appropriate
+    function showCompletionSection() {
+      const completionSection = document.querySelector('.today_report_completed_section');
+      if (completionSection) {
+        completionSection.style.display = 'block';
+      }
+    }
+
+    // Update calendar highlighting based on selected date
+    function updateCalendarHighlighting() {
+      // Remove previous selection highlighting
+      const allDays = document.querySelectorAll('.calendar-day');
+      allDays.forEach(dayEl => {
+        // Reset to original styling based on day type
+        const day = parseInt(dayEl.textContent);
+        const month = currentMonth;
+        const year = currentYear;
+        const actualDay = day;
+        
+        const today = new Date();
+        const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(actualDay).padStart(2, '0')}`;
+        const isPublished = publishedDates.includes(dateString);
+        
+        // Check if this date has been published to Xero
+        const reportData = publishedReportsDict[dateString];
+        const isPublishedToXero = reportData && reportData.xero_integrated_yes === true;
+        
+        const isToday = today && actualDay === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+        const isLatestReport = dateString === latestReportDate;
+        const isPastDateString = dateString < today.toISOString().split('T')[0];
+        
+        // Check if this date should have a report but doesn't (between earliest and today)
+        const shouldHaveReport = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0];
+        const isMissingReport = shouldHaveReport && !isPublished;
+        
+        // Check if this date is clickable
+        const clickedDate = new Date(year, month, actualDay);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        
+        const isTomorrow = clickedDate.toDateString() === tomorrow.toDateString();
+        const isPastDate = clickedDate < today;
+        const isFutureDate = clickedDate > today;
+        const isMissingReportClick = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0] && !isPublished;
+        
+        // Calculate 7 days ago for lookback restriction
+        const sevenDaysAgo = new Date(today);
+        sevenDaysAgo.setDate(today.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+        
+        // Check if future date is after last submitted report (if reports exist)
+        const isFutureAfterLastReport = isFutureDate && (!latestReportDate || clickedDate > new Date(latestReportDate + 'T00:00:00'));
+        // Check if past date is within 7-day window (ONLY when no reports exist)
+        // If reports exist, past dates should only be clickable if they have published reports (for viewing)
+        const isPastWithin7Days = isPastDate && !latestReportDate && clickedDate >= sevenDaysAgo;
+        
+        // Missing reports should only be clickable if they're after the earliest report but before today
+        // But if latestReportDate exists, we shouldn't allow creating reports before it
+        const isMissingReportClickValid = earliestReportDate && 
+                                         dateString >= earliestReportDate && 
+                                         dateString < today.toISOString().split('T')[0] && 
+                                         !isPublished &&
+                                         (!latestReportDate || dateString > latestReportDate);
+        
+        // Allow clicking on: today, future dates after last report, past dates within 7 days (no reports) or with reports (for viewing), valid missing reports
+        const isClickable = isToday || 
+                            (isFutureAfterLastReport) || 
+                            (isPastWithin7Days && !isPublished) || 
+                            (isPastDate && isPublished) || 
+                            (isFutureDate && isPublished) || 
+                            isMissingReportClickValid;
+        
+        if (isToday) {
+          // Today's date - always green background (regardless of published status)
+          dayEl.className = 'calendar-day text-center text-sm py-2 bg-[#00C896] cursor-pointer rounded-lg flex items-center justify-center h-10 text-white font-medium hover:bg-[#00C896]/80';
+        } else if (isPublished) {
+          // Published reports get gray background (regardless of Xero status, but not if it's today)
+          dayEl.className = 'calendar-day text-center text-sm py-2 bg-[#EBEEF2] cursor-pointer rounded-lg flex items-center justify-center h-10 text-gray-500 font-medium hover:bg-[#EBEEF2]/80';
+        } else if (isMissingReport) {
+          // Missing reports get red background
+          dayEl.className = 'calendar-day text-center text-sm py-2 bg-[#FF6B6B] cursor-pointer rounded-lg flex items-center justify-center h-10 text-white font-medium hover:bg-[#FF6B6B]/80';
+        } else if (isClickable) {
+          // Clickable dates (past dates within window, missing reports, etc.) - normal color with cursor
+          dayEl.className = 'calendar-day text-center text-sm py-2 text-gray-500 hover:bg-gray-50 cursor-pointer rounded-lg flex items-center justify-center h-10';
+        } else {
+          // Non-clickable dates - grayed out with no cursor
+          dayEl.className = 'calendar-day text-center text-sm py-2 text-gray-400 rounded-lg flex items-center justify-center h-10';
+        }
+      });
+      
+      // Add selection highlighting if a date is selected
+      if (selectedDate) {
+        const selectedDayEl = document.querySelector(`[data-day="${selectedDate.day}"][data-month="${selectedDate.month}"][data-year="${selectedDate.year}"]`);
+        if (selectedDayEl) {
+          const today = new Date();
+          const isToday = selectedDate.day === today.getDate() && selectedDate.month === today.getMonth() && selectedDate.year === today.getFullYear();
+          const isLatestReport = selectedDate.dateString === latestReportDate;
+          
+          // Check if this date should have a report but doesn't (missing report)
+          const shouldHaveReport = earliestReportDate && selectedDate.dateString >= earliestReportDate && selectedDate.dateString < today.toISOString().split('T')[0];
+          const isMissingReport = shouldHaveReport && !selectedDate.isPublished;
+          
+          if (!isLatestReport && !selectedDate.isPublished && !isToday && !isMissingReport) {
+            // Add primary color selection highlighting for regular dates only (not missing reports)
+            selectedDayEl.className = 'calendar-day text-center text-sm py-2 bg-[#54D3DA]/20 border-2 border-[#54D3DA] cursor-pointer rounded-lg flex items-center justify-center h-10 text-[#54D3DA] font-medium hover:bg-[#54D3DA]/30';
+          }
+        }
+      }
+    }
+
+    // Check if yesterday has a report and show warning notification if needed
+    function checkYesterdayReport() {
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayString = yesterday.toISOString().split('T')[0];
+      
+      // Check if yesterday has a published report
+      const hasYesterdayReport = publishedDates.includes(yesterdayString);
+      
+      // Only show warning if:
+      // 1. User has submitted reports before (not their first report)
+      // 2. There's an earliest report date (meaning they've started reporting)
+      // 3. Yesterday doesn't have a report
+      // 4. Yesterday is between the earliest report date and today (gap in sequence)
+      const hasStartedReporting = earliestReportDate !== null;
+      const isGapInSequence = earliestReportDate && yesterdayString >= earliestReportDate && yesterdayString < today.toISOString().split('T')[0];
+      
+      if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
+        showWarningNotification();
+      }
+    }
+
+    // Initialize page transition and calendar when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      // Initialize page transition first
+      PageTransition.init('.main-content', 'fadeIn', 10);
+      
+      // Initialize calendar
+      initCalendar();
+      
+      // Fallback calendar initialization in case the first one fails
+      setTimeout(() => {
+        const calendarDatesElement = document.getElementById('calendarDates');
+        if (calendarDatesElement && calendarDatesElement.children.length === 0) {
+          initCalendar();
+        }
+        
+      }, 500);
+      
+      // Check if we should auto-start next day report
+      const autoStartNextDay = sessionStorage.getItem('autoStartNextDay');
+      if (autoStartNextDay) {
+        sessionStorage.removeItem('autoStartNextDay');
+        // Set the selected date and trigger the start new report flow
+        window.selectedDateString = autoStartNextDay;
+        window.dateExplicitlySelected = true;
+        // Wait a bit for page to fully load, then trigger
+        setTimeout(() => {
+          if (typeof showStartNewReportMessage === 'function') {
+            showStartNewReportMessage();
+          }
+        }, 1000);
+      }
+      
+      // Check yesterday report and show warning if needed
+      checkYesterdayReport();
+      
+      // Add event listeners for month navigation
+      document.getElementById('prevMonthBtn').addEventListener('click', goToPreviousMonth);
+      document.getElementById('nextMonthBtn').addEventListener('click', goToNextMonth);
+      
+      // Add double-click on month/year to go to current month
+      document.getElementById('currentMonthYear').addEventListener('dblclick', goToCurrentMonth);
+      
+      // Show flash notification on page load if it exists
+      {% if get_flashed_messages() %}
+        showFlashNotification();
+      {% endif %}
+
+    });
+    
+    // Fallback initialization - run after a delay regardless of DOMContentLoaded
+    setTimeout(() => {
+      {% if get_flashed_messages() %}
+        showFlashNotification();
+      {% endif %}
+    }, 100);
+    
+    // Fallback initialization - run after a delay regardless of DOMContentLoaded
+    setTimeout(() => {
+      const calendarDatesElement = document.getElementById('calendarDates');
+      if (calendarDatesElement && calendarDatesElement.children.length === 0) {
+        initCalendar();
+      }
+      
+    }, 1000);
+
+
+    // Toast notification functions
+    function showToast(message, type = 'error') {
+      // Errors are blocking: show a dialog that stays open until the user clicks
+      // OK, matching the flashed-error behaviour. Non-error toasts still slide
+      // in and auto-dismiss.
+      if (type === 'error') {
+        showErrorDialog(message);
+        return;
+      }
+
+      const toast = document.getElementById('toastNotification');
+      const messageElement = document.getElementById('toastMessage');
+
+      if (!toast || !messageElement) {
+        console.error('Toast elements not found');
+        return;
+      }
+      
+      // Update message
+      messageElement.textContent = message;
+      
+      // Remove hidden class first, but keep translate-x-full to start off-screen
+      toast.classList.remove('hidden');
+      
+      // Force a reflow to ensure the element is visible before starting animation
+      void toast.offsetHeight;
+      
+      // Small delay to ensure the element is visible, then slide in
+      setTimeout(() => {
+        toast.classList.remove('translate-x-full');
+        toast.classList.add('translate-x-0');
+      }, 10);
+      
+      // Auto-hide after 4 seconds
+      setTimeout(() => {
+        hideToast();
+      }, 4000);
+    }
+    
+    function hideToast() {
+      const toast = document.getElementById('toastNotification');
+      if (!toast) return;
+      
+      // Slide out using Tailwind classes (same as flash notification)
+      toast.classList.remove('translate-x-0');
+      toast.classList.add('translate-x-full');
+      
+      // Wait for animation to complete before hiding
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 500); // Match the CSS transition duration
+    }
+
+    // Flash notification slider functions
+    function showFlashNotification() {
+      const notification = document.getElementById('flashNotification');
+      if (!notification) return;
+
+      // Errors are blocking: show a dialog that stays open until the user
+      // clicks OK, rather than a toast that auto-dismisses. The error flash
+      // branch renders an #errorMessage element we can read from.
+      const errorMsgEl = notification.querySelector('#errorMessage');
+      if (errorMsgEl) {
+        showErrorDialog(errorMsgEl.textContent);
+        return;
+      }
+
+      if (notification.querySelector('.toast')) {
+        // Slide in using Tailwind classes
+        notification.classList.remove('translate-x-full');
+        notification.classList.add('translate-x-0');
+
+        // Auto-hide after 4 seconds
+        setTimeout(() => {
+          hideFlashNotification();
+        }, 4000);
+      }
+    }
+
+    // Blocking error dialog — stays open until the user clicks OK.
+    function showErrorDialog(message) {
+      const dialog = document.getElementById('errorDialog');
+      if (!dialog) { alert(message); return; }
+      const msgEl = document.getElementById('errorDialogMessage');
+      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
+      dialog.classList.remove('hidden');
+      dialog.classList.add('flex');
+    }
+
+    function hideErrorDialog() {
+      const dialog = document.getElementById('errorDialog');
+      if (!dialog) return;
+      dialog.classList.add('hidden');
+      dialog.classList.remove('flex');
+    }
+
+    function hideFlashNotification() {
+      const notification = document.getElementById('flashNotification');
+      if (notification) {
+        // Slide out using Tailwind classes
+        notification.classList.remove('translate-x-0');
+        notification.classList.add('translate-x-full');
+        
+        // Hide all toast elements after animation
+        setTimeout(() => {
+          const allToasts = notification.querySelectorAll('.toast');
+          allToasts.forEach(toast => {
+            toast.classList.add('hidden');
+          });
+        }, 500);
+      }
+    }
+
+    function showFlashSuccessToast(message) {
+      const notification = document.getElementById('flashNotification');
+      if (!notification) return;
+
+      const existingToasts = notification.querySelectorAll('.toast');
+      existingToasts.forEach(t => t.remove());
+
+      const successToast = document.createElement('div');
+      successToast.className = 'toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative';
+      successToast.style.borderColor = '#a9d7cb';
+      successToast.style.backgroundColor = '#f1fffc';
+      successToast.innerHTML = `
+        <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+          <p class="font-[400] break-words w-full" style="color: #92c6b9;">${message}</p>
+        </div>
+        <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      `;
+
+      notification.appendChild(successToast);
+      notification.classList.remove('translate-x-full');
+      notification.classList.add('translate-x-0');
+
+      setTimeout(() => { hideFlashNotification(); }, 4000);
+    }
+
+    // Function to show error toast in flash notification container (follows same pattern as success messages)
+    function showFlashErrorToast(message) {
+      const notification = document.getElementById('flashNotification');
+      if (!notification) return;
+      
+      // Remove any existing toasts
+      const existingToasts = notification.querySelectorAll('.toast');
+      existingToasts.forEach(toast => toast.remove());
+      
+      // Create error toast element
+      const errorToast = document.createElement('div');
+      errorToast.className = 'toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative';
+      errorToast.style.borderColor = '#ffcccc';
+      errorToast.style.backgroundColor = '#fff1f1';
+      errorToast.innerHTML = `
+        <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
+          <p class="font-[400] break-words w-full" style="color: #f57e7e;">${message}</p>
+        </div>
+        <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      `;
+      
+      // Add toast to notification container
+      notification.appendChild(errorToast);
+      
+      // Slide in using Tailwind classes (same as success messages)
+      notification.classList.remove('translate-x-full');
+      notification.classList.add('translate-x-0');
+
+      // Auto-hide after 4 seconds (same pattern as success messages)
+      setTimeout(() => {
+        hideFlashNotification();
+      }, 4000);
+    }
+
+    // Function to show warning (yellow) toast — same shape as success/error
+    function showFlashWarningToast(message) {
+      const notification = document.getElementById('flashNotification');
+      if (!notification) return;
+
+      const existingToasts = notification.querySelectorAll('.toast');
+      existingToasts.forEach(t => t.remove());
+
+      const warningToast = document.createElement('div');
+      warningToast.className = 'toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative';
+      warningToast.style.borderColor = '#fee0aa';
+      warningToast.style.backgroundColor = '#fffaf1';
+      warningToast.innerHTML = `
+        <img src="{{ url_for('static', filename='img/warning-icon.png') }}" alt="Warning" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #DA8700;">Warning</p>
+          <p class="font-[400] break-words w-full" style="color: #e8b765;">${message}</p>
+        </div>
+        <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      `;
+
+      notification.appendChild(warningToast);
+      notification.classList.remove('translate-x-full');
+      notification.classList.add('translate-x-0');
+
+      setTimeout(() => { hideFlashNotification(); }, 4000);
+    }
+
+    // Function to show info (blue) toast — same shape as success/error
+    function showFlashInfoToast(message) {
+      const notification = document.getElementById('flashNotification');
+      if (!notification) return;
+
+      const existingToasts = notification.querySelectorAll('.toast');
+      existingToasts.forEach(t => t.remove());
+
+      const infoToast = document.createElement('div');
+      infoToast.className = 'toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative';
+      infoToast.style.borderColor = '#a9d3ff';
+      infoToast.style.backgroundColor = '#f1f8ff';
+      infoToast.innerHTML = `
+        <img src="{{ url_for('static', filename='img/info-icon.png') }}" alt="Information" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #006FE6;">Information</p>
+          <p class="font-[400] break-words w-full" style="color: #5ba2ee;">${message}</p>
+        </div>
+        <button class="toast-close shrink-0" onclick="hideFlashNotification()">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      `;
+
+      notification.appendChild(infoToast);
+      notification.classList.remove('translate-x-full');
+      notification.classList.add('translate-x-0');
+
+      setTimeout(() => { hideFlashNotification(); }, 4000);
+    }
+
+    // Warning notification functions
+    function showWarningNotification() {
+      const notification = document.getElementById('warningNotification');
+      notification.classList.remove('hidden');
+    }
+
+    function hideWarningNotification() {
+      const notification = document.getElementById('warningNotification');
+      notification.classList.add('hidden');
+    }
+
+    // Function to navigate to specific report step
+    function navigateToStep(step) {
+      const orgId = {{ org.id | tojson }};
+      const hasDraft = {{ org.has_existing_draft | tojson }};
+      const draftDate = {{ (org.draft_date.strftime('%Y-%m-%d') if org.draft_date else None) | tojson }};
+
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      const todayString = `${year}-${month}-${day}`;
+
+      const transactionDate = hasDraft && draftDate ? draftDate : todayString;
+
+      const baseUrls = {{ {
+        'opening': url_for('report.report_opening'),
+        'sales': url_for('report.report_sale'),
+        'expenses': url_for('report.report_expense'),
+        'deposit': url_for('report.report_deposit'),
+        'cash_count': url_for('report.report_cash_count'),
+        'ending': url_for('report.report_ending')
+      } | tojson }};
+
+      const baseUrl = baseUrls[step];
+      if (!baseUrl) {
+        console.error('Unknown step:', step);
+        return;
+      }
+
+      const redirectUrl = `${baseUrl}?entity_id=${orgId}&transaction_date=${transactionDate}`;
+      PageTransition.navigateWithFade(redirectUrl);
+      window.location.href = redirectUrl;
+    }
+    </script>
+
+
+
+   <!-- Deposit Modal -->
+   <div id="depositModal" class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden p-4">
+     <div class="bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] sm:max-h-[80vh] overflow-y-auto" style="min-width: 0;">
+       <!-- Modal Header -->
+       <div class="flex items-center justify-between mb-6">
+         <h2 class="text-xl font-bold text-gray-900">Deposit to Bank</h2>
+         <button onclick="hideDepositModal()" class="text-gray-400 hover:text-gray-600">
+           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+           </svg>
+         </button>
+       </div>
+
+       <!-- Modal Content -->
+       <div class="space-y-6">
+         <!-- Deposit Amount Field -->
+         <div class="deposit_amount_field">
+            <label class="deposit_amount_label block text-sm font-medium text-gray-700 mb-2">Deposit Amount <span class="text-red-500">*</span></label>
+            <div class="deposit_amount_input_container relative">
+              <div class="deposit_amount_currency_icon absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <span class="text-gray-500 text-sm">$</span>
+              </div>
+              <input type="text" placeholder="Enter amount deposited to bank" class="deposit_amount_input w-full pl-8 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" oninput="formatCurrencyModal(this)" onblur="formatWithCommasModal(this)">
+            </div>
+          </div>
+
+          <!-- Bank Account Field -->
+          <div class="bank_account_field mb-4" id="bankAccountField">
+            <label class="bank_account_label block text-sm font-medium text-gray-700 mb-2">Bank Account <span class="text-red-500">*</span></label>
+            <div class="bank_account_dropdown_container relative w-full">
+              <button type="button" id="bankAccountDropdown" class="bank_account_dropdown_button w-full pl-3 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent text-left flex items-center justify-between" onclick="toggleBankAccountDropdown()">
+                <span id="bankAccountDisplay" class="bank_account_display text-gray-500">Select a bank account</span>
+                <svg class="bank_account_dropdown_icon w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+              </button>
+              <div id="bankAccountOptions" class="bank_account_options absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden">
+                <div class="bank_account_options_container py-1">
+                  {% for account in bank_accounts %}
+                    <button type="button" class="bank_account_option w-full px-3 py-2 text-left text-gray-700 hover:bg-blue-500 hover:text-white" onclick="selectBankAccount('{{ account['AccountID'] }}', '{{ account['Name'] }} ({{ account['MaskedBankAccountNumber'] }})')">{{ account['Name'] }} ({{ account['MaskedBankAccountNumber'] }})</button>
+                  {% endfor %}
+                </div>
+              </div>
+              <input type="hidden" id="bankAccountValue" class="bank_account_value" value="{{main_bank_account['xero_account_id']}}">
+            </div>
+          </div>
+
+          <!-- Deposit Date Field -->
+          <div class="deposit_date_field" id="depositDateField">
+            <label class="deposit_date_label block text-sm font-medium text-gray-700 mb-2">Deposit Date <span class="text-red-500">*</span></label>
+            <div class="deposit_date_input_container relative">
+              <div class="deposit_date_icon_container absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg class="deposit_date_icon w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+              </div>
+              <input type="date" value="2025-04-13" class="deposit_date_input w-full pl-10 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent">
+            </div>
+          </div>
+       </div>
+
+         <!-- Modal Footer -->
+         <div class="flex gap-3 mt-6">
+          <button onclick="goBackToStartModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors">
+            Back
+          </button>
+          <button onclick="saveDepositModal()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
+            Proceed
+          </button>
+        </div>
+     </div>
+   </div>
+
+   <script>
+
+    // Function to go to settings page
+    // Function to disable body scroll
+    function disableBodyScroll() {
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+    }
+
+    // Function to enable body scroll
+    function enableBodyScroll() {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    }
+
+    // Function to hide success modal
+    function hideSuccessModal() {
+      document.getElementById('successModal').classList.add('hidden');
+      enableBodyScroll(); // Re-enable scroll when modal is hidden
+    }
+
+    // Function to show setup settings modal
+    function showSetupSettingsModal() {
+      const modal = document.getElementById('setupSettingsModal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        disableBodyScroll(); // Disable scroll when modal is shown
+      }
+    }
+
+    // Function to hide setup settings modal (not used, but for consistency)
+    function hideSetupSettingsModal() {
+      const modal = document.getElementById('setupSettingsModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        enableBodyScroll(); // Re-enable scroll when modal is hidden
+      }
+    }
+
+    // Initialize modal scroll behavior when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      // Check if Setup Settings modal should be shown
+      const setupModal = document.getElementById('setupSettingsModal');
+      if (setupModal && !setupModal.classList.contains('hidden')) {
+        disableBodyScroll();
+      }
+
+      // Check if Success modal is visible and disable scroll
+      const successModal = document.getElementById('successModal');
+      if (successModal && !successModal.classList.contains('hidden')) {
+        disableBodyScroll();
+      }
+
+      // Check if Start New Report modal is visible and disable scroll
+      const startNewReportModal = document.getElementById('startNewReportModal');
+      if (startNewReportModal && !startNewReportModal.classList.contains('hidden')) {
+        disableBodyScroll();
+      }
+
+      // Add click handler to Start New Report modal backdrop
+      if (startNewReportModal) {
+        startNewReportModal.addEventListener('click', function(e) {
+          if (e.target === startNewReportModal) {
+            hideStartNewReportModal();
+          }
+        });
+      }
+
+      // Add click handler to Success modal backdrop
+      if (successModal) {
+        successModal.addEventListener('click', function(e) {
+          if (e.target === successModal) {
+            hideSuccessModal();
+          }
+        });
+      }
+
+      // Show setup settings modal if settings are incomplete
+      {% if not has_complete_xero_settings %}
+      showSetupSettingsModal();
+      {% endif %}
+    });
+
+
+    // Function to show continue report message
+    function showContinueReportMessage() {
+      alert('This feature is currently in progress, Stay Tuned!');
+    }
+
+    // Function to view today's report
+    function viewTodayReport() {
+      // Log the view today report action
+      console.log('=== VIEW TODAY REPORT LOG ===');
+      console.log('Current URL:', window.location.href);
+      
+      // Get today's date in YYYY-MM-DD format
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      const todayString = `${year}-${month}-${day}`;
+      
+      const orgId = '{{ org.id }}';
+      const redirectUrl = `/entity/${orgId}/ending?entity_id=${orgId}&transaction_date=${todayString}`;
+      console.log('Redirect URL:', redirectUrl);
+      console.log('=== END VIEW TODAY REPORT LOG ===');
+      
+      // Redirect to entity-specific ending page with today's date
+      PageTransition.navigateWithFade(redirectUrl);
+      window.location.href = redirectUrl;
+    }
+
+    // Function to navigate to specific report step
+    function navigateToStep(step) {
+      const orgId = {{ org.id | tojson }};
+      const hasDraft = {{ org.has_existing_draft | tojson }};
+      const draftDate = {{ (org.draft_date.strftime('%Y-%m-%d') if org.draft_date else None) | tojson }};
+
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      const todayString = `${year}-${month}-${day}`;
+
+      const transactionDate = hasDraft && draftDate ? draftDate : todayString;
+
+      const baseUrls = {{ {
+        'opening': url_for('report.report_opening'),
+        'sales': url_for('report.report_sale'),
+        'expenses': url_for('report.report_expense'),
+        'deposit': url_for('report.report_deposit'),
+        'cash_count': url_for('report.report_cash_count'),
+        'ending': url_for('report.report_ending')
+      } | tojson }};
+
+      const baseUrl = baseUrls[step];
+      if (!baseUrl) {
+        console.error('Unknown step:', step);
+        return;
+      }
+
+      const redirectUrl = `${baseUrl}?entity_id=${orgId}&transaction_date=${transactionDate}`;
+      PageTransition.navigateWithFade(redirectUrl);
+      window.location.href = redirectUrl;
+    }
+   </script>
+</body>
+</html>

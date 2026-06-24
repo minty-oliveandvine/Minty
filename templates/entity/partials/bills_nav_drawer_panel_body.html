@@ -1,0 +1,94 @@
+{# Full nav drawer body (header + scroll nav + settings/logout + cat) — parity with components/sidepanel.html
+   for Bills-shell settings pages. Expects: org, entity_acronym, bill_settings_url, bills_app_handoff_url #}
+{% set active_entity_id = org.id if org is defined and org else None %}
+{% set settings_nav_active = active_entity_id and (
+    (request.endpoint in ['entity.entity_settings', 'entity_settings'] and request.view_args and (request.view_args.entity_id|string == active_entity_id|string))
+    or (request.endpoint in ['entity.entity_settings_users', 'entity_settings_users'] and request.view_args and (request.view_args.org_id|string == active_entity_id|string))
+    or (request.endpoint in ['entity.entity_settings_entity', 'entity_settings_entity'] and request.view_args and (request.view_args.org_id|string == active_entity_id|string))
+) %}
+{% set reports_nav_active = active_entity_id and request.endpoint in ['report.entity_report_history', 'entity_report_history'] and request.view_args and (request.view_args.entity_id|string == active_entity_id|string) %}
+{% set dashboard_nav_active = active_entity_id and request.endpoint == 'entity.report_dashboard' and request.view_args and (request.view_args.id|string == active_entity_id|string) %}
+
+<!-- Panel header: abbreviation + close button -->
+<div class="flex flex-col gap-3 border-b border-[rgba(101,101,101,0.2)] px-4 py-3 sm:px-6 sm:py-4">
+  <div class="flex min-w-0 items-center justify-between gap-3">
+    <span class="min-w-0 truncate text-sm font-semibold tracking-wide text-[#656565] sm:text-base">
+      {{ entity_acronym }}
+    </span>
+    <button type="button" onclick="closeNavDrawer()"
+      class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[rgba(101,101,101,0.1)]"
+      aria-label="Close menu">
+      <span class="material-symbols-outlined leading-none" style="font-size:26px">close</span>
+    </button>
+  </div>
+  <a href="{{ url_for('entity.entity_list') }}"
+    class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium text-[#656565] transition-colors hover:bg-[rgba(101,101,101,0.1)]">
+    <span class="material-symbols-outlined shrink-0 leading-none text-[#656565]" style="font-size:22px" aria-hidden="true">corporate_fare</span>
+    Select entity
+  </a>
+</div>
+
+<div class="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-6 sm:py-4">
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div class="w-full flex-none overflow-y-auto overscroll-contain">
+      <div class="flex flex-col gap-3">
+
+        <div class="flex flex-col gap-1" role="group" aria-label="Petty Cash">
+          <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-[rgba(101,101,101,0.7)]">Petty Cash</p>
+          <ul class="flex flex-col gap-1">
+            <li class="w-full">
+              <a href="{{ url_for('entity.report_dashboard', id=org.id) }}"
+                 class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium transition-colors {% if dashboard_nav_active %}bg-[rgba(84,211,218,0.15)] text-[#54d3da]{% else %}text-[#656565] hover:bg-[rgba(101,101,101,0.1)]{% endif %}">
+                <span class="material-symbols-outlined shrink-0 leading-none {% if dashboard_nav_active %}text-[#54d3da]{% else %}text-[#656565]{% endif %}" style="font-size:22px" aria-hidden="true">space_dashboard</span>
+                Dashboard
+              </a>
+            </li>
+            <li class="w-full">
+              <a href="{{ url_for('report.entity_report_history', entity_id=org.id) }}"
+                 class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium transition-colors {% if reports_nav_active %}bg-[rgba(84,211,218,0.15)] text-[#54d3da]{% else %}text-[#656565] hover:bg-[rgba(101,101,101,0.1)]{% endif %}">
+                <span class="material-symbols-outlined shrink-0 leading-none {% if reports_nav_active %}text-[#54d3da]{% else %}text-[#656565]{% endif %}" style="font-size:22px" aria-hidden="true">bar_chart</span>
+                Reports
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        {% if is_billing_enabled(org.id) %}
+        <div class="mt-6 flex flex-col gap-3" role="group" aria-label="Payment Request">
+          <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-[rgba(101,101,101,0.7)]">Payment Request</p>
+          <ul class="flex flex-col gap-1">
+            <li class="w-full">
+              <a href="{{ bills_app_handoff_url(org.id) }}"
+                 class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium text-[#656565] transition-colors hover:bg-[rgba(101,101,101,0.1)]">
+                <span class="material-symbols-outlined shrink-0 leading-none text-[#656565]" style="font-size:22px" aria-hidden="true">local_atm</span>
+                Bills
+              </a>
+            </li>
+          </ul>
+        </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+    <div class="mt-4 shrink-0 -mx-4 border-t border-[rgba(101,101,101,0.15)] sm:-mx-6" role="presentation">
+      <div class="flex flex-col gap-2 px-4 pt-4 sm:px-6 sm:pt-4">
+        <a href="{{ url_for('entity_settings', entity_id=org.id) }}?from=bills"
+           class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium transition-colors {% if settings_nav_active %}bg-[rgba(84,211,218,0.15)] text-[#54d3da]{% else %}text-[#656565] hover:bg-[rgba(101,101,101,0.1)]{% endif %}"
+           {% if settings_nav_active %}aria-current="page"{% endif %}>
+          <span class="material-symbols-outlined shrink-0 leading-none {% if settings_nav_active %}text-[#54d3da]{% else %}text-[#656565]{% endif %}" style="font-size:22px" aria-hidden="true">settings</span>
+          Settings
+        </a>
+        <a href="{{ url_for('auth.logout') }}"
+           class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium text-[#656565] transition-colors hover:bg-[rgba(101,101,101,0.1)]">
+          <span class="material-symbols-outlined shrink-0 leading-none text-[#656565]" style="font-size:22px" aria-hidden="true">logout</span>
+          Logout
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="w-full flex shrink-0 justify-center border-t border-[rgba(101,101,101,0.1)] pt-2 pb-3 sm:pb-4" style="padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));">
+  <img src="{{ url_for('static', filename='img/sidepanel_cat.webp') }}" alt="" width="200" height="120" class="h-auto w-[90%] max-w-[13rem] object-contain" loading="lazy" decoding="async">
+</div>

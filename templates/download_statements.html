@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download Report Statements</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+    <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" class="logo" style="width: 40px;">
+            </a>
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin">Admin Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link btn btn-secondary text-white" href="{{ url_for('auth.logout') }}">Logout</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <h1 class="text-center">Download Report Statements</h1>
+        <p class="text-center">Select a company and date range to download detailed report statements.</p>
+
+        <!-- Filter Form -->
+        <form method="POST" enctype="multipart/form-data" action="{{ url_for('report.download_statements') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row">
+                <div class="col-md-4">
+                    <label for="start_date">Start Date:</label>
+                    <input type="date" name="start_date" id="start_date" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                    <label for="end_date">End Date:</label>
+                    <input type="date" name="end_date" id="end_date" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                    <label for="company">Company:</label>
+                    <select name="company" id="company" class="form-control">
+                        <option value="">All Companies</option>
+                        {% for company in companies %}
+                        <option value="{{ company }}">{{ company }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="text-center mt-4">
+                <button type="submit" id="downloadStatementsButton" class="btn btn-primary">
+                    Download Report Statements
+                </button>
+                <button id="downloadAttachmentsButton" type="button" class="btn btn-secondary">
+                    Download Attachments
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const downloadStatementsButton = document.getElementById('downloadStatementsButton');
+            const downloadAttachmentsButton = document.getElementById('downloadAttachmentsButton');
+
+            // Function to show loading indicator
+            function setLoading(button, loading) {
+                if (loading) {
+                    button.disabled = true;
+                    button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
+                } else {
+                    button.disabled = false;
+                    button.innerHTML = button.getAttribute('data-original-text');
+                }
+            }
+
+            // Save original text for both buttons
+            downloadStatementsButton.setAttribute('data-original-text', downloadStatementsButton.textContent);
+            downloadAttachmentsButton.setAttribute('data-original-text', downloadAttachmentsButton.textContent);
+
+            downloadAttachmentsButton.addEventListener('click', function () {
+                const startDate = document.getElementById('start_date')?.value;
+                const endDate = document.getElementById('end_date')?.value;
+                const company = document.getElementById('company')?.value;
+
+                if (!startDate || !endDate) {
+                    alert("Please select a start date and end date.");
+                    return;
+                }
+
+                setLoading(downloadAttachmentsButton, true);
+
+                const formData = new FormData();
+                formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+                formData.append('start_date', startDate);
+                formData.append('end_date', endDate);
+                formData.append('company', company || '');
+
+                fetch('/download_attachments', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: formData,
+                })
+                    .then(response => {
+                        const contentType = response.headers.get('Content-Type');
+                        console.log("Response Status:", response.status);
+                        console.log("Response Content-Type:", contentType);
+
+                        if (response.ok && contentType === 'application/zip') {
+                            return response.blob();
+                        } else if (contentType?.includes('application/json')) {
+                            return response.json().then(data => {
+                                console.error("Server returned an error:", data);
+                                throw new Error(data.message || 'Failed to download attachments.');
+                            });
+                        } else {
+                            return response.text().then(html => {
+                                console.error("Server returned unexpected HTML:", html);
+                                throw new Error('Unexpected response format from server.');
+                            });
+                        }
+                    })
+                    .then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `attachments_${startDate}_${endDate}.zip`;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        window.URL.revokeObjectURL(url);
+                    })
+                    .catch(error => {
+                        console.error('Error occurred while downloading attachments:', error);
+                        if (window.sendLogToDataDog) {
+                            window.sendLogToDataDog('error', 'Error downloading attachments', { message: error && error.message });
+                        }
+                        alert(`Error: ${error.message}`);
+                    })
+                    .finally(() => {
+                        setLoading(downloadAttachmentsButton, false);
+                    });
+            });
+        });
+    </script>
+
+</body>
+</html>

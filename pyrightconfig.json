@@ -1,0 +1,11 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportUnsupportedDunderAll": "none",
+  "reportCallIssue": "none",
+  "reportOptionalMemberAccess": "none",
+  
+}

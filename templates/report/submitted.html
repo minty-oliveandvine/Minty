@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Report Submitted</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+  <!-- Hover Effects Component -->
+  {% include 'components/hover_effects.html' %}
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+
+  <!-- Inter font (optional) -->
+<link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { inter: ['Inter','ui-sans-serif','system-ui'] } } }
+    }
+  </script>
+   <style>
+     /* Base styles */
+     .main-container {
+       width: 100%;
+       min-height: 100vh;
+       position: relative;
+     }
+    
+    /* Responsive container styles */
+    @media (min-width: 640px) and (max-width: 1024px) {
+        .main-container {
+          width: 640px;
+          margin: 0 auto;
+        }
+      }
+      
+      @media (min-width: 1024px) and (max-width: 1200px) {
+        .main-container {
+          width: 768px;
+          margin: 0 auto;
+        }
+      }
+      
+      @media (min-width: 1200px) {
+        .main-container {
+          width: 1024px;
+          margin: 0 auto;
+        }
+      }
+  </style>
+</head>
+<body class="min-h-screen  font-inter antialiased">
+  <!-- Hidden CSRF token for republish functionality -->
+  <form style="display: none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+  
+  <div class="main-container">
+    <!-- Phone card -->
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+            <!-- Content -->
+      <div class="main-content flex-1 flex flex-col items-center justify-center px-4 text-center overflow-y-auto">
+        <!-- Check icon -->
+        <div class="flex size-20 items-center justify-center rounded-full bg-[#54D3DA] text-white shadow-lg">
+          <svg xmlns="http://www.w3.org/2000/svg" class="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </div>
+
+        <!-- Title -->
+        <h1 class="mt-8 text-2xl font-semibold leading-tight text-slate-800">
+          {% if is_published_to_xero %}
+          Report Published to Xero<br />Successfully!
+          {% else %}
+          Report Submitted<br />Successfully!
+          {% endif %}
+        </h1>
+        <p class="mt-6 text-xs text-slate-500">
+          Your daily petty cash report has been processed
+        </p>
+
+        <!-- Export options -->
+        <p class="mt-20 mb-4 text-sm font-regular tracking-wide text-slate-700">
+          Export Options
+        </p>
+
+        <div class="mt-4 flex items-start justify-center gap-8 sm:gap-12">
+          <!-- Save as Image -->
+          {# 
+          <div class="flex flex-col items-center gap-2 sm:gap-3">
+            <a href="{{ url_for('report.report_screenshot', id=id)}}" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift" target="_blank">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+              </svg>
+            </a>
+            <span class="text-sm font-regular text-gray-700">Save as Image</span>
+          </div>
+          #}
+
+          <!-- Detailed PDF -->
+          {#
+          <div class="flex flex-col items-center gap-2 sm:gap-3">
+            <a href="{{ url_for('report.generate_pdf_report', id=id)}}" onclick="handleDownloadPDF('{{ id }}', '{{ url_for('report.generate_pdf_report', id=id) }}'); return false;" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift" target="_blank">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+              </svg>
+            </a>
+            <span class="text-sm font-regular text-gray-700">Detailed PDF</span>
+          </div>
+          #}
+
+          <!-- Share Link -->
+          <div class="flex flex-col items-center gap-2 sm:gap-3">
+            <button type="button" onclick="generateShareLink()" class="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-slate-100 transition hover-lift">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 sm:h-6 sm:w-6 text-[#567A5C]">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+              </svg>
+            </button>
+            <span class="text-sm font-regular text-gray-700">Share</span>
+          </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="w-full max-w-md pt-8 space-y-3">
+          {% if can_publish %}
+          {% if is_published_to_xero %}
+            <button onclick="showRepublishModal()" id="republishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
+              <img src="{{ url_for('static', filename='img/xero-logo.webp') }}" alt="Xero Logo" class="h-5 w-5 sm:h-6 sm:w-6">
+              <span class="text-sm font-medium">Republish to Xero</span>
+            </button>
+          {% else %}
+            <button onclick="publishToXero()" id="publishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
+              <img src="{{ url_for('static', filename='img/xero-logo.webp') }}" alt="Xero Logo" class="h-5 w-5 sm:h-6 sm:w-6">
+              <span class="text-sm font-medium">Publish to Xero</span>
+            </button>
+          {% endif %}
+          {% endif %}
+
+          <button onclick="goToDashboard()" class="w-full bg-[#54D3DA] flex font-medium gap-4 hover:bg-[#54D3DA]/80 hover-slide-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors">
+            <span id="dashboardButtonText">Back to Dashboard</span>
+            <svg class="hover-slide" width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10.534 5.66477L6.16282 1.18659L7.31648 -9.53674e-07L13.6377 6.50026L7.31648 13L6.16282 11.8139L10.534 7.33576H0.637695V5.66477H10.534Z" fill="white"/>
+            </svg>
+          </button>
+          <button onclick="continueToNextDayReport()" class="w-full bg-white border-2 border-[#54D3DA] flex font-medium gap-4 hover:bg-[#54D3DA]/10 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-black transition-colors">
+            <span id="dashboardButtonText" class="text-[#54D3DA]">Continue to next day report</span>
+            <svg class="hover-scale size-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="   #54D3DA">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 2.994v2.25m10.5-2.25v2.25m-14.252 13.5V7.491a2.25 2.25 0 0 1 2.25-2.25h13.5a2.25 2.25 0 0 1 2.25 2.25v11.251m-18 0a2.25 2.25 0 0 0 2.25 2.25h13.5a2.25 2.25 0 0 0 2.25-2.25m-18 0v-7.5a2.25 2.25 0 0 1 2.25-2.25h13.5a2.25 2.25 0 0 1 2.25 2.25v7.5m-6.75-6h2.25m-9 2.25h4.5m.002-2.25h.005v.006H12v-.006Zm-.001 4.5h.006v.006h-.006v-.005Zm-2.25.001h.005v.006H9.75v-.006Zm-2.25 0h.005v.005h-.006v-.005Zm6.75-2.247h.005v.005h-.005v-.005Zm0 2.247h.006v.006h-.006v-.006Zm2.25-2.248h.006V15H16.5v-.005Z" />
+            </svg>            
+          </button>
+        </div>
+      </div>
+
+
+     {% if can_publish %}
+     <!-- Republish Report Confirmation Modal -->
+     <div id="republishReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4" onclick="if(event.target === this) hideRepublishModal()">
+       <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto" onclick="event.stopPropagation()">
+         <!-- Modal Header -->
+         <div class="flex items-center justify-between mb-6">
+           <h2 class="text-xl font-bold text-gray-900">Republish Report</h2>
+           <button onclick="hideRepublishModal()" class="text-gray-400 hover:text-gray-600">
+             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+             </svg>
+           </button>
+         </div>
+
+         <!-- Modal Content -->
+         <div class="bg-[#FEF2F2] border border-[#FEE2E2] rounded-lg p-4 mb-6">
+           <div class="flex items-start">
+             <div class="flex-shrink-0">
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-[#EF4444]">
+                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+               </svg>
+             </div>
+             <div class="ml-3">
+               <p class="text-sm text-[#B91C1C]">
+                 <span class="font-bold">Warning:</span> The <span class="font-semibold">{{ transaction_date.strftime('%d %b %Y').upper() if transaction_date else 'this' }}</span> report was previously published to Xero.
+               </p>
+               <p class="text-sm text-[#B91C1C] mt-1">
+                 Republishing sends all of this report's transactions to Xero again and may create duplicates.
+               </p>
+               <p class="text-sm text-[#B91C1C] mt-2">
+                 Before continuing, please open Xero and delete the previously published transactions for this report.
+               </p>
+               <p class="text-sm text-[#B91C1C] mt-2">
+                 Are you sure you want to republish this report to Xero?
+               </p>
+             </div>
+           </div>
+         </div>
+
+         <!-- Modal Actions -->
+         <div class="flex space-x-3">
+           <button onclick="hideRepublishModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/10 transition-colors">
+             Cancel
+           </button>
+          <button onclick="confirmRepublish()" id="confirmRepublishButton" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center gap-2">
+            <span>Confirm</span>
+          </button>
+         </div>
+       </div>
+     </div>
+     {% endif %}
+
+     <!-- Full-screen Publishing Overlay -->
+     <div id="publishingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[9999] hidden items-center justify-center" style="display:none;">
+       <div class="bg-white rounded-2xl p-8 shadow-2xl w-[320px] max-w-[90vw] flex flex-col items-center">
+         <svg class="animate-spin h-10 w-10 text-[#54D3DA] mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+         </svg>
+         <span id="publishingOverlayText" class="text-gray-800 font-semibold text-base mb-3">Publishing to Xero...</span>
+         <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
+           <div id="publishingProgressBar" class="bg-[#54D3DA] h-3 rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+         </div>
+         <span id="publishingProgressText" class="text-gray-500 text-sm font-medium">0%</span>
+         <p class="text-gray-400 text-xs mt-3 text-center">Please do not close or navigate away.</p>
+       </div>
+     </div>
+
+     <!-- Loading Overlay (for non-publish actions) -->
+     <div id="loadingOverlay" class="absolute inset-0 bg-black bg-opacity-30 z-50 hidden flex items-center justify-center">
+       <div class="bg-white rounded-lg p-4 shadow-lg">
+         <div class="flex items-center space-x-3">
+           <svg class="animate-spin h-5 w-5 text-[#54D3DA]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+           </svg>
+           <span id="loadingText" class="text-gray-700 font-medium">Processing...</span>
+         </div>
+       </div>
+     </div>
+
+     <!-- Error Dialog (stays open until the user clicks OK) -->
+     <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
+       <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+         <div class="flex items-start mb-6">
+           <div class="flex-shrink-0">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
+               <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+             </svg>
+           </div>
+           <div class="ml-3">
+             <h2 class="text-lg font-bold text-gray-900">Error</h2>
+             <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
+           </div>
+         </div>
+         <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+           OK
+         </button>
+       </div>
+     </div>
+
+     <!-- Share Link Modal -->
+     <div id="shareLinkModal" class="hidden absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+       <div class="bg-white rounded-lg p-6 w-full max-w-md mx-auto">
+         <!-- Modal Header -->
+         <div class="flex items-center justify-between mb-6">
+           <h2 class="text-xl font-bold text-gray-900">Share Report</h2>
+           <button onclick="hideShareModal()" class="text-gray-400 hover:text-gray-600">
+             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+             </svg>
+           </button>
+         </div>
+
+         <!-- Modal Content -->
+         <div class="mb-6">
+           <p class="text-sm text-gray-600 mb-4">
+             Share this link to allow others to view this report. The link will expire in 30 days.
+           </p>
+           <div class="flex items-center gap-2">
+             <input 
+               type="text" 
+               id="shareLinkInput" 
+               readonly 
+               class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50"
+               placeholder="Generating link..."
+             />
+             <button 
+               onclick="copyShareLink()" 
+               id="copyShareBtn"
+               class="px-4 py-2 bg-[#54D3DA] text-white rounded-lg font-medium hover:bg-[#54D3DA]/80 transition-colors whitespace-nowrap">
+               Copy
+             </button>
+           </div>
+           <p id="copySuccessMessage" class="text-sm text-green-600 mt-2 hidden">Link copied to clipboard!</p>
+         </div>
+
+         <!-- Modal Actions -->
+         <div class="flex justify-end">
+           <button onclick="hideShareModal()" class="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors">
+             Close
+           </button>
+         </div>
+       </div>
+     </div>
+   </div>
+
+
+
+  <script>
+    // Function to handle Save as Image action
+    function saveAsImage() {
+      alert('Save as Image functionality would be implemented here');
+      // In a real implementation, you would use a library like html2canvas
+      // to capture the screen and save it as an image
+    }
+
+    // Function to handle PDF generation
+    function generatePDF() {
+      alert('Generate PDF functionality would be implemented here');
+      // In a real implementation, you would use a library like jsPDF
+      // to generate a PDF document
+    }
+
+    // Initialize page transition
+    PageTransition.init('.main-content', 'fadeIn', 10);
+
+    // Check if publishing succeeded and show success toast after redirect
+    (function() {
+      const publishSuccessMsg = sessionStorage.getItem('publishSuccess');
+      if (publishSuccessMsg) {
+        sessionStorage.removeItem('publishSuccess');
+        setTimeout(() => {
+          showNotification(publishSuccessMsg, 'success');
+        }, 500);
+      }
+    })();
+
+    // Simple function to update UI after publish
+    function updateToPublishedState() {
+      const titleElement = document.querySelector('h1.mt-8.text-2xl');
+      const publishButton = document.getElementById('publishButton');
+      
+      if (titleElement) {
+        titleElement.innerHTML = 'Report Published to Xero<br />Successfully!';
+      }
+      
+      if (publishButton) {
+        publishButton.setAttribute('onclick', 'showRepublishModal()');
+        const buttonText = publishButton.querySelector('span');
+        if (buttonText) {
+          buttonText.textContent = 'Republish to Xero';
+        }
+      }
+    }
+
+    // ── Publishing overlay helpers ──
+    const SUBMITTED_PAGE_URL = `/report/{{ id }}/submitted?entity_id={{ entity_id }}`;
+
+    function showPublishingOverlay(label) {
+      const overlay = document.getElementById('publishingOverlay');
+      const text = document.getElementById('publishingOverlayText');
+      const bar = document.getElementById('publishingProgressBar');
+      const pct = document.getElementById('publishingProgressText');
+      if (text) text.textContent = label || 'Publishing to Xero...';
+      if (bar) bar.style.width = '0%';
+      if (pct) pct.textContent = '0%';
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        overlay.style.display = 'flex';
+      }
+      document.body.style.overflow = 'hidden';
+      document.body.style.pointerEvents = 'none';
+      if (overlay) overlay.style.pointerEvents = 'auto';
+    }
+
+    function hidePublishingOverlay() {
+      const overlay = document.getElementById('publishingOverlay');
+      if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.style.display = 'none';
+      }
+      document.body.style.overflow = '';
+      document.body.style.pointerEvents = '';
+    }
+
+    function setPublishingProgress(percent, label) {
+      const bar = document.getElementById('publishingProgressBar');
+      const pct = document.getElementById('publishingProgressText');
+      const text = document.getElementById('publishingOverlayText');
+      const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+      if (bar) bar.style.width = clamped + '%';
+      if (pct) pct.textContent = clamped + '%';
+      if (label && text) text.textContent = label;
+    }
+
+    function publishingSuccess(message) {
+      setPublishingProgress(100, 'Published successfully!');
+      sessionStorage.setItem('publishSuccess', message);
+      setTimeout(() => {
+        hidePublishingOverlay();
+        window.location.href = SUBMITTED_PAGE_URL;
+      }, 600);
+    }
+
+    function publishingFailed(errorMsg) {
+      hidePublishingOverlay();
+      showNotification(errorMsg || 'Publishing to Xero failed. Please try again.', 'error');
+    }
+
+    function pollPublishStatus(reportId, entityId, isRepublish) {
+      let attempts = 0;
+      const maxAttempts = 90;
+      let progress = 15;
+      const label = isRepublish ? 'Republishing to Xero...' : 'Publishing to Xero...';
+      const successMsg = isRepublish ? 'Report Successfully Republished' : 'Report Successfully Published';
+
+      const interval = setInterval(() => {
+        attempts++;
+
+        if (progress < 85) {
+          progress += Math.max(1, Math.round((85 - progress) / 12));
+          setPublishingProgress(progress, label);
+        }
+
+        fetch(`/api/report/${reportId}/publishing_status`)
+          .then(r => r.json())
+          .then(data => {
+            const ps = data.publishing_status;
+            const integrated = data.xero_integrated_yes;
+
+            if (ps === 'completed' || integrated) {
+              clearInterval(interval);
+              if (window.sendLogToDataDog) {
+                window.sendLogToDataDog('info', isRepublish ? 'Republish success' : 'Publish success', { entityId: String(entityId), reportId: String(reportId) });
+              }
+              publishingSuccess(successMsg);
+            } else if (ps === 'failed') {
+              clearInterval(interval);
+              if (window.sendLogToDataDog) {
+                window.sendLogToDataDog('error', isRepublish ? 'Republishing failed' : 'Publishing failed', { entityId: String(entityId), reportId: String(reportId) });
+              }
+              // Prefer the server's specific reason (e.g. Xero lock-date violation)
+              // over the generic fallback message.
+              publishingFailed(data.failure_reason || 'Publishing to Xero failed. Please try again.');
+            } else if (attempts >= maxAttempts) {
+              clearInterval(interval);
+              publishingFailed('Publishing is taking longer than expected. Please check again later.');
+            }
+          })
+          .catch(err => {
+            console.error('Poll error:', err);
+            if (window.sendLogToDataDog) {
+              window.sendLogToDataDog('error', 'Error polling publish status', { reportId, message: err && err.message });
+            }
+            if (attempts >= maxAttempts) {
+              clearInterval(interval);
+              publishingFailed('Error checking publishing status. Please try again.');
+            }
+          });
+      }, 2000);
+    }
+
+    function executePublishRequest(reportId, entityId, isRepublish) {
+      const actionLabel = isRepublish ? 'Republishing to Xero...' : 'Publishing to Xero...';
+      const successMsg = isRepublish ? 'Report Successfully Republished' : 'Report Successfully Published';
+      showPublishingOverlay(actionLabel);
+      setPublishingProgress(5, 'Initiating...');
+
+      const csrfToken = document.querySelector('input[name="csrf_token"]');
+      const formData = new FormData();
+      if (csrfToken) formData.append('csrf_token', csrfToken.value);
+
+      setPublishingProgress(10, 'Sending request to Xero...');
+
+      fetch(`/report/submitted/publish_to_xero?entity_id=${entityId}&report_id=${reportId}`, {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => {
+        if (response.status === 409) {
+          return response.json().then(data => {
+            hidePublishingOverlay();
+            showNotification(data.message || 'This report is already being published. Please wait...', 'warning');
+            return { handled: true };
+          });
+        }
+        if (!response.ok && response.status !== 202) {
+          return response.json().then(data => {
+            throw new Error(data.message || data.error || 'Publishing failed');
+          });
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.handled) return;
+
+        if (data.status === 'success') {
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('info', isRepublish ? 'Republish success' : 'Publish success', { entityId: String(entityId), reportId: String(reportId) });
+          }
+          publishingSuccess(successMsg);
+        } else if (data.status === 'processing') {
+          setPublishingProgress(15, actionLabel);
+          pollPublishStatus(reportId, entityId, isRepublish);
+        } else {
+          const msg = data.message || data.error || 'Publishing failed. Please try again.';
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('error', 'Publish error', { reportId, entityId, message: msg });
+          }
+          publishingFailed(msg);
+        }
+      })
+      .catch(error => {
+        console.error('Publish request error:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Publish error', { reportId, entityId, message: error && error.message });
+        }
+        publishingFailed(error.message || 'Error publishing to Xero. Please try again.');
+      });
+    }
+
+    // Function to handle Publish to Xero action
+    function publishToXero() {
+      const entityId = '{{ entity_id }}';
+      const reportId = '{{ id }}';
+
+      if (!entityId || !reportId || entityId === 'None' || reportId === 'None') {
+        showNotification('Missing required information to publish report.', 'error');
+        return;
+      }
+
+      executePublishRequest(reportId, entityId, false);
+    }
+
+    // Notification functions
+    function closeNotification(closeButton) {
+      let toast = closeButton.parentElement;
+      while (toast && !toast.classList.contains('absolute')) {
+        toast = toast.parentElement;
+      }
+      
+      if (toast) {
+        toast.classList.add('translate-x-full');
+        setTimeout(() => {
+          if (toast.parentElement) {
+            toast.remove();
+          }
+        }, 500);
+      }
+    }
+
+    function showNotification(message, type = 'info') {
+      // Errors are blocking: show a dialog that stays open until the user
+      // clicks OK, rather than a toast that auto-dismisses.
+      if (type === 'error') {
+        showErrorDialog(message);
+        return;
+      }
+
+      const toast = document.createElement('div');
+      toast.className = `absolute top-[0px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50`;
+
+      let borderColor, bgColor, titleColor, subtextColor, iconSrc, label;
+      switch(type) {
+        case 'success':
+          borderColor = '#a9d7cb';
+          bgColor = '#f1fffc';
+          titleColor = '#017155';
+          subtextColor = '#92c6b9';
+          iconSrc = "{{ url_for('static', filename='img/success-icon.png') }}";
+          label = 'Success';
+          break;
+        case 'error':
+          borderColor = '#ffcccc';
+          bgColor = '#fff1f1';
+          titleColor = '#F03D3D';
+          subtextColor = '#f57e7e';
+          iconSrc = "{{ url_for('static', filename='img/error-icon.png') }}";
+          label = 'Error';
+          break;
+        case 'warning':
+          borderColor = '#fee0aa';
+          bgColor = '#fffaf1';
+          titleColor = '#DA8700';
+          subtextColor = '#e8b765';
+          iconSrc = "{{ url_for('static', filename='img/warning-icon.png') }}";
+          label = 'Warning';
+          break;
+        default:
+          borderColor = '#a9d3ff';
+          bgColor = '#f1f8ff';
+          titleColor = '#006FE6';
+          subtextColor = '#5ba2ee';
+          iconSrc = "{{ url_for('static', filename='img/info-icon.png') }}";
+          label = 'Information';
+      }
+
+      toast.innerHTML = `
+        <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: ${borderColor}; background-color: ${bgColor};">
+          <img src="${iconSrc}" alt="${label}" class="shrink-0 w-[36px] h-[44px]" />
+          <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+            <p class="font-[500] whitespace-nowrap" style="color: ${titleColor};">${label}</p>
+            <p class="font-[400] break-words w-full" style="color: ${subtextColor};">${message}</p>
+          </div>
+          <button onclick="closeNotification(this)" class="toast-close shrink-0 p-1 hover:bg-gray-200 rounded ml-2">
+            <svg class="w-[14px] h-[14px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      `;
+      
+      const phoneCard = document.querySelector('.relative.h-screen.bg-gray-50.shadow-xl');
+      if (phoneCard) {
+        phoneCard.appendChild(toast);
+      } else {
+        document.body.appendChild(toast);
+      }
+      
+      setTimeout(() => {
+        toast.classList.remove('translate-x-full');
+      }, 100);
+      
+      // Warnings linger at 8s; success/info auto-dismiss at 4s. (Errors use the
+      // blocking dialog above and never reach this toast path.)
+      const displayDuration = (type === 'warning') ? 8000 : 4000;
+      setTimeout(() => {
+        toast.classList.add('translate-x-full');
+        setTimeout(() => {
+          if (toast.parentElement) {
+            toast.remove();
+          }
+        }, 500);
+      }, displayDuration);
+    }
+
+    // Blocking error dialog — stays open until the user clicks OK.
+    function showErrorDialog(message) {
+      const dialog = document.getElementById('errorDialog');
+      if (!dialog) { alert(message); return; }
+      const msgEl = document.getElementById('errorDialogMessage');
+      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
+      dialog.classList.remove('hidden');
+      dialog.classList.add('flex');
+    }
+
+    function hideErrorDialog() {
+      const dialog = document.getElementById('errorDialog');
+      if (!dialog) return;
+      dialog.classList.add('hidden');
+      dialog.classList.remove('flex');
+    }
+
+    // Republish functions
+    function showRepublishModal() {
+      const modal = document.getElementById('republishReportModal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    function hideRepublishModal() {
+      const modal = document.getElementById('republishReportModal');
+      if (modal) {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+      }
+    }
+
+    function confirmRepublish() {
+      const confirmButton = document.getElementById('confirmRepublishButton');
+      
+      // Update button to show loading state
+      if (confirmButton) {
+        confirmButton.disabled = true;
+        confirmButton.innerHTML = `
+          <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>Republishing to Xero</span>
+        `;
+      }
+      
+      hideRepublishModal();
+      republishToXero();
+    }
+
+    function republishToXero() {
+      const entityId = '{{ entity_id }}';
+      const reportId = '{{ id }}';
+
+      if (!entityId || !reportId || entityId === 'None' || reportId === 'None') {
+        const confirmButton = document.getElementById('confirmRepublishButton');
+        if (confirmButton) {
+          confirmButton.disabled = false;
+          confirmButton.innerHTML = '<span>Confirm</span>';
+        }
+        showNotification('Missing required information to republish report.', 'error');
+        return;
+      }
+
+      executePublishRequest(reportId, entityId, true);
+    }
+
+    // Function to handle PDF download
+    function handleDownloadPDF(reportId, pdfUrl) {
+      if (reportId && pdfUrl) {
+        // Show success notification after a short delay
+        setTimeout(() => {
+          showNotification('Report downloaded successfully!', 'success');
+        }, 500);
+        // Navigate to PDF generation route
+        window.location.href = pdfUrl;
+      } else {
+        showNotification('Unable to download report. Missing report information.', 'error');
+      }
+    }
+
+    // Function to handle Back to Dashboard action
+    function goToDashboard() {
+      // Get the button element
+      const button = event.target.closest('button');
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const loadingText = document.getElementById('loadingText');
+      
+      // Disable button
+      button.disabled = true;
+      
+      sessionStorage.removeItem('publishSuccess');
+
+      // Show loading overlay with spinner
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('hidden');
+        if (loadingText) {
+          loadingText.textContent = 'Redirecting to Dashboard...';
+        }
+      }
+      
+      // Redirect to dashboard with page transition
+      setTimeout(() => {
+        {% if entity_id %}
+        PageTransition.navigateWithFade('{{url_for("entity.report_dashboard", id=entity_id)}}');
+        window.location.href = '{{url_for("entity.report_dashboard", id=entity_id)}}';
+        {% else %}
+        PageTransition.navigateWithFade('{{url_for("entity.entity_list")}}');
+        {% endif %}
+      }, 500);
+    }
+
+    // Function to continue to next day report
+    function continueToNextDayReport() {
+      sessionStorage.removeItem('publishSuccess');
+
+      const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+
+      if (!transactionDate) {
+        showNotification('Missing date information', 'error');
+        return;
+      }
+
+      // Disable button and show loading overlay
+      const button = event.target.closest('button');
+      if (button) button.disabled = true;
+
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const loadingText = document.getElementById('loadingText');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('hidden');
+        if (loadingText) {
+          loadingText.textContent = 'Starting next day report...';
+        }
+      }
+
+      // Calculate next day
+      const currentDate = new Date(transactionDate);
+      const nextDay = new Date(currentDate);
+      nextDay.setDate(currentDate.getDate() + 1);
+      
+      // Format next day as YYYY-MM-DD
+      const nextDayYear = nextDay.getFullYear();
+      const nextDayMonth = String(nextDay.getMonth() + 1).padStart(2, '0');
+      const nextDayDay = String(nextDay.getDate()).padStart(2, '0');
+      const nextDayString = `${nextDayYear}-${nextDayMonth}-${nextDayDay}`;
+      
+      // Store next day in sessionStorage for dashboard to pick up
+      sessionStorage.setItem('autoStartNextDay', nextDayString);
+      
+      // Navigate to dashboard
+      {% if entity_id %}
+      PageTransition.navigateWithFade('{{url_for("entity.report_dashboard", id=entity_id)}}');
+      window.location.href = '{{url_for("entity.report_dashboard", id=entity_id)}}';
+      {% else %}
+      PageTransition.navigateWithFade('{{url_for("entity.entity_list")}}');
+      window.location.href = '{{url_for("entity.entity_list")}}';
+      {% endif %}
+    }
+
+    // Close republish modal when clicking outside
+    document.getElementById('republishReportModal')?.addEventListener('click', function(e) {
+      if (e.target === this) {
+        hideRepublishModal();
+      }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const republishModal = document.getElementById('republishReportModal');
+        if (republishModal && !republishModal.classList.contains('hidden')) {
+          hideRepublishModal();
+        }
+        const shareModal = document.getElementById('shareLinkModal');
+        if (shareModal && !shareModal.classList.contains('hidden')) {
+          hideShareModal();
+        }
+      }
+    });
+
+    // Function to generate share link
+    function generateShareLink() {
+      const entityId = '{{ entity_id }}';
+      const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+      
+      if (!entityId || !transactionDate) {
+        showNotification('Missing entity or date information', 'error');
+        return;
+      }
+      
+      // Get CSRF token
+      const csrfToken = document.querySelector('input[name="csrf_token"]');
+      if (!csrfToken) {
+        showNotification('CSRF token not found', 'error');
+        return;
+      }
+      
+      // Show modal with loading state
+      const modal = document.getElementById('shareLinkModal');
+      const input = document.getElementById('shareLinkInput');
+      const copyBtn = document.getElementById('copyShareBtn');
+      const copySuccessMessage = document.getElementById('copySuccessMessage');
+      
+      if (modal) {
+        modal.classList.remove('hidden');
+        input.value = 'Generating link...';
+        input.disabled = true;
+        copyBtn.disabled = true;
+        copySuccessMessage.classList.add('hidden');
+        document.body.style.overflow = 'hidden';
+      }
+      
+      // Make API call to generate share link
+      fetch('/api/generate_share_link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken.value
+        },
+        body: JSON.stringify({
+          entity_id: entityId,
+          transaction_date: transactionDate,
+          csrf_token: csrfToken.value
+        }),
+        credentials: 'include'
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.url) {
+          input.value = data.url;
+          input.disabled = false;
+          copyBtn.disabled = false;
+        } else {
+          showNotification(data.error || 'Failed to generate share link', 'error');
+          hideShareModal();
+        }
+      })
+      .catch(error => {
+        console.error('Error generating share link:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Error generating share link', { message: error && error.message });
+        }
+        showNotification('Failed to generate share link', 'error');
+        hideShareModal();
+      });
+    }
+
+    // Function to copy share link to clipboard
+    function copyShareLink() {
+      const input = document.getElementById('shareLinkInput');
+      const copySuccessMessage = document.getElementById('copySuccessMessage');
+      
+      if (input && input.value) {
+        input.select();
+        input.setSelectionRange(0, 99999); // For mobile devices
+        
+        try {
+          document.execCommand('copy');
+          copySuccessMessage.classList.remove('hidden');
+          setTimeout(() => {
+            copySuccessMessage.classList.add('hidden');
+          }, 3000);
+        } catch (err) {
+          // Fallback: try Clipboard API
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(input.value).then(() => {
+              copySuccessMessage.classList.remove('hidden');
+              setTimeout(() => {
+                copySuccessMessage.classList.add('hidden');
+              }, 3000);
+            }).catch(() => {
+              if (window.sendLogToDataDog) {
+                window.sendLogToDataDog('error', 'Failed to copy link');
+              }
+              showNotification('Failed to copy link', 'error');
+            });
+          } else {
+            if (window.sendLogToDataDog) {
+              window.sendLogToDataDog('error', 'Copy not supported in this browser');
+            }
+            showNotification('Copy not supported in this browser', 'error');
+          }
+        }
+      }
+    }
+
+    // Function to hide share modal
+    function hideShareModal() {
+      const modal = document.getElementById('shareLinkModal');
+      const input = document.getElementById('shareLinkInput');
+      const copySuccessMessage = document.getElementById('copySuccessMessage');
+      
+      if (modal) {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+        if (input) {
+          input.value = '';
+          input.disabled = false;
+        }
+        if (copySuccessMessage) {
+          copySuccessMessage.classList.add('hidden');
+        }
+      }
+    }
+
+    // Close share modal when clicking outside
+    document.getElementById('shareLinkModal')?.addEventListener('click', function(e) {
+      if (e.target === this) {
+        hideShareModal();
+      }
+    });
+  </script>
+</body>
+</html>
+
+<!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
+<script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
+<script>
+document.addEventListener('submit', function(e){
+  try{
+    const form = e.target;
+    const path = window.location.pathname;
+    let key = 'pending_generic';
+    if(path.includes('/sale')) key='pending_sales';
+    else if(path.includes('/expense')) key='pending_expenses';
+    else if(path.includes('/deposit')) key='pending_deposit';
+    else if(path.includes('/opening')) key='pending_opening';
+    else if(path.includes('/cash_count')) key='pending_cash_count';
+    else if(path.includes('/ending')) key='pending_ending';
+
+    const btn = e.submitter || form.querySelector('button[type="submit"]');
+    if(btn) BFCache.saveButtonState(btn);
+
+    const data = {};
+    try{ new FormData(form).forEach((v,k)=>{ if(data[k]){ if(Array.isArray(data[k])) data[k].push(v); else data[k]=[data[k],v]; } else data[k]=v }); }catch(e){}
+    BFCache.saveSnapshot(key, data);
+  }catch(e){}
+});
+</script>

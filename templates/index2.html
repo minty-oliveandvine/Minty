@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Cash Report - 일일 현금 리포트</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+    <!-- Custom Button Styles -->
+    <style>
+        .btn-primary {
+            background-color: #4a7c59;
+            border-color: #4a7c59;
+        }
+    
+        .btn-primary:hover {
+            background-color: #36543a;
+            border-color: #36543a;
+        }
+    
+        .btn-block {
+            width: 100%;
+        }
+    
+        .logo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 80px;
+            height: auto;
+        }
+    
+        .is-invalid {
+            border-color: red;
+        }
+    
+        @media (max-width: 768px) {
+            .logo {
+                width: 60px;
+            }
+    
+            .btn-block {
+                font-size: 1rem;
+            }
+        }
+    </style>
+    
+</head>
+<body>
+    <div class="container mt-5">
+        <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo" alt="Logo">
+        <h1 class="text-center">Create Daily Report / 리포트 생성하기</h1>
+
+         <!-- Back to Reports Button -->
+        <div class="mb-4">
+            <a href="{{ url_for('auth.index', entity_id=entity_id) if entity_id else url_for('auth.index') }}" class="btn btn-secondary">Back to Reports / 리포트로 돌아가기</a>
+        </div>
+
+        <form id="dailyReportForm" enctype="multipart/form-data" action="{{ url_for('report.create_report') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="entity_id" value="{{ entity_id or '' }}">
+              <!-- Add Company Field (readonly) -->
+              <div class="form-group">
+                <label for="company">Company:</label>
+                <input type="text" id="company" name="company" class="form-control" value="{{ entity_name or entity_id or '' }}" readonly>
+            </div>            
+            <!-- Opening Drawer Section -->
+            <div class="form-group">
+                <label>Opening Cashier Drawer Balance (현금 잔고):</label>
+                <input type="number" id="openingDrawer" name="opening_balance" class="form-control" value="{{ opening_balance }}" {% if opening_balance != 0 %}readonly{% endif %} required>
+            </div>
+
+             <!-- Transaction Date Section -->
+             <div class="form-group">
+                <label>Transaction Date 지출 날짜:</label>
+                <input type="date" id="transaction_date" name="transaction_date" class="form-control" required>
+            </div>
+
+            <!-- Sales Section -->
+            <div id="cashSalesContainer">
+                <h2>Sales 수입</h2>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[cash]">Cash:</label>
+                    <input type="number" name="cash_sales[cash]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[visa]">Visa:</label>
+                    <input type="number" name="cash_sales[visa]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[alipay]">Alipay:</label>
+                    <input type="number" name="cash_sales[alipay]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[wechat]">WeChat Pay:</label>
+                    <input type="number" name="cash_sales[wechat]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[master]">Master:</label>
+                    <input type="number" name="cash_sales[master]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[unionpay]">UnionPay:</label>
+                    <input type="number" name="cash_sales[unionpay]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[takeout]">Takeout:</label>
+                    <input type="number" name="cash_sales[takeout]" class="cash-sale form-control">
+                </div>
+                <div class="cash-sale-item form-group">
+                    <label for="cash_sales[others]">Others:</label>
+                    <input type="number" name="cash_sales[others]" class="cash-sale form-control">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Total Sales 전체 수입:</label>
+                <input type="number" id="totalSales" class="form-control" readonly>
+            </div>
+
+            <!-- Shop Expenses Section -->
+            <h2>Shop Expenses 지출 내역</h2>
+            <table id="shopExpensesContainer" class="table table-bordered expense-table">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Amount (HKD)</th>
+                        <th>Remarks (비고) </th>
+                        <th>Files</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Shop expense rows will be dynamically added here -->
+                </tbody>
+            </table>
+            <button id="addExpenseButton" type="button" class="btn btn-success mb-3">Add Expense / 비용 내역 추가</button>
+
+            <div class="form-group">
+                <label>Total Shop Expense 지출 총계:</label>
+                <input type="number" id="grossTotal" class="form-control" readonly>
+            </div>
+
+            <!-- Closing Drawer Section -->
+            <div class="form-group">
+                <label>Closing Cashier Drawer Balance / 정산 잔고:</label>
+                <input type="number" id="closing_balance" name="closing_balance" class="form-control" readonly>
+            </div>
+
+           <!-- Actual Cash Value Section -->
+<div class="form-group">
+    <label>Actual Cash Value / 현금 실보유금:</label>
+    <div class="row">
+        <div class="col-md-2">
+            <label for="coins">Coins:</label>
+            <input type="number" id="coins" name="actual_cash[coins]" class="form-control" placeholder="Coins">
+        </div>
+        <div class="col-md-2">
+            <label for="note10">10 HKD note:</label>
+            <input type="number" id="note10" name="actual_cash[note10]" class="form-control" placeholder="10 HKD notes">
+        </div>
+        <div class="col-md-2">
+            <label for="note20">20 HKD note:</label>
+            <input type="number" id="note20" name="actual_cash[note20]" class="form-control" placeholder="20 HKD notes">
+        </div>
+        <div class="col-md-2">
+            <label for="note50">50 HKD note:</label>
+            <input type="number" id="note50" name="actual_cash[note50]" class="form-control" placeholder="50 HKD notes">
+        </div>
+        <div class="col-md-2">
+            <label for="note100">100 HKD note:</label>
+            <input type="number" id="note100" name="actual_cash[note100]" class="form-control" placeholder="100 HKD notes">
+        </div>
+        <div class="col-md-2">
+            <label for="note500">500 HKD note:</label>
+            <input type="number" id="note500" name="actual_cash[note500]" class="form-control" placeholder="500 HKD notes">
+        </div>
+        <div class="col-md-2">
+            <label for="note1000">1000 HKD note:</label>
+            <input type="number" id="note1000" name="actual_cash[note1000]" class="form-control" placeholder="1000 HKD notes">
+        </div>
+    </div>
+</div>
+
+<!-- Total Actual Cash Value Section -->
+<div class="form-group">
+    <label>Total Actual Cash Value / 현금 총계:</label>
+    <input type="number" id="total_actual_cash_value" name="total_actual_cash_value" class="form-control" readonly>
+    <span id="actualCashError" class="text-danger" style="display:none;">Value doesn't match Closing Balance / 정산 잔고와 값이 맞지 않습니다.</span>
+</div>
+
+            <!-- Submit Button -->
+            <button id="submitReportButton" type="button" class="btn btn-primary btn-block">Submit Report / 제출하기</button>
+        </form>
+    </div>
+
+    <!-- Link to the JavaScript file -->
+    <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+      <!-- Add New User Modal -->
+      <div id="addUserModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeAddUserModal()">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto relative z-10" onclick="event.stopPropagation()">
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-xl font-bold text-gray-900">Invite User</h3>
+            <button onclick="closeAddUserModal()" class="text-gray-400 hover:text-gray-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Modal Form -->
+          <form id="addUserForm" class="space-y-4">
+            <!-- Hidden Company UUID -->
+            <input type="hidden" id="companyUuid" name="company_uuid" value="{{ org.id }}" required>
+            
+            <!-- Hidden Xero Entity ID -->
+            <input type="hidden" id="xeroEntityId" name="xero_entity_id" value="{{ org.xero_org_id if org.xero_org_id else '' }}">
+
+            <!-- First Name -->
+            <div>
+              <label for="firstName" class="block text-sm font-medium text-gray-700 mb-2">
+                First Name<span class="text-red-500">*</span>
+              </label>
+              <input type="text" id="firstName" name="first_name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" placeholder="Enter first name" required>
+            </div>
+
+            <!-- Last Name -->
+            <div>
+              <label for="lastName" class="block text-sm font-medium text-gray-700 mb-2">
+                Last Name<span class="text-red-500">*</span>
+              </label>
+              <input type="text" id="lastName" name="last_name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" placeholder="Enter last name" required>
+            </div>
+
+            <!-- Email Address -->
+            <div>
+              <label for="emailAddress" class="block text-sm font-medium text-gray-700 mb-2">
+                  Email Address<span class="text-red-500">*</span>
+              </label>
+              <input type="email" id="emailAddress" name="emailAddress" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" placeholder="Enter email address" required>
+            </div>
+
+            <!-- Role -->
+            <div>
+              <label for="userRole" class="block text-sm font-medium text-gray-700 mb-2">
+                Role<span class="text-red-500">*</span>
+              </label>
+              <div class="relative">
+                <input type="text" id="userRole" placeholder="Select a role" class="w-full pl-3 pr-10 py-2 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent placeholder-[#374151] cursor-pointer" autocomplete="off" readonly required>
+                <!-- Dropdown arrow icon -->
+                <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg id="roleDropdownIcon" class="size-5 text-gray-400 transition-transform duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                  </svg>
+                </div>
+                <!-- Role Suggestions Dropdown -->
+                <div id="roleSuggestions" class="hidden max-h-60 overflow-y-auto bg-white border border-gray-300 rounded-lg shadow-lg">
+                  <!-- Suggestions will be populated here -->
+                </div>
+                <!-- Hidden input to store the actual role value -->
+                <input type="hidden" id="userRole_value" name="userRole" value="">
+              </div>
+            </div>
+
+            <!-- Modal Actions -->
+            <div class="flex space-x-3 pt-4">
+              <button type="button" onclick="closeAddUserModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors">Cancel</button>
+              <button type="submit" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">Send Invitation</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      
+      <!-- Edit User Modal -->
+      <div id="editUserModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeEditUserModal()">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto relative z-10" onclick="event.stopPropagation()">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-xl font-bold text-gray-900">Edit User</h3>
+            <button onclick="closeEditUserModal()" class="text-gray-400 hover:text-gray-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <form id="editUserForm" class="space-y-4">
+            <input type="hidden" id="editUserId" name="user_id" value="">
+            <input type="hidden" id="editEntityId" name="entity_id" value="{{ org.id }}">
+
+            <div>
+              <label for="editFirstName" class="block text-sm font-medium text-gray-700 mb-2">First Name<span class="text-red-500">*</span></label>
+              <input type="text" id="editFirstName" name="first_name" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" placeholder="First name" required>
+            </div>
+
+            <div>
+              <label for="editLastName" class="block text-sm font-medium text-gray-700 mb-2">Last Name<span class="text-red-500">*</span></label>
+              <input type="text" id="editLastName" name="last_name" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" placeholder="Last name" required>
+            </div>
+
+            <div>
+              <label for="editUserEmail" class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+              <input type="text" id="editUserEmail" name="edit_user_email_display" readonly tabindex="0" autocomplete="username" value="" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed focus:outline-none focus:ring-0 select-all" aria-readonly="true">
+            </div>
+
+            <div>
+              <label for="editUserRole" class="block text-sm font-medium text-gray-700 mb-2">Role<span class="text-red-500">*</span></label>
+              <div class="relative">
+                <input type="text" id="editUserRole" placeholder="Select a role" class="w-full pl-3 pr-10 py-2 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent placeholder-[#374151] cursor-pointer" autocomplete="off" readonly required>
+                <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg id="editRoleDropdownIcon" class="size-5 text-gray-400 transition-transform duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                  </svg>
+                </div>
+                <div id="editRoleSuggestions" class="hidden max-h-60 overflow-y-auto bg-white border border-gray-300 rounded-lg shadow-lg"></div>
+                <input type="hidden" id="editUserRole_value" name="role" value="">
+              </div>
+            </div>
+
+            <div class="flex space-x-3 pt-4">
+              <button type="button" onclick="closeEditUserModal()" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors">Cancel</button>
+              <button type="submit" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">Save Changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Delete User Confirmation Modal -->
+      <div id="deleteUserModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeDeleteUserModal()">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-4 relative z-10" onclick="event.stopPropagation()">
+          <div class="text-center mb-6">
+            <div class="mx-auto w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-bold text-gray-900 mb-1">Remove User</h3>
+            <p class="text-sm text-gray-500">Are you sure you want to remove <strong id="deleteUserName" class="text-gray-700"></strong> from this entity? This action cannot be undone.</p>
+          </div>
+          <input type="hidden" id="deleteUserId" value="">
+          <div class="flex space-x-3">
+            <button type="button" onclick="closeDeleteUserModal()" class="flex-1 border-2 border-gray-300 text-gray-700 py-3 px-4 rounded-xl font-medium hover:bg-gray-50 transition-colors">Cancel</button>
+            <button type="button" onclick="confirmDeleteUser()" class="flex-1 bg-red-500 text-white py-3 px-4 rounded-xl font-medium hover:bg-red-600 transition-colors">Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cancel Invitation Confirmation Modal -->
+      <div id="cancelInvitationModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeCancelInvitationModal()">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-4 relative z-10" onclick="event.stopPropagation()">
+          <div class="text-center mb-6">
+            <div class="mx-auto w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-bold text-gray-900 mb-1">Cancel Invitation</h3>
+            <p class="text-sm text-gray-500">Are you sure you want to cancel the invitation for <strong id="cancelInvitationEmail" class="text-gray-700"></strong>? They will no longer be able to join using the link that was sent.</p>
+          </div>
+          <input type="hidden" id="cancelInvitationId" value="">
+          <div class="flex space-x-3">
+            <button type="button" onclick="closeCancelInvitationModal()" class="flex-1 border-2 border-gray-300 text-gray-700 py-3 px-4 rounded-xl font-medium hover:bg-gray-50 transition-colors">Keep</button>
+            <button type="button" onclick="confirmCancelInvitation()" class="flex-1 bg-red-500 text-white py-3 px-4 rounded-xl font-medium hover:bg-red-600 transition-colors">Cancel Invitation</button>
+          </div>
+        </div>
+      </div>

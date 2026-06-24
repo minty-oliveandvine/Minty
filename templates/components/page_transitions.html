@@ -1,0 +1,116 @@
+<!-- Simple Page Load Fade Transition Component -->
+<style>
+  /* Hide main content initially to prevent flash */
+  .main-content {
+    opacity: 0;
+  }
+
+  /* Page fade transition */
+  .page-fade-in {
+    opacity: 0;
+    animation: fadeIn 0.25s ease-in-out forwards;
+  }
+
+  .page-fade-out {
+    opacity: 1;
+    animation: fadeOut 0.15s ease-in-out forwards;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fadeOut {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  /* Optional: Add a subtle slide up effect */
+  .page-fade-slide {
+    opacity: 0;
+    transform: translateY(20px);
+    animation: fadeInSlide 0.6s ease-out forwards;
+  }
+
+  @keyframes fadeInSlide {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>
+
+<script>
+  // Simple page transition functions
+  const PageTransition = {
+    // Apply fade in to page content
+    fadeIn: function(element, delay = 0) {
+      setTimeout(() => {
+        element.classList.add('page-fade-in');
+      }, delay);
+    },
+
+    // Apply fade out to page content
+    fadeOut: function(element, delay = 0, callback = null) {
+      setTimeout(() => {
+        element.classList.add('page-fade-out');
+        if (callback) {
+          setTimeout(callback, 150); // Wait for animation to complete
+        }
+      }, delay);
+    },
+
+    // Apply fade in with slide effect
+    fadeInSlide: function(element, delay = 0) {
+      setTimeout(() => {
+        element.classList.add('page-fade-slide');
+      }, delay);
+    },
+
+    // Navigate with fade out transition
+    navigateWithFade: function(url, delay = 0) {
+      const mainContent = document.querySelector('.main-content');
+      if (mainContent) {
+        this.fadeOut(mainContent, delay, () => {
+          window.location.href = url;
+        });
+      } else {
+        // Fallback to body if main-content not found
+        this.fadeOut(document.body, delay, () => {
+          window.location.href = url;
+        });
+      }
+    },
+
+    // Initialize page transition immediately
+    init: function(selector = '.main-content', effect = 'fadeIn', delay = 50) {
+      // Start immediately, don't wait for DOMContentLoaded
+      const element = document.querySelector(selector);
+      if (element) {
+        if (effect === 'fadeInSlide') {
+          PageTransition.fadeInSlide(element, delay);
+        } else {
+          PageTransition.fadeIn(element, delay);
+        }
+      } else {
+        // If element not found yet, try again after a short delay
+        setTimeout(() => {
+          PageTransition.init(selector, effect, 0);
+        }, 10);
+      }
+    }
+  };
+</script>

@@ -1,0 +1,270 @@
+<!--
+Hover Effects Component
+Usage: Include this component and use the hover effect classes
+
+Available Hover Effects:
+- .hover-lift: Subtle lift effect with shadow
+- .hover-scale: Scale up on hover
+- .hover-glow: Glow effect on hover
+- .hover-slide: Slide effect on hover (right)
+- .hover-slide-left: Slide effect on hover (left)
+- .hover-fade: Fade effect on hover
+- .hover-bounce: Bounce effect on hover
+- .hover-rotate: Rotate effect on hover
+- .hover-pulse: Pulse effect on hover
+
+Example Usage:
+<button class="hover-lift">Hover me!</button>
+<div class="hover-scale">Scale on hover</div>
+<img class="hover-glow" src="image.jpg" alt="Glowing image">
+-->
+
+<style>
+/* =======================
+   Hover Effects Component
+======================= */
+
+/* Base transition for all hover effects */
+.hover-lift,
+.hover-scale,
+.hover-glow,
+.hover-slide,
+.hover-slide-left,
+.hover-fade,
+.hover-bounce,
+.hover-rotate,
+.hover-pulse {
+  transition: all 0.3s ease-in-out;
+  cursor: pointer;
+}
+
+/* Lift Effect - Subtle elevation with shadow */
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Scale Effect - Grow slightly on hover */
+.hover-scale:hover {
+  transform: scale(1.05);
+}
+
+/* Glow Effect - Add glowing border */
+.hover-glow:hover {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* Slide Effect - Move slightly to the right */
+.hover-slide:hover {
+  transform: translateX(4px);
+}
+
+/* Slide Left Effect - Move slightly to the left */
+.hover-slide-left:hover {
+  transform: translateX(-4px);
+}
+
+/* Parent hover slide effect - only for elements with hover-slide-parent class */
+.hover-slide-parent:hover .hover-slide {
+  transform: translateX(4px) !important;
+  transition: transform 0.3s ease-in-out !important;
+}
+
+/* Parent hover slide left effect - only for elements with hover-slide-left-parent class */
+.hover-slide-left-parent:hover .hover-slide-left {
+  transform: translateX(-4px) !important;
+  transition: transform 0.3s ease-in-out !important;
+}
+
+/* Parent hover rotate effect - only for elements with hover-rotate-parent class */
+.hover-rotate-parent:hover .hover-rotate {
+  transform: rotate(90deg) !important;
+  transition: transform 0.3s ease-in-out !important;
+}
+
+/* Parent hover scale effect - only for elements with hover-scale-parent class */
+.hover-scale-parent:hover .hover-scale {
+  transform: scale(1.2) !important;
+  transition: transform 0.3s ease-in-out !important;
+}
+
+
+/* Parent hover bounce effect - only for elements with hover-bounce-parent class */
+.hover-bounce-parent:hover .hover-bounce {
+  animation: bounce 0.6s ease-in-out !important;
+}
+
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-8px); }
+  60% { transform: translateY(-4px); }
+}
+
+/* Fade Effect - Change opacity */
+.hover-fade:hover {
+  opacity: 0.8;
+}
+
+/* Bounce Effect - Bounce animation */
+.hover-bounce:hover {
+  animation: bounce 0.6s ease-in-out;
+}
+
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-10px);
+  }
+  60% {
+    transform: translateY(-5px);
+  }
+}
+
+/* Rotate Effect - Rotate slightly */
+.hover-rotate:hover {
+  transform: rotate(90deg);
+}
+
+/* Pulse Effect - Pulsing animation */
+.hover-pulse:hover {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* =======================
+   Button-specific hover effects
+======================= */
+
+/* Primary button hover */
+.btn-hover-primary {
+  transition: all 0.3s ease-in-out;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.btn-hover-primary:hover {
+  background-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Secondary button hover */
+.btn-hover-secondary {
+  transition: all 0.3s ease-in-out;
+  background-color: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.btn-hover-secondary:hover {
+  background-color: #e5e7eb;
+  border-color: #9ca3af;
+  transform: translateY(-1px);
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: all 0.3s ease-in-out;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  background: white;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+  border-color: #d1d5db;
+}
+
+/* Image hover effect */
+.img-hover {
+  transition: all 0.3s ease-in-out;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.img-hover:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Link hover effect */
+.link-hover {
+  transition: all 0.3s ease-in-out;
+  color: #3b82f6;
+  text-decoration: none;
+  position: relative;
+}
+
+.link-hover:hover {
+  color: #2563eb;
+}
+
+.link-hover::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 2px;
+  bottom: -2px;
+  left: 0;
+  background-color: #3b82f6;
+  transition: width 0.3s ease-in-out;
+}
+
+.link-hover:hover::after {
+  width: 100%;
+}
+
+/* =======================
+   Utility classes for customization
+======================= */
+
+/* Fast transition */
+.hover-fast {
+  transition: all 0.15s ease-in-out;
+}
+
+/* Slow transition */
+.hover-slow {
+  transition: all 0.5s ease-in-out;
+}
+
+/* Disable hover effects on mobile */
+@media (hover: none) {
+  .hover-lift:hover,
+  .hover-scale:hover,
+  .hover-glow:hover,
+  .hover-slide:hover,
+  .hover-slide-left:hover,
+  .hover-fade:hover,
+  .hover-bounce:hover,
+  .hover-rotate:hover,
+  .hover-pulse:hover {
+    transform: none;
+    box-shadow: none;
+    animation: none;
+  }
+}
+</style>

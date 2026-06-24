@@ -1,0 +1,83 @@
+{% macro xero_button(link, text='Login with Xero') %}
+  <a href="{{ link }}" class="login_xero_btn shadow-md border border-gray-100 text-[#374151] font-medium">
+    <img
+      src="{{ url_for('static', filename='img/xero-logo.webp') }}"
+      width="18"
+    />
+    {{ text }}
+  </a>
+{% endmacro %}
+{% macro header(left='', middle='', right='', bgColor='primary', leftUrl='#') %}
+  <header class="fixed w-full top-0 z-10 border-b bg-{{ bgColor }} text-white">
+    <div class="flex items-center justify-between px-4 py-3 bg-{{ bgColor }}">
+      <a href="{{ leftUrl }}" class="w-8 h-8 flex items-center justify-center">
+        <i class="{{ left }}"></i>
+      </a>
+      <h1 class="text-xl font-semibold">{{ middle }}</h1>
+             {% if right == 'logo' %}
+         <a
+           href="/entity"
+           class="w-8 h-8 rounded-full bg-white flex items-center justify-center"
+         >
+           <img
+             src="{{ url_for('static', filename='img/logo_v2.webp') }}"
+             alt="Logo"
+             class="h-8"
+           />
+         </a>
+      {% elif right == 'menu' %}
+        <button onclick="toggleMenu()" class="flex h-8 items-center justify-center text-white w-8 hover:text-gray-300">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M9 10H23V11.625H9V10ZM9 15.6875H23V17.3125H9V15.6875ZM9 21.375H23V23H9V21.375Z" fill="#F5F7F9"/>
+          </svg>
+        </button>
+      {% else %}
+        <a
+          href="/entity"
+          class="w-8 h-8 rounded-full bg-white flex items-center justify-center"
+        >
+          <span class="font-['Pacifico'] text-primary text-sm"
+            >{{ right }}</span
+          >
+        </a>
+      {% endif %}
+    </div>
+  </header>
+{% endmacro %}
+{% macro logo(url='#', size=60) %}
+  <a href="{{ url }}" class="logo flex justify-center">
+    <img
+      src="{{ url_for('static', filename='img/logo_v2.webp') }}"
+      alt="Olive and Vine"
+      width="{{ size }}"
+    />
+  </a>
+{% endmacro %}
+{%
+  macro toast(icon='img/success.webp',type='', message='',
+  toastBorder='', toastBg='', toastColor='')
+%}
+  {% set tone = 'error' if 'error' in toastBorder else ('warning' if 'warning' in toastBorder else ('info' if 'info' in toastBorder else 'success')) %}
+  {% if tone == 'success' %}
+    {% set borderHex = '#a9d7cb' %}{% set bgHex = '#f1fffc' %}{% set titleHex = '#017155' %}{% set subHex = '#92c6b9' %}{% set iconFile = 'img/success-icon.png' %}{% set iconAlt = 'Success' %}
+  {% elif tone == 'error' %}
+    {% set borderHex = '#ffcccc' %}{% set bgHex = '#fff1f1' %}{% set titleHex = '#F03D3D' %}{% set subHex = '#f57e7e' %}{% set iconFile = 'img/error-icon.png' %}{% set iconAlt = 'Error' %}
+  {% elif tone == 'warning' %}
+    {% set borderHex = '#fee0aa' %}{% set bgHex = '#fffaf1' %}{% set titleHex = '#DA8700' %}{% set subHex = '#e8b765' %}{% set iconFile = 'img/warning-icon.png' %}{% set iconAlt = 'Warning' %}
+  {% else %}
+    {% set borderHex = '#a9d3ff' %}{% set bgHex = '#f1f8ff' %}{% set titleHex = '#006FE6' %}{% set subHex = '#5ba2ee' %}{% set iconFile = 'img/info-icon.png' %}{% set iconAlt = 'Information' %}
+  {% endif %}
+  <div
+    style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: {{ borderHex }}; background-color: {{ bgHex }};"
+    class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative"
+  >
+    <img src="{{ url_for('static', filename=iconFile) }}" alt="{{ iconAlt }}" class="shrink-0 w-[36px] h-[44px]" />
+    <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+      <p class="font-[500] whitespace-nowrap" style="color: {{ titleHex }};">{{ type }}</p>
+      <p class="font-[400] break-words w-full" style="color: {{ subHex }};">{{ message }}</p>
+    </div>
+    <button class="toast-close shrink-0">
+      <img src="{{ url_for('static', filename='img/toast-close.webp') }}" alt="Close" class="w-[14px] h-[14px]">
+    </button>
+  </div>
+{% endmacro %}

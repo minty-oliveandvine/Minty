@@ -1,0 +1,131 @@
+      <!-- Main Content Area -->
+      {# Bills UI: outer column already has px-4/sm:px-6 — drop inner horizontal padding so content lines up with pills #}
+      <div class="main-content overflow-y-auto flex-1 {% if bills_ui %}px-0 pt-0 pb-28 bg-white{% else %}px-6 py-6 pb-40 bg-gray-50{% endif %}">
+        <!-- Header Section -->
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-lg font-semibold text-gray-800">User Management</h2>
+          <span class="text-sm text-gray-500">{{ users|length }} user{% if users|length != 1 %}s{% endif %}</span>
+        </div>
+
+                 <!-- Filter Section -->
+         <button onclick="toggleFilterModal()" class="w-full border border-gray-200 bg-white rounded-lg p-4 mb-6 flex items-center justify-between transition-colors cursor-pointer">
+           <div class="flex items-center space-x-2 gap-2">
+             <svg width="14" height="10" viewBox="0 0 14 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+               <path d="M5.44624 9.66406H8.55374V8.10938H5.44624V9.66406ZM0.00811768 0.335938V1.89062H13.9919V0.335938H0.00811768ZM2.33874 5.77734H11.6612V4.22266H2.33874V5.77734Z" fill="#4B5563"/>
+             </svg>
+             <span class="text-gray-700 font-medium">Filter Users</span>
+           </div>
+           <svg id="filterChevron" width="12" height="10" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200">
+             <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
+           </svg>
+         </button>
+
+        <!-- Filter Modal -->
+        <div id="filterModal" class="hidden bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <!-- Permission Level Filter -->
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Permission Level</label>
+            <div id="roleFilterButtons" class="flex flex-wrap gap-2">
+              <button onclick="selectPermission(null)" id="allBtn" class="px-4 py-2 rounded-full text-sm font-medium bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80 transition-colors">
+                All
+              </button>
+              {% for role in roles %}
+              <button onclick="selectPermission('{{ role.name|lower }}')" id="{{ role.name|lower }}Btn" class="px-4 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-gray-700 hover:bg-[#F3F4F6]/80 transition-colors" data-role="{{ role.name|lower }}">
+                {{ role.name }}
+              </button>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex space-x-3">
+            <button onclick="resetFilters()" class="flex-1 px-4 py-2 bg-white text-[#54D3DA] border-2 border-[#54D3DA] rounded-xl font-medium hover:bg-[#54D3DA]/10 transition-colors">
+              Reset
+            </button>
+            <button onclick="applyFilters()" class="flex-1 px-4 py-2 bg-[#54D3DA] text-white rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+              Apply Filters
+            </button>
+          </div>
+        </div>
+
+        <!-- User List -->
+        <div class="space-y-3">
+          {% for user, role in users %}
+          <div class="{% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} rounded-lg shadow-sm p-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-4">
+                <div class="w-10 h-10 bg-[#54D3DA] rounded-full flex items-center justify-center">
+                  <span class="text-white font-medium text-sm">{{ user.first_name[0] }}{{ user.last_name[0] }}</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center space-x-2 flex-wrap">
+                    <h3 class="font-semibold text-gray-900 text-[10px] sm:text-base truncate">{{ user.first_name }} {{ user.last_name }}</h3>
+                    <span class="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#EEFBFB] text-[#54D3DA] text-[10px] sm:text-xs font-medium rounded-full flex-shrink-0" data-role="{{ role|lower }}">{{ role|lower|replace('_', ' ')|title }}</span>
+                  </div>
+                  <p class="text-[10px] sm:text-sm text-gray-500 truncate">{{ user.username }}</p>
+                </div>
+              </div>
+              <div class="flex items-center space-x-2">
+                {% if not is_view_only %}
+                <button class="p-1.5 sm:p-2 text-gray-400 hover:text-[#54D3DA] transition-colors"
+                        onclick="openEditUserModal('{{ user.id }}', '{{ user.first_name }}', '{{ user.last_name }}', '{{ user.username }}', '{{ role|lower }}')"
+                        title="Edit user">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 sm:w-5 sm:h-5">
+                    <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-12.15 12.15a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32L19.513 8.2Z" />
+                  </svg>
+                </button>
+                <button class="p-1.5 sm:p-2 text-gray-400 hover:text-red-500 transition-colors"
+                        onclick="openDeleteUserModal('{{ user.id }}', '{{ user.first_name }} {{ user.last_name }}')"
+                        title="Remove user">
+                  <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 sm:w-4 sm:h-4">
+                    <path d="M11.7497 3.50003H15.5V5.00013H13.9996V14.75C13.9996 14.96 13.9274 15.1375 13.7824 15.2825C13.6375 15.4275 13.4601 15.5 13.2501 15.5H2.74994C2.53994 15.5 2.36258 15.4275 2.21759 15.2825C2.0726 15.1375 2.00038 14.96 2.00038 14.75V5.00013H0.5V3.50003H4.25031V1.2502C4.25031 1.04021 4.32253 0.862556 4.46752 0.717527C4.61252 0.5725 4.78988 0.5 4.99987 0.5H11.0001C11.2101 0.5 11.3875 0.5725 11.5325 0.717527C11.6775 0.862556 11.7497 1.04021 11.7497 1.2502V3.50003ZM12.4999 5.00013H3.50013V14.0001H12.4999V5.00013ZM5.75006 7.25011H7.24981V11.7501H5.75006V7.25011ZM8.75019 7.25011H10.2499V11.7501H8.75019V7.25011ZM5.75006 2.00009V3.50003H10.2499V2.00009H5.75006Z" fill="currentColor"/>
+                  </svg>
+                </button>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+          
+          {% if users|length == 0 %}
+          <div class="{% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} rounded-lg p-8 shadow-sm text-center">
+            <div class="text-gray-400 mb-4">
+              <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">No users found</h3>
+            <p class="text-gray-500 mb-4">Get started by inviting your first user to this organization.</p>
+          </div>
+          {% endif %}
+
+          <!-- Pending Invitations Section -->
+          <div id="pendingInvitationsSection" class="hidden mt-6">
+            <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Pending Invitations</h3>
+            <div id="pendingInvitationsList" class="space-y-3"></div>
+          </div>
+        </div>
+        <!-- <button id="saveButton" type="button" onclick="handleSaveChanges()" class="bg-[#54D3DA] font-medium hover:bg-[#54D3DA]/80 px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full">
+          Save Changes
+        </button> -->
+      </div>
+
+      <!-- Loading Overlay -->
+      <div id="loadingOverlay" class="fixed inset-0 z-[300] flex items-center justify-center bg-black bg-opacity-50 hidden">
+        <div class="bg-white rounded-lg p-6 flex items-center space-x-3">
+          <svg class="animate-spin h-6 w-6 text-[#54D3DA]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span id="loadingText" class="text-gray-700 font-medium">Saving Changes...</span>
+        </div>
+      </div>
+
+             <!-- Add New User Button - Floating -->
+        {% if not is_view_only %}
+        <button onclick="addNewUser()" class="{% if bills_ui %}fixed bottom-6{% else %}absolute bottom-24{% endif %} right-6 w-14 h-14 bg-[#54D3DA] rounded-full shadow-lg hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center z-30 hover-lift">
+         <svg width="18" height="19" viewBox="0 0 18 19" fill="none" xmlns="http://www.w3.org/2000/svg">
+           <path d="M9.44737 11.8657V18.5H0.5C0.5 17.2543 0.82807 16.1 1.48421 15.0371C2.11649 14.0086 2.96947 13.1914 4.04316 12.5857C5.15263 11.9571 6.35754 11.6429 7.6579 11.6429C8.26632 11.6429 8.86281 11.7171 9.44737 11.8657ZM7.6579 10.7857C6.67965 10.7857 5.77895 10.5514 4.95579 10.0829C4.14456 9.62571 3.50035 9.00857 3.02316 8.23143C2.53404 7.44286 2.28947 6.58 2.28947 5.64286C2.28947 4.70572 2.53404 3.84286 3.02316 3.05429C3.50035 2.27714 4.14456 1.66 4.95579 1.20286C5.77895 0.734287 6.67965 0.5 7.6579 0.5C8.63614 0.5 9.53684 0.734287 10.36 1.20286C11.1712 1.66 11.8154 2.27714 12.2926 3.05429C12.7818 3.84286 13.0263 4.70572 13.0263 5.64286C13.0263 6.58 12.7818 7.44286 12.2926 8.23143C11.8154 9.00857 11.1712 9.62571 10.36 10.0829C9.53684 10.5514 8.63614 10.7857 7.6579 10.7857ZM13.0263 14.2143V11.6429H14.8158V14.2143H17.5V15.9286H14.8158V18.5H13.0263V15.9286H10.3421V14.2143H13.0263Z" fill="white"/>
+         </svg>
+       </button>
+       {% endif %}

@@ -1,0 +1,342 @@
+{# 
+  Reusable Pie Chart Component
+  
+  Usage:
+  {% include 'components/pie_chart.html' with {
+    'container_id': 'expensesPieChart',
+    'data': existing_expenses,
+    'colors': ['#278CF4', '#F1B337', ...],
+    'color_class_prefix': 'expense-color',
+    'item_class_prefix': 'expense-item'
+  } %}
+#}
+
+<script>
+  function initializePieChart(config) {
+    const {
+      containerId,
+      data,
+      colors = ['#278CF4', '#F1B337', '#F2822C', '#B8E467', '#67e4c0', '#9f67e4', '#e4679d', '#f1db37'],
+      colorClassPrefix = 'expense-color',
+      itemClassPrefix = 'expense-item'
+    } = config;
+    
+    const chartContainer = document.getElementById(containerId);
+    if (!chartContainer || !data || data.length === 0) return;
+    
+    // Clear previous chart
+    chartContainer.innerHTML = '';
+    
+    // Format expense data
+    const expenses = data.map(expense => ({
+      name: expense.item || expense.name || 'N/A',
+      value: expense.amount || expense.value || 0
+    }));
+    
+    // Calculate original total (before any adjustments)
+    const originalTotal = expenses.reduce((sum, exp) => sum + exp.value, 0);
+    if (originalTotal === 0) return;
+    
+    // Check if "Other expenses" exists and needs minimum value
+    const otherExpensesItem = expenses.find(exp => exp.name === 'Other expenses');
+    let adjustedTotal = originalTotal;
+    const minValueForOther = originalTotal * 0.02; // 2% of original total for better visibility
+    
+    if (otherExpensesItem) {
+      if (otherExpensesItem.value <= 0) {
+        // If value is 0 or negative, add minimum value to total
+        adjustedTotal = originalTotal + minValueForOther;
+      } else if (otherExpensesItem.value < minValueForOther) {
+        // If value is small, adjust total to account for minimum visible value
+        adjustedTotal = originalTotal - otherExpensesItem.value + minValueForOther;
+      }
+    }
+    
+    const total = adjustedTotal;
+    
+    // Get container dimensions
+    const size = chartContainer.offsetWidth || 200;
+    const centerX = size / 2;
+    const centerY = size / 2;
+    const innerRadius = size * 0.30;
+    const outerRadius = size * 0.40;
+    const padAngle = 0.03;
+    
+    // Create SVG
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+    svg.style.overflow = 'visible';
+    
+    // Calculate total angle available
+    const totalPadAngle = padAngle * expenses.length;
+    const availableAngle = Math.PI * 2 - totalPadAngle;
+    
+    let currentAngle = -Math.PI / 2; // Start from top
+    
+    expenses.forEach((expense, index) => {
+      const isOtherExpenses = (expense.name === 'Other expenses');
+      
+      // Skip rendering if value is 0 or negative (but "Other expenses" should always render if included)
+      if (expense.value <= 0 && !isOtherExpenses) {
+        currentAngle += padAngle; // Still advance angle to maintain spacing
+        return;
+      }
+      
+      // For "Other expenses" with 0 or very small value, ensure it's visible
+      let effectiveValue = expense.value;
+      if (isOtherExpenses) {
+        // Always ensure "Other expenses" has a minimum visible value (at least 2% of total)
+        const minVisibleValue = originalTotal * 0.02; // 2% of original total for better visibility
+        if (expense.value <= 0) {
+          effectiveValue = minVisibleValue;
+        } else if (expense.value < minVisibleValue) {
+          // If value is very small but > 0, ensure it's at least 2% visible
+          effectiveValue = minVisibleValue;
+        }
+      }
+      
+      const percentage = effectiveValue / total;
+      // Ensure minimum angle for visibility (at least 1% of circle) for very small segments
+      const minAngle = (Math.PI * 2) * 0.01; // 1% of full circle for better visibility
+      let angle = percentage * availableAngle;
+      // Apply minimum angle for very small segments to ensure visibility (especially for "Other expenses")
+      if (isOtherExpenses) {
+        // Always use minimum angle for "Other expenses" to ensure it's visible
+        angle = Math.max(angle, minAngle);
+      } else if (angle > 0 && angle < minAngle) {
+        angle = minAngle;
+      }
+      
+      // Use yellow color (#f1db37) for "Other expenses", otherwise use color from array
+      const color = isOtherExpenses 
+        ? '#f1db37' 
+        : colors[index % colors.length];
+      
+      // Calculate angles
+      const startAngle = currentAngle;
+      const endAngle = currentAngle + angle;
+      
+      // Calculate points for outer arc
+      const outerX1 = centerX + outerRadius * Math.cos(startAngle);
+      const outerY1 = centerY + outerRadius * Math.sin(startAngle);
+      const outerX2 = centerX + outerRadius * Math.cos(endAngle);
+      const outerY2 = centerY + outerRadius * Math.sin(endAngle);
+      
+      // Calculate points for inner arc
+      const innerX1 = centerX + innerRadius * Math.cos(startAngle);
+      const innerY1 = centerY + innerRadius * Math.sin(startAngle);
+      const innerX2 = centerX + innerRadius * Math.cos(endAngle);
+      const innerY2 = centerY + innerRadius * Math.sin(endAngle);
+      
+      const largeArcFlag = angle > Math.PI ? 1 : 0;
+      
+      // Create donut segment path
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      
+      // For very small angles, ensure the path is still visible
+      let pathData;
+      if (angle < 0.01) {
+        // For extremely small angles, create a thin visible wedge
+        const midAngle = startAngle + angle / 2;
+        const outerMidX = centerX + outerRadius * Math.cos(midAngle);
+        const outerMidY = centerY + outerRadius * Math.sin(midAngle);
+        const innerMidX = centerX + innerRadius * Math.cos(midAngle);
+        const innerMidY = centerY + innerRadius * Math.sin(midAngle);
+        
+        pathData = [
+          `M ${innerX1} ${innerY1}`,
+          `L ${outerX1} ${outerY1}`,
+          `L ${outerMidX} ${outerMidY}`,
+          `L ${innerMidX} ${innerMidY}`,
+          `L ${innerX1} ${innerY1}`,
+          'Z'
+        ].join(' ');
+      } else {
+        pathData = [
+        `M ${innerX1} ${innerY1}`,
+        `L ${outerX1} ${outerY1}`,
+        `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${outerX2} ${outerY2}`,
+        `L ${innerX2} ${innerY2}`,
+        `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerX1} ${innerY1}`,
+        'Z'
+      ].join(' ');
+      }
+      
+      path.setAttribute('d', pathData);
+      path.setAttribute('fill', color);
+      path.setAttribute('stroke', '#fff');
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('stroke-linecap', 'round');
+      path.style.cursor = 'pointer';
+      path.style.transition = 'transform 0.2s ease-in-out';
+      path.style.transformOrigin = 'center';
+      
+      // Store expense data for hover
+      path.setAttribute('data-expense-name', expense.name);
+      path.setAttribute('data-expense-value', expense.value);
+      
+      svg.appendChild(path);
+      
+      currentAngle = endAngle + padAngle;
+    });
+    
+    // Format total value
+    const formattedTotal = total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    // Calculate available space in center (inner radius diameter)
+    const centerDiameter = innerRadius * 2;
+    const maxTextWidth = centerDiameter * 0.85; // Use 85% of center diameter to ensure text stays inside
+    
+    // Helper function to estimate text width more accurately
+    const estimateTextWidth = (text, fontSize) => {
+      // Create a temporary text element to measure actual width
+      const tempText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      tempText.setAttribute('font-size', fontSize);
+      tempText.setAttribute('font-weight', '600');
+      tempText.textContent = text;
+      svg.appendChild(tempText);
+      const bbox = tempText.getBBox();
+      svg.removeChild(tempText);
+      return bbox.width;
+    };
+    
+    // Helper function to calculate optimal font size for text to fit in center
+    const calculateOptimalFontSize = (text, baseFontSize = 20) => {
+      let optimalFontSize = baseFontSize;
+      let iterations = 0;
+      const maxIterations = 30;
+      
+      // Only reduce font size if text doesn't fit
+      while (estimateTextWidth(text, optimalFontSize) > maxTextWidth && iterations < maxIterations) {
+        optimalFontSize *= 0.95; // Reduce by 5% each iteration for smoother scaling
+        iterations++;
+      }
+      
+      // Ensure minimum readable font size
+      return Math.max(optimalFontSize, 12);
+    };
+    
+    // Calculate optimal font size for total
+    const fontSize = calculateOptimalFontSize(formattedTotal);
+    
+    // Add total text in the center with proper constraints
+    const totalText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    totalText.setAttribute('id', `${containerId}-center-text`);
+    totalText.setAttribute('x', centerX);
+    totalText.setAttribute('y', centerY);
+    totalText.setAttribute('text-anchor', 'middle');
+    totalText.setAttribute('dominant-baseline', 'middle');
+    totalText.setAttribute('fill', '#111827');
+    totalText.setAttribute('font-size', fontSize);
+    totalText.setAttribute('font-weight', '600');
+    
+    totalText.textContent = formattedTotal;
+    svg.appendChild(totalText);
+    
+    // Store paths array for access from list items
+    const paths = Array.from(svg.querySelectorAll('path[data-expense-name]'));
+    
+    // Function to handle hover effect
+    function handleExpenseHover(index, expenseValue) {
+      if (paths[index]) {
+        paths[index].style.transform = 'scale(1.05)';
+        
+        // Format the value with commas and 2 decimal places
+        const formattedValue = parseFloat(expenseValue).toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+        
+        // Calculate optimal font size using the same scaling function
+        const valueFontSize = calculateOptimalFontSize(formattedValue);
+        
+        totalText.setAttribute('font-size', valueFontSize);
+        totalText.textContent = formattedValue;
+      }
+    }
+    
+    // Function to handle hover out
+    function handleExpenseHoverOut(index) {
+      if (paths[index]) {
+        paths[index].style.transform = 'scale(1)';
+        // Recalculate optimal font size for total (in case container size changed)
+        const totalFontSize = calculateOptimalFontSize(formattedTotal);
+        totalText.setAttribute('font-size', totalFontSize);
+        totalText.textContent = formattedTotal;
+      }
+    }
+    
+    // Add hover functionality to pie chart segments
+    paths.forEach((path, index) => {
+      const expenseValue = path.getAttribute('data-expense-value');
+      
+      path.addEventListener('mouseenter', function() {
+        handleExpenseHover(index, expenseValue);
+      });
+      
+      path.addEventListener('mouseleave', function() {
+        handleExpenseHoverOut(index);
+      });
+    });
+    
+    chartContainer.appendChild(svg);
+    
+    // Set colors for legend and add hover functionality to list items
+    expenses.forEach((expense, index) => {
+      const isOtherExpenses = (expense.name === 'Other expenses');
+      // Use yellow color (#f1db37) for "Other expenses", otherwise use color from array
+      const expenseColor = isOtherExpenses 
+        ? '#f1db37' 
+        : colors[index % colors.length];
+      
+      const colorElements = document.querySelectorAll(`.${colorClassPrefix}-${index}`);
+      colorElements.forEach(el => {
+        el.style.backgroundColor = expenseColor;
+      });
+      
+      // Also handle "other" class for "Other expenses"
+      if (isOtherExpenses) {
+        const otherColorElements = document.querySelectorAll(`.${colorClassPrefix}-other`);
+        otherColorElements.forEach(el => {
+          el.style.backgroundColor = expenseColor;
+      });
+      }
+      
+      // Add hover functionality to list items
+      const listItems = document.querySelectorAll(`.${itemClassPrefix}-${index}`);
+      listItems.forEach(item => {
+        item.style.cursor = 'pointer';
+        item.style.transition = 'opacity 0.2s ease-in-out, transform 0.2s ease-in-out';
+        
+        item.addEventListener('mouseenter', function() {
+          item.style.opacity = '0.8';
+          item.style.transform = 'scale(1.02)';
+          const matchingPath = paths.find(p => p.getAttribute('data-expense-name') === expense.name);
+          if (matchingPath) {
+            const pathIndex = paths.indexOf(matchingPath);
+            const pathValue = parseFloat(matchingPath.getAttribute('data-expense-value')) || expense.value;
+            handleExpenseHover(pathIndex, pathValue);
+          } else {
+            handleExpenseHover(index, expense.value);
+          }
+        });
+        
+        item.addEventListener('mouseleave', function() {
+          item.style.opacity = '1';
+          item.style.transform = 'scale(1)';
+          const matchingPath = paths.find(p => p.getAttribute('data-expense-name') === expense.name);
+          if (matchingPath) {
+            const pathIndex = paths.indexOf(matchingPath);
+            handleExpenseHoverOut(pathIndex);
+          } else {
+            handleExpenseHoverOut(index);
+          }
+        });
+      });
+    });
+  }
+</script>
+

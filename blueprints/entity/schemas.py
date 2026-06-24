@@ -1,0 +1,1 @@
+"""Entity schema placeholders for entity blueprint."""

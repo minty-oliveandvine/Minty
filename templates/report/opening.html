@@ -1,0 +1,1061 @@
+{# Constrained "Edit Report" mode for a SUBMITTED report: only the non-balance
+   "withdrawal from" source is editable here; all balance inputs stay locked.
+   True only when ?report_edit=true AND this is a submitted Report (a draft has
+   status == 'draft'; a submitted Report has no status attribute). #}
+{% set is_report_edit_mode = request.args.get('report_edit') == 'true' and current_draft and current_draft.status != 'draft' %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Opening Balance - Vine Consulting Limited</title>
+    <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+    <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+    <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+    <!-- Hover Effects Component -->
+    {% include 'components/hover_effects.html' %}
+
+    <!-- Page Transitions Component -->
+    {% include 'components/page_transitions.html' %}
+
+    <!-- Inter font -->
+<link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              inter: ["Inter", "ui-sans-serif", "system-ui"],
+            },
+          },
+        },
+      };
+    </script>
+    
+    <style>
+      @media (min-width: 640px) and (max-width: 1024px) {
+        .main-container {
+          width: 640px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1024px) and (max-width: 1200px) {
+        .main-container {
+          width: 768px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1200px) {
+        .main-container {
+          width: 1024px;
+          margin: 0 auto;
+        }
+      }
+
+      /* Simple sticky bottom section */
+      .sticky-bottom-section {
+        flex-shrink: 0;
+      }
+
+      /* Simple content area */
+      .content-scroll-area {
+        flex: 1;
+        overflow-y: auto;
+      }
+      
+      .image-skeleton {
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+      }
+      
+      @keyframes shimmer {
+        0% {
+          background-position: -200% 0;
+        }
+        100% {
+          background-position: 200% 0;
+        }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen font-inter antialiased">
+    <div class="flex min-h-screen items-center justify-center main-container relative">
+      <!-- Phone card -->
+      <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+        <!-- Header -->
+        <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+          <div class="flex-1 flex justify-start min-w-0">
+            <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="/entity/{{org.id}}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7"/>
+              </svg>
+            </a>
+          </div>
+          <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+            {% if display_date %}
+            <span class="px-3 py-1 rounded-full text-xs font-medium text-[#31B6BD] bg-[#CAF1F4]/50">
+              {{ transaction_date.strftime('%d %b').upper() or datenow.strftime('%d %b').upper()}}
+            </span>
+            {% endif %}
+            <h1 class="text-[#474747] text-lg font-medium">{{ entity_acronym }}</h1>
+            {% include 'components/report_draft_header_badge.html' %}
+          </div>
+          <div class="flex-1 flex justify-end">
+            <div class="flex items-center gap-2">
+              {% set fn = (current_user.first_name or '')[:1] %}
+              {% set ln = (current_user.last_name or '')[:1] %}
+              {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+              <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
+                class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
+                aria-label="Open profile in Bills"
+                title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
+                <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
+              </a>
+              <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
+                  <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+          <!-- Loading Overlay -->
+           {% include 'components/loading_overlay.html' %}                                                                                                                                       <!-- Progress Steps -->
+            <div class=" bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
+              <!-- Notification Area -->
+               <div id="notification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
+                 <!-- Success Toast -->
+                 <div id="successToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #a9d7cb; background-color: #f1fffc;">
+                   <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+                   <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                     <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+                     <p class="font-[400] break-words w-full" id="successMessage" style="color: #92c6b9;">Bank Transfer Created Successfully</p>
+                   </div>
+                   <button class="toast-close shrink-0" onclick="hideNotification()">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                     </svg>
+                   </button>
+                 </div>
+
+                 <!-- Error Toast -->
+                 <div id="errorToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffcccc; background-color: #fff1f1;">
+                   <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+                   <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                     <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Validation Error</p>
+                     <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;"></p>
+                   </div>
+                   <button class="toast-close shrink-0" onclick="hideNotification()">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                     </svg>
+                   </button>
+                 </div>
+                 <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
+                 <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
+                   <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
+                   <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                     <p class="font-[500] whitespace-nowrap" style="color: #E59218;">Warning</p>
+                     <p class="font-[400] break-words w-full" style="color: #F0A93B;">You have unsaved changes. Please save your changes first.</p>
+                   </div>
+                   <button class="toast-close shrink-0" onclick="hideNotification()">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                     </svg>
+                   </button>
+                 </div>
+               </div>
+          
+          <!-- Include the reusable stepper component -->
+          {% include 'components/stepper.html' %}
+         </div>
+
+      <!-- Main Content Area -->
+      <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1 overflow-hidden">    
+        <!-- Title -->
+        <div class="text-left mb-6">
+          <h2 class="text-lg sm:text-xl font-bold text-gray-700">Opening</h2>
+        </div>
+        <!-- Form Content -->
+        <form id="opening-form" action="{{ url_for('report.report_opening') }}?entity_id={{ org.id }}&transaction_date={{ request.args.get('transaction_date') }}" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="entity_id" value="{{ org.id }}">
+          <input type="hidden" name="action_type" value="save_next">
+          {% if draft_id %}
+          <input type="hidden" name="draft_id" value="{{ draft_id }}">
+          {% endif %} 
+          <!-- Single Form Container -->
+          <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
+            <!-- Starting Balance -->
+            <div class="mb-2">
+              <div class="mb-10 w-[240px] mx-auto block relative" style="min-height: 156px;">
+                <div class="image-skeleton w-[170px] h-[170px] rounded-full bg-gray-200 absolute top-0 left-1/2 transform -translate-x-1/2"></div>
+                <img src="{{ url_for('static', filename='img/opening.webp') }}" alt="Opening" class="w-[240px] h-auto mx-auto block relative opacity-0 transition-opacity duration-300" onload="this.classList.remove('opacity-0'); this.classList.add('opacity-100'); this.previousElementSibling.style.display='none'; this.parentElement.style.minHeight='auto';" onerror="this.previousElementSibling.style.display='none';">
+              </div>
+              <div class=" bg-gray-100 rounded-2xl p-4">
+                <div class="flex justify-between items-center border-b border-gray-300 pb-2">
+                  <span class="text-sm font-medium text-gray-500">Starting Cash Balance</span>
+                  <span class="text-sm font-medium text-gray-500" id="startingCashBalance">${{ "{:,.2f}".format(yesterday_closing_balance or 0) }}</span>
+                </div>
+                <div class="flex justify-between items-center pt-2">
+                  <span class="text-sm font-medium text-gray-400">Cash Till Balance</span>
+                  <span class="text-sm font-medium text-gray-400" id="yesterdayClosingBalance">${{ "{:,.2f}".format((yesterday_closing_balance or 0) - (safebox_balance or 0)) }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-sm font-medium text-gray-400">Safebox</span>
+                  <span class="text-sm font-medium text-gray-400" id="safeboxBalance">${{ "{:,.2f}".format(safebox_balance or 0) }}</span>
+                </div>
+              </div>
+            </div>
+            <input type="hidden" name="opening_balance" value="{{ (yesterday_closing_balance or 0) }}">
+            <input type="date" name="transaction_date" value="{{ (selected_date or next_transaction_date or datenow).strftime('%Y-%m-%d') }}" class="hidden">
+            <!-- Addition to Cash Drawer -->
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Addition to Cash Drawer</label>
+              <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <span class="text-gray-500 text-sm">$</span>
+                </div>
+                  <input type="text" inputmode="decimal" id="additiontocashbalance" name="cash_addition" value="{{ (current_draft.cash_addition if current_draft and current_draft.cash_addition else report.cash_addition if report and report.cash_addition else '') }}" placeholder="Please enter any cash addition" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-gray-700{% endif %} border border-gray-300 rounded-xl placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); updateOpeningCashBalance();" onblur="formatWithCommas(this); updateOpeningCashBalance();"/>
+              </div>
+            </div>
+            <!-- Withdrawal from -->
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Withdrawal from:</label>
+              <div class="space-y-2">
+                <label class="flex items-center">
+                  <input type="radio" name="withdrawal" value="company" class="w-4 h-4 text-[#54D3DA] border-gray-300 focus:ring-[#54D3DA] {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}opacity-50 cursor-not-allowed{% endif %}" onchange="toggleBankAccount(); markWithdrawalDirty()" {% if report.withdrawal == 'company' %}checked{% endif %} {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}disabled{% endif %}/>
+                  <span class="ml-2 text-sm {% if current_draft and current_draft.status != 'draft' %}text-gray-500{% else %}text-gray-700{% endif %}">Company Bank</span>
+                </label>
+                <label class="flex items-center">
+                  <input type="radio" name="withdrawal" value="personal" class="w-4 h-4 text-[#54D3DA] border-gray-300 focus:ring-[#54D3DA] {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}opacity-50 cursor-not-allowed{% endif %}" onchange="toggleBankAccount(); markWithdrawalDirty()" {% if report.withdrawal == 'personal' or not report.withdrawal %}checked{% endif %} {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}disabled{% endif %}/>
+                  <span class="ml-2 text-sm {% if current_draft and current_draft.status != 'draft' %}text-gray-500{% else %}text-gray-700{% endif %}">Personal</span>
+                </label>
+              </div>
+              <!-- Hidden input for bank account (automatically set based on preset) -->
+              <input type="hidden" name="bank_account" id="bank_account_hidden" value="{% if report.withdrawal == 'company' %}{{main_bank_account}}{% else %}{{main_bank_account}}{% endif %}">
+              {% if is_report_edit_mode %}
+              <div class="flex justify-end mt-3">
+                <button type="button" onclick="saveWithdrawalSource()"
+                  class="bg-[#54D3DA] hover:bg-[#54D3DA]/80 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                  Save changes
+                </button>
+              </div>
+              {% endif %}
+            </div>
+            <!-- Opening Balance -->
+            <div>
+              <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
+                <span class="text-sm font-medium text-[#31B6BD]">Opening Cash Balance</span>
+                <span class="text-sm font-medium text-[#31B6BD]" id="openingCashBalance">${{ "{:,.2f}".format((yesterday_closing_balance or 0) + (current_draft.cash_addition if current_draft and current_draft.cash_addition else (report.cash_addition if report and report.cash_addition else 0))) }}</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <!-- Action Buttons -->
+            {% if not current_draft or current_draft.status == 'draft' %}
+              <!-- New Report or Draft Report: Save & Next, Save & Exit -->
+              <button
+                class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium shadow-md flex items-center justify-center gap-4 hover:bg-[#54D3DA]/80 transition-colors hover-slide-parent"
+                type="button"
+                onclick="logFormSubmission(event)">
+                <span>Save & Next</span>
+                <svg class="hover-slide" width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10.534 5.66477L6.16282 1.18659L7.31648 -9.53674e-07L13.6377 6.50026L7.31648 13L6.16282 11.8139L10.534 7.33576H0.637695V5.66477H10.534Z" fill="white"/>
+                </svg>
+              </button>
+              <div class="flex justify-center mt-2">
+                <button type="button" class="text-[#54D3DA] py-2 px-4 text-sm font-medium hover:text-[#54D3DA]/80 transition-colors flex items-center justify-center min-h-[40px]" onclick="saveAndExit()">
+                  <span>Save & Exit</span>
+                </button>
+              </div>
+            {% elif not is_report_edit_mode %}
+              <button
+                type="button"
+                class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium shadow-md flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors hover-scale-parent"
+                onclick="closeReport()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+                <span>Close</span>
+              </button>
+            {% endif %}
+           </div>
+        </form>
+      </div>
+
+      <!-- Include reusable sidepanel component -->
+      {% include 'components/sidepanel.html' %}
+
+      <!-- Fix Negative Starting Balance Modal -->
+      <div id="fixNegativeBalanceModal" class="absolute inset-0 bg-black bg-opacity-50 {% if (yesterday_closing_balance or 0) < 0 %}flex{% else %}hidden{% endif %} items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+          {% set _yesterday_closing_balance = yesterday_closing_balance or 0 %}
+          <div class="mb-6">
+            <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
+            <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
+            <p class="text-3xl font-semibold text-center mb-4 {% if _yesterday_closing_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if _yesterday_closing_balance < 0 %}(${{ "{:,.2f}".format(-_yesterday_closing_balance) }}){% else %}${{ "{:,.2f}".format(_yesterday_closing_balance) }}{% endif %}</p>
+            <p class="text-sm text-gray-600">Starting cash balance is negative. The deposit amount may exceed available cash. Please go back and adjust.</p>
+          </div>
+          <div class="space-y-3">
+            <button onclick="navigateToDashboard()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+              <div class="flex items-center">
+                <span>Dashboard</span>
+                <p class="ml-2 text-medium font-base text-[#FF6B6B]">(Balance: HK$ {{ "{:,.2f}".format(yesterday_closing_balance or 0) }})</p>
+              </div>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Dialog (stays open until the user clicks OK) -->
+      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+          <div class="flex items-start mb-6">
+            <div class="flex-shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              </svg>
+            </div>
+            <div class="ml-3">
+              <h2 id="errorDialogTitle" class="text-lg font-bold text-gray-900">Error</h2>
+              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
+            </div>
+          </div>
+          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <script>
+      // Function to format currency input (simple and clean)
+      function formatCurrency(input) {
+        // Remove any non-numeric characters except decimal point
+        let value = input.value.replace(/[^\d.]/g, '');
+        
+        // Ensure only one decimal point
+        const parts = value.split('.');
+        if (parts.length > 2) {
+          value = parts[0] + '.' + parts.slice(1).join('');
+        }
+        
+        // Limit to 2 decimal places
+        if (parts.length === 2 && parts[1].length > 2) {
+          value = parts[0] + '.' + parts[1].substring(0, 2);
+        }
+        
+        // Update the input value (keep it simple - no dash conversion)
+        input.value = value;
+      }
+
+      // Format with commas on blur (simple and clean)
+      function formatWithCommas(input) {
+        let value = input.value;
+        
+        // Skip if empty
+        if (value === '') {
+          return;
+        }
+        
+        // Remove existing commas and format
+        value = value.replace(/,/g, '');
+        const parts = value.split('.');
+        
+        if (parts.length > 0 && parts[0] !== '') {
+          const wholeNumber = parts[0];
+          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+          // Add .00 if no decimal part
+          value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
+        }
+        
+        // Update the input value
+        input.value = value;
+      }
+
+
+
+       // Function to navigate to different steps
+       // Store initial form values on page load
+       let initialFormValues = {};
+       let formTrackingInitialized = false;
+       // Tracks unsaved changes to the "withdrawal from" source in edit mode
+       // (radio inputs aren't covered by the text/number tracking below).
+       let withdrawalSourceDirty = false;
+       
+       // Initialize form tracking on page load (with slight delay to ensure form is fully rendered)
+       function initializeFormTracking() {
+         if (formTrackingInitialized) return;
+         
+         const form = document.getElementById('opening-form');
+         if (form) {
+           const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
+           inputs.forEach(input => {
+             if (!input.readOnly && !input.hidden && input.type !== 'hidden') {
+               const inputId = input.name || input.id;
+               if (inputId) {
+                 initialFormValues[inputId] = input.value || '';
+               }
+             }
+           });
+           formTrackingInitialized = true;
+         }
+       }
+       
+       // Try immediately and also on DOMContentLoaded
+       if (document.readyState === 'loading') {
+         document.addEventListener('DOMContentLoaded', function() {
+           setTimeout(initializeFormTracking, 100);
+         });
+       } else {
+         setTimeout(initializeFormTracking, 100);
+       }
+
+       // Function to check if form has unsaved changes
+       function hasUnsavedChanges() {
+         const form = document.getElementById('opening-form');
+         if (!form) {
+           return false;
+         }
+
+         // The withdrawal source (radio) is the editable field in edit mode
+         if (withdrawalSourceDirty) {
+           return true;
+         }
+
+         // Ensure form tracking is initialized
+         if (!formTrackingInitialized) {
+           initializeFormTracking();
+         }
+         
+         const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
+         let hasChanges = false;
+         
+         for (let input of inputs) {
+           // Skip readonly or hidden fields
+           if (input.readOnly || input.hidden || input.type === 'hidden') continue;
+           
+           const inputId = input.name || input.id;
+           if (!inputId) continue; // Skip if no name or id
+           
+           const currentValue = input.value.trim().replace(/,/g, ''); // Remove commas for comparison
+           const initialValue = (initialFormValues[inputId] || '').trim().replace(/,/g, '');
+           
+           // Normalize empty values (treat dash and empty as same)
+           const normalizedCurrent = (currentValue === '' || currentValue === '-') ? '' : currentValue;
+           const normalizedInitial = (initialValue === '' || initialValue === '-') ? '' : initialValue;
+           
+           // Check if value has changed
+           if (normalizedCurrent !== normalizedInitial) {
+             // If current value is not empty and different from initial, it's a change
+             if (normalizedCurrent !== '') {
+               hasChanges = true;
+               break;
+             }
+           }
+         }
+         
+         return hasChanges;
+       }
+
+      const BASE_OPENING = '{{ url_for("report.report_opening") if current_draft.status == "draft" else url_for("report.report_opening", id=current_draft.id) }}';
+      const BASE_SALES = '{{ url_for("report.report_sale") if current_draft.status == "draft" else url_for("report.report_sale", id=current_draft.id) }}';
+      const BASE_EXPENSES = '{{ url_for("report.report_expense") if current_draft.status == "draft" else url_for("report.report_expense", id=current_draft.id) }}';
+      const BASE_DEPOSIT = '{{ url_for("report.report_deposit") if current_draft.status == "draft" else url_for("report.report_deposit", id=current_draft.id) }}';
+      const BASE_CASH_COUNT = '{{ url_for("report.report_cash_count") if current_draft.status == "draft" else url_for("report.report_cash_count", id=current_draft.id) }}';
+      const BASE_ENDING = '{{ url_for("report.report_ending") if current_draft.status == "draft" else url_for("report.report_ending", id=current_draft.id) }}';
+
+      function buildStepUrl(baseUrl, entityId, transactionDate) {
+        let url = baseUrl + '?entity_id=' + entityId;
+        if (transactionDate) {
+          url += '&transaction_date=' + transactionDate;
+        }
+        {% if is_edit_mode %}
+        url += '&edit=true';
+        {% endif %}
+        {% if is_report_edit_mode %}
+        url += '&report_edit=true';
+        {% endif %}
+        return url;
+      }
+
+      function navigateToStep(step) {
+        const hasChanges = hasUnsavedChanges();
+        const transactionDate = '{{ (selected_date or next_transaction_date or datenow).strftime("%Y-%m-%d") }}';
+        const entityId = '{{ org.id }}';
+
+        const stepUrls = {
+          'opening': buildStepUrl(BASE_OPENING, entityId, transactionDate),
+          'sales': buildStepUrl(BASE_SALES, entityId, transactionDate),
+          'expenses': buildStepUrl(BASE_EXPENSES, entityId, transactionDate),
+          'deposit': buildStepUrl(BASE_DEPOSIT, entityId, transactionDate),
+          'cash_count': buildStepUrl(BASE_CASH_COUNT, entityId, transactionDate),
+          'ending': buildStepUrl(BASE_ENDING, entityId, transactionDate)
+        };
+
+        if (hasChanges) {
+          // Show the unsaved-changes warning using the same path/timing as the success toast
+          showNotification('unsaved');
+          // Prevent navigation when there are unsaved changes
+          return;
+        }
+
+        const url = stepUrls[step];
+        if (url) {
+          window.location.href = url;
+        }
+      }
+
+      // Function to toggle bank account (automatically use preset)
+      function toggleBankAccount() {
+        const companyBankRadio = document.querySelector(
+          'input[value="company"]'
+        );
+        const bankAccountHidden = document.getElementById("bank_account_hidden");
+
+        // Always use the preset main bank account
+        if (bankAccountHidden && companyBankRadio) {
+          bankAccountHidden.value = "{{company_bank}}";
+        }
+      }
+
+      // Save only the "withdrawal from" source for a submitted report
+      // (constrained edit mode). The cash amount is never touched here.
+      function saveWithdrawalSource() {
+        const selected = document.querySelector('input[name="withdrawal"]:checked');
+        if (!selected) { showNotification('error'); return; }
+        const bankAccountHidden = document.getElementById('bank_account_hidden');
+        const csrfToken = document.querySelector('input[name="csrf_token"]');
+        const reportId = '{{ current_draft.id }}';
+        const formData = new FormData();
+        formData.append('withdrawal_type', selected.value);
+        formData.append('withdrawal_bank_account',
+          selected.value === 'company' && bankAccountHidden ? bankAccountHidden.value : '');
+        if (csrfToken) formData.append('csrf_token', csrfToken.value);
+        fetch('/report/' + reportId + '/edit/withdrawal', {
+          method: 'POST',
+          headers: csrfToken ? { 'X-CSRFToken': csrfToken.value } : {},
+          body: formData,
+          credentials: 'include'
+        })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.status === 'success') {
+            withdrawalSourceDirty = false;
+            const successMessage = document.getElementById('successMessage');
+            if (successMessage) successMessage.textContent = 'Withdrawal source saved successfully';
+            showNotification('success');
+          } else {
+            const errorTitle = document.getElementById('errorTitle');
+            const errorMessage = document.getElementById('errorMessage');
+            if (errorTitle) errorTitle.textContent = 'Error';
+            if (errorMessage) errorMessage.textContent = (data && data.message) || 'Failed to save withdrawal source';
+            showNotification('error');
+          }
+        })
+        .catch(() => {
+          const errorTitle = document.getElementById('errorTitle');
+          const errorMessage = document.getElementById('errorMessage');
+          if (errorTitle) errorTitle.textContent = 'Error';
+          if (errorMessage) errorMessage.textContent = 'Failed to save withdrawal source';
+          showNotification('error');
+        });
+      }
+
+      // Flag the withdrawal source as having unsaved changes when the user
+      // switches the radio without clicking "Save withdrawal".
+      function markWithdrawalDirty() {
+        withdrawalSourceDirty = true;
+      }
+
+      // Calculate opening balance based on inputs
+      function calculateOpeningBalance() {
+        const startingBalanceEl = document.getElementById('startingCashBalance');
+        const startingBalance = startingBalanceEl
+          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          : 0;
+        const additions =
+          parseFloat(
+            document.querySelector('input[placeholder="Please enter any cash addition"]')
+              .value.replace(/,/g, '')
+          ) || 0;
+        const openingBalance = startingBalance + additions;
+
+        // Only auto-calculate if Opening Balance field is empty or hasn't been manually edited
+        const openingBalanceField = document.querySelector(
+          'input[placeholder="Opening Cash Balance"]'
+        );
+        if (!openingBalanceField.dataset.manuallyEdited) {
+          // Format with commas for display
+          const formattedValue = openingBalance.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+          openingBalanceField.value = formattedValue;
+        }
+
+      }
+
+      // Function to update adjusted opening balance
+      function updateAdjustedOpeningBalance() {
+        const startingBalanceEl = document.getElementById('startingCashBalance');
+        const startingBalance = startingBalanceEl
+          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          : 0;
+        const additions =
+          parseFloat(
+            document.querySelector('input[placeholder="Please enter any cash addition"]')
+              .value.replace(/,/g, '')
+          ) || 0;
+        const adjustedOpeningBalance = startingBalance + additions;
+
+        // Set the value of the adjusted_opening_balance input with comma formatting
+        const adjustedOpeningBalanceField = document.querySelector('input[name="adjusted_opening_balance"]');
+        if (adjustedOpeningBalanceField) {
+          const formattedValue = adjustedOpeningBalance.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+          adjustedOpeningBalanceField.value = formattedValue;
+        }
+      }
+
+      function updateOpeningCashBalance() {
+        const startingBalanceEl = document.getElementById('startingCashBalance');
+        const startingBalance = startingBalanceEl
+          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          : 0;
+        const additions =
+          parseFloat(
+            document.querySelector('input[placeholder="Please enter any cash addition"]')
+              .value.replace(/,/g, '')
+          ) || 0;
+        const openingCashBalance = startingBalance + additions;
+
+        const openingCashBalanceEl = document.getElementById('openingCashBalance');
+        if (openingCashBalanceEl) {
+          const formattedDisplay = openingCashBalance.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+          openingCashBalanceEl.textContent = `$${formattedDisplay}`;
+        }
+      }
+
+      function showFixNegativeBalanceModal() {
+        const modal = document.getElementById('fixNegativeBalanceModal');
+        if (modal) {
+          modal.classList.remove('hidden');
+          modal.classList.add('flex');
+        }
+      }
+
+      function hideFixNegativeBalanceModal() {
+        const modal = document.getElementById('fixNegativeBalanceModal');
+        if (modal) {
+          modal.classList.add('hidden');
+          modal.classList.remove('flex');
+        }
+      }
+
+      function navigateToDashboard() {
+        hideFixNegativeBalanceModal();
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        if (loadingOverlay) {
+          loadingOverlay.classList.remove('hidden');
+        }
+        const entityId = '{{ org.id }}';
+        window.location.href = '/entity/' + entityId;
+      }
+
+      function validateOpeningCashBalance() {
+        const startingBalanceEl = document.getElementById('startingCashBalance');
+        const startingBalance = startingBalanceEl
+          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          : 0;
+        const additions = parseFloat(
+          (document.querySelector('input[name="cash_addition"]').value || '0').replace(/,/g, '')
+        ) || 0;
+        return (startingBalance + additions) >= 0;
+      }
+
+      // Initialize page transition
+      PageTransition.init('.main-content', 'fadeIn', 10);
+
+      // Add event listeners for real-time calculation
+      document.addEventListener("DOMContentLoaded", function () {
+        // Check for URL parameters to show success toast
+        const urlParams = new URLSearchParams(window.location.search);
+        const bankTransferSuccess = urlParams.get('bank_transfer_success');
+        const bankTransferId = urlParams.get('bank_transfer_id');
+        const toastMessage = urlParams.get('toast_message');
+        const toastType = urlParams.get('toast_type');
+
+        if (toastMessage && toastType) {
+          showNotification(toastType);
+        }
+        
+        if (bankTransferSuccess === 'true') {
+          // Update success message with bank transfer ID if available
+          if (bankTransferId) {
+            const successMessage = document.getElementById('successMessage');
+            if (successMessage) {
+              successMessage.textContent = `Bank Transfer Created Successfully (ID: ${bankTransferId})`;
+            }
+          }
+          showNotification('success');
+          
+          // Clean up URL parameters
+          const newUrl = window.location.pathname + '?entity_id=' + urlParams.get('entity_id');
+          if (urlParams.get('transaction_date')) {
+            newUrl += '&transaction_date=' + urlParams.get('transaction_date');
+          }
+          window.history.replaceState({}, document.title, newUrl);
+        }
+        
+        // Calculate opening balance on page load to update sticky summary
+        calculateOpeningBalance();
+        
+        updateOpeningCashBalance();
+        
+        // Format opening balance with commas
+        const openingBalanceInput = document.querySelector('input[name="opening_balance"]');
+        if (openingBalanceInput && openingBalanceInput.value) {
+          const value = parseFloat(openingBalanceInput.value.replace(/,/g, ''));
+          if (!isNaN(value)) {
+            openingBalanceInput.value = value.toLocaleString('en-US', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            });
+          }
+        }
+        
+        // Initialize bank account to preset value
+        toggleBankAccount();
+        
+        const inputs = document.querySelectorAll('input[type="number"], input[type="text"]');
+        inputs.forEach((input) => {
+          input.addEventListener("input", calculateOpeningBalance);
+        });
+
+        // Mark Opening Balance as manually edited when user types in it
+        const openingBalanceField = document.querySelector(
+          'input[placeholder="Opening Cash Balance"]'
+        );
+        openingBalanceField.addEventListener("input", function () {
+          this.dataset.manuallyEdited = "true";
+        });
+
+        // Smart scroll to center when input is focused
+        function scrollToCenter(element) {
+          const scrollContainer = document.querySelector('.main-content');
+          if (!scrollContainer || !element) return;
+          
+          // Get the element's position relative to the scroll container
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const elementRect = element.getBoundingClientRect();
+          
+          // Calculate element's position relative to the container
+          const elementTopRelativeToContainer = elementRect.top - containerRect.top + scrollContainer.scrollTop;
+          
+          // Calculate the center of the visible area
+          const visibleCenter = scrollContainer.scrollTop + (containerRect.height / 2);
+          
+          // Calculate where the element's center should be
+          const elementCenter = elementTopRelativeToContainer + (elementRect.height / 2);
+          
+          // Calculate how much we need to scroll
+          const scrollOffset = elementCenter - visibleCenter;
+          
+          // Only scroll if the element is not already centered (with a small threshold)
+          if (Math.abs(scrollOffset) > 10) {
+            scrollContainer.scrollTo({
+              top: scrollContainer.scrollTop + scrollOffset,
+              behavior: 'smooth'
+            });
+          }
+        }
+        
+        // Add focus event listeners to all input fields (excluding readonly)
+        const allInputs = document.querySelectorAll('input[type="text"], input[type="number"], input[type="date"], textarea');
+        allInputs.forEach(input => {
+          // Skip readonly inputs
+          if (input.readOnly) return;
+          
+          input.addEventListener('focus', function() {
+            // Small delay to ensure the keyboard has appeared on mobile
+            setTimeout(() => {
+              scrollToCenter(this);
+            }, 300);
+          });
+        });
+      });
+
+
+             // Function to show notification
+       function showNotification(toastType = 'error') {
+         // Errors are blocking: show a dialog that stays open until the user
+         // clicks OK, rather than a toast that auto-dismisses.
+         if (toastType === 'error') {
+           const errTitle = document.getElementById('errorTitle');
+           const errMsg = document.getElementById('errorMessage');
+           showErrorDialog(
+             (errMsg && errMsg.textContent) || 'Something went wrong. Please try again.',
+             (errTitle && errTitle.textContent) || 'Error'
+           );
+           return;
+         }
+
+         const notification = document.getElementById('notification');
+         const successToast = document.getElementById('successToast');
+         const errorToast = document.getElementById('errorToast');
+         const unsavedToast = document.getElementById('unsavedDataToast');
+
+         // Hide all toasts first
+         successToast.classList.add('hidden');
+         errorToast.classList.add('hidden');
+         if (unsavedToast) unsavedToast.classList.add('hidden');
+
+         // Show the appropriate toast
+         if (toastType === 'success') {
+           successToast.classList.remove('hidden');
+         } else if (toastType === 'unsaved' && unsavedToast) {
+           unsavedToast.classList.remove('hidden');
+         } else {
+           errorToast.classList.remove('hidden');
+         }
+
+         notification.classList.remove('translate-x-full');
+         notification.classList.add('translate-x-0');
+
+         // Success auto-dismisses at 4s; warnings (unsaved) linger at 8s.
+         const displayDuration = (toastType === 'unsaved') ? 8000 : 4000;
+         setTimeout(() => {
+           hideNotification();
+         }, displayDuration);
+       }
+
+       // Function to hide notification
+       function hideNotification() {
+         const notification = document.getElementById('notification');
+         notification.classList.remove('translate-x-0');
+         notification.classList.add('translate-x-full');
+       }
+
+       // Blocking error dialog — stays open until the user clicks OK.
+       function showErrorDialog(message, title = 'Error') {
+         const dialog = document.getElementById('errorDialog');
+         if (!dialog) { alert(message); return; }
+         const msgEl = document.getElementById('errorDialogMessage');
+         const titleEl = document.getElementById('errorDialogTitle');
+         if (msgEl) msgEl.textContent = message;
+         if (titleEl) titleEl.textContent = title;
+         dialog.classList.remove('hidden');
+         dialog.classList.add('flex');
+       }
+
+       function hideErrorDialog() {
+         const dialog = document.getElementById('errorDialog');
+         if (!dialog) return;
+         dialog.classList.add('hidden');
+         dialog.classList.remove('flex');
+       }
+       
+      // Function to clean form data before submission
+      function cleanFormData() {
+        // Clean cash addition field
+        const cashAdditionField = document.querySelector('input[name="cash_addition"]');
+        if (cashAdditionField) {
+          let value = cashAdditionField.value.replace(/,/g, ''); // Remove commas
+          if (value === '' || value === '-') {
+            value = '0';
+          }
+          cashAdditionField.value = value;
+        }
+        
+        // Clean opening balance field
+        const openingBalanceField = document.querySelector('input[name="opening_balance"]');
+        if (openingBalanceField) {
+          let value = openingBalanceField.value.replace(/,/g, ''); // Remove commas
+          if (value === '' || value === '-') {
+            value = '0';
+          }
+          openingBalanceField.value = value;
+        }
+        
+        // Clean adjusted opening balance field
+        const adjustedBalanceField = document.querySelector('input[name="adjusted_opening_balance"]');
+        if (adjustedBalanceField) {
+          let value = adjustedBalanceField.value.replace(/,/g, ''); // Remove commas
+          if (value === '' || value === '-') {
+            value = '0';
+          }
+          adjustedBalanceField.value = value;
+        }
+      }
+
+      // Function to handle form submission
+      async function logFormSubmission(event) {
+        event.preventDefault();
+
+        if (!validateOpeningCashBalance()) {
+          showFixNegativeBalanceModal();
+          return;
+        }
+        
+        // Clean form data before submission
+        cleanFormData();
+         
+         // Get the form and submit button
+         const form = document.getElementById('opening-form');
+         const submitButton = event.target;
+         const originalButtonText = submitButton.innerHTML;
+         
+         // Show loading overlay to cover entire phone card
+         const loadingOverlay = document.getElementById('loadingOverlay');
+         loadingOverlay.classList.remove('hidden');
+         
+         // Disable button
+         submitButton.disabled = true;
+         
+         try {
+           // Submit the form
+           form.submit();
+         } catch (error) {
+           console.error('Error submitting form:', error);
+           if (window.sendLogToDataDog) {
+             window.sendLogToDataDog('error', 'Opening form submit failed', { message: error && error.message });
+           }
+           // Reset button state and hide loading overlay
+           submitButton.disabled = false;
+           submitButton.innerHTML = originalButtonText;
+           loadingOverlay.classList.add('hidden');
+           alert('An error occurred while saving. Please try again.');
+         }
+       }
+
+      // Function to handle Save & Exit
+      async function saveAndExit() {
+        if (!validateOpeningCashBalance()) {
+          showFixNegativeBalanceModal();
+          return;
+        }
+
+        // Clean form data before submission
+        cleanFormData();
+        
+        // Log form data for debugging
+        const form = document.querySelector('form');
+        const formData = new FormData(form);
+        console.log('Save & Exit started');
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('info', 'Save & Exit started', { context: 'opening' });
+        }
+        console.log('Transaction date:', formData.get('transaction_date'));
+        console.log('Cash addition:', formData.get('cash_addition'));
+        console.log('Opening balance:', formData.get('opening_balance'));
+        
+        // Set the action type to save_exit
+        const actionTypeField = document.querySelector('input[name="action_type"]');
+        if (actionTypeField) {
+          actionTypeField.value = "save_exit";
+        }
+        
+        
+        // Get the Save & Exit button and show loading state
+        const saveExitButton = document.querySelector('button[onclick="saveAndExit()"]');
+        const originalButtonText = saveExitButton.innerHTML;
+        
+        // Show loading overlay to cover entire phone card
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        loadingOverlay.classList.remove('hidden');
+        
+        // Disable button
+        saveExitButton.disabled = true;
+        
+        try {
+          // Submit the form with page transition
+          const form = document.querySelector('form');
+          if (form) {
+            // Add fade out transition before form submission
+            PageTransition.fadeOut(document.querySelector('.main-content'), 0, () => {
+              form.submit();
+            });
+          }
+        } catch (error) {
+          console.error('Error submitting form:', error);
+          if (window.sendLogToDataDog) {
+            window.sendLogToDataDog('error', 'Opening form submit failed', { context: 'save_exit', message: error && error.message });
+          }
+          // Reset button state and hide loading overlay
+          saveExitButton.disabled = false;
+          saveExitButton.innerHTML = originalButtonText;
+          loadingOverlay.classList.add('hidden');
+          alert('An error occurred while saving. Please try again.');
+        }
+      }
+
+      // Function to go back (for old reports)
+      function goBack() {
+        // For opening page, there's no previous section, so go to entity dashboard
+        const entityId = '{{ org.id }}';
+        window.location.href = `/entity/${entityId}`;
+      }
+
+      // Function to go to next (for old reports)
+      function goToNext() {
+        // Navigate to sales page
+        const entityId = '{{ org.id }}';
+        const reportId = '{{ draft_id }}';
+        const url = `/report/${reportId}/sale?entity_id=${entityId}`;
+        window.location.href = url;
+      }
+
+      // Function to close report (for old reports)
+      function closeReport() {
+        // Navigate back to entity dashboard
+        const entityId = '{{ org.id }}';
+        window.location.href = `/entity/${entityId}`;
+      }
+    </script>
+  </div>
+  </body>
+</html>
+
+<!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
+<script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/report_back_nav.js') }}"></script>
+<script>
+document.addEventListener('submit', function(e){
+  try{
+    const form = e.target;
+    const path = window.location.pathname;
+    let key = 'pending_generic';
+    if(path.includes('/sale')) key='pending_sales';
+    else if(path.includes('/expense')) key='pending_expenses';
+    else if(path.includes('/deposit')) key='pending_deposit';
+    else if(path.includes('/opening')) key='pending_opening';
+    else if(path.includes('/cash_count')) key='pending_cash_count';
+    else if(path.includes('/ending')) key='pending_ending';
+
+    const btn = e.submitter || form.querySelector('button[type="submit"]');
+    if(btn) BFCache.saveButtonState(btn);
+
+    const data = {};
+    try{ new FormData(form).forEach((v,k)=>{ if(data[k]){ if(Array.isArray(data[k])) data[k].push(v); else data[k]=[data[k],v]; } else data[k]=v }); }catch(e){}
+    BFCache.saveSnapshot(key, data);
+  }catch(e){}
+});
+</script>

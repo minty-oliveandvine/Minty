@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Entity Created Successfully - Petty Cash</title>
+    <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+
+    <!-- Hover Effects Component -->
+  {% include 'components/hover_effects.html' %}
+
+    <!-- Page Transitions Component -->
+    {% include 'components/page_transitions.html' %}
+
+    <!-- Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              inter: ["Inter", "ui-sans-serif", "system-ui"],
+            },
+          },
+        },
+      };
+    </script>
+    
+    <style>
+      @media (min-width: 640px) and (max-width: 1024px) {
+        .main-container {
+          width: 640px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1024px) and (max-width: 1200px) {
+        .main-container {
+          width: 768px;
+          margin: 0 auto;
+        }
+      }
+
+      @media (min-width: 1200px) {
+        .main-container {
+          width: 1024px;
+          margin: 0 auto;
+        }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen font-inter antialiased">
+    <div class="flex min-h-screen items-center justify-center main-container">
+      <!-- Phone card -->
+      <div
+        class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+        <!-- Header -->
+        <div
+          class="bg-gray-50 flex flex-shrink-0 h-14 items-center justify-between px-4">
+          <div></div>
+          <h1 class="text-[#474747] text-lg font-semibold">Select Company</h1>
+          <div></div>
+        </div>
+        <!-- Content -->
+        <div class="bg-gray-50 main-content flex-1 flex items-center justify-center p-6">
+          <div class="flex flex-col items-center justify-center text-center max-w-md w-full">
+            <div class="flex flex-col gap-8 items-center mb-16">
+              <div class="w-20 h-20 bg-[#54D3DA] text-white rounded-full flex items-center justify-center shadow-xl">
+                  <svg width="35" height="38" viewBox="0 0 35 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14.25 23.7542L28.3538 10L30.5 12.1229L14.25 28L4.5 18.4618L6.64623 16.3688L14.25 23.7542Z" fill="white"/>
+                  </svg>
+              </div>
+              <p class="text-gray-700 text-center font-regular">
+                Your Petty Cash entity has been successfully created!
+              </p>
+            </div>
+            
+            <div class="w-full">
+              <a
+                href="{{url_for('xero_connect_entity', entity_id=entity_id)}}"
+                class="w-full flex justify-center items-center bg-white border border-gray-100 text-[#374151] py-3 px-4 font-medium rounded-xl hover:bg-gray-50 transition-colors cursor-pointer gap-3 shadow-md hover-lift"
+                style="transition: all 0.3s ease-in-out;"
+                onclick="PageTransition.navigateWithFade(this.href); return false;"
+              >
+                <img
+                  src="{{url_for('static', filename='img/xero-logo.webp')}}"
+                  alt="Xero.com"
+                  class="w-6 h-6"
+                />
+                <span>Connect to Xero Entity</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Initialize page transition
+      PageTransition.init('.main-content', 'fadeIn', 10);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1 @@
+"""Report schema placeholders for report blueprint."""

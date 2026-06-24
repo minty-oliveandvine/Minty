@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Petty Cash</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+    <!-- Custom Button Styles -->
+    <style>
+        .btn-primary {
+            background-color: #4a7c59;
+            border-color: #4a7c59;
+        }
+    
+        .btn-primary:hover {
+            background-color: #36543a;
+            border-color: #36543a;
+        }
+    
+        .btn-block {
+            width: 100%;
+        }
+    
+        .logo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 80px;
+            height: auto;
+        }
+    
+        @media (max-width: 768px) {
+            .logo {
+                width: 60px;
+            }
+    
+            .btn-block {
+                font-size: 1rem;
+            }
+        }
+    </style>
+    
+</head>
+<body>
+    <div class="container mt-5 text-center">
+        <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo" alt="Logo">
+        <h1>Welcome to Petty Cash Daily Report System</h1>
+        <div>
+            <a href="{{ url_for('auth.login') }}" class="btn btn-primary">Login</a> 
+            <a href="{{ url_for('auth.register') }}" class="btn btn-secondary">Register</a>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+"""User-management schema placeholders for user-management blueprint."""

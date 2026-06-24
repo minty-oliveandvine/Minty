@@ -1,0 +1,598 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create Entity - Petty Cash</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+  
+  <!-- Hover Effects Component -->
+  {% include 'components/hover_effects.html' %}
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+
+  <!-- Inter font -->
+  <link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+<link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            inter: ["Inter", "ui-sans-serif", "system-ui"],
+          },
+        },
+      },
+    };
+  </script>
+  
+<style>
+    @media (min-width: 640px) and (max-width: 1024px) {
+      .main-container {
+        width: 640px;
+        margin: 0 auto;
+      }
+    }
+
+    @media (min-width: 1024px) and (max-width: 1200px) {
+      .main-container {
+        width: 768px;
+        margin: 0 auto;
+      }
+    }
+
+    @media (min-width: 1200px) {
+      .main-container {
+        width: 1024px;
+        margin: 0 auto;
+      }
+    }
+
+  input:focus,
+  select:focus {
+    outline: none;
+    border-color: #4d7c5f;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+</style>
+</head>
+<body class="min-h-screen font-inter antialiased">
+  <!-- Toast notifications -->   
+  {% with errors = get_flashed_messages(with_categories=True) %}{% if errors %}
+    {% for category, error in errors %}{% if category == 'success' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #a9d7cb; background-color: #f1fffc;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+          <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% elif category == 'danger' or category == 'error' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #ffcccc; background-color: #fff1f1;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
+          <p class="font-[400] break-words w-full" style="color: #f57e7e;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% elif category =='info' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #a9d3ff; background-color: #f1f8ff;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/info-icon.png') }}" alt="Information" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #006FE6;">Information</p>
+          <p class="font-[400] break-words w-full" style="color: #5ba2ee;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% elif category =='warning' %}
+      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #fee0aa; background-color: #fffaf1;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
+        <img src="{{ url_for('static', filename='img/warning-icon.png') }}" alt="Warning" class="shrink-0 w-[36px] h-[44px]" />
+        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+          <p class="font-[500] whitespace-nowrap" style="color: #DA8700;">Warning</p>
+          <p class="font-[400] break-words w-full" style="color: #e8b765;">{{ error }}</p>
+        </div>
+        <button class="toast-close shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    {% endif %}{% endfor %}
+  {% endif %}{% endwith %}
+
+  <div class="flex min-h-screen items-center justify-center main-container">
+    <!-- Phone card -->
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          <button onclick="PageTransition.navigateWithFade('{{ url_for('entity.entity_list') }}')" class="text-[#474747] transition-colors hover-slide-left">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+        </div>
+        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">Create Entity</h1>
+        <div class="flex-1 flex justify-end">
+          <div class="flex items-center gap-2">
+            {% set fn = (current_user.first_name or '')[:1] %}
+            {% set ln = (current_user.last_name or '')[:1] %}
+            {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold shrink-0" style="background-color:#FFE6B1; color:#6B3A12" title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">{{ user_abbrev }}</span>
+            <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
+                <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="bg-gray-50 main-content flex-1 p-6 pb-40 overflow-y-auto">
+        
+    <form id="entityForm" action="{{url_for('entity.entity_create')}}" method="POST">
+      <input type="hidden" name="csrf_token" value="{{csrf_token()}}" />
+          
+      <div class="mb-4">
+        <label for="companyName" class="block text-sm font-medium text-gray-700 mb-2">Entity Name <span class="text-red-500">*</span>
+        </label>
+        <input type="text" id="companyName" name="entity_name" class="w-full pl-3 pr-3 py-2 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" placeholder="Please enter your company name" required="" value="{{form.entity_name.data}}"/>
+        {%if form.entity_name.errors%}
+          {%for error in form.entity_name.errors %}
+          <p class="text-red-500 text-sm mt-1">{{error}}</p>
+          {%endfor%}
+        {%endif%}
+      </div>  
+      <div class="mb-4">
+          <label for="country_code" class="block text-sm font-medium text-gray-700 mb-2">Country Code <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <input type="text" id="country_code" name="country_code" placeholder="Select payment methods" class="w-full pl-3 pr-10 py-2 bg-[#EFEFEF] border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent placeholder-[#374151] cursor-pointer" autocomplete="off" required>
+            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+              <svg id="countryDropdownIcon" class="w-5 h-5 text-gray-400 transition-transform duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </div>
+            <div id="countrySuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
+          </div>
+        </div>
+        {%if form.country_code.errors%}
+          {%for error in form.country_code.errors %}
+          <p class="text-red-500 text-sm mt-1">{{error}}</p>
+          {%endfor%}
+        {%endif%}
+      </div>
+      <div class="mb-4">
+        <label for="currency" class="block text-sm font-medium text-gray-700 mb-2">Currency <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+            <input type="text" id="currency" name="currency_code" placeholder="Select business type" class="w-full pl-3 pr-10 py-2 bg-[#EFEFEF] border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent placeholder-[#374151] cursor-pointer" autocomplete="off" required>
+            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+              <svg id="currencyDropdownIcon" class="w-5 h-5 text-gray-400 transition-transform duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </div>
+            <div id="currencySuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
+          </div>
+        </div>
+       {%if form.currency_code.errors%}
+          {%for error in form.currency_code.errors %}
+          <p class="text-red-500 text-sm mt-1">{{error}}</p>
+          {%endfor%}
+        {%endif%}
+      </div>
+      <div class="mb-4">
+        <label for="contactPhone" class="block text-sm font-medium text-gray-700 mb-2">Contact Phone <span class="text-red-500">*</span>
+        </label>
+        <input type="tel" id="contactPhone" name="contact_phone" class="w-full pl-3 pr-3 py-2 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" placeholder="Please enter your contact phone number" required="" pattern="[0-9]{8,11}" title="Phone number must be 8-11 digits" maxlength="11" minlength="8" value="{{form.contact_phone.data}}"/>
+        {%if form.contact_phone.errors%}
+          {%for error in form.contact_phone.errors %}
+          <p class="text-red-500 text-sm mt-1">{{error}}</p>
+          {%endfor%}
+        {%endif%}
+      </div>
+      <div class="mb-6">
+        <label for="businessEmail" class="block text-sm font-medium text-gray-700 mb-2">Business Email <span class="text-red-500">*</span></label>
+        <input type="email" id="businessEmail" class="w-full pl-3 pr-3 py-2 bg-white border border-gray-300 rounded-xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" placeholder="Please enter your business email" required="" name="business_email" value="{{form.business_email.data}}"/>
+        {%if form.business_email.errors%}
+          {%for error in form.business_email.errors %}
+          <p class="text-red-500 text-sm mt-1">{{error}}</p>
+          {%endfor%}
+        {%endif%}
+      </div>
+          
+      <!-- Action Buttons -->
+      <button type="submit" form="entityForm" class="w-full flex justify-center items-center bg-[#54D3DA] text-white py-3 font-medium rounded-xl hover:bg-[#54D3DA]/80 shadow-md transition-colors cursor-pointer gap-2 mb-3 hover-scale-parent">
+        <svg class="hover-scale" width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="white"/>
+        </svg>
+        <span class="w-fit">Create Entity</span>
+      </button>
+      <div class="flex justify-center">
+        <a href="{{url_for('entity.entity_list')}}" class="text-[#54D3DA] flex font-medium hover:text-[#54D3DA]/80 items-center justify-center min-h-[40px] px-4 py-2 text-sm transition-colors" onclick="PageTransition.navigateWithFade(this.href); return false;">Back to Entity List</a>
+      </div>
+        </form>
+      </div>
+
+      <!-- Include reusable sidepanel component -->
+      {% include 'components/sidepanel.html' %}
+      
+      <!-- Include loading overlay component -->
+      {% include 'components/loading_overlay_entity_create.html' %}
+  </div>
+</div>
+
+  <script>
+    // Global variables for country search
+    let selectedCountryCode = null;
+    let selectedCountryName = null;
+    let allCountries = [];
+
+    // Global variables for currency search
+    let selectedCurrencyCode = null;
+    let selectedCurrencyName = null;
+    let allCurrencies = [];
+
+    // Initialize country search functionality
+    function initializeCountrySearch() {
+      const countryInput = document.getElementById('country_code');
+      const countrySuggestions = document.getElementById('countrySuggestions');
+      
+      if (!countryInput) return;
+      
+      // Get all countries from the page data
+      allCountries = [
+        {%for country in country_code%}
+        {
+          "country_code": "{{country.country_code}}",
+          "country_name": "{{country.country_name}}"
+        },
+        {%endfor%}
+      ];
+      
+      // Add click event listener to show all countries
+      countryInput.addEventListener('click', function() {
+        if (allCountries.length > 0) {
+          showCountrySuggestions(allCountries);
+        }
+      });
+
+      // Add input event listener for search
+      countryInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        
+        if (query.length === 0) {
+          // Show all countries when input is empty
+          if (allCountries.length > 0) {
+            showCountrySuggestions(allCountries);
+          }
+          return;
+        }
+        
+        // Filter countries based on query
+        const filteredCountries = allCountries.filter(country => 
+          country.country_name.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (filteredCountries.length > 0) {
+          showCountrySuggestions(filteredCountries);
+        } else {
+          hideCountrySuggestions();
+        }
+      });
+
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (!countryInput.contains(event.target) && !countrySuggestions.contains(event.target)) {
+          hideCountrySuggestions();
+        }
+      });
+    }
+
+    // Show country suggestions
+    function showCountrySuggestions(countries) {
+      const suggestions = document.getElementById('countrySuggestions');
+      const dropdownIcon = document.getElementById('countryDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      countries.forEach(country => {
+        const option = document.createElement('div');
+        option.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        option.innerHTML = `
+          <div class="text-gray-700">${country.country_name}</div>
+        `;
+        option.addEventListener('click', function() {
+          selectCountry(country.country_code, country.country_name);
+        });
+        suggestions.appendChild(option);
+      });
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide country suggestions
+    function hideCountrySuggestions() {
+      const suggestions = document.getElementById('countrySuggestions');
+      const dropdownIcon = document.getElementById('countryDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+    }
+
+    // Select a country
+    function selectCountry(countryCode, countryName) {
+      const countryInput = document.getElementById('country_code');
+      
+      countryInput.value = countryName;
+      selectedCountryCode = countryCode;
+      selectedCountryName = countryName;
+      
+      hideCountrySuggestions();
+    }
+
+    // Initialize currency search functionality
+    function initializeCurrencySearch() {
+      const currencyInput = document.getElementById('currency');
+      const currencySuggestions = document.getElementById('currencySuggestions');
+      
+      if (!currencyInput) return;
+      
+      // Get all currencies from the page data
+      allCurrencies = [
+        {%for currency in currencies %}
+        {
+          "currency_code": "{{currency.currency_code}}",
+          "currency_name": "{{currency.currency_name}}"
+        },
+        {%endfor%}
+      ];
+      
+      // Add click event listener to show all currencies
+      currencyInput.addEventListener('click', function() {
+        if (allCurrencies.length > 0) {
+          showCurrencySuggestions(allCurrencies);
+        }
+      });
+
+      // Add input event listener for search
+      currencyInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        
+        if (query.length === 0) {
+          // Show all currencies when input is empty
+          if (allCurrencies.length > 0) {
+            showCurrencySuggestions(allCurrencies);
+          }
+          return;
+        }
+        
+        // Filter currencies based on query
+        const filteredCurrencies = allCurrencies.filter(currency => 
+          currency.currency_name.toLowerCase().includes(query.toLowerCase()) ||
+          currency.currency_code.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (filteredCurrencies.length > 0) {
+          showCurrencySuggestions(filteredCurrencies);
+        } else {
+          hideCurrencySuggestions();
+        }
+      });
+
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (!currencyInput.contains(event.target) && !currencySuggestions.contains(event.target)) {
+          hideCurrencySuggestions();
+        }
+      });
+    }
+
+    // Show currency suggestions
+    function showCurrencySuggestions(currencies) {
+      const suggestions = document.getElementById('currencySuggestions');
+      const dropdownIcon = document.getElementById('currencyDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currencies.forEach(currency => {
+        const option = document.createElement('div');
+        option.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        option.innerHTML = `
+          <div class="text-gray-700">${currency.currency_name}</div>
+        `;
+        option.addEventListener('click', function() {
+          selectCurrency(currency.currency_code, currency.currency_name);
+        });
+        suggestions.appendChild(option);
+      });
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide currency suggestions
+    function hideCurrencySuggestions() {
+      const suggestions = document.getElementById('currencySuggestions');
+      const dropdownIcon = document.getElementById('currencyDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+    }
+
+    // Select a currency
+    function selectCurrency(currencyCode, currencyName) {
+      const currencyInput = document.getElementById('currency');
+      
+      currencyInput.value = currencyName;
+      selectedCurrencyCode = currencyCode;
+      selectedCurrencyName = currencyName;
+      
+      hideCurrencySuggestions();
+    }
+
+    // Form submission with loading overlay and button state
+    function handleFormSubmission() {
+      const form = document.getElementById('entityForm');
+      const submitButton = document.querySelector('button[type="submit"]');
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      
+      if (form && submitButton && loadingOverlay) {
+        form.addEventListener('submit', function(e) {
+          // Set the actual country and currency codes in the form fields
+          const countryInput = document.getElementById('country_code');
+          const currencyInput = document.getElementById('currency');
+          
+          // Update the form field values with the actual codes
+          countryInput.value = selectedCountryCode || 'HK';
+          currencyInput.value = selectedCurrencyCode || 'HKD';
+          
+          // Show loading overlay
+          loadingOverlay.classList.remove('hidden');
+          const loadingText = document.getElementById('loadingText');
+          if (loadingText) {
+            loadingText.textContent = 'Creating Entity...';
+          }
+          
+          // Disable button
+          submitButton.disabled = true;
+        });
+      }
+    }
+
+    // Phone validation function
+    function initializePhoneValidation() {
+      const phoneInput = document.getElementById('contactPhone');
+      
+      if (phoneInput) {
+        // Only allow numeric input
+        phoneInput.addEventListener('input', function(e) {
+          // Remove any non-numeric characters
+          this.value = this.value.replace(/[^0-9]/g, '');
+        });
+        
+        // Prevent non-numeric characters on keypress
+        phoneInput.addEventListener('keypress', function(e) {
+          // Allow backspace, delete, tab, escape, enter
+          if ([8, 9, 27, 13, 46].indexOf(e.keyCode) !== -1 ||
+              // Allow Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+              (e.keyCode === 65 && e.ctrlKey === true) ||
+              (e.keyCode === 67 && e.ctrlKey === true) ||
+              (e.keyCode === 86 && e.ctrlKey === true) ||
+              (e.keyCode === 88 && e.ctrlKey === true)) {
+            return;
+          }
+          // Ensure that it is a number and stop the keypress
+          if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
+            e.preventDefault();
+          }
+        });
+        
+        // Validate length on blur
+        phoneInput.addEventListener('blur', function() {
+          const value = this.value;
+          if (value && (value.length < 8 || value.length > 11)) {
+            this.setCustomValidity('Phone number must be between 8 and 11 digits');
+          } else {
+            this.setCustomValidity('');
+          }
+        });
+        
+        // Real-time validation on input
+        phoneInput.addEventListener('input', function() {
+          const value = this.value;
+          if (value.length > 0 && (value.length < 8 || value.length > 11)) {
+            this.setCustomValidity('Phone number must be between 8 and 11 digits');
+          } else {
+            this.setCustomValidity('');
+          }
+        });
+      }
+    }
+
+    // Initialize page transition
+    PageTransition.init('.main-content', 'fadeIn', 10);
+
+    // Toast functionality
+    document.addEventListener("DOMContentLoaded", function () {
+      // Initialize country search
+      initializeCountrySearch();
+      
+      // Initialize currency search
+      initializeCurrencySearch();
+      
+      // Initialize phone validation
+      initializePhoneValidation();
+      
+      // Initialize form submission handling
+      handleFormSubmission();
+      
+      // Set default values for country and currency
+      document.getElementById('country_code').value = 'Hong Kong';
+      document.getElementById('currency').value = 'Hong Kong Dollar';
+      selectedCountryCode = 'HK';
+      selectedCurrencyCode = 'HKD';
+
+      // Handle all toast close buttons
+      const toastCloseButtons = document.querySelectorAll(".toast-close");
+      
+      toastCloseButtons.forEach(function(button) {
+        button.addEventListener("click", function () {
+          // Find the parent toast and hide it
+          const toast = this.closest(".toast");
+          if (toast) {
+            toast.style.display = "none";
+          }
+        });
+
+      });
+
+      // Auto-hide toasts after 5 seconds
+      setTimeout(() => {
+        const toasts = document.querySelectorAll(".toast");
+        toasts.forEach(function(toast) {
+          toast.style.display = "none";
+        });
+      }, 5000);
+    });
+  </script>
+</body>
+</html>
+

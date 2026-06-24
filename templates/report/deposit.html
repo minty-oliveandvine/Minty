@@ -1,0 +1,1040 @@
+{% set is_report_edit_mode = request.args.get('report_edit') == 'true' and current_draft and current_draft.status != 'draft' %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deposit - Vine Consulting Limited</title>
+  <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+
+  <!-- Hover Effects Component -->
+  {% include 'components/hover_effects.html' %}
+
+  <!-- Page Transitions Component -->
+  {% include 'components/page_transitions.html' %}
+
+  <!-- Inter font -->
+<link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <style>
+    /* Base styles */
+    .main-container {
+      width: 100%;
+      min-height: 100vh;
+    }
+    
+    /* Responsive container styles */
+    @media (min-width: 640px) and (max-width: 1024px) {
+      .main-container {
+        width: 640px;
+        margin: 0 auto;
+      }
+    }
+    
+    @media (min-width: 1024px) and (max-width: 1200px) {
+      .main-container {
+        width: 768px;
+        margin: 0 auto;
+      }
+    }
+    
+    @media (min-width: 1200px) {
+      .main-container {
+        width: 1024px;
+        margin: 0 auto;
+      }
+    }
+
+    
+    /* Ensure dropdown options match select field width */
+    select {
+      width: 100%;
+      max-width: 100%;
+    }
+    
+    select option {
+      width: 100%;
+      max-width: 100%;
+      word-wrap: break-word;
+    }
+    
+    /* Ensure side panel is hidden by default */
+    #sidePanel {
+      transform: translateX(100%);
+    }
+    
+    /* Side panel visible state */
+    #sidePanel.show {
+      transform: translateX(0px);
+    }
+
+    /* Simple sticky bottom section */
+    .sticky-bottom-section {
+      flex-shrink: 0;
+    }
+
+    /* Simple content area */
+    .content-scroll-area {
+      flex: 1;
+      overflow-y: auto;
+    }
+    
+    .image-skeleton {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    
+    @keyframes shimmer {
+      0% {
+        background-position: -200% 0;
+      }
+      100% {
+        background-position: 200% 0;
+      }
+    }
+
+  </style>
+  <script>
+    tailwind.config = {
+      theme: { 
+        extend: { 
+          fontFamily: { 
+            inter: ['Inter','ui-sans-serif','system-ui'] 
+          } 
+        } 
+      }
+    }
+  </script>
+</head>
+<body class="min-h-screen font-inter antialiased">
+  <div class="flex min-h-screen items-center justify-center main-container">
+    <!-- Phone card -->
+    <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
+      <!-- Header -->
+      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
+        <div class="flex-1 flex justify-start min-w-0">
+          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="/entity/{{org.id}}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+        </div>
+        <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+          {% if display_date %}
+          <span class="px-3 py-1 rounded-full text-xs font-medium text-[#31B6BD] bg-[#CAF1F4]/50">
+            {{ transaction_date.strftime('%d %b').upper() or datenow.strftime('%d %b').upper()}}
+          </span>
+          {% endif %}
+          <h1 class="text-[#474747] text-lg font-medium">{{ entity_acronym }}</h1>
+          {% include 'components/report_draft_header_badge.html' %}
+        </div>
+        <div class="flex-1 flex justify-end">
+          <div class="flex items-center gap-2">
+            {% set fn = (current_user.first_name or '')[:1] %}
+            {% set ln = (current_user.last_name or '')[:1] %}
+            {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
+            <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
+              class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
+              aria-label="Open profile in Bills"
+              title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
+              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
+            </a>
+            <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
+                <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Progress Steps -->
+      <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
+        <!-- Flash Notification Area (from previous page saves) -->
+        <div id="flashNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
+          <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
+          <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
+            <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
+            <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+              <p class="font-[500] whitespace-nowrap" style="color: #E59218;">Warning</p>
+              <p class="font-[400] break-words w-full" style="color: #F0A93B;">You have unsaved changes. Please save your changes first.</p>
+            </div>
+            <button class="toast-close shrink-0" onclick="hideFlashNotification(event)">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
+            {% for category, message in messages %}{% if category == 'success' %}
+              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
+                <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
+                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                  <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
+                  <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
+                </div>
+                <button class="toast-close shrink-0" onclick="hideFlashNotification(event)">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            {% elif category == 'danger' or category == 'error' %}
+              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+                <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+                  <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
+                  <p class="font-[400] break-words w-full" style="color: #f57e7e;">{{ message }}</p>
+                </div>
+                <button class="toast-close shrink-0" onclick="hideFlashNotification(event)">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            {% endif %}{% endfor %}
+          {% endif %}{% endwith %}
+        </div>
+
+        <!-- Validation Notification Area -->
+        <div id="notification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
+          <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+            <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+            <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
+              <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Validation Error</p>
+              <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">Please enter Deposit Amount</p>
+            </div>
+            <button class="toast-close shrink-0" onclick="hideNotification()">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <!-- Include the reusable stepper component -->
+        {% include 'components/stepper.html' %}
+      </div>
+      <!-- Form Content -->
+        <form id="depositForm" method="post" action="{{ url_for('report.report_deposit') }}?entity_id={{ request.args.get('entity_id') }}&transaction_date={{ request.args.get('transaction_date') }}" class="flex flex-col flex-1 min-h-0 relative">
+         <input type="hidden" name="csrf_token" value="{{csrf_token()}}">
+         <input type="hidden" name="entity_id" value="{{ org.id }}">
+         <input type="hidden" name="action_type" value="save_next">
+         {% if transaction_date %}
+           <input type="hidden" name="transaction_date" value="{{ transaction_date.strftime('%Y-%m-%d') }}">
+         {% endif %}
+            
+         <div class="main-content px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1 min-h-0">
+          <!-- Title -->
+          <div class="text-left mb-6">
+            <h2 class="text-lg sm:text-xl font-bold text-gray-700">Deposit to Bank</h2>
+          </div>
+           <!-- Single Form Container -->
+           <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
+            <div class="mb-10 w-[240px] mx-auto block relative" style="min-height: 164px;">
+              <div class="image-skeleton w-[170px] h-[170px] rounded-full bg-gray-200 absolute top-0 left-1/2 transform -translate-x-1/2"></div>
+              <img src="{{ url_for('static', filename='img/deposit.webp') }}" alt="Deposit" class="w-[240px] h-auto mx-auto block relative opacity-0 transition-opacity duration-300" onload="this.classList.remove('opacity-0'); this.classList.add('opacity-100'); this.previousElementSibling.style.display='none'; this.parentElement.style.minHeight='auto';" onerror="this.previousElementSibling.style.display='none';">
+            </div>
+            <!-- Current Balance Display -->
+             {% set opening_balance = current_draft.opening_balance or 0 %}
+             {% set cash_addition = current_draft.cash_addition or 0 %}
+             {% set cash_sales = current_draft.cash_sales or 0 %}
+             {% set cash_expenses = current_draft.expenses or 0 %}
+             {% set current_balance = opening_balance + cash_addition + cash_sales - cash_expenses %}
+             <div class="mb-6">
+               <p class="text-sm font-inter text-gray-600">
+                 <span>Current Balance: </span>
+                 <span class="font-semibold" id="currentBalanceDisplay">${{ "{:,.2f}".format(current_balance) }}</span>
+               </p>
+             </div>
+             <input type="hidden" id="currentBalance" value="{{ current_balance }}">
+             <!-- Deposit Amount Field -->
+              <div class="mb-6">
+                 <label class="block text-sm font-medium text-gray-700 mb-2">Deposit Amount</label>
+                <div class="relative">
+                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center">
+                    <span class="text-gray-500 text-sm">$</span>
+                  </div>
+                  <input type="text" inputmode="decimal" id="bank_deposit" name="bank_deposit" value="{{'%.2f'|format(current_draft.bank_deposit) if current_draft.bank_deposit and current_draft.bank_deposit > 0 else ''}}" placeholder="0.00" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this)" onblur="formatWithCommas(this)" onchange="updateDepositAmount()">
+                </div>
+              </div>
+           </div>
+            <!-- Action Buttons -->
+            {% if not current_draft or current_draft.status == 'draft' %}
+            <!-- New Report or Draft Report: Save & Next, Save & Exit -->
+            <button type="submit" onclick="logFormSubmission(event)" class="bg-[#54D3DA] flex font-medium gap-4 hover:bg-[#54D3DA]/80 hover-slide-parent items-center justify-center min-h-[40px] px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full">
+              <span class="flex items-center">Save & Next</span>
+                <svg class="hover-slide" width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10.534 5.66477L6.16282 1.18659L7.31648 -9.53674e-07L13.6377 6.50026L7.31648 13L6.16282 11.8139L10.534 7.33576H0.637695V5.66477H10.534Z" fill="white"/>
+                </svg>
+            </button>
+            <div class="flex justify-center mt-2">
+              <button onclick="saveAndExit()" class="text-[#54D3DA] py-2 px-4 text-sm font-medium hover:text-[#54D3DA]/80 transition-colors flex items-center justify-center min-h-[40px]">
+                <span>Save & Exit</span>
+              </button>
+            </div>
+          {% elif not is_report_edit_mode %}
+            <button
+              type="button"
+              class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium shadow-md flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors hover-scale-parent"
+              onclick="closeReport()">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              <span>Close</span>
+            </button>
+          {% endif %}
+         </div>
+        </form>
+
+       <!-- Loading Overlay -->
+       {% include 'components/loading_overlay.html' %}
+
+       <!-- Include reusable sidepanel component -->
+       {% include 'components/sidepanel.html' %} 
+     </div>
+   </div>
+
+   <div id="fixNegativeBalanceModal" class="absolute inset-0 bg-black bg-opacity-50 {% if current_balance < 0 %}flex{% else %}hidden{% endif %} items-center justify-center z-50 p-4">
+     <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
+       <div class="mb-6">
+         <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
+         <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
+         <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if current_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if current_balance < 0 %}(${{ "{:,.2f}".format(-current_balance) }}){% else %}${{ "{:,.2f}".format(current_balance) }}{% endif %}</p>
+         <p class="text-sm text-gray-600">Cash balance cannot be negative. Choose from below to edit the error:</p>
+       </div>
+      <div class="space-y-3">
+        <button onclick="navigateToOpening()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Opening</span>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(current_draft.cash_addition) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        <button onclick="navigateToSales()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Sales</span>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(current_draft.cash_sales) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        <button onclick="navigateToExpenses()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
+          <div class="flex items-center">
+            <span>Expenses</span>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(current_draft.expenses) }})</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+      </div>
+     </div>
+   </div>
+
+  <script>
+    // Shrink the negative-balance figure to fit on one line when it would
+    // otherwise overflow its popup. Keeps the default (CSS) size when it fits.
+    function fitBalanceText() {
+      document.querySelectorAll('[data-fit-balance]').forEach(function (el) {
+        el.style.fontSize = '';  // reset to the CSS-defined size first
+        const max = el.parentElement ? el.parentElement.clientWidth : el.clientWidth;
+        if (!max) return;
+        let size = parseFloat(window.getComputedStyle(el).fontSize);
+        // Step down until it fits on one line (floor at 12px).
+        while (el.scrollWidth > max && size > 12) {
+          size -= 1;
+          el.style.fontSize = size + 'px';
+        }
+      });
+    }
+    window.addEventListener('load', fitBalanceText);
+    window.addEventListener('resize', fitBalanceText);
+
+    // Function to format currency input
+    function formatCurrency(input) {
+      let value = input.value.replace(/[^\d.]/g, '');
+      const parts = value.split('.');
+      if (parts.length > 2) {
+        value = parts[0] + '.' + parts.slice(1).join('');
+      }
+      if (parts.length === 2 && parts[1].length > 2) {
+        value = parts[0] + '.' + parts[1].substring(0, 2);
+      }
+      input.value = value;
+    }
+
+    function formatWithCommas(input) {
+      let value = input.value;
+      
+      // Skip if empty
+      if (value === '') {
+        return;
+      }
+      
+      // Remove existing commas and format
+      value = value.replace(/,/g, '');
+      const parts = value.split('.');
+      
+      if (parts.length > 0 && parts[0] !== '') {
+        const wholeNumber = parts[0];
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        // Add .00 if no decimal part
+        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
+      }
+      
+      // Update the input value
+      input.value = value;
+    }
+
+    // Function to format currency input for modal (with comma formatting and dash for zero)
+    function formatCurrencyModal(input) {
+      // Store cursor position
+      const cursorPosition = input.selectionStart;
+      
+      // Remove any non-numeric characters except decimal point
+      let value = input.value.replace(/[^\d.]/g, '');
+      
+      // Ensure only one decimal point
+      const parts = value.split('.');
+      if (parts.length > 2) {
+        value = parts[0] + '.' + parts.slice(1).join('');
+      }
+      
+      // Limit to 2 decimal places
+      if (parts.length === 2 && parts[1].length > 2) {
+        value = parts[0] + '.' + parts[1].substring(0, 2);
+      }
+      
+      // Show dash for zero value
+      if (value === '0' || value === '0.0' || value === '0.00' || value === '') {
+        input.value = '-';
+        input.setSelectionRange(1, 1);
+        return;
+      }
+      
+      // Format with commas for display
+      if (parts.length > 0 && parts[0] !== '') {
+        const wholeNumber = parts[0];
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '');
+      }
+      
+      // Only update if value actually changed
+      if (input.value !== value) {
+        const oldValue = input.value;
+        input.value = value;
+        
+        // Calculate new cursor position
+        let newCursorPosition = cursorPosition;
+        
+        // Count commas before cursor in old value
+        const commasBeforeCursorOld = (oldValue.substring(0, cursorPosition).match(/,/g) || []).length;
+        
+        // Count commas before cursor in new value
+        const commasBeforeCursorNew = (value.substring(0, cursorPosition).match(/,/g) || []).length;
+        
+        // Adjust cursor position based on comma difference
+        newCursorPosition += (commasBeforeCursorNew - commasBeforeCursorOld);
+        
+        // Ensure cursor position is within bounds
+        newCursorPosition = Math.min(newCursorPosition, value.length);
+        input.setSelectionRange(newCursorPosition, newCursorPosition);
+      }
+    }
+
+    // Format with commas on blur for modal
+    function formatWithCommasModal(input) {
+      let value = input.value;
+      
+      // Skip if empty or dash
+      if (value === '' || value === '-') {
+        return;
+      }
+      
+      // Remove existing commas and format
+      value = value.replace(/,/g, '');
+      const parts = value.split('.');
+      
+      if (parts.length > 0 && parts[0] !== '') {
+        const wholeNumber = parts[0];
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        // Add .00 if no decimal part
+        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
+      }
+      
+      // Only update if we have a valid number
+      if (value !== '' && value !== '-') {
+        input.value = value;
+      }
+    }
+
+    // Function to update deposit amount display
+    function updateDepositAmount() {
+      const input = document.querySelector('input[type="text"]');
+      if (!input) return;
+      
+      let amount = parseFloat(input.value.replace(/,/g, '')) || 0;
+      
+      // Handle dash value
+      if (input.value === '-') {
+        amount = 0;
+      }
+      
+      const depositDisplay = document.getElementById('depositAmount');
+      if (depositDisplay) {
+        if (amount === 0) {
+          depositDisplay.textContent = '-';
+        } else {
+          // Format with commas for display
+          const formattedAmount = amount.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+          depositDisplay.textContent = `$${formattedAmount}`;
+        }
+      }
+    }
+
+     // Function to log form submission data
+     async function logFormSubmission(event) {
+       event.preventDefault();
+       
+      if (!validateCurrentBalance()) {
+        showFixNegativeBalanceModal();
+        return false;
+      }
+      
+      // Get the submit button and show loading state
+      const submitButton = event.target;
+      const originalButtonText = submitButton.innerHTML;
+      
+      // Show loading overlay
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      loadingOverlay.classList.remove('hidden');
+      
+      // Disable button
+      submitButton.disabled = true;
+      
+      try {
+        // Submit the form
+        const form = event.target.closest('form');
+        form.submit();
+      } catch (error) {
+        console.error('Error submitting form:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Deposit form submit failed', { message: error && error.message });
+        }
+        // Reset button state and hide loading overlay
+        submitButton.disabled = false;
+        submitButton.innerHTML = originalButtonText;
+        loadingOverlay.classList.add('hidden');
+        alert('An error occurred while saving. Please try again.');
+      }
+    }
+
+     // Function to handle Save & Exit action
+     async function saveAndExit() {
+      
+      if (!validateCurrentBalance()) {
+        showFixNegativeBalanceModal();
+        return false;
+      }
+      
+      // Set action_type to save_exit
+      const actionTypeField = document.querySelector('input[name="action_type"]');
+      if (actionTypeField) {
+        actionTypeField.value = "save_exit";
+      }
+      
+      // Get the save & exit button and show loading state
+      const saveExitButton = document.querySelector('button[onclick="saveAndExit()"]');
+      const originalButtonText = saveExitButton.innerHTML;
+      
+      // Show loading overlay
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      loadingOverlay.classList.remove('hidden');
+      
+      // Disable button
+      saveExitButton.disabled = true;
+      
+      try {
+        // Use the same submission logic as logFormSubmission but with save_exit action
+        const form = document.querySelector('form');
+        if (form) {
+          // Add fade out transition before form submission
+          PageTransition.fadeOut(document.querySelector('.main-content'), 0, () => {
+            form.submit();
+          });
+        }
+      } catch (error) {
+        console.error('Error submitting form:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Deposit form submit failed', { context: 'save_exit', message: error && error.message });
+        }
+        // Reset button state and hide loading overlay
+        saveExitButton.disabled = false;
+        saveExitButton.innerHTML = originalButtonText;
+        loadingOverlay.classList.add('hidden');
+        alert('An error occurred while saving. Please try again.');
+      }
+    }
+
+
+     // Function to show continue report message
+     function showCompleteReportMessage() {
+       alert('Please complete the current report before navigating away.');
+     }
+
+     // Function to navigate to different steps
+    // Store initial form values on page load
+    let initialFormValues = {};
+    let formTrackingInitialized = false;
+    
+    // Initialize form tracking on page load (with slight delay to ensure form is fully rendered)
+    function initializeFormTracking() {
+      if (formTrackingInitialized) return;
+      
+      const form = document.getElementById('depositForm');
+      if (form) {
+        const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
+        inputs.forEach(input => {
+          if (!input.readOnly && !input.hidden && input.type !== 'hidden') {
+            const inputId = input.name || input.id;
+            if (inputId) {
+              initialFormValues[inputId] = input.value || '';
+            }
+          }
+        });
+        formTrackingInitialized = true;
+      }
+    }
+    
+    // Try immediately and also on DOMContentLoaded
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(initializeFormTracking, 100);
+      });
+    } else {
+      setTimeout(initializeFormTracking, 100);
+    }
+
+    // Function to check if form has unsaved changes
+    function hasUnsavedChanges() {
+      const form = document.getElementById('depositForm');
+      if (!form) return false;
+      
+      const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
+      for (let input of inputs) {
+        if (input.readOnly || input.hidden || input.type === 'hidden') continue;
+        
+        const inputId = input.name || input.id;
+        if (!inputId) continue;
+        
+        const currentValue = input.value.trim().replace(/,/g, '');
+        const initialValue = (initialFormValues[inputId] || '').trim().replace(/,/g, '');
+        
+        // Normalize empty values
+        const normalizedCurrent = (currentValue === '' || currentValue === '-') ? '' : currentValue;
+        const normalizedInitial = (initialValue === '' || initialValue === '-') ? '' : initialValue;
+        
+        // Check if value has changed
+        if (normalizedCurrent !== normalizedInitial) {
+          // If current value is not empty and different from initial, it's a change
+          if (normalizedCurrent !== '') {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Function to show unsaved data alert
+    function showUnsavedDataAlert() {
+      const unsavedToast = document.getElementById('unsavedDataToast');
+      const flashNotification = document.getElementById('flashNotification');
+      
+      if (unsavedToast && flashNotification) {
+        // Hide any other toasts
+        const otherToasts = flashNotification.querySelectorAll('.toast:not(#unsavedDataToast)');
+        otherToasts.forEach(toast => toast.classList.add('hidden'));
+        
+        // Show the unsaved data toast
+        unsavedToast.classList.remove('hidden');
+        
+        // Show the notification container
+        flashNotification.classList.remove('translate-x-full');
+        flashNotification.classList.add('translate-x-0');
+        
+        // Auto-hide after 4 seconds
+        setTimeout(() => {
+          flashNotification.classList.remove('translate-x-0');
+          flashNotification.classList.add('translate-x-full');
+        }, 4000);
+      }
+    }
+
+     function navigateToStep(step) {
+      // Check if there are unsaved changes
+      if (hasUnsavedChanges()) {
+        showUnsavedDataAlert();
+        // Prevent navigation when there are unsaved changes
+        return;
+      }
+      
+      // Get the current transaction date from the form or URL
+      const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+      const entityId = '{{ request.args.get('entity_id') or org.id }}';
+      
+      {% if current_draft.status == "draft" %}
+       const editParam = {{ 'true' if is_edit_mode else 'false' }} ? '&edit=true' : '';
+       const stepUrls = {
+         'opening': '{{ url_for("report.report_opening") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
+         'sales': '{{ url_for("report.report_sale") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
+         'expenses': '{{ url_for("report.report_expense") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
+         'deposit': '{{ url_for("report.report_deposit") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
+         'cash_count': '{{ url_for("report.report_cash_count") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
+         'ending': '{{ url_for("report.report_ending") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam
+       };
+       {% else %}
+       const editParam = {{ 'true' if is_edit_mode else 'false' }} ? '&edit=true' : '';
+       const reportEditParam = {{ 'true' if is_report_edit_mode else 'false' }} ? '&report_edit=true' : '';
+       const stepUrls = {
+         'opening': '{{ url_for("report.report_opening", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + reportEditParam,
+         'sales': '{{ url_for("report.report_sale", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + reportEditParam,
+         'expenses': '{{ url_for("report.report_expense", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + reportEditParam,
+         'deposit': '{{ url_for("report.report_deposit", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + reportEditParam,
+         'cash_count': '{{ url_for("report.report_cash_count", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + reportEditParam,
+         'ending': '{{ url_for("report.report_ending", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + reportEditParam
+       };
+       {% endif %}
+       
+      const url = stepUrls[step];
+      if (url) {
+        window.location.href = url;
+      }
+     }
+
+           // Function to show notification
+      function showNotification(customTitle, customMessage) {
+        const notification = document.getElementById('notification');
+        const errorTitle = document.getElementById('errorTitle');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        // Update notification content if custom messages provided
+        if (customTitle && errorTitle) {
+          errorTitle.textContent = customTitle;
+        }
+        if (customMessage && errorMessage) {
+          errorMessage.textContent = customMessage;
+        }
+        
+        notification.classList.remove('translate-x-full');
+        notification.classList.add('translate-x-0');
+        
+        // Hide notification after 4 seconds
+        setTimeout(() => {
+          hideNotification();
+        }, 4000);
+      }
+
+      // Function to hide notification
+      function hideNotification() {
+        const notification = document.getElementById('notification');
+        notification.classList.remove('translate-x-0');
+        notification.classList.add('translate-x-full');
+      }
+
+      // Function to validate deposit amount
+      function validateDepositAmount() {
+        const depositAmountInput = document.getElementById('bank_deposit');
+        const depositAmountValue = depositAmountInput.value.trim();
+        
+        // Check if empty, dash, or zero
+        if (!depositAmountValue || depositAmountValue === '-' || depositAmountValue === '0' || depositAmountValue === '0.00') {
+          return false;
+        }
+        
+        // Check if it's a valid number greater than 0
+        const depositAmount = parseFloat(depositAmountValue.replace(/,/g, '')) || 0;
+        return depositAmount > 0;
+      }
+
+      // Function to validate current balance (check if negative)
+      function validateCurrentBalance() {
+        const currentBalanceInput = document.getElementById('currentBalance');
+        if (!currentBalanceInput) return true; // If element doesn't exist, allow submission
+        
+        const currentBalance = parseFloat(currentBalanceInput.value) || 0;
+        return currentBalance >= 0;
+      }
+
+      function showFixNegativeBalanceModal() {
+        const modal = document.getElementById('fixNegativeBalanceModal');
+        if (modal) {
+          modal.classList.remove('hidden');
+          document.body.style.overflow = 'hidden';
+        }
+      }
+      function hideFixNegativeBalanceModal() {
+        const modal = document.getElementById('fixNegativeBalanceModal');
+        if (modal) {
+          modal.classList.add('hidden');
+          document.body.style.overflow = '';
+        }
+      }
+      function navigateToOpening() {
+        hideFixNegativeBalanceModal();
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        if (loadingOverlay && loadingText) {
+          loadingText.textContent = 'Redirecting...';
+          loadingOverlay.classList.remove('hidden');
+        }
+        const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+        const entityId = '{{ request.args.get('entity_id') or org.id }}';
+        let openingUrl;
+        {% if current_draft and current_draft.status == "draft" %}
+        openingUrl = '{{ url_for("report.report_opening") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '');
+        {% else %}
+        openingUrl = '{{ url_for("report.report_opening", id=current_draft.id if current_draft else None) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '');
+        {% endif %}
+        window.location.href = openingUrl;
+      }
+
+      function navigateToSales() {
+        hideFixNegativeBalanceModal();
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        if (loadingOverlay && loadingText) {
+          loadingText.textContent = 'Redirecting...';
+          loadingOverlay.classList.remove('hidden');
+        }
+        const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+        const entityId = '{{ request.args.get('entity_id') or org.id }}';
+        let salesUrl;
+        {% if current_draft and current_draft.status == "draft" %}
+        salesUrl = '{{ url_for("report.report_sale") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '');
+        {% else %}
+        salesUrl = '{{ url_for("report.report_sale", id=current_draft.id if current_draft else None) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '');
+        {% endif %}
+        window.location.href = salesUrl;
+      }
+
+      function navigateToExpenses() {
+        hideFixNegativeBalanceModal();
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        if (loadingOverlay && loadingText) {
+          loadingText.textContent = 'Redirecting...';
+          loadingOverlay.classList.remove('hidden');
+        }
+        const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
+        const entityId = '{{ request.args.get('entity_id') or org.id }}';
+        let expensesUrl;
+        {% if current_draft and current_draft.status == "draft" %}
+        expensesUrl = '{{ url_for("report.report_expense") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '');
+        {% else %}
+        expensesUrl = '{{ url_for("report.report_expense", id=current_draft.id if current_draft else None) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '');
+        {% endif %}
+        window.location.href = expensesUrl;
+      }
+
+    // Initialize page transition
+    PageTransition.init('.main-content', 'fadeIn', 10);
+
+     // Initialize deposit amount on page load
+     document.addEventListener('DOMContentLoaded', function() {
+       const depositInput = document.getElementById('bank_deposit');
+       if (depositInput && depositInput.value) {
+         formatWithCommas(depositInput);
+       }
+       updateDepositAmount();
+       
+
+        // Smart scroll to center when input is focused
+        function scrollToCenter(element) {
+         const scrollContainer = document.querySelector('.main-content');
+         if (!scrollContainer || !element) return;
+         
+         // Get the element's position relative to the scroll container
+         const containerRect = scrollContainer.getBoundingClientRect();
+         const elementRect = element.getBoundingClientRect();
+         
+         // Calculate element's position relative to the container
+         const elementTopRelativeToContainer = elementRect.top - containerRect.top + scrollContainer.scrollTop;
+         
+         // Calculate the center of the visible area
+         const visibleCenter = scrollContainer.scrollTop + (containerRect.height / 2);
+         
+         // Calculate where the element's center should be
+         const elementCenter = elementTopRelativeToContainer + (elementRect.height / 2);
+         
+         // Calculate how much we need to scroll
+         const scrollOffset = elementCenter - visibleCenter;
+         
+         // Only scroll if the element is not already centered (with a small threshold)
+         if (Math.abs(scrollOffset) > 10) {
+           scrollContainer.scrollTo({
+             top: scrollContainer.scrollTop + scrollOffset,
+             behavior: 'smooth'
+           });
+         }
+       }
+       
+       // Add focus event listeners to all input fields (excluding readonly)
+       const allInputs = document.querySelectorAll('input[type="text"], input[type="number"], input[type="date"], textarea');
+       allInputs.forEach(input => {
+         // Skip readonly inputs
+         if (input.readOnly) return;
+         
+         input.addEventListener('focus', function() {
+           // Small delay to ensure the keyboard has appeared on mobile
+           setTimeout(() => {
+             scrollToCenter(this);
+           }, 300);
+         });
+       });
+     });
+
+     // Function to go back (for old reports)
+     function goBack() {
+       // Navigate to expenses page
+       const entityId = '{{ request.args.get('entity_id') or org.id }}';
+       const reportId = '{{ draft_id }}';
+       const url = `/report/${reportId}/expense?entity_id=${entityId}`;
+       window.location.href = url;
+     }
+
+     // Function to go to next (for old reports)
+     function goToNext() {
+       // Navigate to cash count page
+       const entityId = '{{ request.args.get('entity_id') or org.id }}';
+       const reportId = '{{ draft_id }}';
+       const url = `/report/${reportId}/cash_count?entity_id=${entityId}`;
+       window.location.href = url;
+     }
+
+     // Function to close report (for old reports)
+     function closeReport() {
+       // Navigate back to entity dashboard
+       const entityId = '{{ request.args.get('entity_id') or org.id }}';
+       window.location.href = `/entity/${entityId}`;
+     }
+
+     // Flash notification slider functions
+     function showFlashNotification() {
+       const notification = document.getElementById('flashNotification');
+       if (notification && notification.querySelector('.toast')) {
+         // Slide in using Tailwind classes
+         notification.classList.remove('translate-x-full');
+         notification.classList.add('translate-x-0');
+         
+         // Auto hide each visible toast after 4 seconds
+         const visibleToasts = notification.querySelectorAll('.toast:not(.hidden)');
+         visibleToasts.forEach(toast => {
+           setTimeout(() => {
+             // Create a synthetic event to trigger the slide-out animation
+             const closeButton = toast.querySelector('.toast-close');
+             if (closeButton) {
+               const syntheticEvent = { target: closeButton };
+               hideFlashNotification(syntheticEvent);
+             }
+           }, 4000);
+         });
+       }
+     }
+
+     function hideFlashNotification(event) {
+       // If event is provided, hide the specific toast that was clicked
+       if (event && event.target) {
+         const closeButton = event.target.closest('.toast-close');
+         if (closeButton) {
+           const toast = closeButton.closest('.toast');
+           if (toast) {
+             // Add slide-out animation (matching the container's transition)
+             toast.style.transition = 'transform 0.5s ease-in-out';
+             toast.style.transform = 'translateX(100%)';
+             
+             // Wait for animation to complete, then hide the toast
+             setTimeout(() => {
+               toast.classList.add('hidden');
+               // Reset styles
+               toast.style.transition = '';
+               toast.style.transform = '';
+               
+               // Check if there are any visible toasts left
+               const notification = document.getElementById('flashNotification');
+               if (notification) {
+                 const visibleToasts = notification.querySelectorAll('.toast:not(.hidden)');
+                 if (visibleToasts.length === 0) {
+                   // No more visible toasts, hide the container
+                   notification.classList.remove('translate-x-0');
+                   notification.classList.add('translate-x-full');
+                 }
+               }
+             }, 500); // Match the transition duration
+             return;
+           }
+         }
+       }
+       
+       // Fallback: hide the entire notification container
+       const notification = document.getElementById('flashNotification');
+       if (notification) {
+         // Slide out using Tailwind classes
+         notification.classList.remove('translate-x-0');
+         notification.classList.add('translate-x-full');
+         
+         // Also hide the unsaved toast after animation
+         setTimeout(() => {
+           const unsavedToast = document.getElementById('unsavedDataToast');
+           if (unsavedToast) {
+             unsavedToast.classList.add('hidden');
+           }
+         }, 500);
+       }
+     }
+
+     // Show flash notification on page load if it exists
+     document.addEventListener('DOMContentLoaded', function() {
+       {% if get_flashed_messages() %}
+         showFlashNotification();
+       {% endif %}
+     });
+
+  </script>
+</body>
+</html>
+
+<!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
+<script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/report_back_nav.js') }}"></script>
+<script>
+document.addEventListener('submit', function(e){
+  try{
+    const form = e.target;
+    const path = window.location.pathname;
+    let key = 'pending_generic';
+    if(path.includes('/sale')) key='pending_sales';
+    else if(path.includes('/expense')) key='pending_expenses';
+    else if(path.includes('/deposit')) key='pending_deposit';
+    else if(path.includes('/opening')) key='pending_opening';
+    else if(path.includes('/cash_count')) key='pending_cash_count';
+    else if(path.includes('/ending')) key='pending_ending';
+
+    const btn = e.submitter || form.querySelector('button[type="submit"]');
+    if(btn) BFCache.saveButtonState(btn);
+
+    const data = {};
+    try{ new FormData(form).forEach((v,k)=>{ if(data[k]){ if(Array.isArray(data[k])) data[k].push(v); else data[k]=[data[k],v]; } else data[k]=v }); }catch(e){}
+    BFCache.saveSnapshot(key, data);
+  }catch(e){}
+});
+</script>

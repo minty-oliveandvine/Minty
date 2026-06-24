@@ -1,0 +1,20 @@
+{% extends 'base/layout.html' %} {% import 'components/components.html' as
+components %} {% block header %} {% endblock%} {% block content %} {{
+components.toast(icon='img/error.webp', type='Error', message=error,
+toastBorder='errorBorder', toastBg='errorBg', toastColor='error') }}
+{%endblock%} {% block footer %} {%endblock%}{% block scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const toastBtn = document.querySelector(".toast-close");
+    const toast = document.querySelector(".toast");
+
+    toastBtn.addEventListener("click", function () {
+      $(".toast").hide();
+    });
+
+    setTimeout(() => {
+      $(".toast").hide();
+    }, 4000);
+  });
+</script>
+{%endblock%}

@@ -1,0 +1,3894 @@
+    // Function to load Xero data asynchronously
+    async function loadXeroDataAsync() {
+      const entityId = '{{ org.id }}';
+      const xeroLoadingOverlay = document.getElementById('xeroLoadingOverlay');
+      const xeroLoadingText = document.getElementById('xeroLoadingText');
+      const saveChangesBtn = document.getElementById('saveChangesBtn');
+
+      try {
+        // Block Save until the dropdown data is ready, so the user can't submit
+        // empty hidden <select> values while Xero data is still loading.
+        window.xeroDataReady = false;
+        if (saveChangesBtn) {
+          saveChangesBtn.disabled = true;
+        }
+
+        // Show loading modal
+        if (xeroLoadingOverlay) {
+          xeroLoadingText.textContent = 'Loading xero entity settings';
+          xeroLoadingOverlay.classList.remove('hidden');
+        }
+
+        console.log('Loading Xero data for entity:', entityId);
+        
+        // Fetch Xero data from API
+        const response = await fetch(`/api/entity/${entityId}/xero-data`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+          console.log('Xero data loaded successfully');
+          
+          // Update global data only when API returned non-empty data (keep server-seeded data otherwise)
+          if (data.bank_accounts && data.bank_accounts.length > 0) {
+            allMainBankAccounts = data.bank_accounts;
+            allDepositBankAccounts = data.bank_accounts;
+            allDiscrepancyBankAccounts = data.bank_accounts;
+          }
+          if (data.cashsale_account && data.cashsale_account.length > 0) {
+            allCashSalesAccounts = data.cashsale_account;
+          }
+          if (data.contacts && data.contacts.length > 0) {
+            allCashSalesContacts = data.contacts;
+            allOwnersContacts = data.contacts;
+            allDiscrepancyContacts = data.contacts;
+          }
+          if (data.owners_account && data.owners_account.length > 0) {
+            allOwnersAccounts = data.owners_account;
+          }
+          if (data.discrepancy_account && data.discrepancy_account.length > 0) {
+            allDiscrepancyAccounts = data.discrepancy_account;
+          }
+          
+          // Update hidden select elements with fresh data
+          updateHiddenSelects(data);
+
+          console.log('All Xero data initialized successfully');
+        } else {
+          // API didn't return fresh data (e.g. entity is disconnected). The
+          // hidden <select> options and the all*Accounts/Contacts globals are
+          // already server-seeded from account_info / xero_contact_sync, so
+          // the dropdowns still work — we just skip the API-driven refresh.
+          console.error('Failed to load Xero data:', data.error);
+          showXeroDataError(data.error);
+        }
+      } catch (error) {
+        console.error('Error loading Xero data:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Xero data load failed', { message: error && error.message });
+        }
+        showXeroDataError('Failed to load Xero data');
+      } finally {
+        // Always wire up the search dropdowns, even when the API call failed,
+        // so disconnected entities still get working dropdowns from the
+        // server-seeded DB data.
+        initializeMainBankAccountSearch();
+        initializeDepositBankAccountSearch();
+        initializeCashSalesAccountSearch();
+        initializeCashSalesContactSearch();
+        initializeOwnersAccountSearch();
+        initializeOwnersContactSearch();
+        initializeDiscrepancyBankAccountSearch();
+        initializeDiscrepancyAccountSearch();
+        initializeDiscrepancyContactSearch();
+
+        // Hide loading modal
+        if (xeroLoadingOverlay) {
+          xeroLoadingOverlay.classList.add('hidden');
+        }
+
+        // Dropdowns are now populated (from the API or the server-seeded
+        // fallback) — re-enable Save and let the submit handler validate.
+        window.xeroDataReady = true;
+        if (saveChangesBtn && !saveChangesBtn.hasAttribute('title')) {
+          // Keep view-only Save (which carries a title tooltip) disabled.
+          saveChangesBtn.disabled = false;
+        }
+      }
+    }
+
+    // ── Petty Cash mapping: client-side validation before save ──────────
+    // The 9 required values live in hidden <select>s that only get a value
+    // when the user picks a suggestion (or a saved default exists). Validate
+    // them here so the form can't be submitted with empty hidden fields, which
+    // the server would otherwise reject with a generic "Please enter all
+    // default settings for this entity" after a full page reload.
+    const REQUIRED_MAPPING_FIELDS = [
+      { selectId: 'main_bank_select',         inputId: 'main_bank_input',          label: 'Petty Cash Account' },
+      { selectId: 'deposit_bank_select',      inputId: 'deposit_bank_input',       label: 'Deposit Bank Account' },
+      { selectId: 'cashsale_account_select',  inputId: 'cashsale_account_input',   label: 'Cash Sales account code' },
+      { selectId: 'cashsale_contact_select',  inputId: 'cashsale_contact_input',   label: 'Cash Sales contact' },
+      { selectId: 'owners_account_select',    inputId: 'owners_account_input',     label: 'Director Personal Account code' },
+      { selectId: 'owners_contact_select',    inputId: 'owners_contact_input',     label: 'Director / Responsible person' },
+      // discrepancy_bank is hidden and mirrors the Petty Cash Account, so point
+      // its highlight back at the Petty Cash Account input.
+      { selectId: 'discrepancy_bank_select',  inputId: 'main_bank_input',          label: 'Petty Cash Account' },
+      { selectId: 'discrepancy_account_select', inputId: 'discrepancy_account_input', label: 'Discrepancy account code' },
+      { selectId: 'discrepancy_contact_select', inputId: 'discrepancy_contact_input', label: 'Discrepancy contact' },
+    ];
+
+    function _mappingSelectValue(id) {
+      const el = document.getElementById(id);
+      return el && el.value ? el.value.trim() : '';
+    }
+
+    function _setMappingHighlight(inputId, on) {
+      const el = document.getElementById(inputId);
+      if (!el) return;
+      if (on) {
+        el.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+        el.classList.remove('border-gray-300');
+      } else {
+        el.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+        el.classList.add('border-gray-300');
+      }
+    }
+
+    function _mappingToast(msg) {
+      if (typeof showErrorToast === 'function') {
+        showErrorToast(msg);
+      } else {
+        alert(msg);
+      }
+    }
+
+    // Returns true when it's safe to submit, false (and blocks/notifies) when not.
+    window.validateMappingBeforeSave = function (event) {
+      // Belt-and-suspenders: the discrepancy bank always mirrors the Petty Cash
+      // (main) bank. If the auto-sync didn't run, copy it across so the hidden,
+      // unfixable field can't fail validation on its own.
+      const mainBankSelect = document.getElementById('main_bank_select');
+      const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+      if (mainBankSelect && discrepancyBankSelect && mainBankSelect.value && !discrepancyBankSelect.value) {
+        const exists = Array.from(discrepancyBankSelect.options).some(o => o.value === mainBankSelect.value);
+        if (!exists) {
+          const opt = document.createElement('option');
+          opt.value = mainBankSelect.value;
+          opt.textContent = mainBankSelect.value;
+          discrepancyBankSelect.appendChild(opt);
+        }
+        discrepancyBankSelect.value = mainBankSelect.value;
+      }
+
+      // Only enforce the mapping when the user is actually configuring it
+      // (mirrors the backend, which ignores mapping unless main_bank is set).
+      // A country-only / account-codes-only save is still allowed.
+      const anySet = REQUIRED_MAPPING_FIELDS.some(f => _mappingSelectValue(f.selectId) !== '');
+      if (!anySet) return true;
+
+      // Don't let the user submit before the dropdown data has loaded.
+      if (window.xeroDataReady !== true) {
+        if (event) event.preventDefault();
+        _mappingToast('Please wait — still loading Xero data.');
+        return false;
+      }
+
+      REQUIRED_MAPPING_FIELDS.forEach(f => _setMappingHighlight(f.inputId, false));
+
+      const missingLabels = [];
+      let firstMissingInput = null;
+      REQUIRED_MAPPING_FIELDS.forEach(f => {
+        if (_mappingSelectValue(f.selectId) === '') {
+          _setMappingHighlight(f.inputId, true);
+          if (missingLabels.indexOf(f.label) === -1) missingLabels.push(f.label);
+          if (!firstMissingInput) firstMissingInput = document.getElementById(f.inputId);
+        }
+      });
+
+      if (missingLabels.length > 0) {
+        if (event) event.preventDefault();
+        if (firstMissingInput && firstMissingInput.scrollIntoView) {
+          firstMissingInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        _mappingToast(
+          missingLabels.length === 1
+            ? `Please select a ${missingLabels[0]}.`
+            : `Please select: ${missingLabels.join(', ')}.`
+        );
+        return false;
+      }
+      return true;
+    };
+
+    // Clear a field's red highlight as soon as the user edits it again.
+    document.addEventListener('DOMContentLoaded', function () {
+      REQUIRED_MAPPING_FIELDS.forEach(f => {
+        const input = document.getElementById(f.inputId);
+        if (input) {
+          input.addEventListener('input', function () { _setMappingHighlight(f.inputId, false); });
+        }
+      });
+    });
+
+    // Function to update hidden select elements with fresh data
+    function updateHiddenSelects(data) {
+      // Update main bank select
+      const mainBankSelect = document.getElementById('main_bank_select');
+      if (mainBankSelect && data.bank_accounts) {
+        const currentValue = mainBankSelect.value;
+        mainBankSelect.innerHTML = '<option value="">Select a bank account</option>';
+        data.bank_accounts.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account.AccountID;
+          option.textContent = `${account.Name} - ${account.MaskedBankAccountNumber}`;
+          mainBankSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(mainBankSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            mainBankSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update deposit bank select
+      const depositBankSelect = document.getElementById('deposit_bank_select');
+      if (depositBankSelect && data.bank_accounts) {
+        const currentValue = depositBankSelect.value;
+        depositBankSelect.innerHTML = '<option value="">Select a bank account</option>';
+        data.bank_accounts.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account.AccountID;
+          option.textContent = `${account.Name} - ${account.MaskedBankAccountNumber}`;
+          depositBankSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(depositBankSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            depositBankSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update cash sales account select
+      const cashSalesAccountSelect = document.getElementById('cashsale_account_select');
+      if (cashSalesAccountSelect && data.cashsale_account) {
+        const currentValue = cashSalesAccountSelect.value;
+        cashSalesAccountSelect.innerHTML = '<option value="">Select an account</option>';
+        data.cashsale_account.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account.Code;
+          option.textContent = `${account.Name} - ${account.Code}`;
+          cashSalesAccountSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(cashSalesAccountSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            cashSalesAccountSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update cash sales contact select
+      const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+      if (cashSalesContactSelect && data.contacts) {
+        const currentValue = cashSalesContactSelect.value;
+        cashSalesContactSelect.innerHTML = '<option value="">Select a contact</option>';
+        data.contacts.forEach(contact => {
+          const option = document.createElement('option');
+          option.value = contact.ContactID;
+          option.textContent = contact.Name;
+          cashSalesContactSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(cashSalesContactSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            cashSalesContactSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update owners account select
+      const ownersAccountSelect = document.getElementById('owners_account_select');
+      if (ownersAccountSelect && data.owners_account) {
+        const currentValue = ownersAccountSelect.value;
+        ownersAccountSelect.innerHTML = '<option value="">Select an account</option>';
+        data.owners_account.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account.Code;
+          option.textContent = `${account.Name} - ${account.Code}`;
+          ownersAccountSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(ownersAccountSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            ownersAccountSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update owners contact select
+      const ownersContactSelect = document.getElementById('owners_contact_select');
+      if (ownersContactSelect && data.contacts) {
+        const currentValue = ownersContactSelect.value;
+        ownersContactSelect.innerHTML = '<option value="">Select a contact</option>';
+        data.contacts.forEach(contact => {
+          const option = document.createElement('option');
+          option.value = contact.ContactID;
+          option.textContent = contact.Name;
+          ownersContactSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(ownersContactSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            ownersContactSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update discrepancy bank select
+      const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+      if (discrepancyBankSelect && data.bank_accounts) {
+        // Preserve the currently selected value before updating
+        const currentValue = discrepancyBankSelect.value || selectedDiscrepancyBankAccountId;
+        console.log('Preserving discrepancy_bank value:', currentValue);
+        discrepancyBankSelect.innerHTML = '<option value="">Select a bank account</option>';
+        data.bank_accounts.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account.AccountID;
+          option.textContent = `${account.Name} - ${account.MaskedBankAccountNumber}`;
+          discrepancyBankSelect.appendChild(option);
+        });
+        // Restore the selected value if it still exists in the new options
+        if (currentValue) {
+          const optionExists = Array.from(discrepancyBankSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            discrepancyBankSelect.value = currentValue;
+            console.log('Restored discrepancy_bank value to:', discrepancyBankSelect.value);
+          } else {
+            console.warn('Could not restore discrepancy_bank value - option not found:', currentValue);
+          }
+        }
+      }
+      
+      // Update discrepancy account select
+      const discrepancyAccountSelect = document.getElementById('discrepancy_account_select');
+      if (discrepancyAccountSelect && data.discrepancy_account) {
+        const currentValue = discrepancyAccountSelect.value;
+        discrepancyAccountSelect.innerHTML = '<option value="">Select an account</option>';
+        data.discrepancy_account.forEach(account => {
+          const option = document.createElement('option');
+          option.value = account.Code;
+          option.textContent = `${account.Name} - ${account.Code}`;
+          discrepancyAccountSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(discrepancyAccountSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            discrepancyAccountSelect.value = currentValue;
+          }
+        }
+      }
+      
+      // Update discrepancy contact select
+      const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+      if (discrepancyContactSelect && data.contacts) {
+        const currentValue = discrepancyContactSelect.value;
+        discrepancyContactSelect.innerHTML = '<option value="">Select a contact</option>';
+        data.contacts.forEach(contact => {
+          const option = document.createElement('option');
+          option.value = contact.ContactID;
+          option.textContent = contact.Name;
+          discrepancyContactSelect.appendChild(option);
+        });
+        if (currentValue) {
+          const optionExists = Array.from(discrepancyContactSelect.options).some(opt => opt.value === currentValue);
+          if (optionExists) {
+            discrepancyContactSelect.value = currentValue;
+          }
+        }
+      }
+    }
+
+    // Function to show Xero data loading error
+    function showXeroDataError(error) {
+      console.error('Xero data loading error:', error);
+      // You can add a toast notification or error message here
+      // For now, just log the error
+    }
+
+    // Global variables for main bank account search (seeded from server so dropdowns work before API)
+    let selectedMainBankAccountId = null;
+    let selectedMainBankAccountName = null;
+    let allMainBankAccounts = {{ (bank_accounts or []) | tojson }};
+    let selectedMainBankSuggestionIndex = -1;
+    let currentMainBankSuggestions = [];
+
+    // Initialize main bank account search functionality
+    function initializeMainBankAccountSearch() {
+      const mainBankInput = document.getElementById('main_bank_input');
+      const mainBankSuggestions = document.getElementById('mainBankSuggestions');
+      
+      if (!mainBankInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allMainBankAccounts === 'undefined') {
+      allMainBankAccounts = [];
+      }
+      
+      // Set default value if available
+      {% if main_bank_account_default %}
+      const defaultMainBank = {{ main_bank_account_default | tojson }};
+      if (defaultMainBank) {
+        mainBankInput.value = `${defaultMainBank.Name} - ${defaultMainBank.MaskedBankAccountNumber}`;
+        selectedMainBankAccountId = defaultMainBank.AccountID;
+        selectedMainBankAccountName = defaultMainBank.Name;
+        
+        const mainBankSelect = document.getElementById('main_bank_select');
+        if (mainBankSelect) {
+          mainBankSelect.value = defaultMainBank.AccountID;
+        }
+        
+        // Sync to discrepancy bank account
+        const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+        const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+        
+        if (discrepancyBankInput) {
+          discrepancyBankInput.value = `${defaultMainBank.Name} - ${defaultMainBank.MaskedBankAccountNumber}`;
+        }
+        
+        if (discrepancyBankSelect) {
+          discrepancyBankSelect.value = defaultMainBank.AccountID;
+        }
+        
+        selectedDiscrepancyBankAccountId = defaultMainBank.AccountID;
+        selectedDiscrepancyBankAccountName = defaultMainBank.Name;
+      } else {
+        mainBankInput.value = '';
+        selectedMainBankAccountId = null;
+        selectedMainBankAccountName = null;
+        
+        const mainBankSelect = document.getElementById('main_bank_select');
+        if (mainBankSelect) {
+          mainBankSelect.value = '';
+        }
+        
+        // Clear discrepancy bank account
+        const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+        const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+        
+        if (discrepancyBankInput) {
+          discrepancyBankInput.value = '';
+        }
+        
+        if (discrepancyBankSelect) {
+          discrepancyBankSelect.value = '';
+        }
+        
+        selectedDiscrepancyBankAccountId = null;
+        selectedDiscrepancyBankAccountName = null;
+      }
+      {% else %}
+      mainBankInput.value = '';
+      selectedMainBankAccountId = null;
+      selectedMainBankAccountName = null;
+      
+      const mainBankSelect = document.getElementById('main_bank_select');
+      if (mainBankSelect) {
+        mainBankSelect.value = '';
+      }
+      
+      // Clear discrepancy bank account
+      const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+      const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+      
+      if (discrepancyBankInput) {
+        discrepancyBankInput.value = '';
+      }
+      
+      if (discrepancyBankSelect) {
+        discrepancyBankSelect.value = '';
+      }
+      
+      selectedDiscrepancyBankAccountId = null;
+      selectedDiscrepancyBankAccountName = null;
+      {% endif %}
+      
+      // Add click event listener to show all bank accounts
+      mainBankInput.addEventListener('click', function() {
+        if (allMainBankAccounts.length > 0) {
+          showMainBankAccountSuggestions(allMainBankAccounts);
+        }
+      });
+
+      // Add input event listener for search
+      mainBankInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedMainBankSuggestionIndex = -1; // Reset navigation when typing
+        
+        if (query.length === 0) {
+          // Show all bank accounts when input is empty
+          if (allMainBankAccounts.length > 0) {
+            showMainBankAccountSuggestions(allMainBankAccounts);
+          } else {
+            hideMainBankAccountSuggestions();
+            selectedMainBankAccountId = null;
+            selectedMainBankAccountName = null;
+            
+            // Clear the hidden select value
+            const mainBankSelect = document.getElementById('main_bank_select');
+            if (mainBankSelect) {
+              mainBankSelect.value = '';
+            }
+            
+            // Clear discrepancy bank account
+            const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+            const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+            
+            if (discrepancyBankInput) {
+              discrepancyBankInput.value = '';
+            }
+            
+            if (discrepancyBankSelect) {
+              discrepancyBankSelect.value = '';
+            }
+            
+            selectedDiscrepancyBankAccountId = null;
+            selectedDiscrepancyBankAccountName = null;
+          }
+          return;
+        }
+        
+        // Search through bank accounts
+        const matches = allMainBankAccounts.filter(account => 
+          account.Name.toLowerCase().includes(query.toLowerCase()) ||
+          account.MaskedBankAccountNumber.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (matches.length > 0) {
+          showMainBankAccountSuggestions(matches);
+        } else {
+          hideMainBankAccountSuggestions();
+        }
+      });
+      
+      // Handle input focus
+      mainBankInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allMainBankAccounts.filter(account => 
+            account.Name.toLowerCase().includes(query.toLowerCase()) ||
+            account.MaskedBankAccountNumber.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          if (matches.length > 0) {
+            showMainBankAccountSuggestions(matches);
+          }
+        } else if (allMainBankAccounts.length > 0) {
+          showMainBankAccountSuggestions(allMainBankAccounts);
+        }
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (mainBankInput && mainBankSuggestions && 
+            !mainBankInput.contains(event.target) && !mainBankSuggestions.contains(event.target)) {
+          hideMainBankAccountSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      mainBankInput.addEventListener('keydown', handleMainBankKeyboardNavigation);
+      
+    }
+
+    // Show main bank account suggestions
+    function showMainBankAccountSuggestions(matches) {
+      const suggestions = document.getElementById('mainBankSuggestions');
+      const dropdownIcon = document.getElementById('mainBankDropdownIcon');
+      if (!suggestions) return;
+      
+      suggestions.innerHTML = '';
+      
+      // Filter out the account that's already selected in deposit bank
+      const filteredMatches = matches.filter(account => account.AccountID !== selectedDepositBankAccountId);
+      currentMainBankSuggestions = filteredMatches;
+      selectedMainBankSuggestionIndex = -1;
+      
+      filteredMatches.forEach((account, index) => {
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
+          <div class="text-xs text-gray-500">${account.MaskedBankAccountNumber}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectMainBankAccount(account.AccountID, account.Name, account.MaskedBankAccountNumber);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      // Show message if no accounts available due to filtering
+      if (filteredMatches.length === 0 && matches.length > 0) {
+        const noOptionsItem = document.createElement('div');
+        noOptionsItem.className = 'px-4 py-2 text-gray-500 text-sm italic';
+        noOptionsItem.textContent = 'No other bank accounts available (current selection is already used in Deposit Bank)';
+        suggestions.appendChild(noOptionsItem);
+      }
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide main bank account suggestions
+    function hideMainBankAccountSuggestions() {
+      const suggestions = document.getElementById('mainBankSuggestions');
+      const dropdownIcon = document.getElementById('mainBankDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedMainBankSuggestionIndex = -1;
+    }
+    
+    // Highlight main bank suggestion item
+    function highlightMainBankSuggestion(index) {
+      const suggestions = document.getElementById('mainBankSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for main bank
+    function handleMainBankKeyboardNavigation(e) {
+      const suggestions = document.getElementById('mainBankSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedMainBankSuggestionIndex = (selectedMainBankSuggestionIndex + 1) % items.length;
+          highlightMainBankSuggestion(selectedMainBankSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedMainBankSuggestionIndex = selectedMainBankSuggestionIndex <= 0 ? items.length - 1 : selectedMainBankSuggestionIndex - 1;
+          highlightMainBankSuggestion(selectedMainBankSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedMainBankSuggestionIndex < 0 && items.length > 0) {
+            selectedMainBankSuggestionIndex = 0;
+          }
+          
+          if (selectedMainBankSuggestionIndex >= 0 && selectedMainBankSuggestionIndex < items.length) {
+            if (currentMainBankSuggestions.length > 0 && selectedMainBankSuggestionIndex < currentMainBankSuggestions.length) {
+              const account = currentMainBankSuggestions[selectedMainBankSuggestionIndex];
+              selectMainBankAccount(account.AccountID, account.Name, account.MaskedBankAccountNumber);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideMainBankAccountSuggestions();
+          break;
+      }
+    }
+
+    // Select a main bank account
+    function selectMainBankAccount(accountId, accountName, accountNumber) {
+      // Check if this account is already selected in deposit bank
+      if (selectedDepositBankAccountId === accountId) {
+        showBankAccountConflict('main', 'deposit');
+        return;
+      }
+      
+      const mainBankInput = document.getElementById('main_bank_input');
+      const mainBankSelect = document.getElementById('main_bank_select');
+      
+      if (mainBankInput) {
+        mainBankInput.value = `${accountName} - ${accountNumber}`;
+      }
+      
+      if (mainBankSelect) {
+        mainBankSelect.value = accountId;
+      }
+      
+      selectedMainBankAccountId = accountId;
+      selectedMainBankAccountName = accountName;
+      
+      // Sync to discrepancy bank account
+      const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+      const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+      
+      if (discrepancyBankInput) {
+        discrepancyBankInput.value = `${accountName} - ${accountNumber}`;
+      }
+      
+      if (discrepancyBankSelect) {
+        discrepancyBankSelect.value = accountId;
+      }
+      
+      selectedDiscrepancyBankAccountId = accountId;
+      selectedDiscrepancyBankAccountName = accountName;
+      
+      hideMainBankAccountSuggestions();
+    }
+
+    // Global variables for deposit bank account search (seeded from server)
+    let selectedDepositBankAccountId = null;
+    let selectedDepositBankAccountName = null;
+    let allDepositBankAccounts = {{ (bank_accounts or []) | tojson }};
+    let selectedDepositBankSuggestionIndex = -1;
+    let currentDepositBankSuggestions = [];
+
+    // Initialize deposit bank account search functionality
+    function initializeDepositBankAccountSearch() {
+      const depositBankInput = document.getElementById('deposit_bank_input');
+      const depositBankSuggestions = document.getElementById('depositBankSuggestions');
+      
+      if (!depositBankInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allDepositBankAccounts === 'undefined') {
+      allDepositBankAccounts = [];
+      }
+      
+      // Set default value if available
+      {% if deposit_bank_account_default %}
+      const defaultDepositBank = {{ deposit_bank_account_default | tojson }};
+      if (defaultDepositBank) {
+        depositBankInput.value = `${defaultDepositBank.Name} - ${defaultDepositBank.MaskedBankAccountNumber}`;
+        selectedDepositBankAccountId = defaultDepositBank.AccountID;
+        selectedDepositBankAccountName = defaultDepositBank.Name;
+        
+        const depositBankSelect = document.getElementById('deposit_bank_select');
+        if (depositBankSelect) {
+          depositBankSelect.value = defaultDepositBank.AccountID;
+        }
+      } else {
+        depositBankInput.value = '';
+        selectedDepositBankAccountId = null;
+        selectedDepositBankAccountName = null;
+        
+        const depositBankSelect = document.getElementById('deposit_bank_select');
+        if (depositBankSelect) {
+          depositBankSelect.value = '';
+        }
+      }
+      {% else %}
+      depositBankInput.value = '';
+      selectedDepositBankAccountId = null;
+      selectedDepositBankAccountName = null;
+      
+      const depositBankSelect = document.getElementById('deposit_bank_select');
+      if (depositBankSelect) {
+        depositBankSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all bank accounts
+      depositBankInput.addEventListener('click', function() {
+        console.log('=== DEPOSIT BANK INPUT CLICKED ===');
+        console.log('All deposit bank accounts:', allDepositBankAccounts);
+        console.log('Number of accounts:', allDepositBankAccounts.length);
+        
+        if (allDepositBankAccounts.length > 0) {
+          showDepositBankAccountSuggestions(allDepositBankAccounts);
+        } else {
+          console.log('No deposit bank accounts available');
+        }
+      });
+
+      // Add input event listener for search
+      depositBankInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedDepositBankSuggestionIndex = -1; // Reset navigation when typing
+        
+        if (query.length === 0) {
+          // Show all bank accounts when input is empty
+          if (allDepositBankAccounts.length > 0) {
+            showDepositBankAccountSuggestions(allDepositBankAccounts);
+          } else {
+            hideDepositBankAccountSuggestions();
+            selectedDepositBankAccountId = null;
+            selectedDepositBankAccountName = null;
+            
+            // Clear the hidden select value
+            const depositBankSelect = document.getElementById('deposit_bank_select');
+            if (depositBankSelect) {
+              depositBankSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through bank accounts
+        const matches = allDepositBankAccounts.filter(account => 
+          account.Name.toLowerCase().includes(query.toLowerCase()) ||
+          account.MaskedBankAccountNumber.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (matches.length > 0) {
+          showDepositBankAccountSuggestions(matches);
+        } else {
+          hideDepositBankAccountSuggestions();
+        }
+      });
+      
+      // Handle input focus
+      depositBankInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allDepositBankAccounts.filter(account => 
+            account.Name.toLowerCase().includes(query.toLowerCase()) ||
+            account.MaskedBankAccountNumber.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          if (matches.length > 0) {
+            showDepositBankAccountSuggestions(matches);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      depositBankInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideDepositBankAccountSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (depositBankInput && depositBankSuggestions && 
+            !depositBankInput.contains(event.target) && !depositBankSuggestions.contains(event.target)) {
+          hideDepositBankAccountSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      depositBankInput.addEventListener('keydown', handleDepositBankKeyboardNavigation);
+      
+    }
+
+    // Show deposit bank account suggestions
+    function showDepositBankAccountSuggestions(matches) {
+      console.log('=== SHOWING DEPOSIT BANK ACCOUNT SUGGESTIONS ===');
+      console.log('Matches:', matches);
+      console.log('Number of matches:', matches.length);
+      
+      const suggestions = document.getElementById('depositBankSuggestions');
+      const dropdownIcon = document.getElementById('depositBankDropdownIcon');
+      
+      console.log('Suggestions element:', suggestions);
+      console.log('Dropdown icon element:', dropdownIcon);
+      
+      if (!suggestions) return;
+      
+      suggestions.innerHTML = '';
+      
+      // Filter out the account that's already selected in main bank
+      const filteredMatches = matches.filter(account => account.AccountID !== selectedMainBankAccountId);
+      currentDepositBankSuggestions = filteredMatches;
+      selectedDepositBankSuggestionIndex = -1;
+      
+      filteredMatches.forEach((account, index) => {
+        console.log(`Creating suggestion ${index + 1}:`, account);
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
+          <div class="text-xs text-gray-500">${account.MaskedBankAccountNumber}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          console.log('=== DEPOSIT BANK ACCOUNT MOUSEDOWN ===');
+          selectDepositBankAccount(account.AccountID, account.Name, account.MaskedBankAccountNumber);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      // Show message if no accounts available due to filtering
+      if (filteredMatches.length === 0 && matches.length > 0) {
+        const noOptionsItem = document.createElement('div');
+        noOptionsItem.className = 'px-4 py-2 text-gray-500 text-sm italic';
+        noOptionsItem.textContent = 'No other bank accounts available (current selection is already used in Main Bank)';
+        suggestions.appendChild(noOptionsItem);
+      }
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+      
+      console.log('=== END SHOWING DEPOSIT BANK ACCOUNT SUGGESTIONS ===');
+    }
+
+    // Hide deposit bank account suggestions
+    function hideDepositBankAccountSuggestions() {
+      console.log('=== HIDING DEPOSIT BANK ACCOUNT SUGGESTIONS ===');
+      const suggestions = document.getElementById('depositBankSuggestions');
+      const dropdownIcon = document.getElementById('depositBankDropdownIcon');
+      
+      console.log('Suggestions element:', suggestions);
+      console.log('Dropdown icon element:', dropdownIcon);
+      
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+        console.log('Suggestions hidden successfully');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+        console.log('Dropdown icon reset successfully');
+      }
+      // Reset navigation state
+      selectedDepositBankSuggestionIndex = -1;
+      console.log('=== END HIDING DEPOSIT BANK ACCOUNT SUGGESTIONS ===');
+    }
+    
+    // Highlight deposit bank suggestion item
+    function highlightDepositBankSuggestion(index) {
+      const suggestions = document.getElementById('depositBankSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for deposit bank
+    function handleDepositBankKeyboardNavigation(e) {
+      const suggestions = document.getElementById('depositBankSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedDepositBankSuggestionIndex = (selectedDepositBankSuggestionIndex + 1) % items.length;
+          highlightDepositBankSuggestion(selectedDepositBankSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedDepositBankSuggestionIndex = selectedDepositBankSuggestionIndex <= 0 ? items.length - 1 : selectedDepositBankSuggestionIndex - 1;
+          highlightDepositBankSuggestion(selectedDepositBankSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedDepositBankSuggestionIndex < 0 && items.length > 0) {
+            selectedDepositBankSuggestionIndex = 0;
+          }
+          
+          if (selectedDepositBankSuggestionIndex >= 0 && selectedDepositBankSuggestionIndex < items.length) {
+            if (currentDepositBankSuggestions.length > 0 && selectedDepositBankSuggestionIndex < currentDepositBankSuggestions.length) {
+              const account = currentDepositBankSuggestions[selectedDepositBankSuggestionIndex];
+              selectDepositBankAccount(account.AccountID, account.Name, account.MaskedBankAccountNumber);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideDepositBankAccountSuggestions();
+          break;
+      }
+    }
+
+    // Select a deposit bank account
+    function selectDepositBankAccount(accountId, accountName, accountNumber) {
+      console.log('=== SELECTING DEPOSIT BANK ACCOUNT ===');
+      console.log('Account ID:', accountId);
+      console.log('Account Name:', accountName);
+      console.log('Account Number:', accountNumber);
+      
+      // Check if this account is already selected in main bank
+      if (selectedMainBankAccountId === accountId) {
+        showBankAccountConflict('deposit', 'main');
+        return;
+      }
+      
+      const depositBankInput = document.getElementById('deposit_bank_input');
+      const depositBankSelect = document.getElementById('deposit_bank_select');
+      
+      console.log('Deposit Bank Input Element:', depositBankInput);
+      console.log('Deposit Bank Select Element:', depositBankSelect);
+      
+      // Update the input field immediately
+      if (depositBankInput) {
+        const newValue = `${accountName} - ${accountNumber}`;
+        depositBankInput.value = newValue;
+        depositBankInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        depositBankInput.style.color = '#1f2937';
+        depositBankInput.style.fontWeight = '400'; // Normal weight instead of bold
+        depositBankInput.style.backgroundColor = '#f9fafb'; // Lighter background
+        depositBankInput.placeholder = '';
+        
+        console.log('Input value set to:', depositBankInput.value);
+        console.log('Input textContent set to:', depositBankInput.textContent);
+        
+        // Force update by triggering input event
+        depositBankInput.dispatchEvent(new Event('input', { bubbles: true }));
+        depositBankInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (depositBankSelect) {
+        depositBankSelect.value = accountId;
+        console.log('Hidden select value set to:', depositBankSelect.value);
+      }
+      
+      // Update global variables
+      selectedDepositBankAccountId = accountId;
+      selectedDepositBankAccountName = accountName;
+      
+      console.log('Global variables updated:', {
+        selectedDepositBankAccountId,
+        selectedDepositBankAccountName
+      });
+      
+      // Hide suggestions immediately
+      hideDepositBankAccountSuggestions();
+      
+      console.log('=== END SELECTING DEPOSIT BANK ACCOUNT ===');
+    }
+
+    // Test function to manually test deposit bank selection
+    function testDepositBankSelection() {
+      console.log('=== TESTING DEPOSIT BANK SELECTION ===');
+      const testAccount = {
+        AccountID: 'test-123',
+        Name: 'Test Bank Account',
+        MaskedBankAccountNumber: '****1234'
+      };
+      selectDepositBankAccount(testAccount.AccountID, testAccount.Name, testAccount.MaskedBankAccountNumber);
+      console.log('=== END TEST ===');
+    }
+    
+    // Make test function available globally
+    window.testDepositBankSelection = testDepositBankSelection;
+
+    // Global variables for cash sales account search
+    let selectedCashSalesAccountCode = null;
+    let selectedCashSalesAccountName = null;
+    let allCashSalesAccounts = {{ (cashsale_account or []) | tojson }};
+    let selectedCashSalesAccountSuggestionIndex = -1;
+    let currentCashSalesAccountSuggestions = [];
+
+    // Initialize cash sales account search functionality
+    function initializeCashSalesAccountSearch() {
+      const cashSalesAccountInput = document.getElementById('cashsale_account_input');
+      const cashSalesAccountSuggestions = document.getElementById('cashsaleAccountSuggestions');
+      
+      if (!cashSalesAccountInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allCashSalesAccounts === 'undefined') {
+      allCashSalesAccounts = [];
+      }
+      
+      // Set default value if available
+      {% if cashsale_account_default %}
+      const defaultCashSalesAccount = {{ cashsale_account_default | tojson }};
+      if (defaultCashSalesAccount) {
+        cashSalesAccountInput.value = `${defaultCashSalesAccount.Name} - ${defaultCashSalesAccount.Code}`;
+        selectedCashSalesAccountCode = defaultCashSalesAccount.Code;
+        selectedCashSalesAccountName = defaultCashSalesAccount.Name;
+        
+        const cashSalesAccountSelect = document.getElementById('cashsale_account_select');
+        if (cashSalesAccountSelect) {
+          cashSalesAccountSelect.value = defaultCashSalesAccount.Code;
+        }
+      } else {
+        cashSalesAccountInput.value = '';
+        selectedCashSalesAccountCode = null;
+        selectedCashSalesAccountName = null;
+        
+        const cashSalesAccountSelect = document.getElementById('cashsale_account_select');
+        if (cashSalesAccountSelect) {
+          cashSalesAccountSelect.value = '';
+        }
+      }
+      {% else %}
+      cashSalesAccountInput.value = '';
+      selectedCashSalesAccountCode = null;
+      selectedCashSalesAccountName = null;
+      
+      const cashSalesAccountSelect = document.getElementById('cashsale_account_select');
+      if (cashSalesAccountSelect) {
+        cashSalesAccountSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all accounts
+      cashSalesAccountInput.addEventListener('click', function() {
+        if (allCashSalesAccounts.length > 0) {
+          showCashSalesAccountSuggestions(allCashSalesAccounts);
+        }
+      });
+
+      // Add input event listener for search
+      cashSalesAccountInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedCashSalesAccountSuggestionIndex = -1; // Reset navigation when typing
+        
+        if (query.length === 0) {
+          // Show all accounts when input is empty
+          if (allCashSalesAccounts.length > 0) {
+            showCashSalesAccountSuggestions(allCashSalesAccounts);
+          } else {
+            hideCashSalesAccountSuggestions();
+            selectedCashSalesAccountCode = null;
+            selectedCashSalesAccountName = null;
+            
+            // Clear the hidden select value
+            const cashSalesAccountSelect = document.getElementById('cashsale_account_select');
+            if (cashSalesAccountSelect) {
+              cashSalesAccountSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through accounts
+        const matches = allCashSalesAccounts.filter(account => 
+          account.Name.toLowerCase().includes(query.toLowerCase()) ||
+          account.Code.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (matches.length > 0) {
+          showCashSalesAccountSuggestions(matches);
+        } else {
+          hideCashSalesAccountSuggestions();
+        }
+      });
+      
+      // Handle input focus
+      cashSalesAccountInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allCashSalesAccounts.filter(account => 
+            account.Name.toLowerCase().includes(query.toLowerCase()) ||
+            account.Code.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          if (matches.length > 0) {
+            showCashSalesAccountSuggestions(matches);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      cashSalesAccountInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideCashSalesAccountSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (cashSalesAccountInput && cashSalesAccountSuggestions && 
+            !cashSalesAccountInput.contains(event.target) && !cashSalesAccountSuggestions.contains(event.target)) {
+          hideCashSalesAccountSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      cashSalesAccountInput.addEventListener('keydown', handleCashSalesAccountKeyboardNavigation);
+      
+    }
+
+    // Show cash sales account suggestions
+    function showCashSalesAccountSuggestions(matches) {
+      const suggestions = document.getElementById('cashsaleAccountSuggestions');
+      const dropdownIcon = document.getElementById('cashsaleAccountDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currentCashSalesAccountSuggestions = matches;
+      selectedCashSalesAccountSuggestionIndex = -1;
+      
+      matches.forEach((account, index) => {
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
+          <div class="text-xs text-gray-500">${account.Code}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectCashSalesAccount(account.Code, account.Name);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide cash sales account suggestions
+    function hideCashSalesAccountSuggestions() {
+      const suggestions = document.getElementById('cashsaleAccountSuggestions');
+      const dropdownIcon = document.getElementById('cashsaleAccountDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedCashSalesAccountSuggestionIndex = -1;
+    }
+    
+    // Highlight cash sales account suggestion item
+    function highlightCashSalesAccountSuggestion(index) {
+      const suggestions = document.getElementById('cashsaleAccountSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for cash sales account
+    function handleCashSalesAccountKeyboardNavigation(e) {
+      const suggestions = document.getElementById('cashsaleAccountSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedCashSalesAccountSuggestionIndex = (selectedCashSalesAccountSuggestionIndex + 1) % items.length;
+          highlightCashSalesAccountSuggestion(selectedCashSalesAccountSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedCashSalesAccountSuggestionIndex = selectedCashSalesAccountSuggestionIndex <= 0 ? items.length - 1 : selectedCashSalesAccountSuggestionIndex - 1;
+          highlightCashSalesAccountSuggestion(selectedCashSalesAccountSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedCashSalesAccountSuggestionIndex < 0 && items.length > 0) {
+            selectedCashSalesAccountSuggestionIndex = 0;
+          }
+          
+          if (selectedCashSalesAccountSuggestionIndex >= 0 && selectedCashSalesAccountSuggestionIndex < items.length) {
+            if (currentCashSalesAccountSuggestions.length > 0 && selectedCashSalesAccountSuggestionIndex < currentCashSalesAccountSuggestions.length) {
+              const account = currentCashSalesAccountSuggestions[selectedCashSalesAccountSuggestionIndex];
+              selectCashSalesAccount(account.Code, account.Name);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideCashSalesAccountSuggestions();
+          break;
+      }
+    }
+
+    // Select a cash sales account
+    function selectCashSalesAccount(accountCode, accountName) {
+      console.log('=== SELECTING CASH SALES ACCOUNT ===');
+      console.log('Account Code:', accountCode);
+      console.log('Account Name:', accountName);
+      
+      const cashSalesAccountInput = document.getElementById('cashsale_account_input');
+      const cashSalesAccountSelect = document.getElementById('cashsale_account_select');
+      
+      console.log('Cash Sales Account Input Element:', cashSalesAccountInput);
+      console.log('Cash Sales Account Select Element:', cashSalesAccountSelect);
+      
+      // Update the input field immediately
+      if (cashSalesAccountInput) {
+        const newValue = `${accountName} - ${accountCode}`;
+        cashSalesAccountInput.value = newValue;
+        cashSalesAccountInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        cashSalesAccountInput.style.color = '#1f2937';
+        cashSalesAccountInput.style.fontWeight = '400'; // Normal weight
+        cashSalesAccountInput.style.backgroundColor = '#f9fafb'; // Light background
+        cashSalesAccountInput.placeholder = '';
+        
+        console.log('Input value set to:', cashSalesAccountInput.value);
+        console.log('Input textContent set to:', cashSalesAccountInput.textContent);
+        
+        // Force update by triggering input event
+        cashSalesAccountInput.dispatchEvent(new Event('input', { bubbles: true }));
+        cashSalesAccountInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (cashSalesAccountSelect) {
+        cashSalesAccountSelect.value = accountCode;
+        console.log('Hidden select value set to:', cashSalesAccountSelect.value);
+      }
+      
+      // Update global variables
+      selectedCashSalesAccountCode = accountCode;
+      selectedCashSalesAccountName = accountName;
+      
+      console.log('Global variables updated:', {
+        selectedCashSalesAccountCode,
+        selectedCashSalesAccountName
+      });
+      
+      // Hide suggestions immediately
+      hideCashSalesAccountSuggestions();
+      
+      console.log('=== END SELECTING CASH SALES ACCOUNT ===');
+    }
+
+    // Global variables for cash sales contact search
+    let selectedCashSalesContactId = null;
+    let selectedCashSalesContactName = null;
+    let allCashSalesContacts = {{ (contacts or []) | tojson }};
+    let selectedCashSalesContactSuggestionIndex = -1;
+    let currentCashSalesContactSuggestions = [];
+
+    // Initialize cash sales contact search functionality
+    function initializeCashSalesContactSearch() {
+      const cashSalesContactInput = document.getElementById('cashsale_contact_input');
+      const cashSalesContactSuggestions = document.getElementById('cashsaleContactSuggestions');
+      
+      if (!cashSalesContactInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allCashSalesContacts === 'undefined') {
+      allCashSalesContacts = [];
+      }
+      
+      // Set default value if available
+      {% if cashsale_contact_default %}
+      const defaultCashSalesContact = {{ cashsale_contact_default | tojson }};
+      if (defaultCashSalesContact) {
+        cashSalesContactInput.value = defaultCashSalesContact.Name;
+        selectedCashSalesContactId = defaultCashSalesContact.ContactID;
+        selectedCashSalesContactName = defaultCashSalesContact.Name;
+        
+        const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+        if (cashSalesContactSelect) {
+          cashSalesContactSelect.value = defaultCashSalesContact.ContactID;
+        }
+      } else {
+        cashSalesContactInput.value = '';
+        selectedCashSalesContactId = null;
+        selectedCashSalesContactName = null;
+        
+        const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+        if (cashSalesContactSelect) {
+          cashSalesContactSelect.value = '';
+        }
+      }
+      {% else %}
+      cashSalesContactInput.value = '';
+      selectedCashSalesContactId = null;
+      selectedCashSalesContactName = null;
+      
+      const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+      if (cashSalesContactSelect) {
+        cashSalesContactSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all contacts
+      cashSalesContactInput.addEventListener('click', function() {
+        if (allCashSalesContacts.length > 0) {
+          showCashSalesContactSuggestions(allCashSalesContacts);
+        }
+      });
+
+      // Add input event listener for search
+      cashSalesContactInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedCashSalesContactSuggestionIndex = -1; // Reset navigation when typing
+        
+        // Check if current value matches selected contact name
+        // If not, reset selection variables
+        if (selectedCashSalesContactName && query !== selectedCashSalesContactName) {
+          selectedCashSalesContactId = null;
+          selectedCashSalesContactName = null;
+        }
+        
+        if (query.length === 0) {
+          // Show all contacts when input is empty
+          if (allCashSalesContacts.length > 0) {
+            showCashSalesContactSuggestions(allCashSalesContacts);
+          } else {
+            hideCashSalesContactSuggestions();
+            selectedCashSalesContactId = null;
+            selectedCashSalesContactName = null;
+            
+            // Clear the hidden select value
+            const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+            if (cashSalesContactSelect) {
+              cashSalesContactSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through contacts for partial matches
+        const matches = allCashSalesContacts.filter(contact => 
+          contact.Name.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        // Check for exact match (case-insensitive)
+        const exactMatch = allCashSalesContacts.find(contact => 
+          contact.Name.toLowerCase() === query.toLowerCase()
+        );
+        
+        if (matches.length > 0) {
+          // Show suggestions, and add "Add new contact" option if no exact match
+          showCashSalesContactSuggestions(matches, exactMatch ? null : query);
+        } else {
+          showCashSalesContactSuggestions([], query);
+        }
+      });
+      
+      // Handle input focus
+      cashSalesContactInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allCashSalesContacts.filter(contact => 
+            contact.Name.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          // Check for exact match (case-insensitive)
+          const exactMatch = allCashSalesContacts.find(contact => 
+            contact.Name.toLowerCase() === query.toLowerCase()
+          );
+          
+          if (matches.length > 0) {
+            // Show suggestions, and add "Add new contact" option if no exact match
+            showCashSalesContactSuggestions(matches, exactMatch ? null : query);
+          } else {
+            showCashSalesContactSuggestions([], query);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      cashSalesContactInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideCashSalesContactSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (cashSalesContactInput && cashSalesContactSuggestions && 
+            !cashSalesContactInput.contains(event.target) && !cashSalesContactSuggestions.contains(event.target)) {
+          hideCashSalesContactSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      cashSalesContactInput.addEventListener('keydown', handleCashSalesContactKeyboardNavigation);
+      
+    }
+
+    // Show cash sales contact suggestions
+    function showCashSalesContactSuggestions(matches, addNewContactQuery = null) {
+      const suggestions = document.getElementById('cashsaleContactSuggestions');
+      const dropdownIcon = document.getElementById('cashsaleContactDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currentCashSalesContactSuggestions = matches;
+      selectedCashSalesContactSuggestionIndex = -1;
+      
+      matches.forEach((contact, index) => {
+        const suggestionItem = document.createElement('div');
+        // Add border-b to all items, but remove from last if "Add new contact" will be shown
+        const borderClass = (addNewContactQuery && index === matches.length - 1) 
+          ? 'px-4 py-2 hover:bg-gray-100 cursor-pointer' 
+          : 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100';
+        suggestionItem.className = borderClass;
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.setAttribute('data-type', 'contact');
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${contact.Name}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectCashSalesContact(contact.ContactID, contact.Name);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      // Add "Add new contact" option if provided (when no exact match found)
+      if (addNewContactQuery) {
+        const addNewContactOption = document.createElement('div');
+        addNewContactOption.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-t border-gray-200';
+        addNewContactOption.setAttribute('data-index', matches.length);
+        addNewContactOption.setAttribute('data-type', 'add-new');
+        addNewContactOption.innerHTML = `
+          <div class="text-gray-600 hover:text-gray-800">
+            + Add '${addNewContactQuery}' as a new contact
+          </div>
+        `;
+        addNewContactOption.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          showNewCashSaleContactSection(addNewContactQuery);
+        });
+        suggestions.appendChild(addNewContactOption);
+      } else if (matches.length === 0) {
+        // Add "No Xero contact found" message and "Add New Contact" option when no matches
+        const noContactMessage = document.createElement('div');
+        noContactMessage.className = 'px-4 py-2 text-gray-600 border-b border-gray-100';
+        noContactMessage.innerHTML = `
+          <div class="text-sm">No Xero contact found</div>
+        `;
+        suggestions.appendChild(noContactMessage);
+        
+        // Create the "Add as new contact" option
+        const addNewContactOption = document.createElement('div');
+        addNewContactOption.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        addNewContactOption.setAttribute('data-index', 0);
+        addNewContactOption.setAttribute('data-type', 'add-new');
+        addNewContactOption.innerHTML = `
+          <div class="text-gray-600 hover:text-gray-800">
+            + Add as a new contact
+          </div>
+        `;
+        addNewContactOption.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          const cashSalesContactInput = document.getElementById('cashsale_contact_input');
+          const query = cashSalesContactInput ? cashSalesContactInput.value.trim() : '';
+          showNewCashSaleContactSection(query);
+        });
+        suggestions.appendChild(addNewContactOption);
+      } else {
+        // Add last:border-b-0 to the last contact item if no "Add new contact" option
+        const lastItem = suggestions.lastElementChild;
+        if (lastItem) {
+          lastItem.classList.add('last:border-b-0');
+        }
+      }
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide cash sales contact suggestions
+    function hideCashSalesContactSuggestions() {
+      const suggestions = document.getElementById('cashsaleContactSuggestions');
+      const dropdownIcon = document.getElementById('cashsaleContactDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedCashSalesContactSuggestionIndex = -1;
+    }
+    
+    // Highlight cash sales contact suggestion item
+    function highlightCashSalesContactSuggestion(index) {
+      const suggestions = document.getElementById('cashsaleContactSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for cash sales contact
+    function handleCashSalesContactKeyboardNavigation(e) {
+      const suggestions = document.getElementById('cashsaleContactSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedCashSalesContactSuggestionIndex = (selectedCashSalesContactSuggestionIndex + 1) % items.length;
+          highlightCashSalesContactSuggestion(selectedCashSalesContactSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedCashSalesContactSuggestionIndex = selectedCashSalesContactSuggestionIndex <= 0 ? items.length - 1 : selectedCashSalesContactSuggestionIndex - 1;
+          highlightCashSalesContactSuggestion(selectedCashSalesContactSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedCashSalesContactSuggestionIndex < 0 && items.length > 0) {
+            selectedCashSalesContactSuggestionIndex = 0;
+          }
+          
+          if (selectedCashSalesContactSuggestionIndex >= 0 && selectedCashSalesContactSuggestionIndex < items.length) {
+            const selectedItem = items[selectedCashSalesContactSuggestionIndex];
+            const itemType = selectedItem.getAttribute('data-type');
+            
+            // Check if this is the "Add new contact" option (either in suggestions or in no-contact-found state)
+            const isAddNewContact = itemType === 'add-new' || 
+                                   (selectedItem.textContent.includes('Add') && selectedItem.textContent.includes('as a new contact'));
+            
+            if (isAddNewContact) {
+              const cashSalesContactInput = document.getElementById('cashsale_contact_input');
+              const query = cashSalesContactInput ? cashSalesContactInput.value.trim() : '';
+              showNewCashSaleContactSection(query);
+            } else if (currentCashSalesContactSuggestions.length > 0 && selectedCashSalesContactSuggestionIndex < currentCashSalesContactSuggestions.length) {
+              const contact = currentCashSalesContactSuggestions[selectedCashSalesContactSuggestionIndex];
+              selectCashSalesContact(contact.ContactID, contact.Name);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideCashSalesContactSuggestions();
+          break;
+      }
+    }
+
+    // Select a cash sales contact
+    function selectCashSalesContact(contactId, contactName) {
+      console.log('=== SELECTING CASH SALES CONTACT ===');
+      console.log('Contact ID:', contactId);
+      console.log('Contact Name:', contactName);
+      
+      const cashSalesContactInput = document.getElementById('cashsale_contact_input');
+      const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+      
+      console.log('Cash Sales Contact Input Element:', cashSalesContactInput);
+      console.log('Cash Sales Contact Select Element:', cashSalesContactSelect);
+      
+      // Update the input field immediately
+      if (cashSalesContactInput) {
+        const newValue = contactName;
+        cashSalesContactInput.value = newValue;
+        cashSalesContactInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        cashSalesContactInput.style.color = '#1f2937';
+        cashSalesContactInput.style.fontWeight = '400'; // Normal weight
+        cashSalesContactInput.style.backgroundColor = '#f9fafb'; // Light background
+        cashSalesContactInput.placeholder = '';
+        
+        console.log('Input value set to:', cashSalesContactInput.value);
+        console.log('Input textContent set to:', cashSalesContactInput.textContent);
+        
+        // Force update by triggering input event
+        cashSalesContactInput.dispatchEvent(new Event('input', { bubbles: true }));
+        cashSalesContactInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (cashSalesContactSelect) {
+        cashSalesContactSelect.value = contactId;
+        console.log('Hidden select value set to:', cashSalesContactSelect.value);
+      }
+      
+      // Update global variables
+      selectedCashSalesContactId = contactId;
+      selectedCashSalesContactName = contactName;
+      
+      console.log('Global variables updated:', {
+        selectedCashSalesContactId,
+        selectedCashSalesContactName
+      });
+      
+      // Hide suggestions immediately
+      hideCashSalesContactSuggestions();
+      
+      console.log('=== END SELECTING CASH SALES CONTACT ===');
+    }
+
+    // Show new contact section with pre-filled name
+    function showNewCashSaleContactSection(contactName) {
+      const newContactSection = document.getElementById('newCashSaleContactSection');
+      const cashSaleContactField = document.getElementById('cashSaleContactField');
+      const newContactInput = document.getElementById('newCashSaleContactInput');
+      
+      if (newContactSection && newContactInput) {
+        newContactInput.value = contactName;
+        // Hide cash sale contact field and show new contact section
+        if (cashSaleContactField) cashSaleContactField.classList.add('hidden');
+        newContactSection.classList.remove('hidden');
+        hideCashSalesContactSuggestions();
+      }
+    }
+
+    // Cancel new contact
+    function cancelNewCashSaleContact() {
+      const newContactSection = document.getElementById('newCashSaleContactSection');
+      const cashSaleContactField = document.getElementById('cashSaleContactField');
+      const cashSalesContactInput = document.getElementById('cashsale_contact_input');
+      
+      // Hide new contact section and show cash sale contact field
+      if (newContactSection) newContactSection.classList.add('hidden');
+      if (cashSaleContactField) cashSaleContactField.classList.remove('hidden');
+      
+      if (cashSalesContactInput) {
+        cashSalesContactInput.value = '';
+      }
+      
+      selectedCashSalesContactId = null;
+      selectedCashSalesContactName = null;
+    }
+
+    // Create new contact
+    function createCashSaleContact() {
+      const newContactInput = document.getElementById('newCashSaleContactInput');
+      if (!newContactInput || !newContactInput.value.trim()) {
+        showErrorToast('Please enter a contact name');
+        return;
+      }
+
+      // Show loading overlay with "Creating Contact..." text
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const loadingText = loadingOverlay ? loadingOverlay.querySelector('span') : null;
+      const originalText = loadingText ? loadingText.textContent : 'Saving Settings...';
+      if (loadingText) {
+        loadingText.textContent = 'Creating Contact...';
+      }
+      if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+
+      const contactName = newContactInput.value.trim();
+      const formData = new FormData();
+      formData.append('name', contactName);
+      
+      // Add CSRF token
+      const csrfToken = document.querySelector('input[name="csrf_token"]');
+      if (csrfToken) {
+        formData.append('csrf_token', csrfToken.value);
+      }
+      
+      // Add entity_id
+      const entityId = '{{ org.id }}';
+      formData.append('entity_id', entityId);
+
+      fetch('/entity/contact/create', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: formData
+      })
+      .then(response => {
+        if (!response.ok) {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            return response.json().then(errorData => {
+              // Hide loading overlay on error and restore original text
+              if (loadingOverlay) {
+                if (loadingText) loadingText.textContent = originalText;
+                loadingOverlay.classList.add('hidden');
+              }
+              throw new Error(errorData.message || 'Network response was not ok');
+            });
+          } else {
+            return response.text().then(htmlText => {
+              // Hide loading overlay on error and restore original text
+              if (loadingOverlay) {
+                if (loadingText) loadingText.textContent = originalText;
+                loadingOverlay.classList.add('hidden');
+              }
+              throw new Error(`Server error (${response.status}): The server returned an HTML page instead of JSON.`);
+            });
+          }
+        }
+        
+        return response.text().then(text => {
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            // Hide loading overlay on error and restore original text
+            if (loadingOverlay) {
+              if (loadingText) loadingText.textContent = originalText;
+              loadingOverlay.classList.add('hidden');
+            }
+            throw new Error('Server returned non-JSON response.');
+          }
+        });
+      })
+      .then(data => {
+        if (data.status === 'success') {
+          const contactName = data.name || newContactInput.value;
+          const contactId = data.contact_id || 'new_' + Date.now();
+          
+          // Update the contact input field and global variables
+          const cashSalesContactInput = document.getElementById('cashsale_contact_input');
+          const cashSalesContactSelect = document.getElementById('cashsale_contact_select');
+          const cashSaleContactField = document.getElementById('cashSaleContactField');
+          
+          if (cashSalesContactInput) {
+            cashSalesContactInput.value = contactName;
+          }
+          
+          if (cashSalesContactSelect) {
+            // Add new option to select
+            const option = document.createElement('option');
+            option.value = contactId;
+            option.textContent = contactName;
+            option.selected = true;
+            cashSalesContactSelect.appendChild(option);
+          }
+          
+          selectedCashSalesContactId = contactId;
+          selectedCashSalesContactName = contactName;
+          
+          // Add the new contact to the allCashSalesContacts array for future searches
+          allCashSalesContacts.push({
+            ContactID: contactId,
+            Name: contactName
+          });
+          
+          // Hide the new contact section and show cash sale contact field
+          const newContactSection = document.getElementById('newCashSaleContactSection');
+          if (newContactSection) newContactSection.classList.add('hidden');
+          if (cashSaleContactField) cashSaleContactField.classList.remove('hidden');
+          
+          // Hide loading overlay on success and restore original text
+          if (loadingOverlay) {
+            if (loadingText) loadingText.textContent = originalText;
+            loadingOverlay.classList.add('hidden');
+          }
+          
+          // Show success message
+          showSuccessToast('Contact created successfully!');
+        } else {
+          // Hide loading overlay on failure and restore original text
+          if (loadingOverlay) {
+            if (loadingText) loadingText.textContent = originalText;
+            loadingOverlay.classList.add('hidden');
+          }
+          throw new Error(data.message || 'Contact creation failed');
+        }
+      })
+      .catch(error => {
+        console.error('Error creating contact:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Error creating contact', { message: error && error.message });
+        }
+        // Hide loading overlay on error and restore original text
+        if (loadingOverlay) {
+          if (loadingText) loadingText.textContent = originalText;
+          loadingOverlay.classList.add('hidden');
+        }
+        showErrorToast('Error creating contact: ' + error.message);
+      });
+    }
+
+    // Global variables for owners account search
+    let selectedOwnersAccountCode = null;
+    let selectedOwnersAccountName = null;
+    let allOwnersAccounts = {{ (owners_account or []) | tojson }};
+    let selectedOwnersAccountSuggestionIndex = -1;
+    let currentOwnersAccountSuggestions = [];
+
+    // Initialize owners account search functionality
+    function initializeOwnersAccountSearch() {
+      const ownersAccountInput = document.getElementById('owners_account_input');
+      const ownersAccountSuggestions = document.getElementById('ownersAccountSuggestions');
+      
+      if (!ownersAccountInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allOwnersAccounts === 'undefined') {
+      allOwnersAccounts = [];
+      }
+      
+      // Set default value if available
+      {% if owners_account_default %}
+      const defaultOwnersAccount = {{ owners_account_default | tojson }};
+      if (defaultOwnersAccount) {
+        ownersAccountInput.value = `${defaultOwnersAccount.Name} - ${defaultOwnersAccount.Code}`;
+        selectedOwnersAccountCode = defaultOwnersAccount.Code;
+        selectedOwnersAccountName = defaultOwnersAccount.Name;
+        
+        const ownersAccountSelect = document.getElementById('owners_account_select');
+        if (ownersAccountSelect) {
+          ownersAccountSelect.value = defaultOwnersAccount.Code;
+        }
+      } else {
+        ownersAccountInput.value = '';
+        selectedOwnersAccountCode = null;
+        selectedOwnersAccountName = null;
+        
+        const ownersAccountSelect = document.getElementById('owners_account_select');
+        if (ownersAccountSelect) {
+          ownersAccountSelect.value = '';
+        }
+      }
+      {% else %}
+      ownersAccountInput.value = '';
+      selectedOwnersAccountCode = null;
+      selectedOwnersAccountName = null;
+      
+      const ownersAccountSelect = document.getElementById('owners_account_select');
+      if (ownersAccountSelect) {
+        ownersAccountSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all accounts
+      ownersAccountInput.addEventListener('click', function() {
+        if (allOwnersAccounts.length > 0) {
+          showOwnersAccountSuggestions(allOwnersAccounts);
+        }
+      });
+
+      // Add input event listener for search
+      ownersAccountInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedOwnersAccountSuggestionIndex = -1; // Reset navigation when typing
+        
+        if (query.length === 0) {
+          // Show all accounts when input is empty
+          if (allOwnersAccounts.length > 0) {
+            showOwnersAccountSuggestions(allOwnersAccounts);
+          } else {
+            hideOwnersAccountSuggestions();
+            selectedOwnersAccountCode = null;
+            selectedOwnersAccountName = null;
+            
+            // Clear the hidden select value
+            const ownersAccountSelect = document.getElementById('owners_account_select');
+            if (ownersAccountSelect) {
+              ownersAccountSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through accounts
+        const matches = allOwnersAccounts.filter(account => 
+          account.Name.toLowerCase().includes(query.toLowerCase()) ||
+          account.Code.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (matches.length > 0) {
+          showOwnersAccountSuggestions(matches);
+        } else {
+          hideOwnersAccountSuggestions();
+        }
+      });
+      
+      // Handle input focus
+      ownersAccountInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allOwnersAccounts.filter(account => 
+            account.Name.toLowerCase().includes(query.toLowerCase()) ||
+            account.Code.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          if (matches.length > 0) {
+            showOwnersAccountSuggestions(matches);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      ownersAccountInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideOwnersAccountSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (ownersAccountInput && ownersAccountSuggestions && 
+            !ownersAccountInput.contains(event.target) && !ownersAccountSuggestions.contains(event.target)) {
+          hideOwnersAccountSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      ownersAccountInput.addEventListener('keydown', handleOwnersAccountKeyboardNavigation);
+      
+    }
+
+    // Show owners account suggestions
+    function showOwnersAccountSuggestions(matches) {
+      const suggestions = document.getElementById('ownersAccountSuggestions');
+      const dropdownIcon = document.getElementById('ownersAccountDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currentOwnersAccountSuggestions = matches;
+      selectedOwnersAccountSuggestionIndex = -1;
+      
+      matches.forEach((account, index) => {
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
+          <div class="text-xs text-gray-500">${account.Code}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectOwnersAccount(account.Code, account.Name);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide owners account suggestions
+    function hideOwnersAccountSuggestions() {
+      const suggestions = document.getElementById('ownersAccountSuggestions');
+      const dropdownIcon = document.getElementById('ownersAccountDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedOwnersAccountSuggestionIndex = -1;
+    }
+    
+    // Highlight owners account suggestion item
+    function highlightOwnersAccountSuggestion(index) {
+      const suggestions = document.getElementById('ownersAccountSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for owners account
+    function handleOwnersAccountKeyboardNavigation(e) {
+      const suggestions = document.getElementById('ownersAccountSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedOwnersAccountSuggestionIndex = (selectedOwnersAccountSuggestionIndex + 1) % items.length;
+          highlightOwnersAccountSuggestion(selectedOwnersAccountSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedOwnersAccountSuggestionIndex = selectedOwnersAccountSuggestionIndex <= 0 ? items.length - 1 : selectedOwnersAccountSuggestionIndex - 1;
+          highlightOwnersAccountSuggestion(selectedOwnersAccountSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedOwnersAccountSuggestionIndex < 0 && items.length > 0) {
+            selectedOwnersAccountSuggestionIndex = 0;
+          }
+          
+          if (selectedOwnersAccountSuggestionIndex >= 0 && selectedOwnersAccountSuggestionIndex < items.length) {
+            if (currentOwnersAccountSuggestions.length > 0 && selectedOwnersAccountSuggestionIndex < currentOwnersAccountSuggestions.length) {
+              const account = currentOwnersAccountSuggestions[selectedOwnersAccountSuggestionIndex];
+              selectOwnersAccount(account.Code, account.Name);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideOwnersAccountSuggestions();
+          break;
+      }
+    }
+
+    // Select an owners account
+    function selectOwnersAccount(accountCode, accountName) {
+      console.log('=== SELECTING OWNERS ACCOUNT ===');
+      console.log('Account Code:', accountCode);
+      console.log('Account Name:', accountName);
+      
+      const ownersAccountInput = document.getElementById('owners_account_input');
+      const ownersAccountSelect = document.getElementById('owners_account_select');
+      
+      console.log('Owners Account Input Element:', ownersAccountInput);
+      console.log('Owners Account Select Element:', ownersAccountSelect);
+      
+      // Update the input field immediately
+      if (ownersAccountInput) {
+        const newValue = `${accountName} - ${accountCode}`;
+        ownersAccountInput.value = newValue;
+        ownersAccountInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        ownersAccountInput.style.color = '#1f2937';
+        ownersAccountInput.style.fontWeight = '400'; // Normal weight
+        ownersAccountInput.style.backgroundColor = '#f9fafb'; // Light background
+        ownersAccountInput.placeholder = '';
+        
+        console.log('Input value set to:', ownersAccountInput.value);
+        console.log('Input textContent set to:', ownersAccountInput.textContent);
+        
+        // Force update by triggering input event
+        ownersAccountInput.dispatchEvent(new Event('input', { bubbles: true }));
+        ownersAccountInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (ownersAccountSelect) {
+        ownersAccountSelect.value = accountCode;
+        console.log('Hidden select value set to:', ownersAccountSelect.value);
+      }
+      
+      // Update global variables
+      selectedOwnersAccountCode = accountCode;
+      selectedOwnersAccountName = accountName;
+      
+      console.log('Global variables updated:', {
+        selectedOwnersAccountCode,
+        selectedOwnersAccountName
+      });
+      
+      // Hide suggestions immediately
+      hideOwnersAccountSuggestions();
+      
+      console.log('=== END SELECTING OWNERS ACCOUNT ===');
+    }
+
+    // Global variables for owners contact search
+    let selectedOwnersContactId = null;
+    let selectedOwnersContactName = null;
+    let allOwnersContacts = {{ (contacts or []) | tojson }};
+    let selectedOwnersContactSuggestionIndex = -1;
+    let currentOwnersContactSuggestions = [];
+
+    // Initialize owners contact search functionality
+    function initializeOwnersContactSearch() {
+      const ownersContactInput = document.getElementById('owners_contact_input');
+      const ownersContactSuggestions = document.getElementById('ownersContactSuggestions');
+      
+      if (!ownersContactInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allOwnersContacts === 'undefined') {
+      allOwnersContacts = [];
+      }
+      
+      // Set default value if available
+      {% if owners_contact_default %}
+      const defaultOwnersContact = {{ owners_contact_default | tojson }};
+      if (defaultOwnersContact) {
+        ownersContactInput.value = defaultOwnersContact.Name;
+        selectedOwnersContactId = defaultOwnersContact.ContactID;
+        selectedOwnersContactName = defaultOwnersContact.Name;
+        
+        const ownersContactSelect = document.getElementById('owners_contact_select');
+        if (ownersContactSelect) {
+          ownersContactSelect.value = defaultOwnersContact.ContactID;
+        }
+      } else {
+        ownersContactInput.value = '';
+        selectedOwnersContactId = null;
+        selectedOwnersContactName = null;
+        
+        const ownersContactSelect = document.getElementById('owners_contact_select');
+        if (ownersContactSelect) {
+          ownersContactSelect.value = '';
+        }
+      }
+      {% else %}
+      ownersContactInput.value = '';
+      selectedOwnersContactId = null;
+      selectedOwnersContactName = null;
+      
+      const ownersContactSelect = document.getElementById('owners_contact_select');
+      if (ownersContactSelect) {
+        ownersContactSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all contacts
+      ownersContactInput.addEventListener('click', function() {
+        if (allOwnersContacts.length > 0) {
+          showOwnersContactSuggestions(allOwnersContacts);
+        }
+      });
+
+      // Add input event listener for search
+      ownersContactInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedOwnersContactSuggestionIndex = -1; // Reset navigation when typing
+        
+        // Check if current value matches selected contact name
+        // If not, reset selection variables
+        if (selectedOwnersContactName && query !== selectedOwnersContactName) {
+          selectedOwnersContactId = null;
+          selectedOwnersContactName = null;
+        }
+        
+        if (query.length === 0) {
+          // Show all contacts when input is empty
+          if (allOwnersContacts.length > 0) {
+            showOwnersContactSuggestions(allOwnersContacts);
+          } else {
+            hideOwnersContactSuggestions();
+            selectedOwnersContactId = null;
+            selectedOwnersContactName = null;
+            
+            // Clear the hidden select value
+            const ownersContactSelect = document.getElementById('owners_contact_select');
+            if (ownersContactSelect) {
+              ownersContactSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through contacts for partial matches
+        const matches = allOwnersContacts.filter(contact => 
+          contact.Name.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        // Check for exact match (case-insensitive)
+        const exactMatch = allOwnersContacts.find(contact => 
+          contact.Name.toLowerCase() === query.toLowerCase()
+        );
+        
+        if (matches.length > 0) {
+          // Show suggestions, and add "Add new contact" option if no exact match
+          showOwnersContactSuggestions(matches, exactMatch ? null : query);
+        } else {
+          showOwnersContactSuggestions([], query);
+        }
+      });
+      
+      // Handle input focus
+      ownersContactInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allOwnersContacts.filter(contact => 
+            contact.Name.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          // Check for exact match (case-insensitive)
+          const exactMatch = allOwnersContacts.find(contact => 
+            contact.Name.toLowerCase() === query.toLowerCase()
+          );
+          
+          if (matches.length > 0) {
+            // Show suggestions, and add "Add new contact" option if no exact match
+            showOwnersContactSuggestions(matches, exactMatch ? null : query);
+          } else {
+            showOwnersContactSuggestions([], query);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      ownersContactInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideOwnersContactSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (ownersContactInput && ownersContactSuggestions && 
+            !ownersContactInput.contains(event.target) && !ownersContactSuggestions.contains(event.target)) {
+          hideOwnersContactSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      ownersContactInput.addEventListener('keydown', handleOwnersContactKeyboardNavigation);
+      
+    }
+
+    // Show owners contact suggestions
+    function showOwnersContactSuggestions(matches, addNewContactQuery = null) {
+      const suggestions = document.getElementById('ownersContactSuggestions');
+      const dropdownIcon = document.getElementById('ownersContactDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currentOwnersContactSuggestions = matches;
+      selectedOwnersContactSuggestionIndex = -1;
+      
+      matches.forEach((contact, index) => {
+        const suggestionItem = document.createElement('div');
+        // Add border-b to all items, but remove from last if "Add new contact" will be shown
+        const borderClass = (addNewContactQuery && index === matches.length - 1) 
+          ? 'px-4 py-2 hover:bg-gray-100 cursor-pointer' 
+          : 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100';
+        suggestionItem.className = borderClass;
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.setAttribute('data-type', 'contact');
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${contact.Name}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectOwnersContact(contact.ContactID, contact.Name);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      // Add "Add new contact" option if provided (when no exact match found)
+      if (addNewContactQuery) {
+        const addNewContactOption = document.createElement('div');
+        addNewContactOption.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-t border-gray-200';
+        addNewContactOption.setAttribute('data-index', matches.length);
+        addNewContactOption.setAttribute('data-type', 'add-new');
+        addNewContactOption.innerHTML = `
+          <div class="text-gray-600 hover:text-gray-800">
+            + Add '${addNewContactQuery}' as a new contact
+          </div>
+        `;
+        addNewContactOption.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          showNewOwnersContactSection(addNewContactQuery);
+        });
+        suggestions.appendChild(addNewContactOption);
+      } else if (matches.length === 0) {
+        // Add "No Xero contact found" message and "Add New Contact" option when no matches
+        const noContactMessage = document.createElement('div');
+        noContactMessage.className = 'px-4 py-2 text-gray-600 border-b border-gray-100';
+        noContactMessage.innerHTML = `
+          <div class="text-sm">No Xero contact found</div>
+        `;
+        suggestions.appendChild(noContactMessage);
+        
+        // Create the "Add as new contact" option
+        const addNewContactOption = document.createElement('div');
+        addNewContactOption.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        addNewContactOption.setAttribute('data-index', 0);
+        addNewContactOption.setAttribute('data-type', 'add-new');
+        addNewContactOption.innerHTML = `
+          <div class="text-gray-600 hover:text-gray-800">
+            + Add as a new contact
+          </div>
+        `;
+        addNewContactOption.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          const ownersContactInput = document.getElementById('owners_contact_input');
+          const query = ownersContactInput ? ownersContactInput.value.trim() : '';
+          showNewOwnersContactSection(query);
+        });
+        suggestions.appendChild(addNewContactOption);
+      } else {
+        // Add last:border-b-0 to the last contact item if no "Add new contact" option
+        const lastItem = suggestions.lastElementChild;
+        if (lastItem) {
+          lastItem.classList.add('last:border-b-0');
+        }
+      }
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide owners contact suggestions
+    function hideOwnersContactSuggestions() {
+      const suggestions = document.getElementById('ownersContactSuggestions');
+      const dropdownIcon = document.getElementById('ownersContactDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedOwnersContactSuggestionIndex = -1;
+    }
+    
+    // Highlight owners contact suggestion item
+    function highlightOwnersContactSuggestion(index) {
+      const suggestions = document.getElementById('ownersContactSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for owners contact
+    function handleOwnersContactKeyboardNavigation(e) {
+      const suggestions = document.getElementById('ownersContactSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedOwnersContactSuggestionIndex = (selectedOwnersContactSuggestionIndex + 1) % items.length;
+          highlightOwnersContactSuggestion(selectedOwnersContactSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedOwnersContactSuggestionIndex = selectedOwnersContactSuggestionIndex <= 0 ? items.length - 1 : selectedOwnersContactSuggestionIndex - 1;
+          highlightOwnersContactSuggestion(selectedOwnersContactSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedOwnersContactSuggestionIndex < 0 && items.length > 0) {
+            selectedOwnersContactSuggestionIndex = 0;
+          }
+          
+          if (selectedOwnersContactSuggestionIndex >= 0 && selectedOwnersContactSuggestionIndex < items.length) {
+            const selectedItem = items[selectedOwnersContactSuggestionIndex];
+            const itemType = selectedItem.getAttribute('data-type');
+            
+            // Check if this is the "Add new contact" option (either in suggestions or in no-contact-found state)
+            const isAddNewContact = itemType === 'add-new' || 
+                                   (selectedItem.textContent.includes('Add') && selectedItem.textContent.includes('as a new contact'));
+            
+            if (isAddNewContact) {
+              const ownersContactInput = document.getElementById('owners_contact_input');
+              const query = ownersContactInput ? ownersContactInput.value.trim() : '';
+              showNewOwnersContactSection(query);
+            } else if (currentOwnersContactSuggestions.length > 0 && selectedOwnersContactSuggestionIndex < currentOwnersContactSuggestions.length) {
+              const contact = currentOwnersContactSuggestions[selectedOwnersContactSuggestionIndex];
+              selectOwnersContact(contact.ContactID, contact.Name);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideOwnersContactSuggestions();
+          break;
+      }
+    }
+
+    // Select an owners contact
+    function selectOwnersContact(contactId, contactName) {
+      console.log('=== SELECTING OWNERS CONTACT ===');
+      console.log('Contact ID:', contactId);
+      console.log('Contact Name:', contactName);
+      
+      const ownersContactInput = document.getElementById('owners_contact_input');
+      const ownersContactSelect = document.getElementById('owners_contact_select');
+      
+      console.log('Owners Contact Input Element:', ownersContactInput);
+      console.log('Owners Contact Select Element:', ownersContactSelect);
+      
+      // Update the input field immediately
+      if (ownersContactInput) {
+        const newValue = contactName;
+        ownersContactInput.value = newValue;
+        ownersContactInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        ownersContactInput.style.color = '#1f2937';
+        ownersContactInput.style.fontWeight = '400'; // Normal weight
+        ownersContactInput.style.backgroundColor = '#f9fafb'; // Light background
+        ownersContactInput.placeholder = '';
+        
+        console.log('Input value set to:', ownersContactInput.value);
+        console.log('Input textContent set to:', ownersContactInput.textContent);
+        
+        // Force update by triggering input event
+        ownersContactInput.dispatchEvent(new Event('input', { bubbles: true }));
+        ownersContactInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (ownersContactSelect) {
+        ownersContactSelect.value = contactId;
+        console.log('Hidden select value set to:', ownersContactSelect.value);
+      }
+      
+      // Update global variables
+      selectedOwnersContactId = contactId;
+      selectedOwnersContactName = contactName;
+      
+      console.log('Global variables updated:', {
+        selectedOwnersContactId,
+        selectedOwnersContactName
+      });
+      
+      // Hide suggestions immediately
+      hideOwnersContactSuggestions();
+      
+      console.log('=== END SELECTING OWNERS CONTACT ===');
+    }
+
+    // Show new contact section with pre-filled name
+    function showNewOwnersContactSection(contactName) {
+      const newContactSection = document.getElementById('newOwnersContactSection');
+      const ownersContactField = document.getElementById('ownersContactField');
+      const newContactInput = document.getElementById('newOwnersContactInput');
+      
+      if (newContactSection && newContactInput) {
+        newContactInput.value = contactName;
+        // Hide owners contact field and show new contact section
+        if (ownersContactField) ownersContactField.classList.add('hidden');
+        newContactSection.classList.remove('hidden');
+        hideOwnersContactSuggestions();
+      }
+    }
+
+    // Cancel new contact
+    function cancelNewOwnersContact() {
+      const newContactSection = document.getElementById('newOwnersContactSection');
+      const ownersContactField = document.getElementById('ownersContactField');
+      const ownersContactInput = document.getElementById('owners_contact_input');
+      
+      // Hide new contact section and show owners contact field
+      if (newContactSection) newContactSection.classList.add('hidden');
+      if (ownersContactField) ownersContactField.classList.remove('hidden');
+      
+      if (ownersContactInput) {
+        ownersContactInput.value = '';
+      }
+      
+      selectedOwnersContactId = null;
+      selectedOwnersContactName = null;
+    }
+
+    // Create new contact
+    function createOwnersContact() {
+      const newContactInput = document.getElementById('newOwnersContactInput');
+      if (!newContactInput || !newContactInput.value.trim()) {
+        showErrorToast('Please enter a contact name');
+        return;
+      }
+
+      // Show loading overlay with "Creating Contact..." text
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const loadingText = loadingOverlay ? loadingOverlay.querySelector('span') : null;
+      const originalText = loadingText ? loadingText.textContent : 'Saving Settings...';
+      if (loadingText) {
+        loadingText.textContent = 'Creating Contact...';
+      }
+      if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+
+      const contactName = newContactInput.value.trim();
+      const formData = new FormData();
+      formData.append('name', contactName);
+      
+      // Add CSRF token
+      const csrfToken = document.querySelector('input[name="csrf_token"]');
+      if (csrfToken) {
+        formData.append('csrf_token', csrfToken.value);
+      }
+      
+      // Add entity_id
+      const entityId = '{{ org.id }}';
+      formData.append('entity_id', entityId);
+
+      fetch('/entity/contact/create', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: formData
+      })
+      .then(response => {
+        if (!response.ok) {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            return response.json().then(errorData => {
+              // Hide loading overlay on error and restore original text
+              if (loadingOverlay) {
+                if (loadingText) loadingText.textContent = originalText;
+                loadingOverlay.classList.add('hidden');
+              }
+              throw new Error(errorData.message || 'Network response was not ok');
+            });
+          } else {
+            return response.text().then(htmlText => {
+              // Hide loading overlay on error and restore original text
+              if (loadingOverlay) {
+                if (loadingText) loadingText.textContent = originalText;
+                loadingOverlay.classList.add('hidden');
+              }
+              throw new Error(`Server error (${response.status}): The server returned an HTML page instead of JSON.`);
+            });
+          }
+        }
+        
+        return response.text().then(text => {
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            // Hide loading overlay on error and restore original text
+            if (loadingOverlay) {
+              if (loadingText) loadingText.textContent = originalText;
+              loadingOverlay.classList.add('hidden');
+            }
+            throw new Error('Server returned non-JSON response.');
+          }
+        });
+      })
+      .then(data => {
+        if (data.status === 'success') {
+          const contactName = data.name || newContactInput.value;
+          const contactId = data.contact_id || 'new_' + Date.now();
+          
+          // Update the contact input field and global variables
+          const ownersContactInput = document.getElementById('owners_contact_input');
+          const ownersContactSelect = document.getElementById('owners_contact_select');
+          const ownersContactField = document.getElementById('ownersContactField');
+          
+          if (ownersContactInput) {
+            ownersContactInput.value = contactName;
+          }
+          
+          if (ownersContactSelect) {
+            // Add new option to select
+            const option = document.createElement('option');
+            option.value = contactId;
+            option.textContent = contactName;
+            option.selected = true;
+            ownersContactSelect.appendChild(option);
+          }
+          
+          selectedOwnersContactId = contactId;
+          selectedOwnersContactName = contactName;
+          
+          // Add the new contact to the allOwnersContacts array for future searches
+          allOwnersContacts.push({
+            ContactID: contactId,
+            Name: contactName
+          });
+          
+          // Hide the new contact section and show owners contact field
+          const newContactSection = document.getElementById('newOwnersContactSection');
+          if (newContactSection) newContactSection.classList.add('hidden');
+          if (ownersContactField) ownersContactField.classList.remove('hidden');
+          
+          // Hide loading overlay on success and restore original text
+          if (loadingOverlay) {
+            if (loadingText) loadingText.textContent = originalText;
+            loadingOverlay.classList.add('hidden');
+          }
+          
+          // Show success message
+          showSuccessToast('Contact created successfully!');
+        } else {
+          // Hide loading overlay on failure and restore original text
+          if (loadingOverlay) {
+            if (loadingText) loadingText.textContent = originalText;
+            loadingOverlay.classList.add('hidden');
+          }
+          throw new Error(data.message || 'Contact creation failed');
+        }
+      })
+      .catch(error => {
+        console.error('Error creating contact:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Error creating contact', { message: error && error.message });
+        }
+        // Hide loading overlay on error and restore original text
+        if (loadingOverlay) {
+          if (loadingText) loadingText.textContent = originalText;
+          loadingOverlay.classList.add('hidden');
+        }
+        showErrorToast('Error creating contact: ' + error.message);
+      });
+    }
+
+    // Global variables for discrepancy bank account search
+    let selectedDiscrepancyBankAccountId = null;
+    let selectedDiscrepancyBankAccountName = null;
+    let allDiscrepancyBankAccounts = {{ (bank_accounts or []) | tojson }};
+    let selectedDiscrepancyBankSuggestionIndex = -1;
+    let currentDiscrepancyBankSuggestions = [];
+
+    // Initialize discrepancy bank account search functionality
+    function initializeDiscrepancyBankAccountSearch() {
+      const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+      const discrepancyBankSuggestions = document.getElementById('discrepancyBankSuggestions');
+      
+      if (!discrepancyBankInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allDiscrepancyBankAccounts === 'undefined') {
+      allDiscrepancyBankAccounts = [];
+      }
+      
+      // Set default value if available
+      {% if discrepancy_bank_default %}
+      const defaultDiscrepancyBank = {{ discrepancy_bank_default | tojson }};
+      if (defaultDiscrepancyBank) {
+        discrepancyBankInput.value = `${defaultDiscrepancyBank.Name} - ${defaultDiscrepancyBank.MaskedBankAccountNumber}`;
+        selectedDiscrepancyBankAccountId = defaultDiscrepancyBank.AccountID;
+        selectedDiscrepancyBankAccountName = defaultDiscrepancyBank.Name;
+        
+        const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+        if (discrepancyBankSelect) {
+          discrepancyBankSelect.value = defaultDiscrepancyBank.AccountID;
+        }
+      } else {
+        discrepancyBankInput.value = '';
+        selectedDiscrepancyBankAccountId = null;
+        selectedDiscrepancyBankAccountName = null;
+        
+        const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+        if (discrepancyBankSelect) {
+          discrepancyBankSelect.value = '';
+        }
+      }
+      {% else %}
+      discrepancyBankInput.value = '';
+      selectedDiscrepancyBankAccountId = null;
+      selectedDiscrepancyBankAccountName = null;
+      
+      const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+      if (discrepancyBankSelect) {
+        discrepancyBankSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all bank accounts
+      discrepancyBankInput.addEventListener('click', function() {
+        if (allDiscrepancyBankAccounts.length > 0) {
+          showDiscrepancyBankAccountSuggestions(allDiscrepancyBankAccounts);
+        }
+      });
+
+      // Add input event listener for search
+      discrepancyBankInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        
+        if (query.length === 0) {
+          // Show all bank accounts when input is empty
+          if (allDiscrepancyBankAccounts.length > 0) {
+            showDiscrepancyBankAccountSuggestions(allDiscrepancyBankAccounts);
+          } else {
+            hideDiscrepancyBankAccountSuggestions();
+            selectedDiscrepancyBankAccountId = null;
+            selectedDiscrepancyBankAccountName = null;
+            
+            // Clear the hidden select value
+            const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+            if (discrepancyBankSelect) {
+              discrepancyBankSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through bank accounts
+        const matches = allDiscrepancyBankAccounts.filter(account => 
+          account.Name.toLowerCase().includes(query.toLowerCase()) ||
+          account.MaskedBankAccountNumber.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (matches.length > 0) {
+          showDiscrepancyBankAccountSuggestions(matches);
+        } else {
+          hideDiscrepancyBankAccountSuggestions();
+        }
+      });
+      
+      // Handle input focus
+      discrepancyBankInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allDiscrepancyBankAccounts.filter(account => 
+            account.Name.toLowerCase().includes(query.toLowerCase()) ||
+            account.MaskedBankAccountNumber.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          if (matches.length > 0) {
+            showDiscrepancyBankAccountSuggestions(matches);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      discrepancyBankInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideDiscrepancyBankAccountSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (discrepancyBankInput && discrepancyBankSuggestions && 
+            !discrepancyBankInput.contains(event.target) && !discrepancyBankSuggestions.contains(event.target)) {
+          hideDiscrepancyBankAccountSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      discrepancyBankInput.addEventListener('keydown', handleDiscrepancyBankKeyboardNavigation);
+      
+    }
+
+    // Show discrepancy bank account suggestions
+    function showDiscrepancyBankAccountSuggestions(matches) {
+      const suggestions = document.getElementById('discrepancyBankSuggestions');
+      const dropdownIcon = document.getElementById('discrepancyBankDropdownIcon');
+      if (!suggestions) return;
+      
+      suggestions.innerHTML = '';
+      
+      currentDiscrepancyBankSuggestions = matches;
+      selectedDiscrepancyBankSuggestionIndex = -1;
+      
+      matches.forEach((account, index) => {
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
+          <div class="text-xs text-gray-500">${account.MaskedBankAccountNumber}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectDiscrepancyBankAccount(account.AccountID, account.Name, account.MaskedBankAccountNumber);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide discrepancy bank account suggestions
+    function hideDiscrepancyBankAccountSuggestions() {
+      const suggestions = document.getElementById('discrepancyBankSuggestions');
+      const dropdownIcon = document.getElementById('discrepancyBankDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedDiscrepancyBankSuggestionIndex = -1;
+    }
+    
+    // Highlight discrepancy bank suggestion item
+    function highlightDiscrepancyBankSuggestion(index) {
+      const suggestions = document.getElementById('discrepancyBankSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for discrepancy bank
+    function handleDiscrepancyBankKeyboardNavigation(e) {
+      const suggestions = document.getElementById('discrepancyBankSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedDiscrepancyBankSuggestionIndex = (selectedDiscrepancyBankSuggestionIndex + 1) % items.length;
+          highlightDiscrepancyBankSuggestion(selectedDiscrepancyBankSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedDiscrepancyBankSuggestionIndex = selectedDiscrepancyBankSuggestionIndex <= 0 ? items.length - 1 : selectedDiscrepancyBankSuggestionIndex - 1;
+          highlightDiscrepancyBankSuggestion(selectedDiscrepancyBankSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedDiscrepancyBankSuggestionIndex < 0 && items.length > 0) {
+            selectedDiscrepancyBankSuggestionIndex = 0;
+          }
+          
+          if (selectedDiscrepancyBankSuggestionIndex >= 0 && selectedDiscrepancyBankSuggestionIndex < items.length) {
+            if (currentDiscrepancyBankSuggestions.length > 0 && selectedDiscrepancyBankSuggestionIndex < currentDiscrepancyBankSuggestions.length) {
+              const account = currentDiscrepancyBankSuggestions[selectedDiscrepancyBankSuggestionIndex];
+              selectDiscrepancyBankAccount(account.AccountID, account.Name, account.MaskedBankAccountNumber);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideDiscrepancyBankAccountSuggestions();
+          break;
+      }
+    }
+
+    // Select a discrepancy bank account
+    function selectDiscrepancyBankAccount(accountId, accountName, accountNumber) {
+      console.log('=== SELECTING DISCREPANCY BANK ACCOUNT ===');
+      console.log('Account ID:', accountId);
+      console.log('Account Name:', accountName);
+      console.log('Account Number:', accountNumber);
+      
+      const discrepancyBankInput = document.getElementById('discrepancy_bank_input');
+      const discrepancyBankSelect = document.getElementById('discrepancy_bank_select');
+      
+      console.log('Discrepancy Bank Input Element:', discrepancyBankInput);
+      console.log('Discrepancy Bank Select Element:', discrepancyBankSelect);
+      
+      // Update the input field immediately
+      if (discrepancyBankInput) {
+        const newValue = `${accountName} - ${accountNumber}`;
+        discrepancyBankInput.value = newValue;
+        discrepancyBankInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        discrepancyBankInput.style.color = '#1f2937';
+        discrepancyBankInput.style.fontWeight = '400'; // Normal weight
+        discrepancyBankInput.style.backgroundColor = '#f9fafb'; // Light background
+        discrepancyBankInput.placeholder = '';
+        
+        console.log('Input value set to:', discrepancyBankInput.value);
+        console.log('Input textContent set to:', discrepancyBankInput.textContent);
+        
+        // Force update by triggering input event
+        discrepancyBankInput.dispatchEvent(new Event('input', { bubbles: true }));
+        discrepancyBankInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (discrepancyBankSelect) {
+        discrepancyBankSelect.value = accountId;
+        console.log('Hidden select value set to:', discrepancyBankSelect.value);
+      }
+      
+      // Update global variables
+      selectedDiscrepancyBankAccountId = accountId;
+      selectedDiscrepancyBankAccountName = accountName;
+      
+      console.log('Global variables updated:', {
+        selectedDiscrepancyBankAccountId,
+        selectedDiscrepancyBankAccountName
+      });
+      
+      // Hide suggestions immediately
+      hideDiscrepancyBankAccountSuggestions();
+      
+      console.log('=== END SELECTING DISCREPANCY BANK ACCOUNT ===');
+    }
+
+    // Global variables for discrepancy account search
+    let selectedDiscrepancyAccountCode = null;
+    let selectedDiscrepancyAccountName = null;
+    let allDiscrepancyAccounts = {{ (discrepancy_account or []) | tojson }};
+    let selectedDiscrepancyAccountSuggestionIndex = -1;
+    let currentDiscrepancyAccountSuggestions = [];
+
+    // Initialize discrepancy account search functionality
+    function initializeDiscrepancyAccountSearch() {
+      const discrepancyAccountInput = document.getElementById('discrepancy_account_input');
+      const discrepancyAccountSuggestions = document.getElementById('discrepancyAccountSuggestions');
+      
+      if (!discrepancyAccountInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allDiscrepancyAccounts === 'undefined') {
+      allDiscrepancyAccounts = [];
+      }
+      
+      // Set default value if available
+      {% if discrepancy_account_default %}
+      const defaultDiscrepancyAccount = {{ discrepancy_account_default | tojson }};
+      if (defaultDiscrepancyAccount) {
+        discrepancyAccountInput.value = `${defaultDiscrepancyAccount.Name} - ${defaultDiscrepancyAccount.Code}`;
+        selectedDiscrepancyAccountCode = defaultDiscrepancyAccount.Code;
+        selectedDiscrepancyAccountName = defaultDiscrepancyAccount.Name;
+        
+        const discrepancyAccountSelect = document.getElementById('discrepancy_account_select');
+        if (discrepancyAccountSelect) {
+          discrepancyAccountSelect.value = defaultDiscrepancyAccount.Code;
+        }
+      } else {
+        discrepancyAccountInput.value = '';
+        selectedDiscrepancyAccountCode = null;
+        selectedDiscrepancyAccountName = null;
+        
+        const discrepancyAccountSelect = document.getElementById('discrepancy_account_select');
+        if (discrepancyAccountSelect) {
+          discrepancyAccountSelect.value = '';
+        }
+      }
+      {% else %}
+      discrepancyAccountInput.value = '';
+      selectedDiscrepancyAccountCode = null;
+      selectedDiscrepancyAccountName = null;
+      
+      const discrepancyAccountSelect = document.getElementById('discrepancy_account_select');
+      if (discrepancyAccountSelect) {
+        discrepancyAccountSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all accounts
+      discrepancyAccountInput.addEventListener('click', function() {
+        if (allDiscrepancyAccounts.length > 0) {
+          showDiscrepancyAccountSuggestions(allDiscrepancyAccounts);
+        }
+      });
+
+      // Add input event listener for search
+      discrepancyAccountInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedDiscrepancyAccountSuggestionIndex = -1; // Reset navigation when typing
+        
+        if (query.length === 0) {
+          // Show all accounts when input is empty
+          if (allDiscrepancyAccounts.length > 0) {
+            showDiscrepancyAccountSuggestions(allDiscrepancyAccounts);
+          } else {
+            hideDiscrepancyAccountSuggestions();
+            selectedDiscrepancyAccountCode = null;
+            selectedDiscrepancyAccountName = null;
+            
+            // Clear the hidden select value
+            const discrepancyAccountSelect = document.getElementById('discrepancy_account_select');
+            if (discrepancyAccountSelect) {
+              discrepancyAccountSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through accounts
+        const matches = allDiscrepancyAccounts.filter(account => 
+          account.Name.toLowerCase().includes(query.toLowerCase()) ||
+          account.Code.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if (matches.length > 0) {
+          showDiscrepancyAccountSuggestions(matches);
+        } else {
+          hideDiscrepancyAccountSuggestions();
+        }
+      });
+      
+      // Handle input focus
+      discrepancyAccountInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allDiscrepancyAccounts.filter(account => 
+            account.Name.toLowerCase().includes(query.toLowerCase()) ||
+            account.Code.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          if (matches.length > 0) {
+            showDiscrepancyAccountSuggestions(matches);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      discrepancyAccountInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideDiscrepancyAccountSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (discrepancyAccountInput && discrepancyAccountSuggestions && 
+            !discrepancyAccountInput.contains(event.target) && !discrepancyAccountSuggestions.contains(event.target)) {
+          hideDiscrepancyAccountSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      discrepancyAccountInput.addEventListener('keydown', handleDiscrepancyAccountKeyboardNavigation);
+      
+    }
+
+    // Show discrepancy account suggestions
+    function showDiscrepancyAccountSuggestions(matches) {
+      const suggestions = document.getElementById('discrepancyAccountSuggestions');
+      const dropdownIcon = document.getElementById('discrepancyAccountDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currentDiscrepancyAccountSuggestions = matches;
+      selectedDiscrepancyAccountSuggestionIndex = -1;
+      
+      matches.forEach((account, index) => {
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
+          <div class="text-xs text-gray-500">${account.Code}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectDiscrepancyAccount(account.Code, account.Name);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide discrepancy account suggestions
+    function hideDiscrepancyAccountSuggestions() {
+      const suggestions = document.getElementById('discrepancyAccountSuggestions');
+      const dropdownIcon = document.getElementById('discrepancyAccountDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedDiscrepancyAccountSuggestionIndex = -1;
+    }
+    
+    // Highlight discrepancy account suggestion item
+    function highlightDiscrepancyAccountSuggestion(index) {
+      const suggestions = document.getElementById('discrepancyAccountSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for discrepancy account
+    function handleDiscrepancyAccountKeyboardNavigation(e) {
+      const suggestions = document.getElementById('discrepancyAccountSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedDiscrepancyAccountSuggestionIndex = (selectedDiscrepancyAccountSuggestionIndex + 1) % items.length;
+          highlightDiscrepancyAccountSuggestion(selectedDiscrepancyAccountSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedDiscrepancyAccountSuggestionIndex = selectedDiscrepancyAccountSuggestionIndex <= 0 ? items.length - 1 : selectedDiscrepancyAccountSuggestionIndex - 1;
+          highlightDiscrepancyAccountSuggestion(selectedDiscrepancyAccountSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedDiscrepancyAccountSuggestionIndex < 0 && items.length > 0) {
+            selectedDiscrepancyAccountSuggestionIndex = 0;
+          }
+          
+          if (selectedDiscrepancyAccountSuggestionIndex >= 0 && selectedDiscrepancyAccountSuggestionIndex < items.length) {
+            if (currentDiscrepancyAccountSuggestions.length > 0 && selectedDiscrepancyAccountSuggestionIndex < currentDiscrepancyAccountSuggestions.length) {
+              const account = currentDiscrepancyAccountSuggestions[selectedDiscrepancyAccountSuggestionIndex];
+              selectDiscrepancyAccount(account.Code, account.Name);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideDiscrepancyAccountSuggestions();
+          break;
+      }
+    }
+
+    // Select a discrepancy account
+    function selectDiscrepancyAccount(accountCode, accountName) {
+      console.log('=== SELECTING DISCREPANCY ACCOUNT ===');
+      console.log('Account Code:', accountCode);
+      console.log('Account Name:', accountName);
+      
+      const discrepancyAccountInput = document.getElementById('discrepancy_account_input');
+      const discrepancyAccountSelect = document.getElementById('discrepancy_account_select');
+      
+      console.log('Discrepancy Account Input Element:', discrepancyAccountInput);
+      console.log('Discrepancy Account Select Element:', discrepancyAccountSelect);
+      
+      // Update the input field immediately
+      if (discrepancyAccountInput) {
+        const newValue = `${accountName} - ${accountCode}`;
+        discrepancyAccountInput.value = newValue;
+        discrepancyAccountInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        discrepancyAccountInput.style.color = '#1f2937';
+        discrepancyAccountInput.style.fontWeight = '400'; // Normal weight
+        discrepancyAccountInput.style.backgroundColor = '#f9fafb'; // Light background
+        discrepancyAccountInput.placeholder = '';
+        
+        console.log('Input value set to:', discrepancyAccountInput.value);
+        console.log('Input textContent set to:', discrepancyAccountInput.textContent);
+        
+        // Force update by triggering input event
+        discrepancyAccountInput.dispatchEvent(new Event('input', { bubbles: true }));
+        discrepancyAccountInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (discrepancyAccountSelect) {
+        discrepancyAccountSelect.value = accountCode;
+        console.log('Hidden select value set to:', discrepancyAccountSelect.value);
+      }
+      
+      // Update global variables
+      selectedDiscrepancyAccountCode = accountCode;
+      selectedDiscrepancyAccountName = accountName;
+      
+      console.log('Global variables updated:', {
+        selectedDiscrepancyAccountCode,
+        selectedDiscrepancyAccountName
+      });
+      
+      // Hide suggestions immediately
+      hideDiscrepancyAccountSuggestions();
+      
+      console.log('=== END SELECTING DISCREPANCY ACCOUNT ===');
+    }
+
+    // Global variables for discrepancy contact search
+    let selectedDiscrepancyContactId = null;
+    let selectedDiscrepancyContactName = null;
+    let allDiscrepancyContacts = {{ (contacts or []) | tojson }};
+    let selectedDiscrepancyContactSuggestionIndex = -1;
+    let currentDiscrepancyContactSuggestions = [];
+
+    // Initialize discrepancy contact search functionality
+    function initializeDiscrepancyContactSearch() {
+      const discrepancyContactInput = document.getElementById('discrepancy_contact_input');
+      const discrepancyContactSuggestions = document.getElementById('discrepancyContactSuggestions');
+      
+      if (!discrepancyContactInput) return;
+      
+      // Initialize with empty data - will be populated by async loading
+      if (typeof allDiscrepancyContacts === 'undefined') {
+      allDiscrepancyContacts = [];
+      }
+      
+      // Set default value if available
+      {% if discrepancy_contact_default %}
+      const defaultDiscrepancyContact = {{ discrepancy_contact_default | tojson }};
+      if (defaultDiscrepancyContact) {
+        discrepancyContactInput.value = defaultDiscrepancyContact.Name;
+        selectedDiscrepancyContactId = defaultDiscrepancyContact.ContactID;
+        selectedDiscrepancyContactName = defaultDiscrepancyContact.Name;
+        
+        const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+        if (discrepancyContactSelect) {
+          discrepancyContactSelect.value = defaultDiscrepancyContact.ContactID;
+        }
+      } else {
+        discrepancyContactInput.value = '';
+        selectedDiscrepancyContactId = null;
+        selectedDiscrepancyContactName = null;
+        
+        const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+        if (discrepancyContactSelect) {
+          discrepancyContactSelect.value = '';
+        }
+      }
+      {% else %}
+      discrepancyContactInput.value = '';
+      selectedDiscrepancyContactId = null;
+      selectedDiscrepancyContactName = null;
+      
+      const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+      if (discrepancyContactSelect) {
+        discrepancyContactSelect.value = '';
+      }
+      {% endif %}
+      
+      // Add click event listener to show all contacts
+      discrepancyContactInput.addEventListener('click', function() {
+        if (allDiscrepancyContacts.length > 0) {
+          showDiscrepancyContactSuggestions(allDiscrepancyContacts);
+        }
+      });
+
+      // Add input event listener for search
+      discrepancyContactInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        selectedDiscrepancyContactSuggestionIndex = -1; // Reset navigation when typing
+        
+        // Check if current value matches selected contact name
+        // If not, reset selection variables
+        if (selectedDiscrepancyContactName && query !== selectedDiscrepancyContactName) {
+          selectedDiscrepancyContactId = null;
+          selectedDiscrepancyContactName = null;
+        }
+        
+        if (query.length === 0) {
+          // Show all contacts when input is empty
+          if (allDiscrepancyContacts.length > 0) {
+            showDiscrepancyContactSuggestions(allDiscrepancyContacts);
+          } else {
+            hideDiscrepancyContactSuggestions();
+            selectedDiscrepancyContactId = null;
+            selectedDiscrepancyContactName = null;
+            
+            // Clear the hidden select value
+            const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+            if (discrepancyContactSelect) {
+              discrepancyContactSelect.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Search through contacts for partial matches
+        const matches = allDiscrepancyContacts.filter(contact => 
+          contact.Name.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        // Check for exact match (case-insensitive)
+        const exactMatch = allDiscrepancyContacts.find(contact => 
+          contact.Name.toLowerCase() === query.toLowerCase()
+        );
+        
+        if (matches.length > 0) {
+          // Show suggestions, and add "Add new contact" option if no exact match
+          showDiscrepancyContactSuggestions(matches, exactMatch ? null : query);
+        } else {
+          showDiscrepancyContactSuggestions([], query);
+        }
+      });
+      
+      // Handle input focus
+      discrepancyContactInput.addEventListener('focus', function() {
+        const query = this.value.trim();
+        if (query.length > 0) {
+          const matches = allDiscrepancyContacts.filter(contact => 
+            contact.Name.toLowerCase().includes(query.toLowerCase())
+          );
+          
+          // Check for exact match (case-insensitive)
+          const exactMatch = allDiscrepancyContacts.find(contact => 
+            contact.Name.toLowerCase() === query.toLowerCase()
+          );
+          
+          if (matches.length > 0) {
+            // Show suggestions, and add "Add new contact" option if no exact match
+            showDiscrepancyContactSuggestions(matches, exactMatch ? null : query);
+          } else {
+            showDiscrepancyContactSuggestions([], query);
+          }
+        }
+      });
+      
+      // Handle input blur (with delay to allow clicking on suggestions)
+      discrepancyContactInput.addEventListener('blur', function() {
+        setTimeout(() => {
+          hideDiscrepancyContactSuggestions();
+        }, 200);
+      });
+      
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', function(event) {
+        if (discrepancyContactInput && discrepancyContactSuggestions && 
+            !discrepancyContactInput.contains(event.target) && !discrepancyContactSuggestions.contains(event.target)) {
+          hideDiscrepancyContactSuggestions();
+        }
+      });
+      
+      // Handle keyboard navigation
+      discrepancyContactInput.addEventListener('keydown', handleDiscrepancyContactKeyboardNavigation);
+      
+    }
+
+    // Show discrepancy contact suggestions
+    function showDiscrepancyContactSuggestions(matches, addNewContactQuery = null) {
+      const suggestions = document.getElementById('discrepancyContactSuggestions');
+      const dropdownIcon = document.getElementById('discrepancyContactDropdownIcon');
+      suggestions.innerHTML = '';
+      
+      currentDiscrepancyContactSuggestions = matches;
+      selectedDiscrepancyContactSuggestionIndex = -1;
+      
+      matches.forEach((contact, index) => {
+        const suggestionItem = document.createElement('div');
+        // Add border-b to all items, but remove from last if "Add new contact" will be shown
+        const borderClass = (addNewContactQuery && index === matches.length - 1) 
+          ? 'px-4 py-2 hover:bg-gray-100 cursor-pointer' 
+          : 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100';
+        suggestionItem.className = borderClass;
+        suggestionItem.setAttribute('data-index', index);
+        suggestionItem.setAttribute('data-type', 'contact');
+        suggestionItem.innerHTML = `
+          <div class="text-sm font-medium text-gray-900">${contact.Name}</div>
+        `;
+        suggestionItem.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectDiscrepancyContact(contact.ContactID, contact.Name);
+        });
+        suggestions.appendChild(suggestionItem);
+      });
+      
+      // Add "Add new contact" option if provided (when no exact match found)
+      if (addNewContactQuery) {
+        const addNewContactOption = document.createElement('div');
+        addNewContactOption.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-t border-gray-200';
+        addNewContactOption.setAttribute('data-index', matches.length);
+        addNewContactOption.setAttribute('data-type', 'add-new');
+        addNewContactOption.innerHTML = `
+          <div class="text-gray-600 hover:text-gray-800">
+            + Add '${addNewContactQuery}' as a new contact
+          </div>
+        `;
+        addNewContactOption.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          showNewDiscrepancyContactSection(addNewContactQuery);
+        });
+        suggestions.appendChild(addNewContactOption);
+      } else if (matches.length === 0) {
+        // Add "No Xero contact found" message and "Add New Contact" option when no matches
+        const noContactMessage = document.createElement('div');
+        noContactMessage.className = 'px-4 py-2 text-gray-600 border-b border-gray-100';
+        noContactMessage.innerHTML = `
+          <div class="text-sm">No Xero contact found</div>
+        `;
+        suggestions.appendChild(noContactMessage);
+        
+        // Create the "Add as new contact" option
+        const addNewContactOption = document.createElement('div');
+        addNewContactOption.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
+        addNewContactOption.setAttribute('data-index', 0);
+        addNewContactOption.setAttribute('data-type', 'add-new');
+        addNewContactOption.innerHTML = `
+          <div class="text-gray-600 hover:text-gray-800">
+            + Add as a new contact
+          </div>
+        `;
+        addNewContactOption.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          const discrepancyContactInput = document.getElementById('discrepancy_contact_input');
+          const query = discrepancyContactInput ? discrepancyContactInput.value.trim() : '';
+          showNewDiscrepancyContactSection(query);
+        });
+        suggestions.appendChild(addNewContactOption);
+      } else {
+        // Add last:border-b-0 to the last contact item if no "Add new contact" option
+        const lastItem = suggestions.lastElementChild;
+        if (lastItem) {
+          lastItem.classList.add('last:border-b-0');
+        }
+      }
+      
+      suggestions.classList.remove('hidden');
+      // Rotate dropdown icon
+      if (dropdownIcon) {
+        dropdownIcon.classList.add('rotate-180');
+      }
+    }
+
+    // Hide discrepancy contact suggestions
+    function hideDiscrepancyContactSuggestions() {
+      const suggestions = document.getElementById('discrepancyContactSuggestions');
+      const dropdownIcon = document.getElementById('discrepancyContactDropdownIcon');
+      if (suggestions) {
+        suggestions.classList.add('hidden');
+      }
+      // Reset dropdown icon rotation
+      if (dropdownIcon) {
+        dropdownIcon.classList.remove('rotate-180');
+      }
+      // Reset navigation state
+      selectedDiscrepancyContactSuggestionIndex = -1;
+    }
+    
+    // Highlight discrepancy contact suggestion item
+    function highlightDiscrepancyContactSuggestion(index) {
+      const suggestions = document.getElementById('discrepancyContactSuggestions');
+      if (!suggestions) return;
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      items.forEach((item, i) => {
+        if (i === index) {
+          item.classList.add('bg-gray-100');
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          item.classList.remove('bg-gray-100');
+        }
+      });
+    }
+    
+    // Handle keyboard navigation for discrepancy contact
+    function handleDiscrepancyContactKeyboardNavigation(e) {
+      const suggestions = document.getElementById('discrepancyContactSuggestions');
+      if (!suggestions || suggestions.classList.contains('hidden')) {
+        return;
+      }
+      
+      const items = suggestions.querySelectorAll('[data-index]');
+      if (items.length === 0) return;
+      
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectedDiscrepancyContactSuggestionIndex = (selectedDiscrepancyContactSuggestionIndex + 1) % items.length;
+          highlightDiscrepancyContactSuggestion(selectedDiscrepancyContactSuggestionIndex);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          selectedDiscrepancyContactSuggestionIndex = selectedDiscrepancyContactSuggestionIndex <= 0 ? items.length - 1 : selectedDiscrepancyContactSuggestionIndex - 1;
+          highlightDiscrepancyContactSuggestion(selectedDiscrepancyContactSuggestionIndex);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (selectedDiscrepancyContactSuggestionIndex < 0 && items.length > 0) {
+            selectedDiscrepancyContactSuggestionIndex = 0;
+          }
+          
+          if (selectedDiscrepancyContactSuggestionIndex >= 0 && selectedDiscrepancyContactSuggestionIndex < items.length) {
+            const selectedItem = items[selectedDiscrepancyContactSuggestionIndex];
+            const itemType = selectedItem.getAttribute('data-type');
+            
+            // Check if this is the "Add new contact" option (either in suggestions or in no-contact-found state)
+            const isAddNewContact = itemType === 'add-new' || 
+                                   (selectedItem.textContent.includes('Add') && selectedItem.textContent.includes('as a new contact'));
+            
+            if (isAddNewContact) {
+              const discrepancyContactInput = document.getElementById('discrepancy_contact_input');
+              const query = discrepancyContactInput ? discrepancyContactInput.value.trim() : '';
+              showNewDiscrepancyContactSection(query);
+            } else if (currentDiscrepancyContactSuggestions.length > 0 && selectedDiscrepancyContactSuggestionIndex < currentDiscrepancyContactSuggestions.length) {
+              const contact = currentDiscrepancyContactSuggestions[selectedDiscrepancyContactSuggestionIndex];
+              selectDiscrepancyContact(contact.ContactID, contact.Name);
+            }
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          hideDiscrepancyContactSuggestions();
+          break;
+      }
+    }
+
+    // Select a discrepancy contact
+    function selectDiscrepancyContact(contactId, contactName) {
+      console.log('=== SELECTING DISCREPANCY CONTACT ===');
+      console.log('Contact ID:', contactId);
+      console.log('Contact Name:', contactName);
+      
+      const discrepancyContactInput = document.getElementById('discrepancy_contact_input');
+      const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+      
+      console.log('Discrepancy Contact Input Element:', discrepancyContactInput);
+      console.log('Discrepancy Contact Select Element:', discrepancyContactSelect);
+      
+      // Update the input field immediately
+      if (discrepancyContactInput) {
+        const newValue = contactName;
+        discrepancyContactInput.value = newValue;
+        discrepancyContactInput.textContent = newValue; // Also set textContent as backup
+        
+        // Apply visual changes
+        discrepancyContactInput.style.color = '#1f2937';
+        discrepancyContactInput.style.fontWeight = '400'; // Normal weight
+        discrepancyContactInput.style.backgroundColor = '#f9fafb'; // Light background
+        discrepancyContactInput.placeholder = '';
+        
+        console.log('Input value set to:', discrepancyContactInput.value);
+        console.log('Input textContent set to:', discrepancyContactInput.textContent);
+        
+        // Force update by triggering input event
+        discrepancyContactInput.dispatchEvent(new Event('input', { bubbles: true }));
+        discrepancyContactInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      // Update the hidden select
+      if (discrepancyContactSelect) {
+        discrepancyContactSelect.value = contactId;
+        console.log('Hidden select value set to:', discrepancyContactSelect.value);
+      }
+      
+      // Update global variables
+      selectedDiscrepancyContactId = contactId;
+      selectedDiscrepancyContactName = contactName;
+      
+      console.log('Global variables updated:', {
+        selectedDiscrepancyContactId,
+        selectedDiscrepancyContactName
+      });
+      
+      // Hide suggestions immediately
+      hideDiscrepancyContactSuggestions();
+      
+      console.log('=== END SELECTING DISCREPANCY CONTACT ===');
+    }
+
+    // Show new contact section with pre-filled name
+    function showNewDiscrepancyContactSection(contactName) {
+      const newContactSection = document.getElementById('newDiscrepancyContactSection');
+      const discrepancyContactField = document.getElementById('discrepancyContactField');
+      const newContactInput = document.getElementById('newDiscrepancyContactInput');
+      
+      if (newContactSection && newContactInput) {
+        newContactInput.value = contactName;
+        // Hide discrepancy contact field and show new contact section
+        if (discrepancyContactField) discrepancyContactField.classList.add('hidden');
+        newContactSection.classList.remove('hidden');
+        hideDiscrepancyContactSuggestions();
+      }
+    }
+
+    // Cancel new contact
+    function cancelNewDiscrepancyContact() {
+      const newContactSection = document.getElementById('newDiscrepancyContactSection');
+      const discrepancyContactField = document.getElementById('discrepancyContactField');
+      const discrepancyContactInput = document.getElementById('discrepancy_contact_input');
+      
+      // Hide new contact section and show discrepancy contact field
+      if (newContactSection) newContactSection.classList.add('hidden');
+      if (discrepancyContactField) discrepancyContactField.classList.remove('hidden');
+      
+      if (discrepancyContactInput) {
+        discrepancyContactInput.value = '';
+      }
+      
+      selectedDiscrepancyContactId = null;
+      selectedDiscrepancyContactName = null;
+    }
+
+    // Create new contact
+    function createDiscrepancyContact() {
+      const newContactInput = document.getElementById('newDiscrepancyContactInput');
+      if (!newContactInput || !newContactInput.value.trim()) {
+        showErrorToast('Please enter a contact name');
+        return;
+      }
+
+      // Show loading overlay with "Creating Contact..." text
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const loadingText = loadingOverlay ? loadingOverlay.querySelector('span') : null;
+      const originalText = loadingText ? loadingText.textContent : 'Saving Settings...';
+      if (loadingText) {
+        loadingText.textContent = 'Creating Contact...';
+      }
+      if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+
+      const contactName = newContactInput.value.trim();
+      const formData = new FormData();
+      formData.append('name', contactName);
+      
+      // Add CSRF token
+      const csrfToken = document.querySelector('input[name="csrf_token"]');
+      if (csrfToken) {
+        formData.append('csrf_token', csrfToken.value);
+      }
+      
+      // Add entity_id
+      const entityId = '{{ org.id }}';
+      formData.append('entity_id', entityId);
+
+      fetch('/entity/contact/create', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: formData
+      })
+      .then(response => {
+        if (!response.ok) {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            return response.json().then(errorData => {
+              // Hide loading overlay on error and restore original text
+              if (loadingOverlay) {
+                if (loadingText) loadingText.textContent = originalText;
+                loadingOverlay.classList.add('hidden');
+              }
+              throw new Error(errorData.message || 'Network response was not ok');
+            });
+          } else {
+            return response.text().then(htmlText => {
+              // Hide loading overlay on error and restore original text
+              if (loadingOverlay) {
+                if (loadingText) loadingText.textContent = originalText;
+                loadingOverlay.classList.add('hidden');
+              }
+              throw new Error(`Server error (${response.status}): The server returned an HTML page instead of JSON.`);
+            });
+          }
+        }
+        
+        return response.text().then(text => {
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            // Hide loading overlay on error and restore original text
+            if (loadingOverlay) {
+              if (loadingText) loadingText.textContent = originalText;
+              loadingOverlay.classList.add('hidden');
+            }
+            throw new Error('Server returned non-JSON response.');
+          }
+        });
+      })
+      .then(data => {
+        if (data.status === 'success') {
+          const contactName = data.name || newContactInput.value;
+          const contactId = data.contact_id || 'new_' + Date.now();
+          
+          // Update the contact input field and global variables
+          const discrepancyContactInput = document.getElementById('discrepancy_contact_input');
+          const discrepancyContactSelect = document.getElementById('discrepancy_contact_select');
+          const discrepancyContactField = document.getElementById('discrepancyContactField');
+          
+          if (discrepancyContactInput) {
+            discrepancyContactInput.value = contactName;
+          }
+          
+          if (discrepancyContactSelect) {
+            // Add new option to select
+            const option = document.createElement('option');
+            option.value = contactId;
+            option.textContent = contactName;
+            option.selected = true;
+            discrepancyContactSelect.appendChild(option);
+          }
+          
+          selectedDiscrepancyContactId = contactId;
+          selectedDiscrepancyContactName = contactName;
+          
+          // Add the new contact to the allDiscrepancyContacts array for future searches
+          allDiscrepancyContacts.push({
+            ContactID: contactId,
+            Name: contactName
+          });
+          
+          // Hide the new contact section and show discrepancy contact field
+          const newContactSection = document.getElementById('newDiscrepancyContactSection');
+          if (newContactSection) newContactSection.classList.add('hidden');
+          if (discrepancyContactField) discrepancyContactField.classList.remove('hidden');
+          
+          // Hide loading overlay on success and restore original text
+          if (loadingOverlay) {
+            if (loadingText) loadingText.textContent = originalText;
+            loadingOverlay.classList.add('hidden');
+          }
+          
+          // Show success message
+          showSuccessToast('Contact created successfully!');
+        } else {
+          // Hide loading overlay on failure and restore original text
+          if (loadingOverlay) {
+            if (loadingText) loadingText.textContent = originalText;
+            loadingOverlay.classList.add('hidden');
+          }
+          throw new Error(data.message || 'Contact creation failed');
+        }
+      })
+      .catch(error => {
+        console.error('Error creating contact:', error);
+        if (window.sendLogToDataDog) {
+          window.sendLogToDataDog('error', 'Error creating contact', { message: error && error.message });
+        }
+        // Hide loading overlay on error and restore original text
+        if (loadingOverlay) {
+          if (loadingText) loadingText.textContent = originalText;
+          loadingOverlay.classList.add('hidden');
+        }
+        showErrorToast('Error creating contact: ' + error.message);
+      });
+    }

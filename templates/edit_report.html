@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edit Report / 리포트 수정하기</title>
+    <!-- Bootstrap CSS -->
+    <link
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+
+    <!-- Custom Button Styles -->
+    <style>
+      /* Responsive Table Styling */
+      .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling for iOS */
+        margin-bottom: 20px;
+      }
+
+      .btn-primary {
+        background-color: #4a7c59;
+        border-color: #4a7c59;
+      }
+
+      .btn-primary:hover {
+        background-color: #36543a;
+        border-color: #36543a;
+      }
+
+      .btn-block {
+        width: 100%;
+      }
+
+      select {
+        width: 100%;
+        white-space: normal;
+      }
+
+      .error-message {
+        color: red;
+        display: none;
+      }
+
+      .error-input {
+        border-color: red;
+      }
+
+      @media (max-width: 768px) {
+        .btn-block {
+          width: 100%;
+          font-size: 1rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        select {
+          font-size: 0.9rem;
+        }
+      }
+
+      /* Ensure a neat layout for the file upload and preview section */
+      td[data-label="Files"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      td[data-label="Files"] input[type="file"],
+      td[data-label="Files"] .preview-button {
+        width: 100%;
+        max-width: 200px;
+        margin: 0 auto;
+      }
+
+      .file-preview-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        max-width: 100%;
+        margin-top: 10px;
+      }
+
+      .file-preview-container img {
+        max-width: 100%;
+        max-height: 300px;
+        object-fit: contain;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+
+      .file-preview-container embed {
+        max-width: 100%;
+        max-height: 300px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+
+      /* Responsive styles for smaller screens */
+      @media (max-width: 768px) {
+        td[data-label="Files"] {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        td[data-label="Files"] input[type="file"],
+        td[data-label="Files"] .preview-button {
+          max-width: 100%;
+          margin: 0;
+        }
+
+        .file-preview-container img,
+        .file-preview-container embed {
+          max-height: 200px; /* Adjust for smaller screens */
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container mt-5">
+      <img
+        src="{{ url_for('static', filename='img/logo.png') }}"
+        class="logo"
+        alt="Logo"
+      />
+      <h1 class="text-center">Edit Report / 리포트 수정하기</h1>
+
+      <!-- Back to Reports Button -->
+      <div class="mb-4">
+        <a href="{{ url_for('auth.index') }}" class="btn btn-secondary"
+          >Back to Reports / 리포트로 돌아가기</a
+        >
+      </div>
+
+      <form
+        id="editReportForm"
+        method="POST"
+        enctype="multipart/form-data"
+        action="{{ url_for('report.edit_report', id=report.id) }}"
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <!-- Opening Drawer Section -->
+        <div class="form-group">
+          <label>Opening Cashier Drawer Balance (현금 잔고):</label>
+          <input
+            type="number"
+            id="openingDrawer"
+            name="opening_balance"
+            class="form-control"
+            value="{{ report.opening_balance }}"
+            required
+            readonly
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Addition to Cash Balance (시제금 보충):</label>
+          <input
+            type="number"
+            id="cash_addition"
+            name="cash_addition"
+            class="form-control"
+            value="{{ report.cash_addition or 0 }}"
+            min="0"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Adjusted Opening Balance (조정된 현금 잔고):</label>
+          <input
+            type="number"
+            id="adjustedOpeningBalance"
+            class="form-control"
+            value="{{ report.adjusted_opening_balance or 0 | round(2) }}"
+            readonly
+          />
+        </div>
+
+        <!-- Transaction Date Section -->
+        <div class="form-group">
+          <label>Transaction Date 지출 날짜:</label>
+          <input
+            type="date"
+            id="transaction_date"
+            name="transaction_date"
+            class="form-control"
+            value="{{ report.transaction_date.strftime('%Y-%m-%d') }}"
+            readonly
+          />
+        </div>
+
+        <!-- Sales Section -->
+        <div id="cashSalesContainer">
+          <h2>Sales 수입</h2>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_cash">Cash:</label>
+            <input
+              type="number"
+              id="shop_sales_cash"
+              name="sales[shop_sales][cash]"
+              class="cash-sale form-control"
+              value="{{ report.cash_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_visa">Visa:</label>
+            <input
+              type="number"
+              id="shop_sales_visa"
+              name="sales[shop_sales][visa]"
+              class="cash-sale form-control"
+              value="{{ report.visa_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_master">Master:</label>
+            <input
+              type="number"
+              id="shop_sales_master"
+              name="sales[shop_sales][master]"
+              class="cash-sale form-control"
+              value="{{ report.master_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_unionpay">UnionPay:</label>
+            <input
+              type="number"
+              id="shop_sales_unionpay"
+              name="sales[shop_sales][unionpay]"
+              class="cash-sale form-control"
+              value="{{ report.unionpay_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_alipay">Alipay:</label>
+            <input
+              type="number"
+              id="shop_sales_alipay"
+              name="sales[shop_sales][alipay]"
+              class="cash-sale form-control"
+              value="{{ report.alipay_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_wechat">WeChat Pay:</label>
+            <input
+              type="number"
+              id="shop_sales_wechat"
+              name="sales[shop_sales][wechat]"
+              class="cash-sale form-control"
+              value="{{ report.wechat_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_amex">Amex:</label>
+            <input
+              type="number"
+              id="shop_sales_amex"
+              name="sales[shop_sales][amex]"
+              class="cash-sale form-control"
+              value="{{ report.amex_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="shop_sales_octopus">Octopus:</label>
+            <input
+              type="number"
+              id="shop_sales_octopus"
+              name="sales[shop_sales][octopus]"
+              class="cash-sale form-control"
+              value="{{ report.octopus_sales or 0 }}"
+              min="0"
+            />
+          </div>
+        </div>
+
+        <!-- Delivery Sales Section -->
+        <div id="deliverySalesContainer">
+          <h2>Delivery Sales 배달 수입</h2>
+          <div class="cash-sale-item form-group">
+            <label for="delivery_sales_foodpanda">Foodpanda:</label>
+            <input
+              type="number"
+              id="delivery_sales_foodpanda"
+              name="sales[delivery_sales][foodpanda]"
+              class="cash-sale form-control"
+              value="{{ report.foodpanda_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="delivery_sales_keeta">Keeta:</label>
+            <input
+              type="number"
+              id="delivery_sales_keeta"
+              name="sales[delivery_sales][keeta]"
+              class="cash-sale form-control"
+              value="{{ report.keeta_sales or 0 }}"
+              min="0"
+            />
+          </div>
+          <div class="cash-sale-item form-group">
+            <label for="delivery_sales_openrice">Openrice:</label>
+            <input
+              type="number"
+              id="delivery_sales_openrice"
+              name="sales[delivery_sales][openrice]"
+              class="cash-sale form-control"
+              value="{{ report.openrice_sales or 0 }}"
+              min="0"
+            />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Total Shop Sales 전체 가게 수입:</label>
+          <input
+            type="number"
+            id="totalShopSales"
+            class="form-control"
+            readonly
+            value="{{ report.total_shop_sales }}"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Total Delivery Sales 전체 배달 수입:</label>
+          <input
+            type="number"
+            id="totalDeliverySales"
+            class="form-control"
+            readonly
+            value="{{ report.total_delivery_sales }}"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Total Sales 전체 수입:</label>
+          <input
+            type="number"
+            id="totalSales"
+            class="form-control"
+            readonly
+            value="{{ report.total_sales }}"
+          />
+        </div>
+
+        <!-- Shop Expenses Section -->
+        <h2>Shop Expenses 지출 내역</h2>
+
+        <div class="form-check mb-3">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="noExpenseCheckbox"
+            name="no_expense"
+            value="true"
+            {% if report and report.expenses == 0 %}checked{% endif %}
+          />
+          <label class="form-check-label" for="noExpenseCheckbox">
+            No Expenses / 지출 없음
+          </label>
+        </div>
+
+        <div class="table-responsive">
+          <table
+            id="shopExpensesContainer"
+            class="table table-bordered expense-table"
+          >
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Amount (HKD)</th>
+                <th>Remarks (비고)</th>
+                <th>Files</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for expense in report.shop_expenses %}
+                <tr>
+                  <td>
+                    <select
+                      name="shopExpenses[{{ loop.index0 }}][item]"
+                      class="form-control"
+                    >
+                      <option
+                        value="Part Time"
+                        {% if expense.item == 'Part Time' %}selected{% endif %}
+                      >
+                        Part Time
+                      </option>
+                      <option
+                        value="Ingredient"
+                        {% if expense.item == 'Ingredient' %}selected{% endif %}
+                      >
+                        Ingredient
+                      </option>
+                      <option
+                        value="Kitchen Expense"
+                        {% if expense.item == 'Kitchen Expense' %}selected{% endif %}
+                      >
+                        Kitchen Expense
+                      </option>
+                      <option
+                        value="Hall Expense"
+                        {% if expense.item == 'Hall Expense' %}selected{% endif %}
+                      >
+                        Hall Expense
+                      </option>
+                      <option
+                        value="Others"
+                        {% if expense.item == 'Others' %}selected{% endif %}
+                      >
+                        Others
+                      </option>
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      name="shopExpenses[{{ loop.index0 }}][amount]"
+                      class="form-control amount-input"
+                      value="{{ expense.amount }}"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      name="shopExpenses[{{ loop.index0 }}][remarks]"
+                      class="form-control"
+                      value="{{ expense.remarks }}"
+                    />
+                  </td>
+                  <td data-label="Files">
+                    <input
+                      type="file"
+                      name="files[{{ loop.index0 }}][]"
+                      class="form-control-file file-input"
+                      multiple
+                    />
+                    <small class="form-text text-muted"
+                      >Attach all relevant files for this expense.</small
+                    >
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm mt-2 preview-button"
+                    >
+                      Preview
+                    </button>
+                    <div
+                      class="file-preview-container mt-2"
+                      data-existing-files="{{ expense.files | tojson }}"
+                      style="max-width: 100%; overflow: auto;"
+                    ></div>
+
+                    <!-- Display existing files -->
+                    {% for file in expense.files.split(',') %}
+                      <a
+                        href="{{ url_for('report.download_file', filename=file) }}"
+                        target="_blank"
+                        >{{ file }}</a
+                      ><br />
+                    {% endfor %}
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-danger remove-expense">
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <button
+          id="addExpenseButton"
+          type="button"
+          class="btn btn-success mb-3"
+        >
+          Add Expense / 비용 내역 추가
+        </button>
+
+        <div class="form-group">
+          <label>Total Shop Expense 지출 총계:</label>
+          <input
+            type="number"
+            id="grossTotal"
+            name="totalExpenses"
+            class="form-control"
+            value="{{ report.expenses }}"
+            readonly
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="bank_deposit">Bank Deposit 은행 예금:</label>
+          <input
+            type="number"
+            id="bank_deposit"
+            name="bank_deposit"
+            class="form-control"
+            value="{{ report.bank_deposit }}"
+            min="0"
+          />
+        </div>
+
+        <!-- Closing Drawer Section -->
+        <div class="form-group">
+          <label>Closing Cashier Drawer Balance / 정산 잔고:</label>
+          <input
+            type="number"
+            id="closing_balance"
+            name="closing_balance"
+            class="form-control"
+            value="{{ report.closing_balance }}"
+            readonly
+          />
+        </div>
+
+        <!-- Actual Cash Value Section -->
+        <div class="form-group">
+          <label>Actual Cash Value / 현금 실보유금:</label>
+          <div class="row">
+            <div class="col-md-2">
+              <label for="note1000">1000 HKD note:</label>
+              <input
+                type="number"
+                id="note1000"
+                name="actual_cash[note1000]"
+                class="form-control"
+                placeholder="1000 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note500">500 HKD note:</label>
+              <input
+                type="number"
+                id="note500"
+                name="actual_cash[note500]"
+                class="form-control"
+                placeholder="500 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note100">100 HKD note:</label>
+              <input
+                type="number"
+                id="note100"
+                name="actual_cash[note100]"
+                class="form-control"
+                placeholder="100 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note50">50 HKD note:</label>
+              <input
+                type="number"
+                id="note50"
+                name="actual_cash[note50]"
+                class="form-control"
+                placeholder="50 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note20">20 HKD note:</label>
+              <input
+                type="number"
+                id="note20"
+                name="actual_cash[note20]"
+                class="form-control"
+                placeholder="20 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="note10">10 HKD note:</label>
+              <input
+                type="number"
+                id="note10"
+                name="actual_cash[note10]"
+                class="form-control"
+                placeholder="10 HKD notes"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="5coins">5 HKD Coins:</label>
+              <input
+                type="number"
+                id="5coins"
+                name="actual_cash[5coins]"
+                class="form-control"
+                placeholder="5 HKD Coins"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="2coins">2 HKD Coins:</label>
+              <input
+                type="number"
+                id="2coins"
+                name="actual_cash[2coins]"
+                class="form-control"
+                placeholder="2 HKD Coins"
+                min="0"
+              />
+            </div>
+            <div class="col-md-2">
+              <label for="1coins">1 HKD Coins:</label>
+              <input
+                type="number"
+                id="1coins"
+                name="actual_cash[1coins]"
+                class="form-control"
+                placeholder="1 HKD Coins"
+                min="0"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Total Actual Cash Value Section -->
+        <div class="form-group">
+          <label>Total Actual Cash Value / 현금 총계:</label>
+          <input
+            type="number"
+            id="total_actual_cash_value"
+            name="total_actual_cash_value"
+            class="form-control"
+            readonly
+          />
+          <span id="actualCashError" class="text-danger" style="display:none;"
+            >Value doesn't match Closing Balance / 현금 잔액이 일치 하지
+            않습니다.</span
+          >
+        </div>
+
+        <!-- Submit Button -->
+        <button
+          id="submitReportButton"
+          type="submit"
+          class="btn btn-primary btn-block"
+        >
+          Update Report / 수정하기
+        </button>
+      </form>
+    </div>
+
+    <!-- JavaScript Section -->
+    <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // DOM Elements
+        const openingDrawerInput = document.getElementById("openingDrawer");
+        const cashAdditionInput = document.getElementById("cash_addition");
+        const adjustedOpeningBalanceInput = document.getElementById(
+          "adjustedOpeningBalance",
+        );
+        const shopSalesFields = document.querySelectorAll(
+          "#cashSalesContainer input[name^='sales[shop_sales]']",
+        );
+        const deliverySalesFields = document.querySelectorAll(
+          "#deliverySalesContainer input[name^='sales[delivery_sales]']",
+        );
+        const totalShopSalesInput = document.getElementById("totalShopSales");
+        const totalDeliverySalesInput =
+          document.getElementById("totalDeliverySales");
+        const totalSalesInput = document.getElementById("totalSales");
+        const grossTotalInput = document.getElementById("grossTotal");
+        const closingDrawerInput = document.getElementById("closing_balance");
+        const bankDepositInput = document.getElementById("bank_deposit");
+        const totalActualCashInput = document.getElementById(
+          "total_actual_cash_value",
+        );
+        const actualCashError = document.getElementById("actualCashError");
+        const addExpenseButton = document.getElementById("addExpenseButton");
+        const shopExpensesTable = document.querySelector(
+          "#shopExpensesContainer tbody",
+        );
+
+        // Coins and Notes Inputs
+        const coinsInputs = [
+          { input: document.getElementById("1coins"), value: 1 },
+          { input: document.getElementById("2coins"), value: 2 },
+          { input: document.getElementById("5coins"), value: 5 },
+        ];
+        const noteInputs = [
+          { input: document.getElementById("note10"), value: 10 },
+          { input: document.getElementById("note20"), value: 20 },
+          { input: document.getElementById("note50"), value: 50 },
+          { input: document.getElementById("note100"), value: 100 },
+          { input: document.getElementById("note500"), value: 500 },
+          { input: document.getElementById("note1000"), value: 1000 },
+        ];
+
+        // Helper Functions
+        function parseInputValue(input) {
+          return parseFloat(input.value) || 0;
+        }
+
+        function updateIndividualSales(fields, totalInput) {
+          let total = 0;
+          fields.forEach((field) => {
+            total += parseInputValue(field);
+          });
+          totalInput.value = total.toFixed(2);
+          calculateTotalSales();
+        }
+
+        function calculateAdjustedOpeningBalance() {
+          const openingBalance = parseInputValue(openingDrawerInput);
+          const cashAddition = parseInputValue(cashAdditionInput);
+          adjustedOpeningBalanceInput.value = (
+            openingBalance + cashAddition
+          ).toFixed(2);
+        }
+
+        function calculateTotalSales() {
+          const totalShopSales = parseInputValue(totalShopSalesInput);
+          const totalDeliverySales = parseInputValue(totalDeliverySalesInput);
+          totalSalesInput.value = (totalShopSales + totalDeliverySales).toFixed(
+            2,
+          );
+          calculateClosingBalance();
+        }
+
+        function calculateTotalExpenses() {
+          const totalExpenses = Array.from(
+            shopExpensesTable.querySelectorAll(".amount-input"),
+          ).reduce((total, field) => total + parseInputValue(field), 0);
+          grossTotalInput.value = totalExpenses.toFixed(2);
+          calculateClosingBalance();
+        }
+
+        function calculateClosingBalance() {
+          const openingDrawer = parseInputValue(openingDrawerInput);
+          const cashAddition = parseInputValue(cashAdditionInput);
+          const totalSales = parseInputValue(totalSalesInput);
+          const totalExpenses = parseInputValue(grossTotalInput);
+          const bankDeposit = parseInputValue(bankDepositInput);
+
+          const closingBalance =
+            openingDrawer +
+            cashAddition +
+            totalSales -
+            totalExpenses -
+            bankDeposit;
+          closingDrawerInput.value = closingBalance.toFixed(2);
+
+          validateActualCash();
+        }
+
+        function calculateTotalActualCash() {
+          let total = 0;
+
+          coinsInputs.forEach(({ input, value }) => {
+            total += parseInputValue(input) * value;
+          });
+
+          noteInputs.forEach(({ input, value }) => {
+            total += parseInputValue(input) * value;
+          });
+
+          totalActualCashInput.value = total.toFixed(2);
+          validateActualCash();
+        }
+
+        function validateActualCash() {
+          const closingBalance = parseInputValue(closingDrawerInput);
+          const totalActualCash = parseInputValue(totalActualCashInput);
+
+          if (totalActualCash !== closingBalance) {
+            actualCashError.textContent =
+              "Actual Cash Value doesn't match Closing Balance / 현금 잔액이 일치 하지 않습니다.";
+            actualCashError.style.display = "inline";
+          } else {
+            actualCashError.style.display = "none";
+          }
+        }
+
+        function removeExpenseRow(event) {
+          const button = event.target;
+          const row = button.closest("tr");
+          if (row) {
+            row.remove();
+            reindexExpenseRows();
+            calculateTotalExpenses();
+          }
+        }
+
+        document
+          .querySelector("#shopExpensesContainer")
+          .addEventListener("click", function (event) {
+            if (event.target.classList.contains("preview-button")) {
+              const row = event.target.closest("tr");
+              const fileInput = row.querySelector(".file-input");
+              const previewContainer = row.querySelector(
+                ".file-preview-container",
+              );
+
+              if (fileInput && previewContainer) {
+                handleFilePreview(fileInput, previewContainer);
+              } else {
+                console.error(
+                  "File input or preview container not found for the clicked preview button.",
+                );
+              }
+            }
+          });
+
+        function createExpenseRow() {
+          const rowIndex = shopExpensesTable.querySelectorAll("tr").length;
+          const row = document.createElement("tr");
+          row.innerHTML = `
+                    <td>
+                        <select name="shopExpenses[${rowIndex}][item]" class="form-control">
+                            <option value="Part Time">Part Time</option>
+                            <option value="Ingredient">Ingredient</option>
+                            <option value="Kitchen Expense">Kitchen Expense</option>
+                            <option value="Hall Expense">Hall Expense</option>
+                            <option value="Others">Others</option>
+                        </select>
+                    </td>
+                    <td>
+                        <input type="number" name="shopExpenses[${rowIndex}][amount]" class="form-control amount-input" value="0" min="0">
+                    </td>
+                    <td>
+                        <input type="text" name="shopExpenses[${rowIndex}][remarks]" class="form-control">
+                    </td>
+                    <td>
+                        <input type="file" name="files[${rowIndex}][]" class="form-control-file file-input" multiple>
+                        <button type="button" class="btn btn-secondary btn-sm mt-2 preview-button">Preview</button>
+                        <div class="file-preview-container mt-2" style="max-width: 100%; overflow: auto;"></div>
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-danger remove-expense">Remove</button>
+                    </td>
+                `;
+          document
+            .querySelector("#shopExpensesContainer tbody")
+            .appendChild(row);
+          attachListenersToExistingRows();
+        }
+
+        function attachListenersToExistingRows() {
+          const rows = document.querySelectorAll(
+            "#shopExpensesContainer tbody tr",
+          );
+          rows.forEach((row) => {
+            const previewButton = row.querySelector(".preview-button");
+            const fileInput = row.querySelector(".file-input");
+            const previewContainer = row.querySelector(
+              ".file-preview-container",
+            );
+
+            if (previewButton && fileInput && previewContainer) {
+              previewButton.addEventListener("click", () =>
+                handleFilePreview(fileInput, previewContainer),
+              );
+            }
+          });
+        }
+
+        function reindexExpenseRows() {
+          shopExpensesTable.querySelectorAll("tr").forEach((row, index) => {
+            row.querySelector("select").name = `shopExpenses[${index}][item]`;
+            row.querySelector(".amount-input").name =
+              `shopExpenses[${index}][amount]`;
+            row.querySelector('input[type="text"]').name =
+              `shopExpenses[${index}][remarks]`;
+            row.querySelector('input[type="file"]').name = `files[${index}][]`;
+          });
+        }
+
+        // Event Listeners
+        openingDrawerInput.addEventListener(
+          "input",
+          calculateAdjustedOpeningBalance,
+        );
+        cashAdditionInput.addEventListener(
+          "input",
+          calculateAdjustedOpeningBalance,
+        );
+        shopSalesFields.forEach((field) =>
+          field.addEventListener("input", () =>
+            updateIndividualSales(shopSalesFields, totalShopSalesInput),
+          ),
+        );
+        deliverySalesFields.forEach((field) =>
+          field.addEventListener("input", () =>
+            updateIndividualSales(deliverySalesFields, totalDeliverySalesInput),
+          ),
+        );
+        grossTotalInput.addEventListener("input", calculateClosingBalance);
+        bankDepositInput.addEventListener("input", calculateClosingBalance);
+        coinsInputs.forEach(({ input }) =>
+          input.addEventListener("input", calculateTotalActualCash),
+        );
+        noteInputs.forEach(({ input }) =>
+          input.addEventListener("input", calculateTotalActualCash),
+        );
+        addExpenseButton.addEventListener("click", createExpenseRow);
+
+        // Initial Setup
+        attachListenersToExistingRows();
+        calculateAdjustedOpeningBalance();
+        calculateTotalSales();
+        calculateTotalExpenses();
+        calculateClosingBalance();
+        calculateTotalActualCash();
+      });
+    </script>
+  </body>
+</html>

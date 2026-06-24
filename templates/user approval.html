@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approve Admins</title>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Approve Admins</h1>
+        <a href="{{ url_for('user_management.admin_dashboard') }}" class="btn btn-primary mb-3">Back to Admin Dashboard</a>
+
+        <!-- Pending Admin Approvals -->
+        <h3>Pending Admin Approvals</h3>
+        {% if pending_admins %}
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Memberships</th>
+                    <th>Approve</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for admin in pending_admins %}
+                <tr>
+                    <td>{{ admin.username }}</td>
+                    <td>{{ admin.email }}</td>
+                    <td>{{ membership_summary_by_user.get(admin.id, 'No memberships') if membership_summary_by_user is defined else 'No memberships' }}</td>
+                    <td>
+                        <form action="{{ url_for('approve_admins') }}" method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="user_id" value="{{ admin.id }}">
+                            <button type="submit" class="btn btn-success">Approve</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No pending admin approvals.</p>
+        {% endif %}
+
+        <!-- Approved Admins Section -->
+        <h3>Approved Admins</h3>
+        {% if approved_admins %}
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Memberships</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for admin in approved_admins %}
+                <tr>
+                    <td>{{ admin.username }}</td>
+                    <td>{{ admin.email }}</td>
+                    <td>{{ membership_summary_by_user.get(admin.id, 'No memberships') if membership_summary_by_user is defined else 'No memberships' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No approved admins.</p>
+        {% endif %}
+    </div>
+</body>
+</html>
+
