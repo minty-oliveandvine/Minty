@@ -68,6 +68,11 @@
   </style>
 </head>
 <body class="antialiased">
+  <!-- Flash messages + client-side notifications (new-design slide-in toast).
+       Kept as the first child of <body> — outside the `sticky z-30` header's
+       stacking context — so its z-[400] renders above the z-[300] modals,
+       mirroring the regular users UI. -->
+  {% include 'components/flash_messages.html' %}
 <div id="app-scroll-root">
 
   <header class="sticky top-0 z-30 bg-white" style="padding-top: env(safe-area-inset-top, 0px)">
@@ -128,10 +133,12 @@
           Entity & Integration
         </a>
 
+        {% if is_petty_cash_enabled(org.id) %}
         <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}?from=bills"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Petty Cash Settings
         </a>
+        {% endif %}
 
         {% if is_billing_enabled(org.id) %}
         <a href="{{ bill_settings_url }}"
@@ -143,15 +150,11 @@
         <!-- Module & Subscription pill -->
         <a href="{{ url_for('entity_settings_module', org_id=org.id) }}?from=bills"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
-          Module &amp; Subscription
+          Module
         </a>
       </div>
     </div>
 
-    <!-- Flash messages + client-side notifications (new-design slide-in toast)
-         — fixed overlay, lives in the header so it isn't tied to the main
-         scroll/overflow context. -->
-    {% include 'entity/partials/settings_flash_toast.html' %}
   </header>
 
   <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">

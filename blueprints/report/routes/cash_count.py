@@ -255,7 +255,7 @@ def report_cash_count(id=None):
             - (current_draft.bank_deposit or 0)
         )
         if expected_balance < 0:
-            flash("Cash balance is negative. Please fix your entries before proceeding.", "danger")
+            flash("Cash balance is negative. Please fix your entries before proceeding.", "warning")
             return redirect(
                 url_for(
                     "report.report_cash_count",

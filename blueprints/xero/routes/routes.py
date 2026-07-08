@@ -54,12 +54,20 @@ def xero_auth():
     # to auto-create the user + accept the invitation, mirroring the OTP path.
     invite_token = (request.args.get("invite") or "").strip()
     state = f"auth:invite:{invite_token}" if invite_token else "auth"
+    # prompt=login forces Xero to re-authenticate instead of silently reusing an
+    # existing SSO session. Without it, a user already signed into Xero as
+    # someone else (e.g. User A) would be auto-authorized as that account, so an
+    # invitee who needs to sign in as User B could never switch — the callback
+    # would keep resolving User A and block the invite. prompt=login makes Xero
+    # show the login screen so they can authenticate as the correct account. It
+    # does NOT end User A's Xero session; it only re-prompts for this request.
     return redirect(
         "https://login.xero.com/identity/connect/authorize?response_type=code"
         f"&client_id={current_app.config['CLIENT_ID']}"
         f"&redirect_uri={current_app.config['REDIRECT_URI']}"
         f"&scope={scope}"
         f"&state={state}"
+        "&prompt=login"
     )
 
 
@@ -71,18 +79,33 @@ def _onboarding_app_url() -> str:
     ).rstrip("/")
 
 
-def _onboarding_xero_return(connected: bool, org_name: str = ""):
+def _onboarding_xero_return(connected: bool, org_name: str = "",
+                            mismatch: bool = False, expected: str = ""):
     """Redirect back into the onboarding app at the Accounting step (3).
 
     ``org_name`` is the Xero tenant/org name so onboarding can show the real
     Xero entity (not the local entity name).
+
+    ``mismatch`` distinguishes a blocked wrong-account attempt from a plain
+    user cancel. When set, the return flag is ``xero=mismatch`` (NOT
+    ``cancelled``) and ``expected`` (the address the user should have used) is
+    passed as a URL-encoded ``expected`` param so the onboarding UI can show a
+    specific message. The full address is sent, not masked.
     """
     from urllib.parse import urlencode
 
-    flag = "connected" if connected else "cancelled"
+    if mismatch:
+        flag = "mismatch"
+    elif connected:
+        flag = "connected"
+    else:
+        flag = "cancelled"
     qs = {"xero": flag, "step": 3}
     if org_name:
         qs["org"] = org_name
+    if mismatch and expected:
+        qs["expected"] = expected
+    # urlencode handles the URL-encoding of the email (and org name).
     return redirect(f"{_onboarding_app_url()}/?{urlencode(qs)}")
 
 
@@ -132,6 +155,59 @@ def _create_user_from_xero(decoded: dict, xero_email: str) -> User | None:
         return None
 
 
+def _initiator_owned_emails(user) -> set[str]:
+    """The set of addresses the clicker owns, across every identity column.
+
+    Mirrors the ownership check in ``accept_invitation`` (blueprints/invitation/
+    services/invite.py): a person may carry their address on ``email``,
+    ``xero_email``, or ``username``, and different addresses legitimately belong
+    to the same person (see blueprints/auth/services/identity.py). All are
+    normalized; empty values are dropped.
+    """
+    if user is None:
+        return set()
+    return {
+        e
+        for e in (
+            normalize_email(user.email),
+            normalize_email(user.xero_email),
+            normalize_email(user.username),
+        )
+        if e
+    }
+
+
+def _connect_initiator_mismatch(state_initiator_id, xero_email):
+    """Return the expected email(s) when the Xero login is NOT owned by the user
+    who started the connect/reconnect flow, else None.
+
+    Follows the invite-acceptance identity model: the Xero login proves it's the
+    clicker iff ``xero_email`` appears on any of the clicker's identity columns
+    (email / xero_email / username). The creator of the entity is irrelevant.
+
+    ``state_initiator_id`` is the clicker's user id carried through the OAuth
+    state. When absent (links generated before this gate existed) the check is
+    skipped — backward compatible. Returns a display string of the expected
+    address(es) for the error message, or None when the login matches.
+    """
+    if not state_initiator_id:
+        return None
+    initiator = User.query.get(state_initiator_id)
+    owned = _initiator_owned_emails(initiator)
+    if not owned:
+        # We can't determine the clicker's address — don't block (fail open,
+        # matching the no-initiator-id case). resolve_user_by_email downstream
+        # still governs which row the connection attaches to.
+        return None
+    if normalize_email(xero_email) in owned:
+        return None  # the Xero login is one of the clicker's own addresses
+    # For the user-facing message, show only email-shaped addresses (a
+    # form-signup ``username`` handle isn't an email). Matching above still
+    # considered every column; this only tidies the displayed expected value.
+    display = sorted(e for e in owned if "@" in e)
+    return " or ".join(display) if display else "your own Xero account"
+
+
 @xero_bp.route("/xero_connect")
 @login_required
 def xero_connect_entity():
@@ -154,17 +230,29 @@ def xero_connect_entity():
     # it may contain ":" / spaces, which would otherwise break the partition.
     entity_name = (request.args.get("entity_name") or "").strip()
     base_state = "entity_connect_onboarding" if from_onboarding else "entity_connect"
-    # state shape: "<base>" | "<base>:<entity_id>" | "<base>:<entity_id>:<name>"
-    # entity_id may be empty while name is present (id-less resume).
+    # state shape:
+    #   "<base>"
+    #   "<base>:<entity_id>:<name>"
+    #   "<base>:<entity_id>:<name>:<initiator_user_id>"
+    # entity_id may be empty while name is present (id-less resume). The trailing
+    # initiator id is the user who clicked Connect; the callback enforces that the
+    # Xero login email matches this user's email (see _expected_connect_email).
+    # The session does NOT survive the Xero round-trip, so the id rides in state.
     state = base_state
     if entity_id or entity_name:
         state = f"{base_state}:{entity_id}:{quote(entity_name, safe='')}"
+        if current_user.is_authenticated:
+            state = f"{state}:{current_user.id}"
+    # prompt=login forces Xero to re-authenticate instead of silently reusing an
+    # existing SSO session, so a user signed into Xero as a different account can
+    # connect with the correct one (and the callback's email gate then matches).
     return redirect(
         "https://login.xero.com/identity/connect/authorize?response_type=code"
         f"&client_id={current_app.config['CLIENT_ID']}"
         f"&redirect_uri={current_app.config['REDIRECT_URI']}"
         f"&scope={scope}"
         f"&state={state}"
+        "&prompt=login"
     )
 
 
@@ -180,7 +268,15 @@ def xero_reconnect():
     entity_id = request.args.get("entity_id")
     session["reconnect_entity_id"] = entity_id
     scope = "email profile openid accounting.contacts accounting.contacts.read accounting.settings accounting.settings.read accounting.reports.read accounting.attachments.read files payroll.employees payroll.payruns payroll.payslip payroll.timesheets projects.read projects accounting.attachments files.read accounting.journals.read assets.read assets accounting.transactions payroll.settings accounting.budgets.read offline_access"
+    # state shape: "entity_reconnect" | "entity_reconnect:<initiator_user_id>".
+    # The trailing id is the user who clicked Reconnect; the callback enforces the
+    # Xero login email matches this user's email. The session does not survive the
+    # Xero round-trip, so it rides in state.
     state = "entity_reconnect"
+    if current_user.is_authenticated:
+        state = f"entity_reconnect:{current_user.id}"
+    # prompt=login forces Xero to re-authenticate instead of silently reusing an
+    # existing SSO session, so the user can reconnect with the correct account.
     return redirect(
         "https://login.xero.com/identity/connect/authorize?response_type=code"
         f"&client_id={current_app.config['CLIENT_ID']}"
@@ -188,6 +284,7 @@ def xero_reconnect():
         f"&scope={scope}"
         f"&state={state}"
         f"&entity_id={entity_id}"
+        "&prompt=login"
     )
 
 
@@ -261,12 +358,21 @@ def xero_callback():
         invite_token = state_suffix[len("invite:"):].strip()
         state_suffix = ""
 
-    # For the entity-connect branches the suffix is "<entity_id>:<name>" (name
-    # url-encoded, either part possibly empty). For other branches it's just the
-    # raw suffix.
-    state_entity_id, _, state_entity_name_raw = state_suffix.partition(":")
-    state_entity_id = state_entity_id.strip()
-    state_entity_name = unquote(state_entity_name_raw).strip()
+    # For the entity-connect branches the suffix is
+    # "<entity_id>:<name>:<initiator_id>" (name url-encoded; any part possibly
+    # empty). For entity_reconnect the suffix is just "<initiator_id>". For other
+    # branches it's the raw suffix.
+    state_initiator_id = ""
+    if base_state == "entity_reconnect":
+        state_initiator_id = state_suffix.strip()
+        state_entity_id = ""
+        state_entity_name = ""
+    else:
+        state_entity_id, _, _rest = state_suffix.partition(":")
+        state_entity_id = state_entity_id.strip()
+        state_entity_name_raw, _, state_initiator_id = _rest.partition(":")
+        state_entity_name = unquote(state_entity_name_raw).strip()
+        state_initiator_id = state_initiator_id.strip()
 
     # Legacy: entity_id could also arrive as a query param (reconnect flow).
     entity_id = state_entity_id or (request.args.get("entity_id") or "").strip()
@@ -384,8 +490,32 @@ def xero_callback():
                         f"Xero invite acceptance failed for user {user.id}: "
                         f"{accept_error}"
                     )
+                    # Accept-time identity mismatch on a fresh Xero login. Do
+                    # NOT log this (wrong) user in. Send them back to the invited
+                    # /auth page to re-authenticate. We do NOT end the Xero SSO
+                    # session: the Xero login uses ``prompt=login`` (see
+                    # xero_auth), so Xero re-prompts and the user can sign in as
+                    # the correct account even if a different Xero session is
+                    # active — no force-logout, and no Xero-homepage dead-end.
+                    from urllib.parse import urlencode
+
+                    invitation = Invitation.query.filter_by(
+                        token=invite_token
+                    ).first()
+                    invited_email = (
+                        invitation.email if invitation else ""
+                    )
+                    onboarding_base = os.environ.get(
+                        "ONBOARDING_APP_URL", "http://localhost:3001"
+                    ).rstrip("/")
+                    resume_qs = {"invite": invite_token}
+                    if invited_email:
+                        resume_qs["email"] = invited_email
+                    resume_url = (
+                        f"{onboarding_base}/auth?{urlencode(resume_qs)}"
+                    )
                     flash(accept_error, "error")
-                    return redirect(url_for("auth.home"))
+                    return redirect(resume_url)
                 login_user(user)
                 logger.info(
                     f"Xero login: user {user.id} accepted invite to entity "
@@ -421,6 +551,34 @@ def xero_callback():
             decoded = decode_jwt(response.get("id_token"))
             xero_email = normalize_email(
                 decoded.get("email") or decoded.get("preferred_username"))
+
+            # Gate: the Xero account logged in with must match the user who
+            # clicked Connect. Block before any DB write / login_user so a
+            # mismatched account never connects the entity or gets logged in.
+            expected_email = _connect_initiator_mismatch(
+                state_initiator_id, xero_email
+            )
+            if expected_email:
+                logger.warning(
+                    "Xero connect blocked: expected %s, logged in as %s",
+                    expected_email, xero_email,
+                )
+                flash(
+                    f"You must connect with the Xero account for "
+                    f"{expected_email}. You logged in as {xero_email}.",
+                    "error",
+                )
+                if from_onboarding:
+                    # Distinct mismatch signal (not "cancelled") so onboarding
+                    # can show a wrong-account message. expected may list >1
+                    # owned address ("a@x or b@y"); send the first for the param.
+                    return _onboarding_xero_return(
+                        False,
+                        mismatch=True,
+                        expected=expected_email.split(" or ")[0],
+                    )
+                return redirect(url_for("entity.entity_list"))
+
             user = resolve_user_by_email(xero_email)
 
             if user:
@@ -591,6 +749,25 @@ def xero_callback():
             decoded = decode_jwt(response.get("id_token"))
             xero_email = normalize_email(
                 decoded.get("email") or decoded.get("preferred_username"))
+
+            # Gate: the Xero account logged in with must match the user who
+            # clicked Reconnect. Block before any DB write / login_user.
+            expected_email = _connect_initiator_mismatch(
+                state_initiator_id, xero_email
+            )
+            if expected_email:
+                logger.warning(
+                    "Xero reconnect blocked: expected %s, logged in as %s",
+                    expected_email, xero_email,
+                )
+                flash(
+                    f"You must reconnect with the Xero account for "
+                    f"{expected_email}. You logged in as {xero_email}.",
+                    "error",
+                )
+                return redirect(
+                    url_for("entity_settings", entity_id=entity_id))
+
             user = resolve_user_by_email(xero_email)
 
             if user:

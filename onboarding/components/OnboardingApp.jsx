@@ -499,9 +499,16 @@ export default function OnboardingApp() {
             ...(payload.entity?.currency ? { currency: payload.entity.currency } : {}),
           },
           modules,
+          // The server /state payload is authoritative for the connection in
+          // BOTH directions: a `connected: true` adopts the server's org, and a
+          // `connected: false` clears local state. The earlier code only honored
+          // the `true` case and fell back to `prev.xero` otherwise, so a Xero
+          // disconnect by another member (e.g. an invitee) never showed up when
+          // the inviter refreshed — local `connected: true` masked the server's
+          // `connected: false`.
           xero: payload.xero?.connected
             ? { connected: true, org: payload.xero.org || prev.xero.org }
-            : prev.xero,
+            : { connected: false, org: '' },
           invites: Array.isArray(payload.invites) ? payload.invites : prev.invites,
           inviteDeferred: cachedDeferred,
         };

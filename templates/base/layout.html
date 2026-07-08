@@ -72,34 +72,10 @@
 
   <body>
     <div class="main-container">
-      {% with errors = get_flashed_messages(with_categories=True) %}{% if errors %}
-        {% for category, error in errors %}{% if category == 'success' %}
-          {{
-            components.toast(icon='img/success.webp', type='Success', message=error,
-            toastBorder='successBorder', toastBg='successBg', toastColor='success')
-          }}
-        {% elif category =='error' or category == 'danger' %}
-                     {{
-             components.toast(icon='img/error.webp',
-             type='Error', message=error, toastBorder='errorBorder', toastBg='errorBg',
-             toastColor='error')
-           }}
-        {% elif category =='info' %}
-                     {{
-             components.toast(icon='img/info.webp', type='Information', message=error,
-             toastBorder='infoBorder', toastBg='infoBg', toastColor='info')
-           }}
-        {%
-            elif
-            category =='warning'
-          %}
-                     {{
-             components.toast(icon='img/warning.svg',
-             type='Warning', message=error, toastBorder='warningBorder',
-             toastBg='warningBg', toastColor='warning')
-           }}
-        {% endif %}{% endfor %}
-      {% endif %}{% endwith %}
+      {# Flash toasts + drain (canonical). Every page extending this base
+         inherits the single flash renderer and consumes the session flash
+         queue on load, so a queued message can't leak forward. #}
+      {% include 'components/flash_messages.html' %}
       <header class="main-header">{% block header %}{% endblock %}</header>
       <main class="main-content">{% block content %}{% endblock %}</main>
       <footer class="main-footer">{% block footer %}{% endblock %}</footer>
@@ -118,24 +94,12 @@
                  }
                });
              });
-
-             // Auto-hide toasts after 4 seconds
-             setTimeout(() => {
-               const toasts = document.querySelectorAll(".toast");
-               toasts.forEach(function(toast) {
-                 toast.style.display = "none";
-               });
-             }, 4000);
+             // NOTE: no blanket `.toast` auto-hide here — the canonical
+             // flash_messages partial scopes auto-dismiss to its own toast so
+             // client-side (validation) toasts are never killed by a global sweep.
            });
          </script>
       {% endblock %}
     </div>
-    <!-- Idle auto-logout (also ends the Xero session). Placed outside the
-         overridable scripts block so child templates can't drop it. -->
-    <script>
-      window.IDLE_TIMEOUT_SECONDS = {{ config.get('IDLE_TIMEOUT_SECONDS', 1800) }};
-      window.IDLE_LOGOUT_URL = "{{ url_for('auth.logout') }}?reason=idle";
-    </script>
-    <script src="{{ url_for('static', filename='js/idle-logout.js') }}"></script>
   </body>
 </html>

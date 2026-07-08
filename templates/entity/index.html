@@ -81,6 +81,11 @@
   </style>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Flash toasts + drain. Including this here consumes any flash queued by a
+     prior redirect (e.g. "Entity not found" / "Entity deleted successfully")
+     so it can't leak forward to the dashboard. #}
+  {% include 'components/flash_messages.html' %}
+
   <div class="flex min-h-screen items-center justify-center main-container">
     <!-- Phone card -->
     <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">

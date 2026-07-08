@@ -4,15 +4,41 @@ from __future__ import annotations
 
 from loguru import logger
 
+# Blueprints that MUST register for the app to work. A failure to register one
+# of these is a real bug (not an optional module being absent), so it is logged
+# at ERROR with a traceback instead of being swallowed at DEBUG. Historically a
+# circular import silently dropped ``invitation`` here, which only surfaced much
+# later as ``url_for('invitation.accept_invitation_page')`` BuildErrors during
+# invite-email sends (email_sent=False). Loud logging prevents a repeat.
+_EXPECTED_BLUEPRINTS = frozenset(
+    {
+        "blueprints.auth",
+        "blueprints.entity",
+        "blueprints.report",
+        "blueprints.user_management",
+        "blueprints.xero",
+        "blueprints.invitation",
+    }
+)
+
 
 def _register_if_available(app, module_path: str, attr: str) -> None:
+    expected = module_path in _EXPECTED_BLUEPRINTS
     try:
         __import__(f"{module_path}.routes")
     except ModuleNotFoundError:
         pass
     except Exception as exc:
-        # Keep bootstrap resilient when optional route modules are unavailable.
-        logger.debug(f"Skip importing routes for {module_path}: {exc}")
+        # A route module that fails to import means its endpoints won't exist,
+        # so url_for() to them raises BuildError downstream. For expected
+        # blueprints this is a bug — log loudly with the traceback.
+        if expected:
+            logger.exception(
+                f"Failed to import routes for expected blueprint "
+                f"{module_path!r}: {type(exc).__name__}: {exc}"
+            )
+        else:
+            logger.debug(f"Skip importing routes for {module_path}: {exc}")
     try:
         module = __import__(module_path, fromlist=[attr])
         blueprint = getattr(module, attr)
@@ -20,12 +46,34 @@ def _register_if_available(app, module_path: str, attr: str) -> None:
     except ModuleNotFoundError:
         return
     except Exception as exc:
-        # Keep bootstrap resilient when optional modules are intentionally
-        # absent.
-        logger.debug(f"Skip registering blueprint {module_path}.{attr}: {exc}")
+        if expected:
+            logger.exception(
+                f"Failed to register expected blueprint "
+                f"{module_path}.{attr}: {type(exc).__name__}: {exc}"
+            )
+        else:
+            # Keep bootstrap resilient when optional modules are intentionally
+            # absent.
+            logger.debug(
+                f"Skip registering blueprint {module_path}.{attr}: {exc}"
+            )
 
 
 def register_blueprints(app):
+    # Fully load the model registry FIRST. ``models.db`` imports every model
+    # submodule (e.g. blueprints.invitation.models.invitation) to register them
+    # with SQLAlchemy, and those submodules do ``from models.db import db``.
+    # If a blueprint's ``.routes`` is imported before ``models.db`` has finished
+    # executing, that ``from models.db import db`` re-enters a half-initialized
+    # ``models.db`` and raises "cannot import name ... from partially
+    # initialized module" — which previously silently dropped the invitation
+    # blueprint. Importing models.db to completion here makes registration
+    # order-independent.
+    try:
+        import models.db  # noqa: F401
+    except Exception:
+        logger.exception("Failed to pre-load models.db before blueprint registration")
+
     for module_path, attr in (
         ("blueprints.auth", "auth_bp"),
         ("blueprints.entity", "entity_bp"),
@@ -33,7 +81,6 @@ def register_blueprints(app):
         ("blueprints.user_management", "user_management_bp"),
         ("blueprints.xero", "xero_bp"),
         ("blueprints.invitation", "invitation_bp"),
-        ("blueprints.consent", "consent_bp"),
         ("blueprints.admin", "admin_bp"),
         ("blueprints.file", "file_bp"),
         ("blueprints.api", "api_bp"),

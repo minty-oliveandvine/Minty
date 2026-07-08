@@ -10,6 +10,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history_draft
 from blueprints.report.services.shared import (check_user_has_entities,
+                                               future_date_error,
                                                header_publishing_status_for,
                                                recalculate_report,
                                                resolve_report_entity_id,
@@ -25,16 +26,41 @@ from services.permission_policy import Permission, can_edit_report, has_permissi
 from utils import jsonify
 
 
-def _onboarding_start_date_error(selected_date, today):
-    """Validate the start date an onboarding user chose for their first report.
+def _onboarding_floor_date(entity_id):
+    """The earliest date a first report may use: the onboarding opening date.
 
-    Onboarding users deliberately pick the date they want to begin reporting
-    from, so the usual "within 7 days from today" floor doesn't apply. The only
-    remaining bound is that the date can't be in the future. Returns an error
-    message if out of range, else None.
+    Onboarding seeds an opening ReportDraft whose ``transaction_date`` is the
+    date the user chose to start reporting from. That date is the floor for the
+    first report (replaces the legacy "within 7 days from today" window).
+    Returns a date, or None if no onboarding draft exists.
     """
-    if selected_date > today:
-        return "Start date can't be in the future. Choose today or an earlier date."
+    opening_draft = (
+        ReportDraft.query.filter_by(company=entity_id)
+        .order_by(ReportDraft.transaction_date.asc())
+        .first()
+    )
+    return opening_draft.transaction_date if opening_draft else None
+
+
+def _first_report_date_error(selected_date, today, entity_id):
+    """Validate a first report's date.
+
+    Floor is the onboarding date (the opening draft's transaction_date) so the
+    rule is the same whether or not the user arrived straight from the
+    onboarding wizard. Future dates are always rejected; the onboarding date is
+    enforced as the lower bound when one exists. Returns an error message if out
+    of range, else None.
+    """
+    future_err = future_date_error(selected_date, today)
+    if future_err:
+        return future_err
+
+    onboarding_date = _onboarding_floor_date(entity_id)
+    if onboarding_date and selected_date < onboarding_date:
+        return (
+            f"Transaction date must be on or after your onboarding date "
+            f"({onboarding_date})."
+        )
     return None
 
 
@@ -125,25 +151,9 @@ def report_opening(id=None, entity_id=None):
         try:
             selected_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
             if not id and request.method == "POST":
-                today = datetime.now().date()
-
-                # Reject dates that fall within a Xero-locked period.
-                from blueprints.xero.services.integration import (
-                    get_effective_lock_date, lock_date_violation_message)
-                entity = Entity.query.get(entity_id)
-                lock_msg = lock_date_violation_message(
-                    selected_date, get_effective_lock_date(entity)
-                )
-                if lock_msg:
-                    logger.warning(
-                        f"Transaction date {selected_date} is within Xero lock period for entity {entity_id}"
-                    )
-                    flash(lock_msg, "error")
-                    if entity_id:
-                        return redirect(
-                            url_for("entity.report_dashboard", id=entity_id)
-                        )
-                    return redirect(url_for("entity.entity_list"))
+                # Use Hong Kong time so the date boundary matches the users'
+                # local midnight, not the server's (UTC) midnight.
+                today = datetime.now(tz).date()
 
                 # Fetch the last submitted report to validate date
                 last_report = (
@@ -152,16 +162,31 @@ def report_opening(id=None, entity_id=None):
                     .first()
                 )
 
+                # No report may start on a date after today, regardless of how
+                # many prior reports exist.
+                future_err = future_date_error(selected_date, today)
+                if future_err:
+                    logger.warning(
+                        f"Transaction date {selected_date} rejected: {future_err}"
+                    )
+                    flash(future_err, "error")
+                    if entity_id:
+                        return redirect(
+                            url_for("entity.report_dashboard", id=entity_id))
+                    return redirect(url_for("entity.entity_list"))
+
                 # Validate based on business rules
                 if last_report:
-                    # If reports exist: only allow dates after the last
-                    # submitted report
-                    if selected_date <= last_report.transaction_date:
+                    # If reports exist: only the day after the last submitted
+                    # report is allowed (consecutive days, no gaps).
+                    expected_date = last_report.transaction_date + timedelta(days=1)
+                    if expected_date > today:
                         logger.warning(
-                            f"Transaction date {selected_date} is before or equal to last submitted report date {last_report.transaction_date}"
+                            f"Next report date {expected_date} is in the future (today {today})"
                         )
                         flash(
-                            f"Transaction date must be after {last_report.transaction_date}. You can only start reports after your last submitted report date.",
+                            "Transaction date cannot be in the future. "
+                            f"You can only create reports for dates up to {today}.",
                             "error",
                         )
                         if entity_id:
@@ -171,18 +196,14 @@ def report_opening(id=None, entity_id=None):
                                     id=entity_id))
                         else:
                             return redirect(url_for("entity.entity_list"))
-                elif from_onboarding:
-                    # Coming from onboarding: the 7-day floor doesn't apply, but
-                    # keep the date within a sane range (not future, not before
-                    # the entity existed).
-                    onboarding_err = _onboarding_start_date_error(
-                        selected_date, today
-                    )
-                    if onboarding_err:
+                    if selected_date != expected_date:
                         logger.warning(
-                            f"Onboarding start date {selected_date} rejected: {onboarding_err}"
+                            f"Transaction date {selected_date} is not the day after the last submitted report date {last_report.transaction_date}"
                         )
-                        flash(onboarding_err, "error")
+                        flash(
+                            f"Transaction date must be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).",
+                            "error",
+                        )
                         if entity_id:
                             return redirect(
                                 url_for(
@@ -191,17 +212,17 @@ def report_opening(id=None, entity_id=None):
                         else:
                             return redirect(url_for("entity.entity_list"))
                 else:
-                    # If no reports exist: allow dates within 7 days from today
-                    # (past) or any future date.
-                    seven_days_ago = today - timedelta(days=7)
-                    if selected_date < seven_days_ago:
+                    # No reports exist: the first report may start on or after
+                    # the onboarding date (no 7-day floor), up to today. Same
+                    # rule whether or not the user came straight from onboarding.
+                    first_err = _first_report_date_error(
+                        selected_date, today, entity_id
+                    )
+                    if first_err:
                         logger.warning(
-                            f"Transaction date {selected_date} is more than 7 days in the past from today {today}"
+                            f"First report date {selected_date} rejected: {first_err}"
                         )
-                        flash(
-                            f"Transaction date must be within 7 days from today. You can only create reports for dates on or after {seven_days_ago}.",
-                            "error",
-                        )
+                        flash(first_err, "error")
                         if entity_id:
                             return redirect(
                                 url_for(
@@ -636,16 +657,36 @@ def report_opening(id=None, entity_id=None):
                         f"Last report found: {last_report.id if last_report else 'None'} on date {last_report.transaction_date if last_report else 'N/A'}"
                     )
 
-                    # Determine the expected date and validate transaction_date
+                    # Determine the expected date and validate transaction_date.
+                    # Hong Kong time so the "future" boundary is the users' local
+                    # midnight, not the server's (UTC) midnight.
+                    today = datetime.now(tz).date()
                     if last_report:
-                        # If a report has been submitted, you can only start
-                        # after the submitted date
-                        if transaction_date <= last_report.transaction_date:
+                        # If a report has been submitted, only the day after the
+                        # submitted date is allowed (consecutive days, no gaps).
+                        expected_date = last_report.transaction_date + timedelta(days=1)
+                        if expected_date > today:
                             logger.warning(
-                                f"Transaction date {transaction_date} is before or equal to last submitted report date {last_report.transaction_date}"
+                                f"Next report date {expected_date} is in the future (today {today})"
                             )
                             flash(
-                                f"Error: Transaction date must be after {last_report.transaction_date}. You can only start reports after your last submitted report date.",
+                                "Error: Transaction date cannot be in the future. "
+                                f"You can only create reports for dates up to {today}.",
+                                "error",
+                            )
+                            if entity_id:
+                                return redirect(
+                                    url_for(
+                                        "entity.report_dashboard",
+                                        id=entity_id))
+                            else:
+                                return redirect(url_for("entity.entity_list"))
+                        if transaction_date != expected_date:
+                            logger.warning(
+                                f"Transaction date {transaction_date} is not the day after the last submitted report date {last_report.transaction_date}"
+                            )
+                            flash(
+                                f"Error: Transaction date must be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).",
                                 "error",
                             )
                             if entity_id:
@@ -662,49 +703,26 @@ def report_opening(id=None, entity_id=None):
                         logger.info(
                             "No previous reports found; this is the first report."
                         )
-                        today = datetime.now().date()
+                        today = datetime.now(tz).date()
 
-                        if from_onboarding:
-                            # Onboarding: the 7-day floor doesn't apply, but the
-                            # chosen start date must still be sane (not future,
-                            # not before the entity existed).
-                            onboarding_err = _onboarding_start_date_error(
-                                transaction_date, today
+                        # First report: may start on or after the onboarding
+                        # date (no 7-day floor), up to today. Same rule whether
+                        # or not the user arrived straight from onboarding.
+                        first_err = _first_report_date_error(
+                            transaction_date, today, entity_id
+                        )
+                        if first_err:
+                            logger.warning(
+                                f"First report date {transaction_date} rejected: {first_err}"
                             )
-                            if onboarding_err:
-                                logger.warning(
-                                    f"Onboarding start date {transaction_date} rejected: {onboarding_err}"
-                                )
-                                flash(f"Error: {onboarding_err}", "error")
-                                if entity_id:
-                                    return redirect(
-                                        url_for(
-                                            "entity.report_dashboard",
-                                            id=entity_id))
-                                else:
-                                    return redirect(url_for("entity.entity_list"))
-                        else:
-                            # If no report has been submitted, may start within
-                            # 7 days from now.
-                            seven_days_ago = today - timedelta(days=7)
-                            if (
-                                transaction_date < seven_days_ago
-                                or transaction_date > today
-                            ):
-                                logger.warning(
-                                    f"Transaction date {transaction_date} is outside the 7-day window from today {today}"
-                                )
-                                flash(
-                                    f"Error: Transaction date must be within 7 days from today. You can only create reports for dates between {seven_days_ago} and {today}.",
-                                    "error",
-                                )
-                                if entity_id:
-                                    return redirect(
-                                        url_for(
-                                            "entity.report_dashboard",
-                                            id=entity_id))
-                                else:
-                                    return redirect(url_for("entity.entity_list"))
+                            flash(f"Error: {first_err}", "error")
+                            if entity_id:
+                                return redirect(
+                                    url_for(
+                                        "entity.report_dashboard",
+                                        id=entity_id))
+                            else:
+                                return redirect(url_for("entity.entity_list"))
 
                         next_transaction_date = transaction_date + \
                             timedelta(days=1)
@@ -878,7 +896,7 @@ def report_opening(id=None, entity_id=None):
                     500,
                 )
             else:
-                flash("An error occurred. Please try again.", "danger")
+                flash("Couldn't save the opening entry. Please try again.", "error")
                 return redirect(url_for("report.report_opening"))
 
     # For GET request, check for existing drafts first
@@ -894,7 +912,7 @@ def report_opening(id=None, entity_id=None):
             # Don't look for other drafts, we want to create one for the
             # selected date
         else:
-            today = datetime.now().date()
+            today = datetime.now(tz).date()
 
             # Try to find an existing draft for this entity (any user) in the
             # last 7 days

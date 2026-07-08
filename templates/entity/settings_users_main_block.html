@@ -30,7 +30,7 @@
                 All
               </button>
               {% for role in roles %}
-              <button onclick="selectPermission('{{ role.name|lower }}')" id="{{ role.name|lower }}Btn" class="px-4 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-gray-700 hover:bg-[#F3F4F6]/80 transition-colors" data-role="{{ role.name|lower }}">
+              <button onclick="selectPermission('{{ role.value }}')" id="{{ role.value }}Btn" class="px-4 py-2 rounded-full text-sm font-medium bg-[#F3F4F6] text-gray-700 hover:bg-[#F3F4F6]/80 transition-colors" data-role="{{ role.value }}">
                 {{ role.name }}
               </button>
               {% endfor %}

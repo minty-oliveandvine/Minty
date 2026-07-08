@@ -87,45 +87,6 @@ def refresh_access_token(application=None):
     return refresh_access_token_for_user(user, application=application)
 
 
-def xero_logout_url(user, application=None, post_logout_redirect_uri=None):
-    """Build Xero's RP-initiated logout (end-session) URL for ``user``.
-
-    Redirecting the browser here ends the user's Xero SSO session (the Xero
-    IdentityServer cookie), so a subsequent "Login with Xero" prompts for
-    credentials again instead of silently signing back in. Xero turns this into
-    the ``/identity/user/logout?logoutId=...`` page.
-
-    Unlike revocation, this does NOT touch the OAuth grant or stored tokens, so
-    entity Xero connections keep working — it only ends the browser session.
-
-    ``post_logout_redirect_uri`` (optional) is where Xero sends the browser
-    after logout; it MUST be registered in the Xero app's post-logout redirect
-    URIs or Xero will ignore it. Falls back to the ``XERO_POST_LOGOUT_REDIRECT_URI``
-    config value when not passed.
-
-    Returns the URL string, or ``None`` if the user has no Xero ``id_token``
-    (e.g. a password-only account that never linked Xero) and therefore has no
-    Xero session to end.
-    """
-    from urllib.parse import urlencode
-
-    app = _resolve_app(application)
-    id_token = getattr(user, "id_token", None) if user else None
-    if not id_token:
-        return None
-
-    params = {"id_token_hint": id_token}
-    redirect_uri = post_logout_redirect_uri or (
-        app.config.get("XERO_POST_LOGOUT_REDIRECT_URI") if app else None
-    )
-    if redirect_uri:
-        params["post_logout_redirect_uri"] = redirect_uri
-    return (
-        "https://login.xero.com/identity/connect/endsession?"
-        + urlencode(params)
-    )
-
-
 def token_expired(current_user, application=None, tz=None):
     app = _resolve_app(application)
     try:

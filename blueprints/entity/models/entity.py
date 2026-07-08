@@ -20,6 +20,11 @@ class Entity(db.Model):
     timezone = db.Column(db.String(30))
     note = db.Column(db.Text)
     status = db.Column(db.String(20), default="active")
+    # Onboarding wizard step the user last "Saved and Exited" on. This is the
+    # frontend step id (1-9) sent verbatim by the wizard — NOT the backend's
+    # derived current_step ordering — so it is stored and returned as-is. NULL
+    # means the user never explicitly saved a step.
+    onboarding_saved_step = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
     last_connected_at = db.Column(db.TIMESTAMP, nullable=True)
     period_lock_date = db.Column(db.Date, nullable=True)

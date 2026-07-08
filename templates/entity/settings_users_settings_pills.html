@@ -7,10 +7,12 @@
            <a href="{{ url_for('entity_settings', entity_id=org.id) }}{{ bills_settings_query }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
              Entity & Integration
            </a>
+           {% if is_petty_cash_enabled(org.id) %}
            <!-- Petty Cash Settings Tab -->
            <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}{{ bills_settings_query }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
              Petty Cash Settings
            </a>
+           {% endif %}
            {% if is_billing_enabled(org.id) %}
            <a href="{{ bill_settings_url }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center shrink-0" rel="noopener noreferrer">
              Bill Settings
@@ -19,6 +21,6 @@
           <!-- Module & Subscription pill -->
         <a href="{{ url_for('entity_settings_module', org_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
-          Module &amp; Subscription
+          Module
         </a>
          </div>

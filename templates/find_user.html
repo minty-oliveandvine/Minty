@@ -179,6 +179,7 @@
     
 </head>
 <body>
+    {% include 'components/flash_messages.html' %}
     <div class="container mt-5">
         <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo" alt="Logo">
         <h1 class="text-center">Find User / 사용자 찾기</h1>

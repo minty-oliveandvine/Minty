@@ -100,10 +100,28 @@
     }
 
     .auth-page {
+      /* Positioning context for the toasts (position:absolute). The auth pages
+         reset .main-container to static, so anchor toasts to .auth-page. */
+      position: relative;
       min-height: calc(100vh - 60px);
       padding: 24px 16px 48px;
       display: flex;
       justify-content: center;
+    }
+    /* Shared toast macro is bottom-center for dashboards; on this page put every
+       toast in the top-right corner. Covers both the form/error toasts (rendered
+       inside .auth-page) and the flash toasts — e.g. the post-registration
+       success message — which the base layout renders inside .main-container.
+       Anchor to the fixed viewport so position is consistent regardless of which
+       container holds the toast. */
+    .main-container .toast:not(#flashMessagesCard),
+    .auth-page .toast:not(#flashMessagesCard) {
+      position: fixed !important;
+      top: 24px !important;
+      right: 24px !important;
+      bottom: auto !important;
+      left: auto !important;
+      transform: none !important;
     }
 
     .auth-card {
@@ -352,9 +370,15 @@
           />
         </a>
 
+        <p class="auth-foot">
+          Don't have an account?
+          <a href="{{ url_for('auth.register') }}" class="auth-link">Sign up</a>
+        </p>
+
       </div>
 
-      <div class="auth-notice">
+      <!-- Hide Auth in the front-end -->
+      <!-- <div class="auth-notice">
         <span class="auth-notice-icon" aria-hidden="true">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z" />
@@ -365,7 +389,7 @@
           <div class="auth-notice-title">Secure Authentication</div>
           <p>Your login is protected by industry-standard AES-256 encryption.</p>
         </div>
-      </div>
+      </div> -->
 
     </div>
   </main>

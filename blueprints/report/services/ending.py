@@ -13,6 +13,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report.services.shared import (check_user_has_entities,
                                                cleanup_partial_submission_data,
+                                               future_date_error,
                                                get_cash_sales_from_detail,
                                                resolve_report_entity_id)
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
@@ -1159,7 +1160,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             - (current_draft.bank_deposit or 0)
         )
         if expected_balance < 0:
-            flash("Cash balance is negative. Please fix your entries before finishing the report.", "danger")
+            flash("Cash balance is negative. Please fix your entries before finishing the report.", "warning")
             return redirect(
                 url_for(
                     "report.report_deposit",
@@ -1219,6 +1220,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 # 3. Validate essential data fields
                 if not current_draft.transaction_date:
                     validation_errors.append("Transaction date is required")
+                else:
+                    # No report may be posted for a date after today. This is the
+                    # definitive guard: the wizard bypasses create.py, so this is
+                    # the last gate before a Report row is written.
+                    future_err = future_date_error(current_draft.transaction_date)
+                    if future_err:
+                        validation_errors.append(future_err)
 
                 if current_draft.opening_balance is None:
                     validation_errors.append("Opening balance is required")

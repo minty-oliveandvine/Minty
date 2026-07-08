@@ -7,6 +7,7 @@
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
+    {% include 'components/flash_messages.html' %}
     <div class="container mt-5">
         <h1 class="text-center">Approve Admins</h1>
         <a href="{{ url_for('user_management.admin_dashboard') }}" class="btn btn-primary mb-3">Back to Admin Dashboard</a>

@@ -58,14 +58,14 @@ MODULE_DISPLAY: dict[str, dict] = {
         "price": "280 HKD per Month",
         "price_amount": 280,
         "summary_label": "Petty cash module",
-        "learn_more": "https://example.com/petty-cash",
+        "learn_more": "https://youtu.be/kMs85hnvwFw?si=4Yt6WHeFIYVkNLPK",
     },
     MODULE_BILL: {
         "image": "img/payment-icon.png",
         "price": "280 HKD per Month",
         "price_amount": 280,
         "summary_label": "Bill module",
-        "learn_more": "https://example.com/payment-request",
+        "learn_more": "https://youtu.be/v7G6gaGO0V0?si=P7-aWHPa9p4jDlHS",
     },
 }
 
@@ -74,6 +74,43 @@ MODULE_DISPLAY: dict[str, dict] = {
 # subscribes to more than one module (mirrors the Discount_coupon catalog).
 SUBSCRIPTION_CURRENCY = "HK$"
 BULK_DISCOUNT_AMOUNT = 160
+
+
+def _enabled_state(entity_id: str) -> dict[str, bool]:
+    """Resolve each canonical module's on/off state for an entity.
+
+    Mirrors ``_is_module_enabled``'s backward-compatible fallback:
+    map row → catalog is_active → True. Returns {code: bool} for every
+    code in MODULE_CODES so callers get a complete, stable picture.
+    """
+    catalog_by_code = {
+        fn.function_code: fn
+        for fn in EntityFunction.query.filter(
+            EntityFunction.function_code.in_(MODULE_CODES)
+        ).all()
+    }
+    fn_ids = [fn.id for fn in catalog_by_code.values()]
+    maps_by_fn_id = {}
+    if fn_ids:
+        maps_by_fn_id = {
+            row.entity_function_id: row
+            for row in EntityFunctionMap.query.filter(
+                EntityFunctionMap.entity_id == entity_id,
+                EntityFunctionMap.entity_function_id.in_(fn_ids),
+            ).all()
+        }
+
+    state: dict[str, bool] = {}
+    for code in MODULE_CODES:
+        fn = catalog_by_code.get(code)
+        row = maps_by_fn_id.get(fn.id) if fn else None
+        if row is not None:
+            state[code] = bool(row.is_enabled)
+        elif fn is not None:
+            state[code] = bool(fn.is_active)
+        else:
+            state[code] = True
+    return state
 
 
 def get_module_cards(entity_id: str) -> list[dict]:
@@ -146,10 +183,10 @@ def get_module_cards(entity_id: str) -> list[dict]:
 def get_subscription_summary(entity_id: str) -> dict:
     """Build the subscription cost summary shown beside the module cards.
 
-    One line per canonical module priced from MODULE_DISPLAY, a bulk discount
-    when more than one module is subscribed, and the resulting total. The
-    summary reflects the full catalog the entity is subscribing to (every
-    canonical module), independent of the per-module on/off toggle state.
+    One line per *enabled* canonical module priced from MODULE_DISPLAY, a bulk
+    discount when more than one module is enabled, and the resulting total. The
+    summary tracks the per-module on/off toggle state — disabling a module via
+    its toggle removes it from the summary and its cost from the total.
 
     Returns a dict shaped for the template:
         {currency, lines: [{label, amount}], subtotal,
@@ -161,9 +198,12 @@ def get_subscription_summary(entity_id: str) -> dict:
             EntityFunction.function_code.in_(MODULE_CODES)
         ).all()
     }
+    enabled = _enabled_state(entity_id)
 
     lines: list[dict] = []
     for code in MODULE_CODES:
+        if not enabled.get(code):
+            continue
         display = MODULE_DISPLAY.get(code, {})
         fn = catalog_by_code.get(code)
         amount = display.get("price_amount", 0)

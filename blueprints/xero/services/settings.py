@@ -252,8 +252,20 @@ def sync_entity_xero_status(entity_id, token_validated=False):
                 )
                 return True
         else:
+            # The entity's own token user has a valid token (token_user is the
+            # user whose Xero account holds this entity's connection), yet the
+            # tenant is absent from Xero's /connections response. That means the
+            # connection was revoked on the Xero side, so flip to disconnected.
+            if entity.status != "disconnected":
+                entity.status = "disconnected"
+                db.session.commit()
+                logger.info(
+                    f"Updated entity {entity_id} status to 'disconnected' "
+                    f"(tenant {entity.xero_org_id} no longer in Xero connections)"
+                )
+                return True
             logger.info(
-                f"Current user doesn't have access to entity {entity_id}'s Xero org (xero_org_id: {entity.xero_org_id}), preserving existing status: {entity.status}"
+                f"Entity {entity_id} already 'disconnected' (tenant {entity.xero_org_id} not in Xero connections)"
             )
             return False
 

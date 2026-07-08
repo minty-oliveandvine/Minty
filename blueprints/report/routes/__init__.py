@@ -3,6 +3,9 @@ from importlib import import_module
 from loguru import logger
 
 _ROUTE_MODULES = (
+    # Registers the PETTY_CASH before_request gate for the whole blueprint;
+    # keep first so the guard is attached before any route module loads.
+    "module_guard",
     "api",
     "cash_count",
     "create",

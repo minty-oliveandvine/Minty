@@ -110,6 +110,9 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client-side toasts still use the page's
+     own #flashNotification / #toastNotification below. #}
+  {% include 'components/flash_messages.html' %}
   <div class="flex min-h-screen items-center justify-center main-container">
          <!-- Phone card -->
      <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
@@ -147,64 +150,18 @@
       {% include 'components/sidepanel.html' %}
 
       <!-- Flash Notification Area (Slider) -->
-      <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40">
-        {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-          {% for category, message in messages %}{% if category == 'success' %}
-            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-              <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-              </div>
-              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          {% elif category == 'danger' or category == 'error' %}
-            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-              <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
-                <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
-              </div>
-              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          {% endif %}{% endfor %}
-        {% endif %}{% endwith %}
-      </div>
-
-      <!-- Error Dialog (stays open until the user clicks OK) -->
-      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
-          <div class="flex items-start mb-6">
-            <div class="flex-shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <h2 class="text-lg font-bold text-gray-900">Error</h2>
-              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
-            </div>
-          </div>
-          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
-            OK
-          </button>
-        </div>
-      </div>
+      {# Client-side toast container (validation / AJAX results). Server flashes
+         are handled by the canonical flash_messages partial included at the top
+         of <body>; this stays empty on load and is populated by
+         showFlashSuccessToast / showFlashErrorToast / showFlashWarningToast. #}
+      <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40"></div>
 
       <!-- Toast Notification Area (Slider) -->
       <div id="toastNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40 hidden">
-        <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-          <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
+        <div id="toastCard" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
+          <img id="toastIcon" src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
           <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-            <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Validation Error</p>
+            <p id="toastTitle" class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Validation Error</p>
             <p id="toastMessage" class="font-[400] break-words w-full" style="color: #f57e7e;">Please select a bank account</p>
           </div>
           <button class="toast-close shrink-0" onclick="hideToast()">
@@ -689,6 +646,45 @@
     // date with a report is selected — can be re-enabled for read actions.
     const IS_READONLY = {{ is_readonly_for(org.id) | tojson }};
 
+    // The onboarding opening date (draft transaction date). When present, it is
+    // the floor for the first report — reports may be logged from this date
+    // onward, with no 7-day-ago lookback restriction. Returns null when the
+    // entity has no opening draft (no floor enforced in that case).
+    const ONBOARDING_FLOOR_STR = {{ (org.draft_date.strftime('%Y-%m-%d') if org.draft_date else None) | tojson }};
+
+    // Server-authoritative "today" in Hong Kong time ('YYYY-MM-DD'). Used by the
+    // create-time validation so the future-date boundary is the users' local
+    // (HK) midnight, not the browser's timezone. Falls back to the browser date
+    // only if the server value is somehow absent.
+    const SERVER_TODAY_HK = {{ server_today_hk | tojson }};
+    function serverTodayHK() {
+      if (SERVER_TODAY_HK) {
+        const d = new Date(SERVER_TODAY_HK + 'T00:00:00');
+        d.setHours(0, 0, 0, 0);
+        return d;
+      }
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    function onboardingFloorDate() {
+      if (!ONBOARDING_FLOOR_STR) return null;
+      const d = new Date(ONBOARDING_FLOOR_STR + 'T00:00:00');
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    // When reports exist, the only creatable date is the day after the latest
+    // submitted report (consecutive days, no gaps). Returns the expected next
+    // date as a 'YYYY-MM-DD' string, or null when there is no latest report.
+    function expectedNextReportDateStr(latestReportDateStr) {
+      if (!latestReportDateStr) return null;
+      const d = new Date(latestReportDateStr + 'T00:00:00');
+      d.setDate(d.getDate() + 1);
+      d.setHours(0, 0, 0, 0);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     // Function to continue existing report
     function continueExistingReport() {
       // Direct navigation to resume route with entity ID to continue the existing draft
@@ -770,10 +766,11 @@
         console.log('No date selected, defaulting to today:', selectedDate);
       }
       
-      // Validate selected date based on business rules
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      // Use local date formatting instead of toISOString() to avoid timezone issues
+      // Validate selected date based on business rules.
+      // Use the server-authoritative Hong Kong "today" (not the browser clock)
+      // so the future-date boundary matches the users' local midnight and the
+      // backend rule, avoiding the midnight/timezone discrepancy.
+      const today = serverTodayHK();
       const todayYear = today.getFullYear();
       const todayMonth = String(today.getMonth() + 1).padStart(2, '0');
       const todayDay = String(today.getDate()).padStart(2, '0');
@@ -784,39 +781,43 @@
       const isPastDate = selectedDateObj < today;
       const isFutureDate = selectedDateObj > today;
 
-      // Calculate 7 days ago for lookback restriction
-      const sevenDaysAgo = new Date(today);
-      sevenDaysAgo.setDate(today.getDate() - 7);
-      sevenDaysAgo.setHours(0, 0, 0, 0);
-
-      // Xero lock-date check first — a locked period is a hard Xero constraint,
-      // so verify it before navigating to the opening form.
-      if (isReportDateLocked(selectedDate)) {
-        return; // Stop — don't navigate to the opening form
-      }
+      // The onboarding date (opening draft date) is the floor for the first
+      // report — there is no 7-day-ago lookback restriction.
+      const onboardingFloor = onboardingFloorDate();
 
       let isValidDate = false;
       let errorMessage = '';
 
       if (latestReportDate) {
-        // If reports exist: only allow dates after the last submitted report
+        // If reports exist: only the day after the last submitted report is
+        // allowed (consecutive days, no gaps).
         const lastReportDateObj = new Date(latestReportDate + 'T00:00:00');
-        if (selectedDateObj <= lastReportDateObj) {
-          errorMessage = `Transaction date must be after ${latestReportDate}. You can only start reports after your last submitted report date.`;
+        const expectedNext = new Date(lastReportDateObj);
+        expectedNext.setDate(lastReportDateObj.getDate() + 1);
+        expectedNext.setHours(0, 0, 0, 0);
+        if (expectedNext > today) {
+          // The next consecutive day hasn't arrived yet — never allow a future date.
+          errorMessage = `Transaction date cannot be in the future. You can only create reports for dates up to ${todayString}.`;
+        } else if (selectedDateObj.getTime() !== expectedNext.getTime()) {
+          const expectedStr = `${expectedNext.getFullYear()}-${String(expectedNext.getMonth() + 1).padStart(2, '0')}-${String(expectedNext.getDate()).padStart(2, '0')}`;
+          errorMessage = `Transaction date must be ${expectedStr}, the day after your last submitted report (${latestReportDate}).`;
         } else {
-          isValidDate = true; // Future dates after last report are valid
+          isValidDate = true; // Only the consecutive next day is valid
         }
       } else {
-        // If no reports exist: allow dates within 7 days from today (past) or any future date
-        if (isPastDate && selectedDateObj < sevenDaysAgo) {
-          errorMessage = `Transaction date must be within 7 days from today. You can only create reports for dates on or after ${sevenDaysAgo.toISOString().split('T')[0]}.`;
+        // No reports exist: the first report may start on or after the
+        // onboarding date, up to today (future dates are also allowed here,
+        // matching the previous behaviour). When there is no onboarding floor,
+        // no lower bound is enforced.
+        if (onboardingFloor && selectedDateObj < onboardingFloor) {
+          errorMessage = `Transaction date must be on or after your onboarding date (${onboardingFloor.toISOString().split('T')[0]}).`;
         } else {
-          isValidDate = true; // Dates within 7 days (past) or any future date are valid
+          isValidDate = true;
         }
       }
 
       if (!isValidDate) {
-        showToast(errorMessage);
+        showToast(errorMessage, 'warning');
         return; // Stop execution, don't proceed with report creation
       }
       
@@ -841,7 +842,7 @@
         
         if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
           // Show toast notification about missing previous report
-          showToast('Please complete previous report before starting today\'s report');
+          showToast('Please complete previous report before starting today\'s report', 'warning');
           return; // Stop execution, don't proceed with report creation
         }
       }
@@ -1145,35 +1146,10 @@
     }
 
     // Function to show deposit confirmation for a specific date
-    // Returns true (and shows the blocking error dialog) when the given report
-    // date falls on or before the Xero lock date. Callers MUST stop on true.
-    // Centralised so every "start new report" entry point enforces it. The
-    // opening route and publishing re-validate against Xero as the authoritative
-    // guards.
-    function isReportDateLocked(dateString) {
-      if (!effectiveLockDate || !dateString) return false;
-      const sel = new Date(dateString + 'T00:00:00');
-      const lock = new Date(effectiveLockDate + 'T00:00:00');
-      if (sel <= lock) {
-        const readable = `${lock.getDate()} ${monthNames[lock.getMonth()]} ${lock.getFullYear()}`;
-        showToast(
-          `The selected transaction date is in a locked accounting period. ` +
-          `Xero only allows transactions dated after ${readable}. ` +
-          `Please choose a later date.`
-        );
-        return true;
-      }
-      return false;
-    }
-
     function showDepositConfirmationForDate(dateString) {
       // Store the selected date for later use
       window.selectedDateString = dateString;
-
-      // Block locked dates before any navigation/modal (calendar-selected dates
-      // reach this path directly, bypassing showStartNewReportMessage).
-      if (isReportDateLocked(dateString)) return;
-
+      
       // Check if user has any published/submitted reports
       // If user has no reports (0 reports), skip the modal and go directly to opening screen
       const hasNoReports = publishedDates.length === 0 || earliestReportDate === null;
@@ -1301,7 +1277,7 @@
       const prevDeposit = window.previousDepositAmount || 0;
       if (amount > prevDeposit) {
         hideDepositModal();
-        showToast('Deposit cannot be higher than previous deposit amount', 'error');
+        showToast('Deposit cannot be higher than previous deposit amount', 'warning');
         return;
       }
 
@@ -1425,10 +1401,6 @@
     // Published dates and report IDs from backend
     const publishedDates = {{ published_dates | tojson }} || [];
     const publishedReportsDict = {{ published_reports_dict | tojson }} || {};
-
-    // Effective Xero lock date (YYYY-MM-DD) or null. Dates on or before this are
-    // locked in Xero and cannot be reported on.
-    const effectiveLockDate = {{ effective_lock_date | tojson }};
 
     console.log('Published Dates:', publishedDates);
     console.log('Published Reports Dict:', publishedReportsDict);
@@ -1569,32 +1541,27 @@
         const isFutureDate = clickedDate > today;
         const isMissingReportClick = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0] && !isPublished;
         
-        // Calculate 7 days ago for lookback restriction
-        const sevenDaysAgo = new Date(today);
-        sevenDaysAgo.setDate(today.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
-        
-        // Check if future date is after last submitted report (if reports exist)
-        const isFutureAfterLastReport = isFutureDate && (!latestReportDate || clickedDate > new Date(latestReportDate + 'T00:00:00'));
-        // Check if past date is within 7-day window (ONLY when no reports exist)
-        // If reports exist, past dates should only be clickable if they have published reports (for viewing)
-        const isPastWithin7Days = isPastDate && !latestReportDate && clickedDate >= sevenDaysAgo;
-        
-        // Missing reports should only be clickable if they're after the earliest report but before today
-        // But if latestReportDate exists, we shouldn't allow creating reports before it
-        const isMissingReportClickValid = earliestReportDate && 
-                                         dateString >= earliestReportDate && 
-                                         dateString < today.toISOString().split('T')[0] && 
-                                         !isPublished &&
-                                         (!latestReportDate || dateString > latestReportDate);
-        
-        // Allow clicking on: today, future dates after last report, past dates within 7 days (no reports) or with reports (for viewing), valid missing reports
-        const isClickable = isToday || 
-                            (isFutureAfterLastReport) || 
-                            (isPastWithin7Days && !isPublished) || 
-                            (isPastDate && isPublished) || 
-                            (isFutureDate && isPublished) || 
-                            isMissingReportClickValid;
+        // First report floor: the onboarding (opening draft) date, not a
+        // 7-day lookback.
+        const onboardingFloor = onboardingFloorDate();
+
+        // When reports exist, the only creatable date is the day after the
+        // latest submitted report (consecutive days, no gaps).
+        const isNextDayAfterLatestReport = latestReportDate && !isPublished &&
+                                           dateString === expectedNextReportDateStr(latestReportDate);
+        // First-report dates (no reports yet): future dates are allowed, plus
+        // past dates on/after the onboarding floor.
+        const isFirstReportFutureClick = isFutureDate && !latestReportDate;
+        const isPastWithin7Days = isPastDate && !latestReportDate && (!onboardingFloor || clickedDate >= onboardingFloor);
+
+        // Allow clicking on: today, the next consecutive day (reports exist),
+        // first-report dates (no reports yet), and published dates (for viewing).
+        const isClickable = isToday ||
+                            isNextDayAfterLatestReport ||
+                            isFirstReportFutureClick ||
+                            (isPastWithin7Days && !isPublished) ||
+                            (isPastDate && isPublished) ||
+                            (isFutureDate && isPublished);
         
         if (isToday) {
           // Today's date - always green background (regardless of published status)
@@ -1656,56 +1623,35 @@
       // Check if date is within the 10-day lookback window (today or up to 10 days in the past)
       const isWithin10DayWindow = clickedDate >= tenDaysAgo && clickedDate <= today;
       
-      // Calculate 7 days ago for lookback restriction
-      const sevenDaysAgo = new Date(today);
-      sevenDaysAgo.setDate(today.getDate() - 7);
-      sevenDaysAgo.setHours(0, 0, 0, 0);
-      
+      // First report floor: the onboarding (opening draft) date, not a 7-day
+      // lookback.
+      const onboardingFloor = onboardingFloorDate();
+
       // Only allow clicks on:
       // 1. Today (for creating/viewing today's report)
-      // 2. Dates within 7-day window (ONLY when no reports exist)
+      // 2. Dates on/after the onboarding date (ONLY when no reports exist)
       // 3. Past dates that have published reports (for viewing)
       // 4. Missing reports (red dates) - but only if after latestReportDate
       // 5. Future dates after last submitted report
       const isMissingReportClick = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0] && !isPublished;
       const isFutureDate = clickedDate > today;
-      
-      // Check if future date is after last submitted report (if reports exist)
-      const isFutureAfterLastReport = isFutureDate && (!latestReportDate || clickedDate > new Date(latestReportDate + 'T00:00:00'));
-      // Check if past date is within 7-day window (ONLY when no reports exist)
-      // If reports exist, past dates should only be clickable if they have published reports (for viewing) - handled separately
-      const isPastWithinWindow = isPastDate && !latestReportDate && clickedDate >= sevenDaysAgo;
-      
-      let isNextDayAfterLatestReport = false;
-      if (latestReportDate && !isPublished) {
-        const latestReportDateObj = new Date(latestReportDate + 'T00:00:00');
-        const nextDayAfterLatest = new Date(latestReportDateObj);
-        nextDayAfterLatest.setDate(latestReportDateObj.getDate() + 1);
-        nextDayAfterLatest.setHours(0, 0, 0, 0);
-        
-        const clickedDateStr = dateString;
-        const nextDayStr = `${nextDayAfterLatest.getFullYear()}-${String(nextDayAfterLatest.getMonth() + 1).padStart(2, '0')}-${String(nextDayAfterLatest.getDate()).padStart(2, '0')}`;
-        
-        if (clickedDateStr === nextDayStr) {
-          isNextDayAfterLatestReport = true;
-        }
-      }
-      
-      // Missing reports should only be clickable if they're after the earliest report but before today
-      // But if latestReportDate exists, we shouldn't allow creating reports before it
-      const isMissingReportClickValid = earliestReportDate && 
-                                       dateString >= earliestReportDate && 
-                                       dateString < today.toISOString().split('T')[0] && 
-                                       !isPublished &&
-                                       (!latestReportDate || dateString > latestReportDate);
-      
-      const isClickable = isToday || 
-                          (isFutureAfterLastReport) || 
-                          (isPastWithinWindow) || 
-                          (isPastDate && isPublished) || 
-                          (isFutureDate && isPublished) || 
-                          isMissingReportClickValid ||
-                          isNextDayAfterLatestReport;
+
+      // First-report dates (no reports yet): future dates are allowed, plus
+      // past dates on/after the onboarding floor.
+      const isFirstReportFutureClick = isFutureDate && !latestReportDate;
+      const isPastWithinWindow = isPastDate && !latestReportDate && (!onboardingFloor || clickedDate >= onboardingFloor);
+
+      // When reports exist, the only creatable date is the day after the latest
+      // submitted report (consecutive days, no gaps).
+      const isNextDayAfterLatestReport = latestReportDate && !isPublished &&
+                                         dateString === expectedNextReportDateStr(latestReportDate);
+
+      const isClickable = isToday ||
+                          isNextDayAfterLatestReport ||
+                          isFirstReportFutureClick ||
+                          (isPastWithinWindow) ||
+                          (isPastDate && isPublished) ||
+                          (isFutureDate && isPublished);
       
       console.log('Date clickability check:', {
         dateString,
@@ -1778,7 +1724,7 @@
           
           if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
             // Show toast notification about missing previous report
-            showToast('Please complete previous report before starting today\'s report');
+            showToast('Please complete previous report before starting today\'s report', 'warning');
             return; // Stop execution - don't allow starting today's report
           }
         }
@@ -2019,32 +1965,27 @@
         const isFutureDate = clickedDate > today;
         const isMissingReportClick = earliestReportDate && dateString >= earliestReportDate && dateString < today.toISOString().split('T')[0] && !isPublished;
         
-        // Calculate 7 days ago for lookback restriction
-        const sevenDaysAgo = new Date(today);
-        sevenDaysAgo.setDate(today.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
-        
-        // Check if future date is after last submitted report (if reports exist)
-        const isFutureAfterLastReport = isFutureDate && (!latestReportDate || clickedDate > new Date(latestReportDate + 'T00:00:00'));
-        // Check if past date is within 7-day window (ONLY when no reports exist)
-        // If reports exist, past dates should only be clickable if they have published reports (for viewing)
-        const isPastWithin7Days = isPastDate && !latestReportDate && clickedDate >= sevenDaysAgo;
-        
-        // Missing reports should only be clickable if they're after the earliest report but before today
-        // But if latestReportDate exists, we shouldn't allow creating reports before it
-        const isMissingReportClickValid = earliestReportDate && 
-                                         dateString >= earliestReportDate && 
-                                         dateString < today.toISOString().split('T')[0] && 
-                                         !isPublished &&
-                                         (!latestReportDate || dateString > latestReportDate);
-        
-        // Allow clicking on: today, future dates after last report, past dates within 7 days (no reports) or with reports (for viewing), valid missing reports
-        const isClickable = isToday || 
-                            (isFutureAfterLastReport) || 
-                            (isPastWithin7Days && !isPublished) || 
-                            (isPastDate && isPublished) || 
-                            (isFutureDate && isPublished) || 
-                            isMissingReportClickValid;
+        // First report floor: the onboarding (opening draft) date, not a
+        // 7-day lookback.
+        const onboardingFloor = onboardingFloorDate();
+
+        // When reports exist, the only creatable date is the day after the
+        // latest submitted report (consecutive days, no gaps).
+        const isNextDayAfterLatestReport = latestReportDate && !isPublished &&
+                                           dateString === expectedNextReportDateStr(latestReportDate);
+        // First-report dates (no reports yet): future dates are allowed, plus
+        // past dates on/after the onboarding floor.
+        const isFirstReportFutureClick = isFutureDate && !latestReportDate;
+        const isPastWithin7Days = isPastDate && !latestReportDate && (!onboardingFloor || clickedDate >= onboardingFloor);
+
+        // Allow clicking on: today, the next consecutive day (reports exist),
+        // first-report dates (no reports yet), and published dates (for viewing).
+        const isClickable = isToday ||
+                            isNextDayAfterLatestReport ||
+                            isFirstReportFutureClick ||
+                            (isPastWithin7Days && !isPublished) ||
+                            (isPastDate && isPublished) ||
+                            (isFutureDate && isPublished);
         
         if (isToday) {
           // Today's date - always green background (regardless of published status)
@@ -2075,7 +2016,7 @@
           // Check if this date should have a report but doesn't (missing report)
           const shouldHaveReport = earliestReportDate && selectedDate.dateString >= earliestReportDate && selectedDate.dateString < today.toISOString().split('T')[0];
           const isMissingReport = shouldHaveReport && !selectedDate.isPublished;
-          
+
           if (!isLatestReport && !selectedDate.isPublished && !isToday && !isMissingReport) {
             // Add primary color selection highlighting for regular dates only (not missing reports)
             selectedDayEl.className = 'calendar-day text-center text-sm py-2 bg-[#54D3DA]/20 border-2 border-[#54D3DA] cursor-pointer rounded-lg flex items-center justify-center h-10 text-[#54D3DA] font-medium hover:bg-[#54D3DA]/30';
@@ -2149,20 +2090,11 @@
       // Add double-click on month/year to go to current month
       document.getElementById('currentMonthYear').addEventListener('dblclick', goToCurrentMonth);
       
-      // Show flash notification on page load if it exists
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      // Server flashes are drained + shown by the canonical flash_messages
+      // partial; nothing to reveal here.
 
     });
-    
-    // Fallback initialization - run after a delay regardless of DOMContentLoaded
-    setTimeout(() => {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
-    }, 100);
-    
+
     // Fallback initialization - run after a delay regardless of DOMContentLoaded
     setTimeout(() => {
       const calendarDatesElement = document.getElementById('calendarDates');
@@ -2174,15 +2106,15 @@
 
 
     // Toast notification functions
-    function showToast(message, type = 'error') {
-      // Errors are blocking: show a dialog that stays open until the user clicks
-      // OK, matching the flashed-error behaviour. Non-error toasts still slide
-      // in and auto-dismiss.
-      if (type === 'error') {
-        showErrorDialog(message);
-        return;
-      }
+    // Icon URLs for each toast tone (resolved server-side).
+    const TOAST_ICONS = {
+      success: "{{ url_for('static', filename='img/success-icon.png') }}",
+      error:   "{{ url_for('static', filename='img/error-icon.png') }}",
+      warning: "{{ url_for('static', filename='img/warning-icon.png') }}",
+      info:    "{{ url_for('static', filename='img/info-icon.png') }}"
+    };
 
+    function showToast(message, type = 'error') {
       const toast = document.getElementById('toastNotification');
       const messageElement = document.getElementById('toastMessage');
 
@@ -2190,7 +2122,24 @@
         console.error('Toast elements not found');
         return;
       }
-      
+
+      // Apply the tone (colours + icon + label) so the toast matches the
+      // severity instead of always rendering as a red "Validation Error".
+      const TONES = {
+        success: { border: '#a9d7cb', bg: '#f1fffc', title: '#017155', sub: '#92c6b9', icon: TOAST_ICONS.success, label: 'Success' },
+        error:   { border: '#ffcccc', bg: '#fff1f1', title: '#F03D3D', sub: '#f57e7e', icon: TOAST_ICONS.error,   label: 'Error' },
+        warning: { border: '#fee0aa', bg: '#fffaf1', title: '#DA8700', sub: '#e8b765', icon: TOAST_ICONS.warning, label: 'Warning' },
+        info:    { border: '#a9d3ff', bg: '#f1f8ff', title: '#006FE6', sub: '#5ba2ee', icon: TOAST_ICONS.info,    label: 'Information' }
+      };
+      const tone = TONES[type] || TONES.error;
+      const card = document.getElementById('toastCard');
+      const icon = document.getElementById('toastIcon');
+      const titleEl = document.getElementById('toastTitle');
+      if (card) { card.style.borderColor = tone.border; card.style.backgroundColor = tone.bg; }
+      if (icon) { icon.src = tone.icon; icon.alt = tone.label; }
+      if (titleEl) { titleEl.style.color = tone.title; titleEl.textContent = tone.label; }
+      messageElement.style.color = tone.sub;
+
       // Update message
       messageElement.textContent = message;
       
@@ -2229,44 +2178,16 @@
     // Flash notification slider functions
     function showFlashNotification() {
       const notification = document.getElementById('flashNotification');
-      if (!notification) return;
-
-      // Errors are blocking: show a dialog that stays open until the user
-      // clicks OK, rather than a toast that auto-dismisses. The error flash
-      // branch renders an #errorMessage element we can read from.
-      const errorMsgEl = notification.querySelector('#errorMessage');
-      if (errorMsgEl) {
-        showErrorDialog(errorMsgEl.textContent);
-        return;
-      }
-
-      if (notification.querySelector('.toast')) {
+      if (notification && notification.querySelector('.toast')) {
         // Slide in using Tailwind classes
         notification.classList.remove('translate-x-full');
         notification.classList.add('translate-x-0');
-
+        
         // Auto-hide after 4 seconds
         setTimeout(() => {
           hideFlashNotification();
         }, 4000);
       }
-    }
-
-    // Blocking error dialog — stays open until the user clicks OK.
-    function showErrorDialog(message) {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) { alert(message); return; }
-      const msgEl = document.getElementById('errorDialogMessage');
-      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
-      dialog.classList.remove('hidden');
-      dialog.classList.add('flex');
-    }
-
-    function hideErrorDialog() {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) return;
-      dialog.classList.add('hidden');
-      dialog.classList.remove('flex');
     }
 
     function hideFlashNotification() {

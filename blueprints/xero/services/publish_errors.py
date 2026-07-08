@@ -23,6 +23,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Sentinel reason emitted when Xero rejects the OAuth token (HTTP 401).  An
+# expired/revoked token is an account-wide condition, not a per-module one, so
+# the publish orchestrator collapses it to a single reason instead of repeating
+# it once per module/expense line.  Keep this exact wording — the orchestrator
+# and the report-history toast both key off it.
+XERO_AUTH_EXPIRED = "Xero connection has expired"
+
 
 def _latest_publish_failed_row(histories):
     """Return the most recent publish-failed ReportHistory-like row, or None."""
@@ -155,7 +162,7 @@ def translate_xero_error(
 
     # ── Status-code-first cases (no useful body needed) ──────────────────────
     if status_code == 401:
-        return "Xero connection has expired"
+        return XERO_AUTH_EXPIRED
     if status_code == 403:
         return "no permission to post this in Xero"
     if status_code == 429:
@@ -196,7 +203,7 @@ def translate_xero_error(
     ):
         return "contact no longer exists in Xero"
     if "token" in lowered or "unauthor" in lowered:
-        return "Xero connection has expired"
+        return XERO_AUTH_EXPIRED
 
     # ── Fallbacks ────────────────────────────────────────────────────────────
     if message and len(message) <= 120:
@@ -294,6 +301,18 @@ class PublishFailureReason:
 
     def has_any(self) -> bool:
         return bool(self._items)
+
+    def has_auth_expired(self) -> bool:
+        """True when any recorded reason is the account-wide 401 (expired token).
+
+        The reason is stored either bare (``"Xero connection has expired"``) or
+        with a module prefix (``"Withdrawal — Xero connection has expired"``), so
+        we match on the suffix.  The orchestrator uses this to stop the run and
+        report the expiry once instead of once per module.
+        """
+        return any(
+            it.get("text", "").endswith(XERO_AUTH_EXPIRED) for it in self._items
+        )
 
     # ── Rendering ──────────────────────────────────────────────────────────
 

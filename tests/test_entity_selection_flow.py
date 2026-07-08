@@ -445,7 +445,6 @@ def test_find_user_looks_up_membership_by_entity_id(monkeypatch):
     [
         "templates/components/sidepanel.html",
         "templates/index.html",
-        "templates/index2.html",
         "templates/admin_dashboard.html",
         "templates/user approval.html",
         "templates/report/submitted.html",

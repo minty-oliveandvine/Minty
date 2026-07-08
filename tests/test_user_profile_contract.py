@@ -145,7 +145,6 @@ def test_my_profile_returns_system_role_and_memberships(app, db_session, monkeyp
         ("admin.html", "current_user.system_role"),
         ("admin_dashboard.html", "user.system_role"),
         ("report_detail.html", "current_user.system_role"),
-        ("report_list-copy.html", "current_user.system_role"),
     ],
 )
 def test_templates_depend_on_system_role_not_legacy_role(

@@ -34,10 +34,6 @@ from blueprints.report.models.share_link import ShareLink  # noqa: E402
 from blueprints.report.models.shop_expense import ShopExpense  # noqa: E402
 from blueprints.report.models.shop_expense_draft import ShopExpenseDraft  # noqa: E402
 from blueprints.invitation.models.invitation import Invitation  # noqa: E402
-from blueprints.consent.models.terms_version import TermsVersion  # noqa: E402
-from blueprints.consent.models.terms_user_principal import TermsUserPrincipal  # noqa: E402
-from blueprints.consent.models.consent_record import ConsentRecord  # noqa: E402
-from blueprints.consent.models.consent_event import ConsentEvent  # noqa: E402
 from blueprints.user_management.models.permissions import Permissions  # noqa: E402
 from blueprints.user_management.models.role_permissions import RolePermissions  # noqa: E402
 from blueprints.user_management.models.roles import Roles  # noqa: E402
@@ -86,8 +82,4 @@ __all__ = [
     "Permissions",
     "RolePermissions",
     "Invitation",
-    "TermsVersion",
-    "TermsUserPrincipal",
-    "ConsentRecord",
-    "ConsentEvent",
 ]

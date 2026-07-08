@@ -14,6 +14,7 @@ from loguru import logger
 from blueprints.entity import entity_bp
 from blueprints.entity.services.settings import (
     sync_chart_of_accounts_if_changed_background,
+    sync_contacts_if_changed_background,
     sync_xero_coa_bill,
 )
 from models.db import Entity
@@ -100,5 +101,49 @@ def billing_sync_chart_if_changed(entity_id):
     except Exception as exc:
         logger.exception(
             "billing_sync_chart_if_changed failed entity=%s: %s", entity_id, exc
+        )
+        return jsonify({"skipped": True, "reason": "exception", "error": str(exc)}), 200
+
+
+@entity_bp.route(
+    "/api/entities/<string:entity_id>/billing/sync-contacts-if-changed",
+    methods=["POST"],
+)
+def billing_sync_contacts_if_changed(entity_id):
+    """Compare Xero vs DB contacts; if anything changed, refresh locally.
+
+    Mirror of ``billing_sync_chart_if_changed`` for contacts. Module 2 POSTs
+    here when the Bill Settings / contact picker is opened; we resolve the
+    entity's Xero token locally and never trust the incoming payload (only
+    entity_id from the URL).
+    """
+    err = _require_bearer()
+    if err:
+        return err
+
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        return jsonify({"skipped": True, "reason": "entity_not_found"}), 404
+    if not entity.xero_org_id:
+        return jsonify({"skipped": True, "reason": "no_xero_org_id"}), 200
+
+    try:
+        token_user = get_xero_token_user_for_entity(entity_id)
+        if not token_user or not ensure_valid_token(token_user):
+            return jsonify({"skipped": True, "reason": "no_valid_xero_token"}), 200
+
+        # Fire-and-forget: run the Xero diff/sync in a daemon thread and return
+        # immediately. The contact list is served from the DB, so the caller is
+        # never blocked on the Xero diff; this only refreshes the cached
+        # contacts for the next load.
+        sync_contacts_if_changed_background(
+            entity_id,
+            token_user.access_token,
+            entity.xero_org_id,
+        )
+        return jsonify({"status": "triggered"}), 202
+    except Exception as exc:
+        logger.exception(
+            "billing_sync_contacts_if_changed failed entity=%s: %s", entity_id, exc
         )
         return jsonify({"skipped": True, "reason": "exception", "error": str(exc)}), 200
