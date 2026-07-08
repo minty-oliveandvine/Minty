@@ -1,0 +1,18 @@
+{
+  "plugins": ["prettier-plugin-jinja-template"],
+  "overrides": [
+    {
+      "files": ["*.html", "*.jinja"],
+      "options": {
+        "parser": "jinja-template",
+        "jinjaFormatOptions": {
+          "blockLineBreak": true,
+          "keepHtmlWhitespace": true,
+          "indentSize": 2,
+          "blockStyle": "consistent",
+          "minLineBreaksBetweenBlocks": 1
+        }
+      }
+    }
+  ]
+}

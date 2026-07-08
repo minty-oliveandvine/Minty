@@ -994,7 +994,7 @@ def report_sale(id=None):
                     f"Error checking draft status after rollback: {check_error}"
                 )
 
-            flash("An error occurred updating sales data. Please try again.", "danger")
+            flash("Couldn't update the sales data. Please try again.", "error")
             return redirect(url_for("report.report_sale"))
 
     # For GET request, check for existing draft and load data

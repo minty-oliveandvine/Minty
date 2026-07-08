@@ -39,7 +39,52 @@ def accept_invitation_page(token):
         params["fn"] = fn
     if ln:
         params["ln"] = ln
-    return redirect(f"{onboarding_base}/auth?{urlencode(params)}")
+    resume_url = f"{onboarding_base}/auth?{urlencode(params)}"
+
+    # Email-bound acceptance: if a DIFFERENT user is already logged in (their
+    # identity doesn't own the invited email), never silently accept under the
+    # wrong identity. Log them out of our app session and bounce to /auth to
+    # re-authenticate as the invited email.
+    #
+    # IMPORTANT: imports inside this block are LAZY (inside the function), never
+    # at module top, to keep this route module always importable (a failed
+    # module-level import would drop the whole invitation blueprint).
+    if current_user.is_authenticated:
+        from blueprints.auth.services.identity import normalize_email
+
+        invited_email = normalize_email(invitation.email)
+        owned = {
+            normalize_email(getattr(current_user, "email", None)),
+            normalize_email(getattr(current_user, "xero_email", None)),
+            normalize_email(getattr(current_user, "username", None)),
+        }
+        owned.discard(None)
+        if invited_email and invited_email not in owned:
+            from flask import session
+            from flask_login import logout_user
+
+            logger.warning(
+                "invitation.accept_link.session_mismatch invitation={} "
+                "invited={} user={}",
+                invitation.id, invited_email,
+                getattr(current_user, "id", "?"),
+            )
+            # Clear our app session so the wrong user isn't carried into the
+            # accept flow, then bounce to /auth to re-authenticate. The Xero
+            # login uses ``prompt=login`` (see xero_auth), so the user can sign
+            # in as the correct account even if another Xero session is active —
+            # and accept_invitation re-blocks any wrong account regardless.
+            session["token"] = None
+            session.pop("last_activity", None)
+            logout_user()
+            flash(
+                f"This invitation was sent to {invitation.email}. Please sign "
+                f"in as that account to accept it.",
+                "warning",
+            )
+            return redirect(resume_url)
+
+    return redirect(resume_url)
 
 
 @invitation_bp.route("/invitation/xero-not-connected/<string:entity_id>", methods=["GET"])

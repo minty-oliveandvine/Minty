@@ -117,6 +117,48 @@ def require_entity_access(
     return decorator
 
 
+def require_module(
+    module_code: str,
+    *,
+    entity_arg: str | None = None,
+    entity_keys: Iterable[str] | None = None,
+    message: str | None = None,
+):
+    """Block access to a route unless the entity has ``module_code`` activated.
+
+    Resolves the entity from the route/request the same way the other guards
+    do, then checks the per-entity module state (entity_function_map, falling
+    back to the catalog default). A disabled module is treated like a missing
+    permission: JSON 403 for API/XHR callers, otherwise a flash + redirect to
+    the no-permission page.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not getattr(current_user, "is_authenticated", False):
+                return _auth_redirect()
+
+            entity_id = _extract_entity_id(
+                kwargs, entity_arg=entity_arg, entity_keys=entity_keys
+            )
+            if not entity_id:
+                return _bad_request("Entity context is required.")
+
+            # Lazy import: the resolver lives in the entity blueprint, which
+            # imports this module — importing at call time avoids the cycle.
+            from blueprints.entity.routes.modules import _is_module_enabled
+
+            if not _is_module_enabled(entity_id, module_code):
+                msg = message or "This module is not activated for this entity."
+                return _forbidden(msg, entity_id=entity_id)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def require_permission(
     permission: Permission,
     *,

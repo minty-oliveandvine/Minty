@@ -9,8 +9,9 @@ cache only.
 
 ``get_onboarding_state`` returns everything the wizard needs to land on the
 correct step bound to ``entity_id`` without any browser storage: the entity's
-basic info, selected modules, Xero connection, pending invites, and a derived
-``current_step`` / ``max_reached``.
+basic info, selected modules, Xero connection, petty-cash Sales Setting (sales
+methods + opening balance), pending invites, and a derived ``current_step`` /
+``max_reached``.
 
 Same token/membership contract as the other ``/api/onboarding/*`` services: the
 caller is the JWT's user_id; access is denied (403) unless that user is a member
@@ -19,11 +20,18 @@ of the entity.
 
 from __future__ import annotations
 
+import requests
+from loguru import logger
+
 from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
 from models.db import (Entity, EntityFunction, EntityFunctionMap,
-                       EntityPettycashSettings, UserEntity)
+                       EntityPettycashSettings, ReportDraft, SaleInfo,
+                       UserEntity, db)
+from services.auth.token_service import get_xero_token_user_for_entity
+
+_XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
 
 # Wizard step ids, mirroring the STEPS table in the onboarding app's
 # OnboardingApp.jsx. Kept here so ``current_step`` derivation lives next to the
@@ -70,8 +78,73 @@ def _enabled_modules(entity_id: str) -> list[str]:
     return enabled
 
 
+def _reconcile_xero_disconnect(entity: Entity) -> None:
+    """Detect a Xero-side disconnect and clear local connection state.
+
+    The wizard reads ``connected`` from ``entity.xero_org_id`` (see
+    ``_xero_state``), which lags reality if the user revokes the app from inside
+    Xero rather than through our disconnect flow. This verifies against Xero's
+    /connections endpoint using the entity's connector token: if that token is
+    valid yet the tenant is gone, the connection was revoked remotely, so we
+    flip the entity back to the not-connected onboarding state (mirroring
+    ``disconnect_entity_xero``, minus the remote DELETE that already happened).
+
+    Best-effort: any failure (no connector, invalid/expired token, Xero
+    unreachable) leaves existing state untouched so a transient error never
+    falsely drops a live connection.
+    """
+    if not entity.xero_org_id:
+        return
+
+    token_user = get_xero_token_user_for_entity(entity.id)
+    if token_user is None:
+        # Can't verify (no connector / token couldn't be validated). Don't
+        # touch state — a reconnect prompt elsewhere handles the token case.
+        return
+
+    try:
+        resp = requests.get(
+            _XERO_CONNECTIONS_URL,
+            headers={"Authorization": f"Bearer {token_user.access_token}"},
+            timeout=10,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "onboarding state: Xero /connections check failed for entity %s: %s",
+            entity.id, exc,
+        )
+        return
+
+    if resp.status_code != 200:
+        logger.warning(
+            "onboarding state: Xero /connections returned %s for entity %s; "
+            "preserving existing connection state",
+            resp.status_code, entity.id,
+        )
+        return
+
+    still_connected = any(
+        conn.get("tenantId") == str(entity.xero_org_id) for conn in resp.json()
+    )
+    if still_connected:
+        return
+
+    # Confirmed Xero-side revoke: connector token is valid but the tenant is
+    # gone. Clear local connection so the wizard shows Xero as not connected.
+    entity.status = "onboarding"
+    entity.xero_org_id = None
+    entity.connected_by_user_id = None
+    db.session.commit()
+    logger.info(
+        "onboarding state: entity %s connection revoked on Xero side; "
+        "cleared local connection state",
+        entity.id,
+    )
+
+
 def _xero_state(entity: Entity) -> dict:
     """Xero connection picture for the wizard, from the entities row."""
+    _reconcile_xero_disconnect(entity)
     connected = bool(entity.xero_org_id)
     return {
         "connected": connected,
@@ -87,6 +160,57 @@ def _account_codes_done(entity_id: str) -> bool:
     """
     row = EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
     return bool(row and getattr(row, "pettycash_account_id", None))
+
+
+def _sales_methods_state(entity_id: str) -> dict:
+    """Saved petty-cash Sales Setting (Step 5) for resume rehydration.
+
+    Reads the same ``sale_info`` rows the save path writes via
+    ``replace_sales_methods``: enabled Electronic/Delivery method names, in the
+    display order the wizard rendered them. Shape mirrors the POST
+    ``/api/onboarding/sales-methods`` body so the frontend round-trips with no
+    translation. Empty lists when nothing has been saved yet.
+    """
+    methods = (
+        SaleInfo.query.filter(
+            SaleInfo.entity_id == entity_id,
+            SaleInfo.enabled.is_(True),
+            SaleInfo.type.in_(["Electronic", "Delivery"]),
+        )
+        .order_by(SaleInfo.display_order.asc(), SaleInfo.create_date.asc())
+        .all()
+    )
+    return {
+        "electronic": [m.sale_name for m in methods if m.type == "Electronic"],
+        "delivery": [m.sale_name for m in methods if m.type == "Delivery"],
+    }
+
+
+def _opening_balance_state(entity_id: str) -> dict | None:
+    """Saved petty-cash opening balance (Step 5) for resume rehydration.
+
+    Reads the opening ``report_draft`` seeded by ``seed_opening_draft`` (keyed by
+    ``company`` = entity_id). Onboarding stores the starting cash in
+    ``opening_balance`` (with ``cash_addition`` 0); both are returned so the
+    frontend can bind to either. ``None`` when no opening draft exists yet.
+    """
+    draft = (
+        ReportDraft.query.filter(
+            ReportDraft.company == entity_id,
+            ReportDraft.status == "draft",
+        )
+        .order_by(ReportDraft.transaction_date.asc())
+        .first()
+    )
+    if draft is None:
+        return None
+    tx = draft.transaction_date
+    return {
+        "opening_date": tx.isoformat() if tx else None,
+        "opening_balance": draft.opening_balance,
+        "cash_addition": draft.cash_addition,
+        "adjusted_opening_balance": draft.adjusted_opening_balance,
+    }
 
 
 def _derive_current_step(entity: Entity, modules: list[str], xero: dict,
@@ -139,6 +263,8 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
     xero = _xero_state(entity)
     account_codes_done = _account_codes_done(entity_id)
     current_step = _derive_current_step(entity, modules, xero, account_codes_done)
+    sales_methods = _sales_methods_state(entity_id)
+    opening_balance = _opening_balance_state(entity_id)
 
     # Pending invites are best-effort: a permission gap there shouldn't break
     # resume, so fall back to an empty list rather than failing the request.
@@ -150,6 +276,10 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
         "status": entity.status,
         "current_step": current_step,
         "max_reached": current_step,
+        # The wizard step the user last "Saved and Exited" on, returned verbatim
+        # (the frontend step id), or null if never set. The wizard resumes here,
+        # but only advances past Step 4 when xero.connected is truly true above.
+        "saved_step": entity.onboarding_saved_step,
         "entity": {
             "name": entity.name or "",
             "country": entity.country_code or "",
@@ -157,6 +287,49 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
         },
         "modules": modules,
         "xero": xero,
+        # Saved petty-cash Sales Setting (Step 5). Shape mirrors the
+        # POST /api/onboarding/sales-methods body: {electronic, delivery} of
+        # enabled method names (empty lists when nothing saved yet).
+        "sales_methods": sales_methods,
+        # Saved petty-cash opening balance (Step 5), or null if no opening draft
+        # exists yet. Includes both opening_balance and cash_addition so the
+        # frontend can bind to either field.
+        "opening_balance": opening_balance,
         "invites": invites,
     }
     return payload, 200
+
+
+def save_onboarding_step(user_id, entity_id: str, saved_step) -> tuple[dict, int]:
+    """Persist the wizard's "Save and Exit" step on the entity.
+
+    ``saved_step`` is the frontend step id (1-9) and is stored verbatim — no
+    remap to the backend's derived current_step ordering. Same token/membership
+    contract as ``get_onboarding_state``: 403 unless the token's user is a member
+    of the entity. Returns ``(payload, status)``.
+    """
+    entity_id = (entity_id or "").strip()
+    if not entity_id:
+        return {"error": "entity_id is required"}, 400
+
+    try:
+        step = int(saved_step)
+    except (TypeError, ValueError):
+        return {"error": "saved_step must be an integer 1-9"}, 400
+    if step < STEP_BASIC or step > STEP_ALL_SET:
+        return {"error": "saved_step must be an integer 1-9"}, 400
+
+    membership = UserEntity.query.filter(
+        UserEntity.user_id == str(user_id),
+        UserEntity.entity_id == entity_id,
+    ).first()
+    if not membership:
+        return {"error": "You don't have access to this entity"}, 403
+
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        return {"error": "Entity not found"}, 404
+
+    entity.onboarding_saved_step = step
+    db.session.commit()
+    return {"ok": True, "saved_step": step}, 200

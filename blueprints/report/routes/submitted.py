@@ -193,34 +193,6 @@ def report_submitted_publish_to_xero():
         if not posted_report:
             return jsonify({"error": "No report found to publish"}), 404
 
-        # Block publish/republish if the report date falls within a Xero-locked
-        # period. Re-fetch fresh lock dates from Xero so we validate against the
-        # current cutoff rather than a possibly stale cached value.
-        from blueprints.entity.services.settings import refresh_entity_lock_dates
-        from blueprints.xero.services.integration import (
-            get_effective_lock_date, lock_date_violation_message)
-
-        entity = refresh_entity_lock_dates(
-            entity_id, access_token, entity.xero_org_id
-        )
-        lock_msg = lock_date_violation_message(
-            posted_report.transaction_date, get_effective_lock_date(entity)
-        )
-        if lock_msg:
-            logger.warning(
-                f"Publish blocked for report {posted_report.id}: date {posted_report.transaction_date} is within Xero lock period"
-            )
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": lock_msg,
-                        "error": lock_msg,
-                    }
-                ),
-                400,
-            )
-
         logger.info(
             f"Starting Xero integration for report {posted_report.id}, entity {entity_id} (using token from user: {owner_user.username if owner_user else 'unknown'})"
         )

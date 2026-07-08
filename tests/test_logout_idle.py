@@ -1,9 +1,7 @@
-"""Tests for logout + 30-minute idle auto-logout (incl. Xero sign-out).
+"""Tests for logout + 30-minute idle auto-logout.
 
 Covers:
-  * xero_logout_url() helper — builds Xero's end-session URL, skips non-Xero users.
-  * /logout — non-Xero user lands home; Xero user is handed off to Xero's
-    end-session endpoint with id_token_hint.
+  * /logout — clears the Flask-Login session and lands the user on home.
   * Idle backstop in hooks.before_request — a request after the idle window is
     redirected to /logout (HTML) or gets 401 session_expired (AJAX), while a
     request inside the window is let through.
@@ -79,47 +77,6 @@ def _login(client, username="idle.user"):
 
 
 # --------------------------------------------------------------------------- #
-# xero_logout_url() helper
-# --------------------------------------------------------------------------- #
-
-def test_xero_logout_url_none_for_non_xero_user(app):
-    """A user with no Xero id_token has no Xero session to end."""
-    from types import SimpleNamespace
-
-    from services.auth.token_service import xero_logout_url
-
-    with app.app_context():
-        assert xero_logout_url(SimpleNamespace(id_token=None), application=app) is None
-        assert xero_logout_url(SimpleNamespace(id_token=""), application=app) is None
-        assert xero_logout_url(None, application=app) is None
-
-
-def test_xero_logout_url_built_with_id_token(app):
-    """With an id_token we hit Xero's end-session endpoint, passing the token
-    as id_token_hint and our post-logout redirect — NOT the revocation URL."""
-    from types import SimpleNamespace
-
-    from services.auth.token_service import xero_logout_url
-
-    with app.app_context():
-        url = xero_logout_url(
-            SimpleNamespace(id_token="the-id-token"),
-            application=app,
-            post_logout_redirect_uri="https://app.example.com/",
-        )
-
-    assert url is not None
-    parsed = urlparse(url)
-    assert parsed.netloc == "login.xero.com"
-    assert parsed.path == "/identity/connect/endsession"
-    # End-session, not revocation — revocation would break entity connections.
-    assert "revocation" not in url
-    qs = parse_qs(parsed.query)
-    assert qs["id_token_hint"] == ["the-id-token"]
-    assert qs["post_logout_redirect_uri"] == ["https://app.example.com/"]
-
-
-# --------------------------------------------------------------------------- #
 # /logout route
 # --------------------------------------------------------------------------- #
 
@@ -141,29 +98,6 @@ def test_logout_non_xero_user_redirects_home(app, db_session):
         assert "xero.com" not in (resp.location or "")
         # logout_user() took effect within this request context.
         assert not current_user.is_authenticated
-
-
-def test_logout_xero_user_redirects_to_xero_endsession(app, db_session):
-    """Xero user: logout hands off to Xero's end-session endpoint so the Xero
-    SSO session is ended too, carrying the user's id_token as id_token_hint."""
-    from flask_login import login_user
-
-    from blueprints.auth.routes.logout import logout
-    from models.db import User
-
-    user = _make_user(
-        db_session, id_token="user-xero-id-token", username="xero.user"
-    )
-    with app.test_request_context("/logout"):
-        login_user(User.query.get(user.id))
-        resp = logout()
-
-    assert resp.status_code == 302
-    parsed = urlparse(resp.location)
-    assert parsed.netloc == "login.xero.com"
-    assert parsed.path == "/identity/connect/endsession"
-    qs = parse_qs(parsed.query)
-    assert qs["id_token_hint"] == ["user-xero-id-token"]
 
 
 # --------------------------------------------------------------------------- #

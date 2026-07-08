@@ -106,6 +106,14 @@ document.addEventListener('submit', function(e){
     const btn = e.submitter || form.querySelector('button[type="submit"]');
     if(btn) BFCache.saveButtonState(btn);
 
+    //Strip commas from safe box balance before submmiting to the db
+    if (path.includes('/cash_count')) {
+      const safeBoxInput = e.target.querySelector('#safeBoxBalance');
+      if (safeBoxInput && safeBoxInput.value) {
+        safeBoxInput.value = safeBoxInput.value.replace(/,/g, '');
+      }
+    }
+
     const data = {};
     try{ new FormData(form).forEach((v,k)=>{ if(data[k]){ if(Array.isArray(data[k])) data[k].push(v); else data[k]=[data[k],v]; } else data[k]=v }); }catch(e){}
     BFCache.saveSnapshot(key, data);
@@ -113,6 +121,8 @@ document.addEventListener('submit', function(e){
 });
 </script>
 <body class="min-h-screen  font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
   <div class="flex min-h-screen items-center justify-center main-container relative">
     <!-- Phone card -->
      <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
@@ -170,35 +180,7 @@ document.addEventListener('submit', function(e){
                </svg>
              </button>
            </div>
-           {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-             {% for category, message in messages %}{% if category == 'success' %}
-               <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-                 <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-                 <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                   <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                   <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-                 </div>
-                 <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                   </svg>
-                 </button>
-               </div>
-             {% elif category == 'danger' or category == 'error' %}
-               <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-                 <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-                 <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                   <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
-                   <p class="font-[400] break-words w-full" style="color: #f57e7e;">{{ message }}</p>
-                 </div>
-                 <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                     <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                   </svg>
-                 </button>
-               </div>
-             {% endif %}{% endfor %}
-           {% endif %}{% endwith %}
+           {# server flashes handled by canonical flash_messages partial #}
          </div>
 
          <!-- Validation Notification Area -->
@@ -278,7 +260,8 @@ document.addEventListener('submit', function(e){
               <div class="mb-4">
                 <h3 class="text-sm mb-2 font-semibold text-gray-700">Safebox Cash Balance</h3>
                 <div class="flex items-center gap-2">
-                  <input type="number" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ cashcount_draft.safe_box_balance if cashcount_draft and cashcount_draft.safe_box_balance is not none and cashcount_draft.safe_box_balance > 0 else '' }}" placeholder="Please enter Balance of the safebox" min="0" step="0.01" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()">
+                  <input type="text" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ cashcount_draft.safe_box_balance if cashcount_draft and cashcount_draft.safe_box_balance is not none and cashcount_draft.safe_box_balance > 0 else '' }}" placeholder="Please enter Balance of the safebox" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); calculateTotals();" onblur="formatWithCommas(this); calculateTotals();">
+
                 </div>
               </div>
           <div class="flex items-center justify-between mt-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
@@ -425,6 +408,96 @@ document.addEventListener('submit', function(e){
 
   <script>
     const EXPECTED_CASH_COUNT_BALANCE = {{ expected_cash_count_balance }};
+    // Format number inputs to show .00
+    // Function to format currency input (simple and clean)
+      function formatCurrency(input) {
+        // Just remove invalid characters, don't pad yet
+        let value = input.value.replace(/[^\d.]/g, '');
+        
+        // Remove multiple decimal points (keep only first one)
+        const parts = value.split('.');
+        if (parts.length > 2) {
+          value = parts[0] + '.' + parts.slice(1).join('');
+        }
+        
+        // Limit decimal to 2 digits
+        const decimalParts = value.split('.');
+        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
+          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
+        }
+        
+        // Just set the cleaned value - NO padding during input
+        input.value = value;
+      }
+
+
+
+      // Format with commas on blur (simple and clean)
+      function formatWithCommas(input) {
+        let value = input.value;
+        
+        if (value === '') return;
+        
+        // Remove commas
+        value = value.replace(/,/g, '');
+        const parts = value.split('.');
+        const wholeNumber = parts[0];
+        
+        // Add commas to whole number
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        
+        // Ensure .00 at the end with proper padding
+        let decimalPart = parts.length > 1 ? parts[1] : '00';
+        if (decimalPart === '') {
+          decimalPart = '00'; // 1234. → 1234.00
+        } else if (decimalPart.length === 1) {
+          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
+        }
+        
+        input.value = formattedWholeNumber + '.' + decimalPart;
+      }
+
+    // Format all currency inputs after page load
+    function formatAllCurrencyFields() {
+      // Get all inputs on the page
+      const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
+      
+      allInputs.forEach(input => {
+        if (input.value && input.value.trim() !== '') {
+          // Remove existing commas
+          let value = input.value.replace(/,/g, '');
+          
+          // Split into whole and decimal parts
+          const parts = value.split('.');
+          const wholeNumber = parts[0];
+          
+          // Add commas to whole number
+          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+          
+          // Ensure .00 at the end
+          const decimalPart = parts.length > 1 ? parts[1] : '00';
+          const paddedDecimal = (decimalPart + '00').substring(0, 2);
+          
+          // Set the formatted value
+          input.value = formattedWholeNumber + '.' + paddedDecimal;
+        }
+      });
+    }
+
+    // Run when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', formatAllCurrencyFields);
+    } else {
+      formatAllCurrencyFields();
+    }
+
+    // Also run after a short delay to catch dynamic content
+    setTimeout(formatAllCurrencyFields, 100);
+    setTimeout(formatAllCurrencyFields, 500);
+
+
+
+
 
     // Shrink the negative-balance figure to fit on one line when it would
     // otherwise overflow its popup. Keeps the default (CSS) size when it fits.
@@ -664,7 +737,7 @@ document.addEventListener('submit', function(e){
 
     // Function to update cash till balance
     function updateCashTillBalance() {
-      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value) || 0;
+      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
       
       // Calculate expected cash total: opening_balance + cash_addition + cash_sales - expenses - deposit
       const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
@@ -685,12 +758,12 @@ document.addEventListener('submit', function(e){
       function getValue(calcId, hiddenId) {
         const calcElement = document.getElementById(calcId);
         if (calcElement && calcElement.value && calcElement.value.trim() !== '') {
-          return parseFloat(calcElement.value) || 0;
+          return parseFloat(calcElement.value.replace(/,/g, '')) || 0;
         }
         // Fallback to hidden input if calculator input is empty or doesn't exist
         const hiddenElement = document.getElementById(hiddenId);
         if (hiddenElement) {
-          return parseFloat(hiddenElement.value) || 0;
+          return parseFloat(hiddenElement.value.replace(/,/g, '')) || 0;
         }
         return 0;
       }
@@ -796,7 +869,7 @@ document.addEventListener('submit', function(e){
       // Calculate Total Cash Count: actualCashBalance + safeBoxBalance
       const actualCashBalanceInput = document.getElementById('actualCashBalance');
       const actualCashBalanceValue = actualCashBalanceInput ? parseFloat(actualCashBalanceInput.value.replace(/[$,]/g, '')) || 0 : 0;
-      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value) || 0;
+      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
       const totalCashCountValue = actualCashBalanceValue + safeBoxBalance;
       const formattedTotalCashCount = totalCashCountValue.toLocaleString('en-US', {
         minimumFractionDigits: 2,
@@ -923,7 +996,7 @@ document.addEventListener('submit', function(e){
         return total;
       })();
 
-      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value) || 0;
+      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
       
       // Calculate expected cash count balance: opening_balance + total_sales - expenses - deposit
       const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
@@ -1320,7 +1393,8 @@ document.addEventListener('submit', function(e){
        });
        
        // Get safe box balance
-       const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value) || 0;
+       const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
+
        
        // Calculate expected cash count balance
        const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
@@ -1723,9 +1797,7 @@ document.addEventListener('submit', function(e){
 
       // Show flash notification on page load if it exists
       document.addEventListener('DOMContentLoaded', function() {
-        {% if get_flashed_messages() %}
-          showFlashNotification();
-        {% endif %}
+        {# server flashes handled by canonical flash_messages partial #}
       });
   </script>
 

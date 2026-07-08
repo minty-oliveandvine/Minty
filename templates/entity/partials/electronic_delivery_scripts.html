@@ -1544,7 +1544,7 @@
     function showErrorToast(message = 'Error updating entity settings') {
       const notification = document.getElementById('settingsNotification');
       // Bills-UI pages have no classic toast elements; delegate to the
-      // new-design slide-in toast (settings_flash_toast.html).
+      // new-design slide-in toast (components/flash_messages.html).
       if (!notification && typeof window.showSettingsFlashToast === 'function') {
         window.showSettingsFlashToast(message, 'error');
         return;
@@ -1579,7 +1579,7 @@
     function showSuccessToast(message = 'Entity settings updated successfully') {
       const notification = document.getElementById('settingsNotification');
       // Bills-UI pages have no classic toast elements; delegate to the
-      // new-design slide-in toast (settings_flash_toast.html).
+      // new-design slide-in toast (components/flash_messages.html).
       if (!notification && typeof window.showSettingsFlashToast === 'function') {
         window.showSettingsFlashToast(message, 'success');
         return;

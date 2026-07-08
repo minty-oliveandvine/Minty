@@ -1,0 +1,13 @@
+.venv
+node_modules
+__pycache__/*
+__pycache__/logging_settings.cpython-311.pyc
+__pycache__/utils.cpython-311.pyc
+migrations/__pycache__/*    
+migrations/versions/__pycache__/*
+__pycache__/
+.vscode/
+.vscode/launch.json
+app.log
+.env
+.DS_Store

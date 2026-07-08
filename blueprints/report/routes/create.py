@@ -8,7 +8,8 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.s3_storage import upload_file_to_s3
-from blueprints.report.services.shared import parse_nested_keys, safe_float
+from blueprints.report.services.shared import (future_date_error,
+                                               parse_nested_keys, safe_float)
 from models.db import Entity, Report, ReportCashCountDraft, ShopExpense, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
@@ -45,21 +46,14 @@ def create_report():
             transaction_date = datetime.strptime(
                 request.form["transaction_date"], "%Y-%m-%d"
             ).date()
-
-            # Reject dates that fall within a Xero-locked period (uses the
-            # cached lock date; publishing re-validates against fresh Xero data).
-            from blueprints.xero.services.integration import (
-                get_effective_lock_date, lock_date_violation_message)
-            entity = Entity.query.get(entity_id)
-            lock_msg = lock_date_violation_message(
-                transaction_date, get_effective_lock_date(entity)
-            )
-            if lock_msg:
+            # No report may be created for a date after today, regardless of how
+            # many prior reports exist.
+            future_err = future_date_error(transaction_date)
+            if future_err:
                 logger.warning(
-                    f"Transaction date {transaction_date} is within Xero lock period for entity {entity_id}"
+                    f"Transaction date {transaction_date} rejected: {future_err}"
                 )
-                raise ValueError(lock_msg)
-
+                raise ValueError(future_err)
             logger.info(
                 f"Checking for existing report with transaction_date: {transaction_date} for company: {entity_id}"
             )
@@ -85,25 +79,48 @@ def create_report():
             )
             logger.info(f"last report is {last_report}")
             if last_report:
-                if transaction_date <= last_report.transaction_date:
+                # Hong Kong time so the "future" boundary is the users' local
+                # midnight, not the server's (UTC) midnight.
+                today = datetime.now(tz).date()
+                expected_date = last_report.transaction_date + timedelta(days=1)
+                if expected_date > today:
                     logger.warning(
-                        f"Transaction date {transaction_date} is before or equal to last submitted report date {last_report.transaction_date}"
+                        f"Next report date {expected_date} is in the future (today {today})"
                     )
                     raise ValueError(
-                        f"Transaction date must be after {last_report.transaction_date}. You can only start reports after your last submitted report date."
+                        f"Transaction date cannot be in the future. You can only create reports for dates up to {today}."
+                    )
+                if transaction_date != expected_date:
+                    logger.warning(
+                        f"Transaction date {transaction_date} is not the day after the last submitted report date {last_report.transaction_date}"
+                    )
+                    raise ValueError(
+                        f"Transaction date must be {expected_date}, the day after your last submitted report ({last_report.transaction_date})."
                     )
                 next_transaction_date = transaction_date + timedelta(days=1)
             else:
                 logger.info(
                     "No previous reports found; this is the first report.")
-                today = datetime.now().date()
-                seven_days_ago = today - timedelta(days=7)
-                if transaction_date < seven_days_ago or transaction_date > today:
+                # The floor for the first report is the onboarding date — the
+                # transaction_date of the opening draft seeded during onboarding
+                # (Step 4). The future-date guard above already rejected any date
+                # after today; the onboarding date is the lower bound when one
+                # exists.
+                from models.db import ReportDraft
+                opening_draft = (
+                    ReportDraft.query.filter_by(company=entity_id)
+                    .order_by(ReportDraft.transaction_date.asc())
+                    .first()
+                )
+                onboarding_date = (
+                    opening_draft.transaction_date if opening_draft else None
+                )
+                if onboarding_date and transaction_date < onboarding_date:
                     logger.warning(
-                        f"Transaction date {transaction_date} is outside the 7-day window from today {today}"
+                        f"Transaction date {transaction_date} is before onboarding date {onboarding_date}"
                     )
                     raise ValueError(
-                        f"Transaction date must be within 7 days from today. You can only create reports for dates between {seven_days_ago} and {today}."
+                        f"Transaction date must be on or after your onboarding date ({onboarding_date})."
                     )
                 next_transaction_date = transaction_date + timedelta(days=1)
 

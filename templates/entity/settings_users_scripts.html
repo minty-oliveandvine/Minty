@@ -16,7 +16,7 @@
 
     function showBillsInlineBanner(kind, message) {
       if (!isUsersBillsUi()) return false;
-      // Surface via the new-design slide-in toast (settings_flash_toast.html)
+      // Surface via the new-design slide-in toast (components/flash_messages.html)
       // instead of the old inline banners.
       var type = kind === 'Error' ? 'error' : (kind === 'Info' ? 'info' : 'success');
       if (typeof window.showSettingsFlashToast === 'function') {
@@ -27,7 +27,8 @@
     }
 
     function showUsersBillsSaving(text) {
-      if (!isUsersBillsUi()) return;
+      // Loading overlay lives in the shared main block, so it works in both the
+      // bills UI and the regular UI — don't gate it on isUsersBillsUi().
       var ov = document.getElementById('loadingOverlay');
       var lt = document.getElementById('loadingText');
       if (!ov || !lt) return;
@@ -135,7 +136,7 @@
 
     // Function to show continue report message
     function showContinueReportMessage() {
-      showErrorToast('This feature is currently in progress, Stay Tuned!');
+      showInfoToast('This feature is currently in progress, Stay Tuned!');
     }
 
     // Function to handle tab switching
@@ -256,19 +257,39 @@
        if (selectedRole === null) {
          line = 'Showing all users';
        } else {
-         var roleName = selectedRole.charAt(0).toUpperCase() + selectedRole.slice(1);
+         var roleName = displayNameForEntityRoleSlug(selectedRole);
          line = 'Users filtered by ' + roleName + ' permission';
        }
        if (showBillsInlineBanner('Info', line)) return;
 
        const toast = document.getElementById('filterToast');
        if (!toast) return;
+       const titleElement = toast.querySelector('.font-\\[500\\]');
        const messageElement = toast.querySelector('.font-\\[400\\]');
+       // Reset the title in case showInfoToast last reused this element.
+       if (titleElement) titleElement.textContent = 'Filter Applied';
        if (messageElement) messageElement.textContent = line;
 
        setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
        setTimeout(() => { closeFilterToast(); }, 4000);
      }
+
+    // Informational toast — reuses the blue, info-styled filter toast element
+    // (classic page) or the new slide-in flash toast (bills-UI page). Used for
+    // non-error notices like "feature in progress" so they don't show as errors.
+    function showInfoToast(message) {
+      if (showBillsInlineBanner('Info', message)) return;
+
+      const toast = document.getElementById('filterToast');
+      if (!toast) return;
+      const titleElement = toast.querySelector('.font-\\[500\\]');
+      const messageElement = toast.querySelector('.font-\\[400\\]');
+      if (titleElement) titleElement.textContent = 'Information';
+      if (messageElement && message) messageElement.textContent = message;
+
+      setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
+      setTimeout(() => { closeFilterToast(); }, 4000);
+    }
 
     function closeFilterToast() {
       if (isUsersBillsUi()) {
@@ -830,22 +851,22 @@
          if (data.status === 'success' && data.invitations && data.invitations.length > 0) {
            section.classList.remove('hidden');
            list.innerHTML = data.invitations.map(inv => `
-             <div class="bg-white rounded-lg p-4 border-l-4 border-amber-400 flex items-center shadow-sm justify-between">
-               <div class="flex items-center space-x-3">
-                 <div class="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center">
+             <div class="bg-white rounded-lg p-4 border-l-4 border-amber-400 flex flex-col gap-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+               <div class="flex items-center space-x-3 min-w-0">
+                 <div class="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                    </svg>
                  </div>
-                 <div>
-                   <p class="text-sm font-medium text-gray-900">${inv.email}</p>
+                 <div class="min-w-0">
+                   <p class="text-sm font-medium text-gray-900 truncate">${inv.email}</p>
                    <div class="flex items-center gap-2">
                      <span class="px-1.5 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-medium rounded-full">${inv.role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
                      <span class="text-[10px] text-gray-400">Pending</span>
                    </div>
                  </div>
                </div>
-               <div class="flex items-center space-x-2">
+               <div class="flex items-center space-x-2 flex-shrink-0 self-end sm:self-auto">
                  <button id="resend-${inv.id}" data-resend-cooldown="${inv.resend_cooldown || 0}" onclick="resendInvitation('${inv.id}')"
                          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#54D3DA] border border-[#54D3DA] rounded-lg hover:bg-[#54D3DA]/10 transition-colors">
                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

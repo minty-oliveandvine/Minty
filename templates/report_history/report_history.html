@@ -150,12 +150,24 @@
      .flatpickr-day:hover { background: #f1fbfc; }
      .flatpickr-months .flatpickr-month { color: #374151; }
      .flatpickr-current-month { font-weight: 600; }
-     /* Align day columns with the weekday headers and stop the last (partial)
-        row from spreading edge-to-edge: each day is exactly 1/7, left-aligned. */
-     .flatpickr-calendar .dayContainer { justify-content: flex-start; }
-     .flatpickr-calendar .flatpickr-day {
-       max-width: 14.2857%;
-       flex-basis: 14.2857%;
+     /* Day-column alignment is left to Flatpickr's own layout: the default
+        `justify-content: space-around` with 39px-capped cells makes each day's
+        centre land exactly under its weekday header. */
+
+     /* In two-month mode Flatpickr tags the leading/trailing adjacent-month
+        cells with class "hidden" and relies on `visibility: hidden` to keep
+        their grid slot. But Tailwind's utility `.hidden { display: none }`
+        (generated at runtime by the Play CDN for these dynamically-added
+        classes) removes them from the grid entirely, so every date packed
+        left under the wrong weekday and the final partial row spread out.
+        Re-assert Flatpickr's cell so the slot stays, and show those days
+        greyed like a normal calendar instead of blank. */
+     .flatpickr-calendar .flatpickr-day.hidden,
+     .flatpickr-calendar .flatpickr-day.prevMonthDay,
+     .flatpickr-calendar .flatpickr-day.nextMonthDay {
+       display: inline-block !important;
+       visibility: visible !important;
+       color: rgba(57, 57, 57, 0.3);   /* Flatpickr's own muted "other month" grey */
      }
      /* Footer action buttons inside the calendar popup */
      .fp-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid #f0f0f0; }
@@ -187,9 +199,10 @@
          min-width: 100% !important;
          max-width: 100% !important;
        }
-       /* Let the 7 day cells share the row evenly and stay tap-friendly */
+       /* Taller cells for touch. Width/alignment stay on Flatpickr's default
+          space-around layout (no 1/7 cap) so cells never wrap out of column
+          even though the dayContainer is stretched to the viewport width. */
        .flatpickr-calendar .flatpickr-day {
-         max-width: 14.2857%;
          height: 42px;
          line-height: 42px;
        }
@@ -211,6 +224,8 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
   <!-- Full-screen Publishing Overlay -->
   <div id="publishingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[9999] hidden items-center justify-center" style="display:none;">
     <div class="bg-white rounded-2xl p-8 shadow-2xl w-[320px] max-w-[90vw] flex flex-col items-center">
@@ -314,35 +329,7 @@
 
       <!-- Flash Notification Area (Slider) -->
       <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40">
-        {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-          {% for category, message in messages %}{% if category == 'success' %}
-            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-              <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-              </div>
-              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          {% elif category == 'danger' or category == 'error' %}
-            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-              <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
-                <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
-              </div>
-              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          {% endif %}{% endfor %}
-        {% endif %}{% endwith %}
+        {# server flashes handled by canonical flash_messages partial #}
       </div>
     <!-- Delete Confirmation Modal -->
       <div id="deleteReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
@@ -384,33 +371,13 @@
         </div>
       </div>
 
-      <!-- Error Dialog (stays open until the user clicks OK) -->
-      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
-        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
-          <div class="flex items-start mb-6">
-            <div class="flex-shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <h2 class="text-lg font-bold text-gray-900">Error</h2>
-              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
-            </div>
-          </div>
-          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
-            OK
-          </button>
-        </div>
-      </div>
-
       <!-- Republish Report Confirmation Modal -->
       <div id="republishReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
         <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
           <!-- Modal Header -->
-          <div class="flex items-center justify-between mb-6">
+          <div class="relative flex items-center justify-center mb-6">
             <h2 class="text-xl font-bold text-gray-900">Republish Report</h2>
-            <button onclick="hideRepublishModal()" class="text-gray-400 hover:text-gray-600">
+            <button onclick="hideRepublishModal()" class="absolute right-0 text-gray-400 hover:text-gray-600">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
               </svg>
@@ -426,19 +393,13 @@
                 </svg>
               </div>
               <div class="ml-3">
-                <p class="text-sm text-[#B91C1C]">
-                  <span class="font-bold">Warning:</span>
-                </p>
                 <div id="republishDuplicateWarning" class="hidden">
-                  <p class="text-sm text-[#B91C1C] mt-1">
-                    The <span id="republishReportDate" class="font-semibold"></span> report was previously published to Xero. Republishing sends all of its transactions to Xero again and may create duplicates.
-                  </p>
-                  <p class="text-sm text-[#B91C1C] mt-2">
-                    Before continuing, please open Xero and delete the previously published transactions for this report.
+                  <p class="text-sm text-[#B91C1C]">
+                    This report was previously published. This action may create duplicate entries in Xero.
                   </p>
                 </div>
                 <p class="text-sm text-[#B91C1C] mt-2">
-                  Are you sure you want to republish this report to Xero?
+                  Do you wish to continue?
                 </p>
               </div>
             </div>
@@ -951,13 +912,6 @@
 
     // Function to show notifications
     function showNotification(message, type = 'info') {
-      // Errors are blocking: show a dialog that stays open until the user
-      // clicks OK, rather than a toast that auto-dismisses.
-      if (type === 'error') {
-        showErrorDialog(message);
-        return;
-      }
-
       const toast = document.createElement('div');
       toast.className = `absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40`;
 
@@ -1028,23 +982,6 @@
           }
         }, 500);
       }, 4000);
-    }
-
-    // Blocking error dialog — stays open until the user clicks OK.
-    function showErrorDialog(message) {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) { alert(message); return; }
-      const msgEl = document.getElementById('errorDialogMessage');
-      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
-      dialog.classList.remove('hidden');
-      dialog.classList.add('flex');
-    }
-
-    function hideErrorDialog() {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) return;
-      dialog.classList.add('hidden');
-      dialog.classList.remove('flex');
     }
 
     // Handle report entry container click
@@ -1554,8 +1491,6 @@
               publishingPartial(entityId, data.failure_reasons);
             } else if (ps === 'failed') {
               clearInterval(interval);
-              // Prefer the server's specific reason (e.g. Xero lock-date
-              // violation) over the generic fallback message.
               publishingFailed(
                 (data.failure_reason
                   ? 'Publishing to Xero failed: ' + data.failure_reason
@@ -1932,9 +1867,7 @@
 
     // Show flash notification on page load if it exists
     document.addEventListener('DOMContentLoaded', function() {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
       
       // Format timestamps to Hong Kong timezone
       formatTimestampsToHKTime();
@@ -1942,9 +1875,7 @@
     
     // Fallback initialization - run after a delay regardless of DOMContentLoaded
     setTimeout(() => {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
       
       // Format timestamps to Hong Kong timezone
       formatTimestampsToHKTime();

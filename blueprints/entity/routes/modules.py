@@ -167,6 +167,10 @@ def go_to_bills(entity_id):
             flash("You don't have access to this entity", "danger")
             return redirect(url_for("entity.entity_list"))
 
+    if not _is_module_enabled(entity_id, "BILL"):
+        flash("The Bill module is not activated for this entity.", "warning")
+        return redirect(url_for("entity.report_dashboard", id=entity_id))
+
     return redirect(billing_app_home_url(entity_id, org, current_user.id))
 
 

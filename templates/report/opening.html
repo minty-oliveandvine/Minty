@@ -86,6 +86,7 @@
     </style>
   </head>
   <body class="min-h-screen font-inter antialiased">
+    {% include 'components/flash_messages.html' %}
     <div class="flex min-h-screen items-center justify-center main-container relative">
       <!-- Phone card -->
       <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
@@ -202,7 +203,7 @@
               <div class=" bg-gray-100 rounded-2xl p-4">
                 <div class="flex justify-between items-center border-b border-gray-300 pb-2">
                   <span class="text-sm font-medium text-gray-500">Starting Cash Balance</span>
-                  <span class="text-sm font-medium text-gray-500" id="startingCashBalance">${{ "{:,.2f}".format(yesterday_closing_balance or 0) }}</span>
+                  <span class="text-sm font-medium text-gray-500" id="startingCashBalance">${{ "{:,.2f}".format(yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0)) }}</span>
                 </div>
                 <div class="flex justify-between items-center pt-2">
                   <span class="text-sm font-medium text-gray-400">Cash Till Balance</span>
@@ -214,7 +215,7 @@
                 </div>
               </div>
             </div>
-            <input type="hidden" name="opening_balance" value="{{ (yesterday_closing_balance or 0) }}">
+            <input type="hidden" name="opening_balance" value="{{ yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0) }}">
             <input type="date" name="transaction_date" value="{{ (selected_date or next_transaction_date or datenow).strftime('%Y-%m-%d') }}" class="hidden">
             <!-- Addition to Cash Drawer -->
             <div class="mb-4">
@@ -254,7 +255,7 @@
             <div>
               <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
                 <span class="text-sm font-medium text-[#31B6BD]">Opening Cash Balance</span>
-                <span class="text-sm font-medium text-[#31B6BD]" id="openingCashBalance">${{ "{:,.2f}".format((yesterday_closing_balance or 0) + (current_draft.cash_addition if current_draft and current_draft.cash_addition else (report.cash_addition if report and report.cash_addition else 0))) }}</span>
+                <span class="text-sm font-medium text-[#31B6BD]" id="openingCashBalance">${{ "{:,.2f}".format((yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0)) + (current_draft.cash_addition if current_draft and current_draft.cash_addition else (report.cash_addition if report and report.cash_addition else 0))) }}</span>
               </div>
             </div>
           </div>
@@ -317,73 +318,107 @@
           </div>
         </div>
       </div>
-
-      <!-- Error Dialog (stays open until the user clicks OK) -->
-      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
-        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
-          <div class="flex items-start mb-6">
-            <div class="flex-shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <h2 id="errorDialogTitle" class="text-lg font-bold text-gray-900">Error</h2>
-              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
-            </div>
-          </div>
-          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
-            OK
-          </button>
-        </div>
-      </div>
     </div>
   </div>
 
     <script>
       // Function to format currency input (simple and clean)
       function formatCurrency(input) {
-        // Remove any non-numeric characters except decimal point
+        // Just remove invalid characters, don't pad yet
         let value = input.value.replace(/[^\d.]/g, '');
         
-        // Ensure only one decimal point
+        // Remove multiple decimal points (keep only first one)
         const parts = value.split('.');
         if (parts.length > 2) {
           value = parts[0] + '.' + parts.slice(1).join('');
         }
         
-        // Limit to 2 decimal places
-        if (parts.length === 2 && parts[1].length > 2) {
-          value = parts[0] + '.' + parts[1].substring(0, 2);
+        // Limit decimal to 2 digits
+        const decimalParts = value.split('.');
+        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
+          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
         }
         
-        // Update the input value (keep it simple - no dash conversion)
+        // Just set the cleaned value - NO padding during input
         input.value = value;
       }
+
+
 
       // Format with commas on blur (simple and clean)
       function formatWithCommas(input) {
         let value = input.value;
         
-        // Skip if empty
-        if (value === '') {
-          return;
-        }
+        if (value === '') return;
         
-        // Remove existing commas and format
+        // Remove commas
         value = value.replace(/,/g, '');
         const parts = value.split('.');
+        const wholeNumber = parts[0];
         
-        if (parts.length > 0 && parts[0] !== '') {
-          const wholeNumber = parts[0];
-          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-          // Add .00 if no decimal part
-          value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
+        // Add commas to whole number
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        
+        // Ensure .00 at the end with proper padding
+        let decimalPart = parts.length > 1 ? parts[1] : '00';
+        if (decimalPart === '') {
+          decimalPart = '00'; // 1234. → 1234.00
+        } else if (decimalPart.length === 1) {
+          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
         }
         
-        // Update the input value
-        input.value = value;
+        input.value = formattedWholeNumber + '.' + decimalPart;
       }
+
+
+      function formatAllCurrencyOnLoad() {
+        // Get all inputs on the page
+        const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
+        
+        allInputs.forEach(input => {
+          if (input.value && input.value.trim() !== '') {
+            // Remove existing commas
+            let value = input.value.replace(/,/g, '');
+            
+            // Split into whole and decimal parts
+            const parts = value.split('.');
+            const wholeNumber = parts[0];
+            
+            // Add commas to whole number
+            const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            
+            // Ensure .00 at the end - handle empty decimal part
+            let decimalPart = parts.length > 1 ? parts[1] : '00';
+            
+            // If decimal part is empty (trailing dot), set to '00'
+            if (decimalPart === '') {
+              decimalPart = '00';
+            } else {
+              // Pad to 2 digits: '1' → '10', '12' → '12'
+              decimalPart = (decimalPart + '00').substring(0, 2);
+            }
+            
+            // Set the formatted value
+            input.value = formattedWholeNumber + '.' + decimalPart;
+          }
+        });
+      }
+
+      // Run when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', formatAllCurrencyOnLoad);
+      } else {
+        formatAllCurrencyOnLoad();
+      }
+
+      // Also run after a short delay
+      setTimeout(formatAllCurrencyOnLoad, 100);
+      setTimeout(formatAllCurrencyOnLoad, 500);
+
+      // Call on page load
+      document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(formatAllCurrencyOnLoad, 100);
+      });
 
 
 
@@ -806,18 +841,6 @@
 
              // Function to show notification
        function showNotification(toastType = 'error') {
-         // Errors are blocking: show a dialog that stays open until the user
-         // clicks OK, rather than a toast that auto-dismisses.
-         if (toastType === 'error') {
-           const errTitle = document.getElementById('errorTitle');
-           const errMsg = document.getElementById('errorMessage');
-           showErrorDialog(
-             (errMsg && errMsg.textContent) || 'Something went wrong. Please try again.',
-             (errTitle && errTitle.textContent) || 'Error'
-           );
-           return;
-         }
-
          const notification = document.getElementById('notification');
          const successToast = document.getElementById('successToast');
          const errorToast = document.getElementById('errorToast');
@@ -836,41 +859,21 @@
          } else {
            errorToast.classList.remove('hidden');
          }
-
+         
          notification.classList.remove('translate-x-full');
          notification.classList.add('translate-x-0');
-
-         // Success auto-dismisses at 4s; warnings (unsaved) linger at 8s.
-         const displayDuration = (toastType === 'unsaved') ? 8000 : 4000;
+         
+         // Hide notification after 4 seconds
          setTimeout(() => {
            hideNotification();
-         }, displayDuration);
+         }, 4000);
        }
-
+       
        // Function to hide notification
        function hideNotification() {
          const notification = document.getElementById('notification');
          notification.classList.remove('translate-x-0');
          notification.classList.add('translate-x-full');
-       }
-
-       // Blocking error dialog — stays open until the user clicks OK.
-       function showErrorDialog(message, title = 'Error') {
-         const dialog = document.getElementById('errorDialog');
-         if (!dialog) { alert(message); return; }
-         const msgEl = document.getElementById('errorDialogMessage');
-         const titleEl = document.getElementById('errorDialogTitle');
-         if (msgEl) msgEl.textContent = message;
-         if (titleEl) titleEl.textContent = title;
-         dialog.classList.remove('hidden');
-         dialog.classList.add('flex');
-       }
-
-       function hideErrorDialog() {
-         const dialog = document.getElementById('errorDialog');
-         if (!dialog) return;
-         dialog.classList.add('hidden');
-         dialog.classList.remove('flex');
        }
        
       // Function to clean form data before submission

@@ -108,6 +108,8 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
 
 <!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
 <script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
@@ -201,35 +203,7 @@ document.addEventListener('submit', function(e){
               </svg>
             </button>
           </div>
-          {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-            {% for category, message in messages %}{% if category == 'success' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-                <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                  <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% elif category == 'danger' or category == 'error' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-                <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
-                  <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% endif %}{% endfor %}
-          {% endif %}{% endwith %}
+          {# server flashes handled by canonical flash_messages partial #}
         </div>       
         <!-- Include the reusable stepper component -->
         {% if not is_shared_link %}
@@ -2056,9 +2030,7 @@ document.addEventListener('submit', function(e){
 
     // Show flash notification on page load if it exists and calculate cash count totals
     document.addEventListener('DOMContentLoaded', function() {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
       calculateCashCountTotals();
       initializeSalesHistoryChart();
       initializeExpensesPieChart();

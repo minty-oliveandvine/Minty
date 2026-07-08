@@ -350,7 +350,7 @@ def edit_report(id):
         except Exception:
             logger.exception("Unexpected error editing report")
             db.session.rollback()
-            flash("An unexpected error occurred.", "danger")
+            flash("Couldn't save your changes to this report. Please try again.", "error")
 
     sales_data = {
         "shop_sales": {

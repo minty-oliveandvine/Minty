@@ -108,6 +108,8 @@
   </style>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
   <div class="flex min-h-screen items-center justify-center main-container">
     <!-- Phone card -->
     <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
@@ -153,35 +155,7 @@
       <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
         <!-- Notification Area (Slider) -->
         <div id="flashNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-          {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-            {% for category, message in messages %}{% if category == 'success' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-                <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                  <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% elif category == 'danger' or category == 'error' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-                <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
-                  <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% endif %}{% endfor %}
-          {% endif %}{% endwith %}
+          {# server flashes handled by canonical flash_messages partial #}
           <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
           <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
             <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
@@ -564,60 +538,91 @@
       }
     }
 
-    // Format currency input (with automated comma formatting)
-    function formatCurrency(input) {
-      // Store cursor position
-      const cursorPosition = input.selectionStart;
-      
-      // Remove any non-numeric characters except decimal point
-      let value = input.value.replace(/[^\d.]/g, '');
-      
-      // Ensure only one decimal point
-      const parts = value.split('.');
-      if (parts.length > 2) {
-        value = parts[0] + '.' + parts.slice(1).join('');
+    // Function to format currency input (simple and clean)
+      function formatCurrency(input) {
+        // Just remove invalid characters, don't pad yet
+        let value = input.value.replace(/[^\d.]/g, '');
+        
+        // Remove multiple decimal points (keep only first one)
+        const parts = value.split('.');
+        if (parts.length > 2) {
+          value = parts[0] + '.' + parts.slice(1).join('');
+        }
+        
+        // Limit decimal to 2 digits
+        const decimalParts = value.split('.');
+        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
+          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
+        }
+        
+        // Just set the cleaned value - NO padding during input
+        input.value = value;
       }
-      
-      // Limit to 2 decimal places
-      if (parts.length === 2 && parts[1].length > 2) {
-        value = parts[0] + '.' + parts[1].substring(0, 2);
+
+
+
+      // Format with commas on blur (simple and clean)
+      function formatWithCommas(input) {
+        let value = input.value;
+        
+        if (value === '') return;
+        
+        // Remove commas
+        value = value.replace(/,/g, '');
+        const parts = value.split('.');
+        const wholeNumber = parts[0];
+        
+        // Add commas to whole number
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        
+        // Ensure .00 at the end with proper padding
+        let decimalPart = parts.length > 1 ? parts[1] : '00';
+        if (decimalPart === '') {
+          decimalPart = '00'; // 1234. → 1234.00
+        } else if (decimalPart.length === 1) {
+          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
+        }
+        
+        input.value = formattedWholeNumber + '.' + decimalPart;
       }
+
+    // Format all currency inputs after page load
+    function formatAllCurrencyFields() {
+      // Get all inputs on the page
+      const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
       
-      // Update the input value
-      input.value = value;
+      allInputs.forEach(input => {
+        if (input.value && input.value.trim() !== '') {
+          // Remove existing commas
+          let value = input.value.replace(/,/g, '');
+          
+          // Split into whole and decimal parts
+          const parts = value.split('.');
+          const wholeNumber = parts[0];
+          
+          // Add commas to whole number
+          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+          
+          // Ensure .00 at the end
+          const decimalPart = parts.length > 1 ? parts[1] : '00';
+          const paddedDecimal = (decimalPart + '00').substring(0, 2);
+          
+          // Set the formatted value
+          input.value = formattedWholeNumber + '.' + paddedDecimal;
+        }
+      });
     }
 
-    // Format with commas on blur
-    function formatWithCommas(input) {
-      let value = input.value;
-      
-      // Remove any non-numeric characters except decimal point
-      value = value.replace(/[^\d.]/g, '');
-      
-      // If empty, clear the field to show placeholder
-      if (value === '') {
-        input.value = '';
-        return;
-      }
-      
-      // Remove existing commas and format
-      value = value.replace(/,/g, '');
-      const parts = value.split('.');
-      
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        // Add .00 if no decimal part
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
-      } else {
-        // If no whole number part, clear the field to show placeholder
-        input.value = '';
-        return;
-      }
-      
-      // Update the input value
-      input.value = value;
+    // Run when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', formatAllCurrencyFields);
+    } else {
+      formatAllCurrencyFields();
     }
+
+    // Also run after a short delay to catch dynamic content
+    setTimeout(formatAllCurrencyFields, 100);
+    setTimeout(formatAllCurrencyFields, 500);
 
          // Calculate totals based on input values
      function calculateTotals() {
@@ -971,9 +976,7 @@
 
     // Show flash notification on page load if it exists
     document.addEventListener('DOMContentLoaded', function() {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
     });
   </script>
 </body>

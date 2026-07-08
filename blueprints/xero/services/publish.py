@@ -793,11 +793,11 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
                     access_token = token_user.access_token
                 else:
                     logger.error("No access token available in xero_withdrawal_from")
-                    _record_module_error(pfr, "Withdrawal", "Xero connection has expired")
+                    _record_module_error(pfr, "Withdrawal", _pub_err.XERO_AUTH_EXPIRED)
                     return (0, 1)
             except RuntimeError:
                 logger.error("current_user not available and no access_token provided in xero_withdrawal_from")
-                _record_module_error(pfr, "Withdrawal", "Xero connection has expired")
+                _record_module_error(pfr, "Withdrawal", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
 
         if report_draft:
@@ -918,11 +918,11 @@ def xero_invoices(entity_id, posted_report, date, amount, access_token=None, pfr
                     access_token = token_user.access_token
                 else:
                     logger.error("No access token available in xero_invoices")
-                    _record_module_error(pfr, "Cash sales", "Xero connection has expired")
+                    _record_module_error(pfr, "Cash sales", _pub_err.XERO_AUTH_EXPIRED)
                     return (0, 1)
             except RuntimeError:
                 logger.error("current_user not available and no access_token provided in xero_invoices")
-                _record_module_error(pfr, "Cash sales", "Xero connection has expired")
+                _record_module_error(pfr, "Cash sales", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
 
         cash_sale_contact = get_entity_contact_settings(
@@ -993,11 +993,11 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
                     access_token = token_user.access_token
                 else:
                     logger.error("No access token available in xero_expenses")
-                    _record_module_error(pfr, "Expenses", "Xero connection has expired")
+                    _record_module_error(pfr, "Expenses", _pub_err.XERO_AUTH_EXPIRED)
                     return (0, 1)
             except RuntimeError:
                 logger.error("current_user not available and no access_token provided in xero_expenses")
-                _record_module_error(pfr, "Expenses", "Xero connection has expired")
+                _record_module_error(pfr, "Expenses", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
         
         if posted_report.expenses and posted_report.expenses > 0:
@@ -1154,11 +1154,11 @@ def xero_deposit(entity_id, posted_report, date, access_token=None, pfr=None):
                     access_token = token_user.access_token
                 else:
                     logger.error("No access token available in xero_deposit")
-                    _record_module_error(pfr, "Deposit", "Xero connection has expired")
+                    _record_module_error(pfr, "Deposit", _pub_err.XERO_AUTH_EXPIRED)
                     return (0, 1)
             except RuntimeError:
                 logger.error("current_user not available and no access_token provided in xero_deposit")
-                _record_module_error(pfr, "Deposit", "Xero connection has expired")
+                _record_module_error(pfr, "Deposit", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
 
         pettycash_settings = (
@@ -1201,11 +1201,11 @@ def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None):
                     access_token = token_user.access_token
                 else:
                     logger.error("No access token available in xero_discrepancy")
-                    _record_module_error(pfr, "Discrepancy", "Xero connection has expired")
+                    _record_module_error(pfr, "Discrepancy", _pub_err.XERO_AUTH_EXPIRED)
                     return (0, 1)
             except RuntimeError:
                 logger.error("current_user not available and no access_token provided in xero_discrepancy")
-                _record_module_error(pfr, "Discrepancy", "Xero connection has expired")
+                _record_module_error(pfr, "Discrepancy", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
 
         discrepancy_date = _normalize_xero_date(date)
@@ -1403,11 +1403,11 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
                     access_token = token_user.access_token
                 else:
                     logger.error("No access token available in xero_integrated_module")
-                    return _aggregate_error_result("Xero connection has expired")
+                    return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
             except RuntimeError:
                 # current_user not available (e.g., in background thread)
                 logger.error("current_user not available and no access_token provided")
-                return _aggregate_error_result("Xero connection has expired")
+                return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
 
         pfr = PublishFailureReason()
         modules = {}
@@ -1433,6 +1433,14 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             ReportDraft.company == entity_id, ReportDraft.transaction_date == date
         ).first()
 
+        # A rejected token (HTTP 401) is an account-wide condition, not a
+        # per-module one.  As soon as any module reports it, stop the run and
+        # surface the expiry a single time — otherwise every remaining module
+        # makes a doomed Xero call and appends the same reason, producing a
+        # toast like "Withdrawal — …; Cash sales — …; Expense 'X' — …".
+        def _auth_expired():
+            return pfr.has_auth_expired()
+
         #Cash addition/withdrawal from start
         if report_draft.cash_addition and report_draft.cash_addition > 0:
             if _should_run("withdrawal_from"):
@@ -1440,6 +1448,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
                     report_draft, entity_id, date, access_token=access_token, pfr=pfr))
         else:
             modules["withdrawal_from"] = {"status": "success"}
+        if _auth_expired():
+            return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
 
         #Cash sales
         if posted_report.cash_sales and posted_report.cash_sales > 0:
@@ -1449,6 +1459,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
                     access_token=access_token, pfr=pfr))
         else:
             modules["invoices"] = {"status": "success"}
+        if _auth_expired():
+            return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
 
         #Expenses
         if posted_report.expenses and posted_report.expenses > 0:
@@ -1458,6 +1470,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
                     retry_expense_ids=retry_expense_ids))
         else:
             modules["expenses"] = {"status": "success"}
+        if _auth_expired():
+            return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
 
         #Bank deposit
         if posted_report.bank_deposit and posted_report.bank_deposit > 0:
@@ -1466,6 +1480,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
                     entity_id, posted_report, date, access_token=access_token, pfr=pfr))
         else:
             modules["deposit"] = {"status": "success"}
+        if _auth_expired():
+            return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
 
         #Discrepancy
         if (posted_report.discrepancy_amount and
@@ -1476,6 +1492,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
                     entity_id, posted_report, date, access_token=access_token, pfr=pfr))
         else:
             modules["discrepancy"] = {"status": "success"}
+        if _auth_expired():
+            return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
 
         return {
             "modules": modules,
@@ -1795,39 +1813,6 @@ def _set_report_processing_status(
     return report
 
 
-def _lock_date_violation_reason(posted_report, entity_id, access_token):
-    """Return a friendly lock-date message when a publish failed because the
-    report date is in a Xero-locked period, else None.
-
-    The pre-publish check validates against a freshly-refreshed lock date, but
-    Xero is the authoritative source and the cutoff can move between that check
-    and the actual API call. When a publish fails we re-fetch the lock date from
-    Xero and, if the report date is now within a locked period, return the
-    specific lock-date message so the caller can surface it as the failure
-    reason instead of Xero's raw rejection text.
-    """
-    try:
-        from blueprints.entity.services.settings import refresh_entity_lock_dates
-        from blueprints.xero.services.integration import (
-            get_effective_lock_date, lock_date_violation_message)
-
-        entity = Entity.query.get(entity_id)
-        if entity is None:
-            return None
-        entity = refresh_entity_lock_dates(
-            entity_id, access_token, entity.xero_org_id
-        )
-        return lock_date_violation_message(
-            posted_report.transaction_date, get_effective_lock_date(entity)
-        )
-    except Exception as exc:
-        logger.warning(
-            "Lock-date failure re-check failed for report %s: %s",
-            getattr(posted_report, "id", "?"), exc,
-        )
-        return None
-
-
 def process_xero_integration_background(
     entity_id, date, report_id, user_email, access_token, app, prior_status=None
 ):
@@ -1948,27 +1933,7 @@ def process_xero_integration_background(
                     # Some or all transactions failed.  Distinguish a full
                     # failure from a partial publish (some succeeded, some not).
                     posted_report.xero_integrated_yes = False
-
-                    # Fallback: Xero is the authoritative lock-date source. If the
-                    # report date is in a locked period, that's the root cause and
-                    # the single actionable reason — surface the friendly lock-date
-                    # message in place of Xero's raw rejection text. A locked date
-                    # can never be a partial publish (Xero rejects every entry for
-                    # that date), so this also forces a full "failed".
-                    lock_msg = _lock_date_violation_reason(
-                        posted_report, entity_id, user.access_token
-                    )
-                    if lock_msg:
-                        reason_items = [{
-                            "text": lock_msg,
-                            "scope": "entity",
-                            "expense_id": None,
-                            "deps": [],
-                            "module": None,
-                        }]
-                        reasons = [lock_msg]
-
-                    if not lock_msg and (selective or succeeded > 0):
+                    if selective or succeeded > 0:
                         # Selective re-publish always keeps the report partial when
                         # anything remains: earlier parts are already live in Xero,
                         # so it can never regress to a full "failed".
