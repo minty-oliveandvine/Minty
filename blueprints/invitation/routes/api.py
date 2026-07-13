@@ -104,6 +104,8 @@ def list_pending(entity_id):
                 "id": inv.id,
                 "email": inv.email,
                 "role": inv.role,
+                "first_name": inv.first_name or "",
+                "last_name": inv.last_name or "",
                 "created_at": inv.created_at.isoformat() if inv.created_at else None,
                 "resend_cooldown": resend_cooldown_remaining(inv),
             }

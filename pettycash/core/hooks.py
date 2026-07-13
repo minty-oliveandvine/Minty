@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import time
 
-from flask import flash, jsonify, redirect, request, session, url_for
+from flask import (flash, jsonify, redirect, render_template, request, session,
+                   url_for)
 from flask_login import current_user, user_logged_in
 from flask_wtf.csrf import CSRFError
 from loguru import logger
@@ -42,7 +43,26 @@ def init_app(app, db):
                     }),
                 500,
             )
-        return exception
+
+        # Friendly, non-technical fallback. The technical detail (type,
+        # traceback) is already logged above; the user only sees plain guidance.
+        friendly_message = (
+            "Something interrupted that action. We've logged it on our end — "
+            "please try again, and let us know if it keeps happening."
+        )
+        # Match "/api/" anywhere in the path, not just as a prefix: the API
+        # routes are mounted under /minty/api/..., so a startswith("/api")
+        # check missed every one of them and handed fetch() an HTML error
+        # page, which then died in response.json() as "Unexpected token '<'".
+        wants_json = bool(request) and (
+            "/api/" in request.path
+            or request.is_json
+            or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            or "application/json" in (request.headers.get("Accept") or "").lower()
+        )
+        if wants_json:
+            return jsonify({"status": "error", "message": friendly_message}), 500
+        return render_template("errors.html", error=friendly_message), 500
 
     @app.route("/health")
     def health_check():
@@ -219,7 +239,7 @@ def init_app(app, db):
                         403,
                     )
                 flash(
-                    "Read-only access. You can view this entity but cannot modify it.",
+                    "You have read-only access to this entity - you can look, but not edit.",
                     "warning",
                 )
                 return redirect(request.referrer or url_for("entity.entity_list"))
@@ -256,7 +276,7 @@ def init_app(app, db):
                             }),
                         401,
                     )
-                flash("Your session has expired. Please login again.", "warning")
+                flash("Your session ran out. Mind logging back in?", "warning")
                 return redirect(url_for("auth.home"))
 
             if current_user.is_authenticated:
@@ -286,7 +306,7 @@ def init_app(app, db):
                 400,
             )
         flash(
-            "Form expired or invalid. Please refresh the page and try again.",
+            "This form went stale while you were away. Refresh and try again?",
             "warning")
         return redirect(request.referrer or url_for("auth.home"))
 

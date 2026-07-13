@@ -197,8 +197,7 @@ def process_xero_account_mapping_post(
 
         if main_bank and deposit_bank and main_bank == deposit_bank:
             flash(
-                "Main Bank Account and Deposit Bank Account cannot be the same. Please select different bank accounts.",
-                "error",
+                "Main Bank Account and Deposit Bank Account can't be the same — please pick a different one for each.", "danger",
             )
             return _mapping_redirect(entity_id, _from, return_view=return_view)
 
@@ -217,7 +216,7 @@ def process_xero_account_mapping_post(
         ]
         missing = [label for value, label in required_fields if not value]
         if missing:
-            flash("Please select: " + ", ".join(missing), "error")
+            flash("Please select: " + ", ".join(missing), "danger")
             return _mapping_redirect(entity_id, _from, return_view=return_view)
 
         entity = Entity.query.get_or_404(entity_id)
@@ -272,24 +271,33 @@ def process_xero_account_mapping_post(
             entity_id, discrepancy_contact, xero_org_id
         )
 
-        if not all(
-            [
-                pettycash_account_id,
-                bank_account_id,
-                cash_sale_account_id,
-                discrepancy_bank_account_id,
-                discrepancy_account_id,
-                director_account_id,
-                cash_sale_contact_id,
-                director_contact_id,
-                discrepancy_contact_id,
-            ]
-        ):
+        # Pair each resolved id with the field label and the value the user
+        # submitted, so an unresolved item can be named specifically (e.g.
+        # "Cash Sales account code (48001)") instead of a vague "one or more".
+        resolution_checks = [
+            (pettycash_account_id, "Petty Cash Account", main_bank),
+            (bank_account_id, "Deposit Bank Account", deposit_bank),
+            (cash_sale_account_id, "Cash Sales account code", cashsale_account),
+            (discrepancy_bank_account_id, "Discrepancy Bank Account", discrepancy_bank),
+            (discrepancy_account_id, "Discrepancy account code", discrepancy_account),
+            (director_account_id, "Director Personal Account code", owners_account),
+            (cash_sale_contact_id, "Cash Sales contact", cashsale_contact),
+            (director_contact_id, "Director / Responsible person", owners_contact),
+            (discrepancy_contact_id, "Discrepancy contact", discrepancy_contact),
+        ]
+        unresolved = [
+            f"{label} ({value})" if value else label
+            for resolved_id, label, value in resolution_checks
+            if not resolved_id
+        ]
+        if unresolved:
             db.session.rollback()
             flash(
-                "Failed to resolve one or more selected accounts/contacts. "
-                "Please retry after the Xero sync completes.",
-                "error",
+                "Couldn't find the following in your Xero data: "
+                + "; ".join(unresolved)
+                + ". They may not have synced from Xero yet — "
+                "please retry once the Xero sync has finished.",
+                "danger",
             )
             return _mapping_redirect(entity_id, _from, return_view=return_view)
 
@@ -335,7 +343,7 @@ def process_xero_account_mapping_post(
             )
 
         if not (defer_success_redirect and has_existing_settings):
-            flash("Entity settings updated successfully.", "success")
+            flash("Entity settings saved!", "success")
         if entity_id:
             logger.info(f"Entity settings updated for entity ID: {entity_id}")
 

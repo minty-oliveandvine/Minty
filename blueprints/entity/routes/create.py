@@ -891,6 +891,8 @@ def onboarding_invite():
         entity_id,
         payload.get("email") or "",
         payload.get("role") or "",
+        payload.get("first_name") or "",
+        payload.get("last_name") or "",
     )
     resp = jsonify(data)
     resp.status_code = status

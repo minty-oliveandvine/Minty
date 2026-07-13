@@ -41,7 +41,7 @@ def entity_ending_with_report(entity_id, report_id):
         UserEntity.entity_id == entity_id).first()
 
     if not user_entity and not is_superuser(current_user):
-        flash("You don't have access to this entity", "danger")
+        flash("Hmm, it looks like you don't have permission to look there.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Get the entity
@@ -55,10 +55,10 @@ def entity_ending_with_report(entity_id, report_id):
     ).first()
 
     if not report:
-        flash("Report not found", "danger")
+        flash("Hmm, I couldn't find that report.", "danger")
         return redirect(url_for("report.entity_report_history", entity_id=entity_id))
     if not can_view_report(current_user, report):
-        flash("You do not have permission to access this report", "danger")
+        flash("Hmm, it looks like you don't have permission to open this report.", "danger")
         return redirect(url_for("report.entity_report_history", entity_id=entity_id))
 
     # Get the report data and render the ending page
@@ -67,73 +67,115 @@ def entity_ending_with_report(entity_id, report_id):
 
 
 
-def convert_report_to_draft(report_id):
-    """Convert a posted report back to draft for editing (Testing Only)"""
+class RevertError(Exception):
+    """A revert-to-draft attempt that failed a guard, with an HTTP status."""
+
+    def __init__(self, message, status_code):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
+def revert_report_to_draft(report_id):
+    """Revert a submitted report to an editable draft.
+
+    Deletes the posted Report (and its ShopExpense rows) and rewinds the
+    ReportDraft to the opening step, so the whole report — balances included —
+    can be re-entered through the normal flow and re-submitted.
+
+    Two things are deliberately preserved on the draft before the Report row
+    goes away:
+
+    * ``publishing_status`` — the only record that this report was already
+      pushed to Xero. Publishing does not store Xero object IDs, so a second
+      publish re-POSTs everything and duplicates it. Submitting the draft again
+      restores this marker onto the new Report so the publish flow can warn.
+    * ``xero_integrated_yes`` — whether that push fully succeeded.
+
+    Raises RevertError on a failed guard. Commits on success and returns the
+    ReportDraft.
+    """
+    report = Report.query.filter(Report.id == report_id).first()
+    if not report:
+        raise RevertError("Report not found", 404)
+
+    entity_id = report.company
+    if not entity_id or not has_permission(
+        current_user, Permission.REPORT_EDIT_OWN, entity_id
+    ):
+        raise RevertError("You do not have permission to edit this report.", 403)
+
+    # Reports chain: each one's opening balance comes from the previous one's
+    # closing balance. Reverting an older report deletes a link mid-chain and
+    # leaves the newer reports' opening balances dangling, so only the latest
+    # may be reverted -- matching edit_report and delete_report.
+    newer_report = (
+        Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date > report.transaction_date,
+        )
+        .order_by(Report.transaction_date.desc())
+        .first()
+    )
+    if newer_report:
+        raise RevertError(
+            "You can only edit the most recent report. Delete or edit the newer "
+            "reports first.",
+            400,
+        )
+
+    report_draft = ReportDraft.query.filter(ReportDraft.id == report_id).first()
+    if not report_draft:
+        raise RevertError("Report draft not found", 404)
+
+    was_published = bool(report.xero_integrated_yes)
+    prior_publishing_status = report.publishing_status
+
     try:
-        # Get the report and draft
-        report = Report.query.filter(Report.id == report_id).first()
-
-        if not report:
-            return jsonify(
-                {"status": "error", "message": "Report not found"}), 404
-        entity_id = report.company
-        if not entity_id or not has_permission(
-            current_user, Permission.REPORT_EDIT_OWN, entity_id
-        ):
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "You do not have permission to edit this report.",
-                    }
-                ),
-                403,
-            )
-
-        report_draft = ReportDraft.query.filter(
-            ReportDraft.id == report_id).first()
-
-        if not report_draft:
-            return (
-                jsonify({"status": "error", "message": "Report draft not found"}),
-                404,
-            )
-
-        # Delete all related ShopExpense records first (they have a
-        # non-nullable foreign key)
+        # ShopExpense.report_id is non-nullable, so these go before the Report.
         ShopExpense.query.filter(ShopExpense.report_id == report_id).delete()
-
-        # Delete the Report record (submitted/published report)
         db.session.delete(report)
 
-        # Convert ReportDraft back to draft status
         report_draft.status = "draft"
         report_draft.current_section = "opening"
         report_draft.completed_sections = []
-        report_draft.xero_integrated_yes = False  # Reset Xero integration flag
+        report_draft.xero_integrated_yes = was_published
+        report_draft.publishing_status = prior_publishing_status
 
         db.session.commit()
-
-        logger.info(
-            f"Report {report_id} converted to draft for editing (testing)")
-
-        return jsonify(
-            {
-                "status": "success",
-                "message": "Report converted to draft",
-                "draft_id": report_draft.id,
-                "transaction_date": (
-                    report_draft.transaction_date.strftime("%Y-%m-%d")
-                    if report_draft.transaction_date
-                    else None
-                ),
-            }
-        )
-
-    except Exception as e:
+    except Exception:
         db.session.rollback()
+        raise
+
+    logger.info(
+        f"Report {report_id} reverted to draft "
+        f"(was_published={was_published}, publishing_status={prior_publishing_status})"
+    )
+    return report_draft
+
+
+def convert_report_to_draft(report_id):
+    """JSON endpoint wrapper around revert_report_to_draft."""
+    try:
+        report_draft = revert_report_to_draft(report_id)
+    except RevertError as e:
+        return jsonify({"status": "error", "message": e.message}), e.status_code
+    except Exception as e:
         logger.error(f"Error converting report to draft: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+    return jsonify(
+        {
+            "status": "success",
+            "message": "Report converted to draft",
+            "draft_id": report_draft.id,
+            "transaction_date": (
+                report_draft.transaction_date.strftime("%Y-%m-%d")
+                if report_draft.transaction_date
+                else None
+            ),
+        }
+    )
 
 
 
@@ -147,12 +189,12 @@ def entity_ending(entity_id):
         # Verify token
         secret_key = app.config.get("SECRET_KEY")
         if not secret_key:
-            flash("Server configuration error", "danger")
+            flash("Something's not set up right on my end. Could you let us know?", "danger")
             return redirect(url_for("entity.entity_list"))
 
         is_valid, params = verify_share_token(token, secret_key)
         if not is_valid or not params:
-            flash("Invalid or expired share link", "danger")
+            flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
             return redirect(url_for("entity.entity_list"))
 
         # Extract params from token (use token params, not URL params for
@@ -162,7 +204,7 @@ def entity_ending(entity_id):
 
         # Verify entity_id matches
         if token_entity_id != entity_id:
-            flash("Invalid share link", "danger")
+            flash("This link doesn't look right to me.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         # Get the entity
@@ -185,19 +227,21 @@ def entity_ending(entity_id):
                 )
             else:
                 flash(
-                    f"No report found for {token_transaction_date}",
+                    f"I couldn't find a report for {token_transaction_date}.",
                     "warning",
                 )
                 return redirect(url_for("entity.entity_list"))
         except ValueError:
-            flash("Invalid date format in share link", "warning")
+            flash("There's something wrong with the date in this link.", "warning")
             return redirect(url_for("entity.entity_list"))
 
     # No token provided, require login
     try:
         if not current_user.is_authenticated:
+            flash("You'll need to sign in to view this report.", "info")
             return redirect(url_for("auth.login"))
     except AttributeError:
+        flash("You'll need to sign in to view this report.", "info")
         return redirect(url_for("auth.login"))
 
     # Check if user has access to this entity. Superusers without a
@@ -207,7 +251,7 @@ def entity_ending(entity_id):
         UserEntity.entity_id == entity_id).first()
 
     if not user_entity and not is_superuser(current_user):
-        flash("You don't have access to this entity", "danger")
+        flash("Hmm, it looks like you don't have permission to look there.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Get transaction_date from request or use today's date
@@ -217,7 +261,7 @@ def entity_ending(entity_id):
             report_date = datetime.strptime(
                 transaction_date, "%Y-%m-%d").date()
         except ValueError:
-            flash("Invalid date format", "warning")
+            flash("That date doesn't look quite right to me.", "warning")
             return redirect(url_for("entity.entity_list"))
     else:
         # Use today's date if no transaction_date provided
@@ -237,7 +281,7 @@ def entity_ending(entity_id):
         )
     else:
         flash(
-            f"No report found for {report_date.strftime('%Y-%m-%d')}",
+            f"I couldn't find a report for {report_date.strftime('%Y-%m-%d')}.",
             "warning",
         )
         return redirect(url_for("entity.entity_list"))
@@ -250,22 +294,22 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     if not skip_auth and not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not skip_auth and not entity_id:
-        flash("Entity context is required.", "danger")
+        flash("I need to know which entity we're working with first!", "danger")
         return redirect(url_for("entity.entity_list"))
     if not skip_auth and not has_permission(
         current_user, Permission.REPORT_VIEW_OWN, entity_id
     ):
-        flash("You do not have permission to view reports for this entity.", "danger")
+        flash("It looks like you don't have permission to view this entity's reports.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not skip_auth and id:
         report_for_access = Report.query.filter_by(id=id).first()
         if not report_for_access:
             report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
-            flash("Report not found", "danger")
+            flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
         if not can_view_report(current_user, report_for_access):
-            flash("You do not have permission to access this report.", "danger")
+            flash("Hmm, it looks like you don't have permission to open this report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
     # Check if edit mode is enabled
@@ -280,13 +324,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 current_user.id
             ):
                 flash(
-                    "You need to create an entity first before accessing reports.",
+                    "You'll need to create an entity before I can show you any reports.",
                     "warning",
                 )
                 return redirect(url_for("entity.entity_list"))
         except AttributeError:
             flash(
-                "You need to create an entity first before accessing reports.",
+                "You'll need to create an entity before I can show you any reports.",
                 "warning",
             )
             return redirect(url_for("entity.entity_list"))
@@ -317,7 +361,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         if not report_exists:
             logger.error(f"Report not found: id={id}, entity_id={entity_id}")
-            flash("Report not found", "danger")
+            flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity_report_history", entity_id=entity_id))
 
         logger.info(
@@ -393,7 +437,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             logger.error(
                 f"Report query failed after existence check: id={id}, entity_id={entity_id}"
             )
-            flash("Report not found", "danger")
+            flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity_report_history", entity_id=entity_id))
 
         # Check if ReportDraft exists, create it if missing
@@ -872,7 +916,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     # Check if entity and draft exist
     if not user_entity:
-        flash("Entity not found.", "danger")
+        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # If edit mode is enabled and no draft exists, try to load any existing report for this date
@@ -892,12 +936,12 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 )
             )
         else:
-            flash("No report found to edit for this date.", "warning")
+            flash("I couldn't find a report to edit for that date.", "warning")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
     if not current_draft and not is_edit_mode:
         flash(
-            "No draft found for today. Please start with the opening section.",
+            "I don't see a draft for today yet - let's start with the opening entry.",
             "warning",
         )
         return redirect(url_for("report.report_opening"))
@@ -918,7 +962,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     )
     if not is_edit_mode and "cash_count" not in completed_sections and expected_balance >= 0:
         flash(
-            "Please complete the Cash Count step before accessing the Ending page.",
+            "The Cash Count step needs finishing before I can show you the Ending page - shall we do that first?",
             "warning",
         )
         return redirect(
@@ -1160,7 +1204,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             - (current_draft.bank_deposit or 0)
         )
         if expected_balance < 0:
-            flash("Cash balance is negative. Please fix your entries before finishing the report.", "warning")
+            flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "warning")
             return redirect(
                 url_for(
                     "report.report_deposit",
@@ -1302,7 +1346,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 )
                 logger.error(f"Validation Errors: {validation_errors}")
                 logger.error(f"=== END VALIDATION FAILURE ===")
-                flash(f"Validation failed: {'; '.join(validation_errors)}", "error")
+                flash(f"Hmm, a few things need fixing before I can submit: {'; '.join(validation_errors)}", "danger")
                 return redirect(url_for("report.report_ending", entity_id=entity_id))
 
             logger.info(f"=== VALIDATION PASSED ===")
@@ -1389,6 +1433,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         discrepancy_amount=current_draft.discrepancy_amount,
                         discrepancy_type=current_draft.discrepancy_type,
                         discrepancy_reason=current_draft.discrepancy_reason,
+                        # Restore the Xero publish markers carried on the draft by
+                        # revert_report_to_draft. Publishing stores no Xero object
+                        # IDs, so a re-publish duplicates every transaction; these
+                        # are what let the publish flow warn about that. Normal
+                        # first-time drafts carry None/False and are unaffected.
+                        publishing_status=current_draft.publishing_status,
+                        xero_integrated_yes=bool(current_draft.xero_integrated_yes),
                     )
                     db.session.add(posted_report)
                     logger.info(
@@ -1666,7 +1717,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         raise commit_error
                 else:
                     logger.warning(f"Report {current_draft.id} already submitted")
-                    flash("Report already submitted.", "warning")
+                    flash("This one's already been submitted!", "warning")
                     return redirect(
                         url_for("entity.report_dashboard", id=entity_id)
                     )
@@ -1675,7 +1726,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 logger.warning(
                     f"Report {current_draft.id} already submitted, redirecting to dashboard"
                 )
-                flash("Report already submitted.", "warning")
+                flash("This one's already been submitted!", "warning")
                 return redirect(
                     url_for("entity.report_dashboard", id=entity_id)
                 )
@@ -1725,7 +1776,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         f"Draft record {current_draft.id} was lost due to rollback - this is a critical error"
                     )
                     flash(
-                        "Critical error: Your draft was lost. Please start over.",
+                        "I'm so sorry - your draft was lost and I couldn't recover it. You'll need to start this report over.",
                         "danger",
                     )
                     return redirect(
@@ -1792,25 +1843,25 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             if error_type == "connection":
                 logger.info(f"Showing connection error message to user")
                 flash(
-                    "Connection error occurred. Please check your internet connection and try again.",
+                    "Something went wrong reaching the server. Could you check your connection and try again?",
                     "warning",
                 )
             elif error_type == "constraint":
                 logger.info(f"Showing constraint error message to user")
                 flash(
-                    "Data validation error occurred. Please check your data and try again.",
+                    "Something in the report data doesn't look right to me. Could you check your entries and try again?",
                     "warning",
                 )
             elif error_type == "permission":
                 logger.info(f"Showing permission error message to user")
                 flash(
-                    "Permission error occurred. Please contact your administrator.",
+                    "I couldn't save your report - something on our end blocked it. Nothing was submitted, so please contact your administrator before trying again.",
                     "danger",
                 )
             else:
                 logger.info(f"Showing general error message to user")
                 flash(
-                    "An error occurred while submitting the report. Please try again.",
+                    "Something went wrong on my end while submitting your report. Mind trying again?",
                     "danger",
                 )
 

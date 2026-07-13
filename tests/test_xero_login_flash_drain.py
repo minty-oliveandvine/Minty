@@ -1,7 +1,7 @@
 """Tests for stale-flash draining in the Xero login (``auth``) callback branch.
 
 Regression: a flash queued by a pre-login request (e.g. a stale deep link that
-flashed "Entity not found" then redirected) survives redirects because Flask
+flashed "Hmm, I looked everywhere but couldn't find that one." then redirected) survives redirects because Flask
 keeps flashes in the session until a rendered page consumes them. The dashboard
 template (entity_dashboard_v2.html) is the one page that renders the ``danger``
 category, so without draining, that old error toast pops up next to the
@@ -28,8 +28,8 @@ from blueprints.xero.routes import routes as xero_routes
 
 
 # Flask stores flashes as (category, message) tuples in session["_flashes"].
-SUCCESS = ("success", "Xero Authentication: Logged in successfully")
-STALE = ("danger", "Entity not found")
+SUCCESS = ("success", "You're signed in with Xero.")
+STALE = ("danger", "Hmm, I looked everywhere but couldn't find that one.")
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def _patch_login_branch(monkeypatch, *, user) -> None:
 # ---------------------------------------------------------------------------
 
 def test_stale_flash_drained_on_login(monkeypatch):
-    """A leftover "Entity not found" flash queued before login must NOT survive
+    """A leftover "Hmm, I looked everywhere but couldn't find that one." flash queued before login must NOT survive
     into the post-login render — only the login-success flash remains."""
     app = _build_app()
     user = _make_user()
@@ -110,7 +110,7 @@ def test_stale_flash_drained_on_login(monkeypatch):
         assert response.status_code == 302
         remaining = session.get("_flashes", [])
 
-    assert STALE not in remaining, "stale 'Entity not found' flash should be drained"
+    assert STALE not in remaining, "stale 'Hmm, I looked everywhere but couldn't find that one.' flash should be drained"
     assert remaining == [SUCCESS], "only the login-success flash should be queued"
 
 

@@ -311,7 +311,7 @@ def email_handoff():
         logger.error(
             f"Handoff: invite acceptance failed for user {user.id}: {accept_error}"
         )
-        flash(accept_error, "error")
+        flash(accept_error, "danger")
         return redirect(url_for("auth.home"))
 
     if not user.approved:

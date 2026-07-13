@@ -729,7 +729,7 @@
         const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
         if (submittedReportDate) {
           const selectedDate = new Date(dateString);
-          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const monthAbbr = selectedDate.toLocaleDateString('en-US', { month: 'short' });
           const day = selectedDate.getDate().toString().padStart(2, '0');
           const year = selectedDate.getFullYear();
           submittedReportDate.textContent = `${day} ${monthAbbr} ${year}`;
@@ -1813,7 +1813,7 @@
         if (submittedReportDate) {
           // Format the date as "DD Nov YYYY"
           const selectedDate = new Date(year, month, day);
-          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const monthAbbr = selectedDate.toLocaleDateString('en-US', { month: 'short' });
           const dayPadded = selectedDate.getDate().toString().padStart(2, '0');
           const selectedYear = selectedDate.getFullYear();
           submittedReportDate.textContent = `${dayPadded} ${monthAbbr} ${selectedYear}`;
@@ -1856,7 +1856,7 @@
         const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
         if (submittedReportDate) {
           const selectedDate = new Date(dateString);
-          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const monthAbbr = selectedDate.toLocaleDateString('en-US', { month: 'short' });
           const day = selectedDate.getDate().toString().padStart(2, '0');
           const year = selectedDate.getFullYear();
           submittedReportDate.textContent = `${day} ${monthAbbr} ${year}`;
@@ -1875,7 +1875,7 @@
         const transactionDateDisplay = document.querySelector('.text-lg.font-semibold.text-gray-900');
         if (transactionDateDisplay) {
           const selectedDate = new Date(dateString);
-          const monthAbbr = selectedDate.toLocaleDateString(undefined, { month: 'short' });
+          const monthAbbr = selectedDate.toLocaleDateString('en-US', { month: 'short' });
           const day = selectedDate.getDate().toString().padStart(2, '0');
           const year = selectedDate.getFullYear();
           transactionDateDisplay.textContent = `${day} ${monthAbbr} ${year}`;
@@ -1891,7 +1891,7 @@
       const submittedReportDate = document.querySelector('.submitted_report_until .text-lg');
       if (submittedReportDate) {
         const today = new Date();
-        const monthAbbr = today.toLocaleDateString(undefined, { month: 'short' });
+        const monthAbbr = today.toLocaleDateString('en-US', { month: 'short' });
         const day = today.getDate().toString().padStart(2, '0');
         const year = today.getFullYear();
         submittedReportDate.textContent = `${day} ${monthAbbr} ${year}`;
@@ -1911,7 +1911,7 @@
       const transactionDateDisplay = document.querySelector('.text-lg.font-semibold.text-gray-900');
       if (transactionDateDisplay) {
         const today = new Date();
-        const monthAbbr = today.toLocaleDateString(undefined, { month: 'short' });
+        const monthAbbr = today.toLocaleDateString('en-US', { month: 'short' });
         const day = today.getDate().toString().padStart(2, '0');
         const year = today.getFullYear();
         transactionDateDisplay.textContent = `${day} ${monthAbbr} ${year}`;
