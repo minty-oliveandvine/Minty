@@ -183,57 +183,6 @@ def get_organisation_lock_dates(access_token, xero_org_id):
         return {"period_lock_date": None, "end_of_year_lock_date": None}
 
 
-def get_effective_lock_date(entity):
-    """Return the cutoff date enforced for an entity.
-
-    Xero rejects any transaction dated on or before its lock date, so the
-    effective cutoff is the *latest* of the period lock date and the
-    end-of-year lock date. Returns a ``datetime.date`` or None if neither is
-    set.
-    """
-    if entity is None:
-        return None
-    candidates = [
-        d
-        for d in (
-            getattr(entity, "period_lock_date", None),
-            getattr(entity, "end_of_year_lock_date", None),
-        )
-        if d is not None
-    ]
-    return max(candidates) if candidates else None
-
-
-def _format_date_for_message(value):
-    """Render a date as e.g. ``18 June 2026`` for user-facing messages.
-
-    Accepts a ``date``/``datetime`` and falls back to ``str`` for anything
-    else (e.g. an already-formatted string).
-    """
-    if hasattr(value, "strftime"):
-        return f"{value.day} {value:%B %Y}"
-    return str(value)
-
-
-def lock_date_violation_message(transaction_date, lock_date):
-    """Return a user-facing error message if ``transaction_date`` is locked.
-
-    A date is locked when it falls on or before ``lock_date`` (matching Xero's
-    own behaviour). Returns None when the date is allowed or when there is no
-    lock date to enforce.
-    """
-    if not lock_date or not transaction_date:
-        return None
-    if transaction_date <= lock_date:
-        return (
-            f"The selected transaction date "
-            f"({_format_date_for_message(transaction_date)}) is in a locked "
-            f"accounting period. Xero only allows transactions dated after "
-            f"{_format_date_for_message(lock_date)}. Please choose a later date."
-        )
-    return None
-
-
 def _get_entity_xero_data_from_db(entity_id):
     db_accounts = AccountInfo.query.filter_by(entity_id=entity_id).all()
     db_contacts = XeroContactSync.query.filter_by(entity_id=entity_id).all()

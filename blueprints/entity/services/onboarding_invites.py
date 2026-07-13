@@ -35,17 +35,21 @@ def _invite_payload(inv: Invitation) -> dict:
         "email": inv.email,
         "role": inv.role,
         "status": inv.status,
+        "first_name": inv.first_name or "",
+        "last_name": inv.last_name or "",
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
     }
 
 
-def send_invite(user_id, entity_id, email, role):
+def send_invite(user_id, entity_id, email, role, first_name="", last_name=""):
     """Create and email an invitation for the onboarding entity."""
     if not has_permission_by_user_id(user_id, Permission.USER_INVITE, entity_id):
         return {"error": "You do not have permission to invite users to this entity."}, 403
 
     email = (email or "").strip().lower()
     role = _normalize_role(role)
+    first_name = (first_name or "").strip()
+    last_name = (last_name or "").strip()
     if not email or not role:
         return {"error": "email and role are required."}, 400
     if role not in _ASSIGNABLE_ROLES:
@@ -56,12 +60,19 @@ def send_invite(user_id, entity_id, email, role):
         return {"error": "You cannot assign a role higher than your own."}, 403
 
     invitation, error = create_invitation(
-        entity_id=entity_id, email=email, role=role, invited_by=user_id
+        entity_id=entity_id,
+        email=email,
+        role=role,
+        invited_by=user_id,
+        first_name=first_name,
+        last_name=last_name,
     )
     if error:
         return {"error": error}, 409
 
-    email_sent = send_invitation_email(invitation)
+    email_sent = send_invitation_email(
+        invitation, first_name=first_name, last_name=last_name
+    )
     return {
         "status": "success",
         "email_sent": email_sent,

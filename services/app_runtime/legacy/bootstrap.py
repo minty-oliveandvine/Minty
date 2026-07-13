@@ -228,9 +228,16 @@ def create_app():
     from blueprints.entity.routes.billing_sync import (
         billing_sync_chart_accounts,
         billing_sync_chart_if_changed,
+        billing_sync_contacts_if_changed,
     )
     csrf.exempt(billing_sync_chart_accounts)
     csrf.exempt(billing_sync_chart_if_changed)
+    csrf.exempt(billing_sync_contacts_if_changed)
+    # Same reason: billing asks for a Xero access token with a signed Bearer
+    # assertion and no cookie. Without this the CSRF handler redirects the POST to
+    # the login page, `requests` follows it, and billing parses an HTML 200 as JSON.
+    from blueprints.xero.routes.routes import internal_xero_access_token
+    csrf.exempt(internal_xero_access_token)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,
@@ -243,7 +250,10 @@ def create_app():
                                                   onboarding_invite_cancel,
                                                   onboarding_modules,
                                                   onboarding_opening_balance,
-                                                  onboarding_sales_methods)
+                                                  onboarding_sales_methods,
+                                                  onboarding_saved_step,
+                                                  onboarding_update_entity,
+                                                  onboarding_xero_disconnect)
     csrf.exempt(onboarding_create_entity)
     csrf.exempt(onboarding_modules)
     csrf.exempt(onboarding_sales_methods)
@@ -255,6 +265,9 @@ def create_app():
     csrf.exempt(onboarding_invite_cancel)
     csrf.exempt(onboarding_bill_codes)
     csrf.exempt(onboarding_finalize)
+    csrf.exempt(onboarding_saved_step)
+    csrf.exempt(onboarding_update_entity)
+    csrf.exempt(onboarding_xero_disconnect)
     # Onboarding /auth and /auth/confirm call these from a different origin
     # (port 3001) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_check,
@@ -277,18 +290,6 @@ def create_app():
     )
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24
     app.config["WTF_CSRF_TIME_LIMIT"] = 24 * 60 * 60
-    # Idle auto-logout: sign the user out after this many seconds with no
-    # activity. The client timer (static/js/idle-logout.js) is the primary
-    # trigger; hooks.before_request is the server-side backstop. Both route
-    # through /logout, which also ends the Xero SSO session. Defaults to 30 min.
-    app.config["IDLE_TIMEOUT_SECONDS"] = int(
-        os.environ.get("IDLE_TIMEOUT_SECONDS", 30 * 60)
-    )
-    # Optional: where Xero sends the browser after its end-session logout. Must
-    # be registered in the Xero app's post-logout redirect URIs to take effect.
-    app.config["XERO_POST_LOGOUT_REDIRECT_URI"] = os.environ.get(
-        "XERO_POST_LOGOUT_REDIRECT_URI"
-    )
     if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
         app.config["SESSION_SQLALCHEMY_SCHEMA"] = "pettycashv2"
     Session(app)

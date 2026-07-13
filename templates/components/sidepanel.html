@@ -47,6 +47,9 @@
       <!-- Nav sections -->
       <div class="flex flex-col gap-3 overflow-y-auto overscroll-contain">
         {% if show_entity_navigation %}
+        {# Petty Cash links only when the PETTY_CASH module is enabled for this
+           entity — mirrors the BILL gate below and the server-side route guard. #}
+        {% if is_petty_cash_enabled(active_entity_id) %}
         <!-- PETTY CASH -->
         <div class="flex flex-col gap-1" role="group" aria-label="Petty Cash">
           <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-[#656565]/70">Petty Cash</p>
@@ -69,6 +72,7 @@
             </li>
           </ul>
         </div>
+        {% endif %}
 
         {# Payment Request links bounce the user over to Module 2 — only show
            them when this entity actually has the BILL module enabled. Petty

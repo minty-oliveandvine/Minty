@@ -903,34 +903,6 @@ def backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id):
         logger.warning("backfill_lock_dates_if_needed: failed entity=%s: %s", entity_id, exc)
 
 
-def refresh_entity_lock_dates(entity_id, access_token, xero_org_id):
-    """Re-fetch lock dates from Xero and persist them, returning the entity.
-
-    Unlike :func:`backfill_lock_dates_if_needed`, this always overwrites the
-    stored values so callers (e.g. publishing) validate against the current
-    Xero lock date rather than a possibly stale cached value. On any failure it
-    returns the entity unchanged so the caller can fall back to the cached
-    values.
-    """
-    entity = Entity.query.get(entity_id)
-    if not entity or not xero_org_id or not access_token:
-        return entity
-    try:
-        from blueprints.xero.services.integration import get_organisation_lock_dates
-        lock_dates = get_organisation_lock_dates(access_token, xero_org_id)
-        entity.period_lock_date = lock_dates["period_lock_date"]
-        entity.end_of_year_lock_date = lock_dates["end_of_year_lock_date"]
-        db.session.commit()
-        logger.info(
-            "refresh_entity_lock_dates: entity=%s period=%s eoy=%s",
-            entity_id, entity.period_lock_date, entity.end_of_year_lock_date,
-        )
-    except Exception as exc:
-        db.session.rollback()
-        logger.warning("refresh_entity_lock_dates: failed entity=%s: %s", entity_id, exc)
-    return entity
-
-
 def backfill_lock_dates_if_needed_background(entity_id, access_token, xero_org_id, flask_app=None):
     """Fire-and-forget version — runs backfill_lock_dates_if_needed in a daemon thread."""
     if flask_app is None:
@@ -1117,22 +1089,33 @@ def sync_expense_account_info_from_xero(
     for code_str, xero_acc in by_code.items():
         if code_str not in selected_set:
             continue
-        existing_acc = AccountInfo.query.filter(
-            AccountInfo.entity_id == entity_id,
-            AccountInfo.xero_code == code_str,
-        ).first()
+        xero_account_id = xero_acc.get("AccountID", "")
+        # Match on xero_account_id — the unique-constraint key. Matching on
+        # xero_code here used to leave the AccountID free to collide: a row
+        # created earlier (e.g. by _resolve_account_id for a mapping) could
+        # already hold this AccountID, and the by-code UPDATE would then try to
+        # stamp a duplicate xero_account_id → IntegrityError on revisit.
+        existing_acc = None
+        if xero_account_id:
+            existing_acc = AccountInfo.query.filter(
+                AccountInfo.entity_id == entity_id,
+                AccountInfo.xero_account_id == xero_account_id,
+            ).first()
         if existing_acc:
             existing_acc.status = "ACTIVE"
             existing_acc.type = xero_acc.get("Type", existing_acc.type)
             existing_acc.name = xero_acc.get("Name", existing_acc.name)
-            existing_acc.xero_account_id = xero_acc.get("AccountID", existing_acc.xero_account_id)
+            existing_acc.xero_code = code_str
         else:
+            # No row for this AccountID yet. _upsert_account_info goes through
+            # ON CONFLICT (entity_id, xero_account_id), so if one nonetheless
+            # exists it is updated in place rather than duplicated.
             _upsert_account_info({
                 "id": str(uuid4()),
                 "entity_id": entity_id,
                 "type": xero_acc.get("Type", "EXPENSE"),
                 "name": xero_acc.get("Name", ""),
-                "xero_account_id": xero_acc.get("AccountID", ""),
+                "xero_account_id": xero_account_id,
                 "xero_code": code_str,
                 "status": "ACTIVE",
             })

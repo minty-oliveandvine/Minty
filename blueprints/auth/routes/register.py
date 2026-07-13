@@ -1,66 +1,27 @@
-import uuid
-
-from flask import (flash, get_flashed_messages, jsonify, redirect,
-                   render_template, request, url_for)
-from werkzeug.security import generate_password_hash
+from flask import get_flashed_messages, jsonify, render_template, request
 
 from blueprints.auth import auth_bp
-from blueprints.auth.forms import RegistrationForm
-from models.db import User, db
+from blueprints.auth.forms import _REQUIRED, RegistrationForm
+from models.db import User
 
 
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
+    # Registration is now OTP-verified end to end: the register page (register.html)
+    # collects name + email, the user clicks "Verify" to receive a 6-digit code
+    # (POST /auth/email/request-code), and the account is created ONLY after the
+    # code is confirmed on the Register click (POST /auth/email/verify-code, which
+    # creates the passwordless user via _create_passwordless_user and logs them
+    # in). This route therefore no longer creates users on a plain form POST —
+    # doing so would be an unverified-email bypass. A direct POST just re-renders
+    # the page so the JS flow can run.
     form = RegistrationForm()
-    if form.validate_on_submit():
-        try:
-            password = form.password.data
-            if not password:
-                flash("Password is required.", "danger")
-                return redirect(url_for("auth.register"))
-            hashed_password = generate_password_hash(
-                password, method="pbkdf2:sha256")
-            user = User.query.with_entities(User.username).filter_by(
-                username=form.username.data
-            ).first()
-            if user:
-                flash(
-                    "Account with this username is already taken. Please contact administrator or use different username",
-                    "danger",
-                )
-                return redirect(url_for("auth.register"))
-            else:
-                new_user = User(
-                    id=str(uuid.uuid4()),
-                    first_name=form.first_name.data,
-                    last_name=form.last_name.data,
-                    username=form.username.data,
-                    password=hashed_password,
-                    email=form.email.data,
-                    system_role=User.SYSTEM_ROLE_DEFAULT,
-                    approved=True,
-                )
-                db.session.add(new_user)
-                db.session.commit()
-                flash("Your account has been created! You can now log in.", "success")
-                return redirect(url_for("auth.login"))
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error during registration: {e}")
-            flash(
-                "There was an error during registration. Please try again later.",
-                "danger",
-            )
-            return redirect(url_for("auth.register"))
     get_flashed_messages()
     return render_template(
         "register.html",
         form=form,
         first_name=form.first_name.data,
         last_name=form.last_name.data,
-        username=form.username.data,
-        password=form.password.data,
-        confirm_password=form.confirm_password.data,
         email=form.email.data,
     )
 
@@ -71,21 +32,29 @@ def validate_register():
     errors = {}
     form.validate()
     for key, error in form.errors.items():
+        # Skip the "required" error while typing — an empty field the user hasn't
+        # filled yet shouldn't flash an error inline (it's still enforced on submit).
         if (
             isinstance(error, list)
             and len(error) > 0
-            and error[0] != "This field is required."
+            and error[0] != _REQUIRED
         ):
             errors[key] = error
-    error_count = len(dict(form.errors.items()))
+    # Duplicate-email check, reported inline like any other field error so the
+    # client can flag just the email field (no full-page submit/redirect that
+    # wipes the form). The register page sends this as a JSON body (so the OTP
+    # "Verify" button can gate on it before emailing a code), so read the email
+    # from JSON first and fall back to the form field.
+    json_body = request.get_json(silent=True) or {}
+    email = (json_body.get("email") or form.email.data or "").strip()
+    if email and not form.email.errors:
+        existing = User.query.with_entities(User.username).filter_by(
+            username=email
+        ).first()
+        if existing:
+            errors["email"] = ["An account with this email already exists"]
+
+    error_count = len(errors)
     return jsonify({"errors": errors, "errorCount": error_count})
-
-
-@auth_bp.route("/validate_username", methods=["POST"])
-def validate_username():
-    data = request.get_json()
-    username = data.get("username")
-    user = User.query.filter_by(username=username).first()
-    return jsonify({"exists": user is not None})
 
 

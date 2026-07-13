@@ -36,6 +36,7 @@ class Permission(str, Enum):
     ENTITY_UPDATE = "entity_update"
     ENTITY_RENAME = "entity_rename"
     ENTITY_DELETE = "entity_delete"
+    MODULE_MANAGE = "module_manage"
     SALES_METHOD_VIEW = "sales_method_view"
     SALES_METHOD_CREATE = "sales_method_create"
     SALES_METHOD_UPDATE = "sales_method_update"
@@ -95,6 +96,8 @@ PERMISSION_RULES: dict[Permission, PermissionRule] = {
     Permission.ENTITY_UPDATE: PermissionRule(Role.ACCOUNTANT),
     Permission.ENTITY_RENAME: PermissionRule(Role.ADMIN),
     Permission.ENTITY_DELETE: PermissionRule(Role.ADMIN),
+    # Changing an entity's active modules is admin-only.
+    Permission.MODULE_MANAGE: PermissionRule(Role.ADMIN),
     Permission.SALES_METHOD_VIEW: PermissionRule(Role.CASHIER),
     Permission.SALES_METHOD_CREATE: PermissionRule(Role.ACCOUNTANT),
     Permission.SALES_METHOD_UPDATE: PermissionRule(Role.ACCOUNTANT),

@@ -105,7 +105,7 @@ def _cors(resp):
     """Allow the onboarding origin to call the API cross-origin (token auth)."""
     resp.headers["Access-Control-Allow-Origin"] = _onboarding_base_url()
     resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
     return resp
 
@@ -193,6 +193,24 @@ def entity_create():
     )
 
 
+@entity_bp.route("/api/onboarding/server-time", methods=["GET", "OPTIONS"])
+def onboarding_server_time():
+    """Server-authoritative "today" in Hong Kong time for the onboarding app.
+
+    GET → {"today": "YYYY-MM-DD"} in Asia/Hong_Kong. The onboarding date picker
+    uses this to cap selectable dates at the current date so the future-date
+    boundary matches the users' local midnight, not the browser's timezone.
+    Public (returns only the current date); same CORS contract as the others.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from models.db import tz
+
+    resp = jsonify({"today": datetime.now(tz).date().isoformat()})
+    return _cors(resp)
+
+
 @entity_bp.route("/api/onboarding/state", methods=["GET", "OPTIONS"])
 def onboarding_state():
     """Token-authenticated resume state for the onboarding app.
@@ -221,6 +239,39 @@ def onboarding_state():
     from blueprints.entity.services.onboarding_state import get_onboarding_state
 
     data, status = get_onboarding_state(user_id, entity_id)
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/saved-step", methods=["POST", "OPTIONS"])
+def onboarding_saved_step():
+    """Token-authenticated "Save and Exit" step for the onboarding app.
+
+    POST {entity_id, saved_step} → persists ``saved_step`` (the frontend step
+    id 1-9, stored verbatim) on the entity so resume can land the user back
+    where they left off across devices/cleared browsers. Membership-checked
+    against the JWT; same JWT/CORS contract as the other onboarding routes.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_state import save_onboarding_step
+
+    data, status = save_onboarding_step(user_id, entity_id, payload.get("saved_step"))
     resp = jsonify(data)
     resp.status_code = status
     return _cors(resp)
@@ -260,6 +311,132 @@ def onboarding_create_entity():
 
     resp = jsonify({"entity_id": entity.id, "name": entity.name})
     resp.status_code = 201
+    return _cors(resp)
+
+
+@entity_bp.route(
+    "/api/onboarding/entity/<string:entity_id>", methods=["PUT", "OPTIONS"]
+)
+def onboarding_update_entity(entity_id):
+    """Token-authenticated edit of an in-progress entity (onboarding Step 1).
+
+    Lets the wizard persist name/country/currency edits when the user goes back
+    to Step 1 on revisit. Overwrites the EXISTING entity row in place — it never
+    creates a new entity. Mirrors the country→currency derivation of the
+    session-authenticated Settings page (``_integration_minimal_entity_settings_post``),
+    but authenticates via the onboarding JWT + membership check like the other
+    ``/api/onboarding/*`` routes.
+
+    PUT {entity_name, country, currency} → {"entity_id"} / {"error"}.
+    Renames are gated on ``ENTITY_RENAME`` and 409 on a name already taken by a
+    different entity. Same JWT/CORS contract as the other onboarding routes.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    entity_id = (entity_id or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from models.db import (CountryInfo, CurrencyInfo, Entity, UserEntity,
+                           db as _db)
+    from services.permission_policy import (Permission,
+                                            has_permission_by_user_id)
+
+    membership = UserEntity.query.filter(
+        UserEntity.user_id == str(user_id),
+        UserEntity.entity_id == entity_id,
+    ).first()
+    if not membership:
+        resp = jsonify({"error": "You don't have access to this entity"})
+        resp.status_code = 403
+        return _cors(resp)
+
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        resp = jsonify({"error": "Entity not found"})
+        resp.status_code = 404
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+
+    # --- Name (admin-only rename; re-check the gate on this crafted PUT) ------
+    if "entity_name" in payload or "name" in payload:
+        name_new = (payload.get("entity_name") or payload.get("name") or "").strip()
+        if name_new != (entity.name or ""):
+            if not has_permission_by_user_id(
+                user_id, Permission.ENTITY_RENAME, entity_id
+            ):
+                resp = jsonify(
+                    {"error": "You don't have permission to rename this entity"}
+                )
+                resp.status_code = 403
+                return _cors(resp)
+            if not name_new:
+                resp = jsonify({"error": "Entity name is required."})
+                resp.status_code = 400
+                return _cors(resp)
+            if len(name_new) > 100:
+                resp = jsonify(
+                    {"error": "Entity name must be 100 characters or fewer."}
+                )
+                resp.status_code = 400
+                return _cors(resp)
+            if Entity.query.filter(
+                Entity.name == name_new, Entity.id != entity_id
+            ).first():
+                resp = jsonify({"error": "Entity name already exist"})
+                resp.status_code = 409
+                return _cors(resp)
+            entity.name = name_new
+
+    # --- Country / currency ---------------------------------------------------
+    # Mirror the Settings page: a country change re-derives the currency from
+    # CountryInfo/CurrencyInfo. An explicit currency is honoured as a fallback
+    # when no country is supplied (or the country has no mapped currency).
+    country_code = _resolve_country_code(
+        payload.get("country_code") or payload.get("country") or ""
+    )
+    if country_code:
+        entity.country_code = country_code
+        country_info = CountryInfo.query.filter_by(
+            country_code=country_code
+        ).first()
+        if country_info and country_info.currency_id:
+            currency_info = CurrencyInfo.query.filter_by(
+                currency_code=country_info.currency_id
+            ).first()
+            if currency_info:
+                entity.currency_code = currency_info.currency_code
+                entity.currency_format = currency_info.symbol or "$"
+
+    currency_code = _resolve_currency_code(
+        payload.get("currency_code") or payload.get("currency") or ""
+    )
+    if currency_code and not entity.currency_code:
+        entity.currency_code = currency_code
+
+    try:
+        _db.session.commit()
+    except Exception as exc:  # noqa: BLE001
+        _db.session.rollback()
+        logger.error(
+            "onboarding_update_entity failed entity=%s: %s", entity_id, exc
+        )
+        resp = jsonify({"error": "Failed to update entity. Please try again."})
+        resp.status_code = 500
+        return _cors(resp)
+
+    resp = jsonify({"entity_id": entity.id, "name": entity.name})
+    resp.status_code = 200
     return _cors(resp)
 
 
@@ -714,6 +891,8 @@ def onboarding_invite():
         entity_id,
         payload.get("email") or "",
         payload.get("role") or "",
+        payload.get("first_name") or "",
+        payload.get("last_name") or "",
     )
     resp = jsonify(data)
     resp.status_code = status

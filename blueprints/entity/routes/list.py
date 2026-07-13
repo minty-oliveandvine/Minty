@@ -6,19 +6,18 @@ from datetime import datetime
 from flask import flash, redirect, render_template, url_for
 from flask_login import current_user, login_required
 from loguru import logger
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from blueprints.entity import entity_bp
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
-from blueprints.xero.services.integration import (get_accounts_from_xero,
-                                                  get_effective_lock_date)
+from blueprints.xero.services.integration import get_accounts_from_xero
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, get_entity_account_settings,
     get_missing_xero_settings_fields)
-from models.db import Entity, Report, ReportDraft, User, UserEntity, db
+from models.db import Entity, Report, ReportDraft, User, UserEntity, db, tz
 from services.authz import (permission_denied, require_entity_access,
-                            require_permission)
+                            require_module, require_permission)
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
 from services.permission_policy import (Permission, has_permission,
@@ -53,15 +52,23 @@ def entity_list():
 
 @entity_bp.route("/entity/<string:id>")
 @login_required
+@require_module(
+    "PETTY_CASH",
+    entity_arg="id",
+    message="Petty Cash is not activated for this entity.",
+)
 def report_dashboard(id):
+    id = (id or "").strip()
     if not check_user_has_entities(current_user.id):
         flash(
             "You need to create an entity first before accessing report dashboard.",
             "info",
         )
         return redirect(url_for("entity.entity_list"))
-
-    org = Entity.query.filter(Entity.id == id).first()
+    #prev code
+    #org = Entity.query.filter(Entity.id == id).first()
+    #new code fix
+    org = Entity.query.filter(func.trim(Entity.id) == id.strip()).first()
     if not org:
         flash("Entity not found", "danger")
         return redirect(url_for("entity.entity_list"))
@@ -81,14 +88,23 @@ def report_dashboard(id):
             "You do not have permission to view this entity.", entity_id=id
         )
 
-    # Entity still mid-onboarding → bounce the owner back into the wizard to
+    # Entity still mid-onboarding → bounce the member back into the wizard to
     # finish setup. Gated on user_entity so a superuser inspecting an entity
     # they don't belong to can still view it read-only instead of being sent
     # into an onboarding flow that isn't theirs.
+    #
+    # Pass entity_id (not just entity_name) so the wizard binds THIS entity and
+    # rehydrates its saved progress via GET /api/onboarding/state. Without it the
+    # wizard boots fresh and only Step 1 (entity name) shows — so an invitee, or
+    # the owner re-entering, would lose all progress made past Basic Information.
     if org.status == "onboarding" and user_entity:
         from blueprints.entity.routes.create import onboarding_launch_url
 
-        return redirect(onboarding_launch_url(current_user, entity_name=org.name or ""))
+        return redirect(
+            onboarding_launch_url(
+                current_user, entity_name=org.name or "", entity_id=id
+            )
+        )
 
     latest_report = (
         Report.query.filter(Report.company == str(id))
@@ -228,19 +244,6 @@ def report_dashboard(id):
                 order="Code ASC, Name ASC",
                 token_validated=True,
             )
-            # Refresh the cached Xero lock date while we already have a valid
-            # token, so the dashboard can accurately pre-validate the selected
-            # report date before the user starts a new report.
-            try:
-                from blueprints.entity.services.settings import \
-                    refresh_entity_lock_dates
-                org = refresh_entity_lock_dates(
-                    id, token_user.access_token, org.xero_org_id
-                ) or org
-            except Exception as lock_exc:
-                logger.warning(
-                    f"Failed to refresh lock dates for entity {id}: {lock_exc}"
-                )
         else:
             bank_accounts = []
     except Exception as e:
@@ -268,18 +271,15 @@ def report_dashboard(id):
             else org.created_at
         )
 
-    # Effective Xero lock date (ISO string) so the dashboard can pre-validate a
-    # selected report date before navigating to the opening form. Publishing
-    # still re-checks against fresh Xero data as the authoritative guard.
-    effective_lock_date = get_effective_lock_date(org)
-    effective_lock_date = (
-        effective_lock_date.strftime("%Y-%m-%d") if effective_lock_date else None
-    )
+    # Server-authoritative "today" in Hong Kong time. The calendar's create-time
+    # validation uses this (not the browser clock) so the future-date boundary
+    # matches the users' local midnight regardless of the device timezone.
+    server_today_hk = datetime.now(tz).date().isoformat()
 
     return render_template(
         "entity/entity_dashboard_v2.html",
         org=org,
-        effective_lock_date=effective_lock_date,
+        server_today_hk=server_today_hk,
         main_bank_account=main_bank_account,
         bank_accounts=bank_accounts,
         published_dates=published_dates,

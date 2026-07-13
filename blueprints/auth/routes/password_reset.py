@@ -40,7 +40,7 @@ def reset_request():
                     logger.info(
                         f"Password reset link is sent to {form.email.data}")
                     flash(
-                        f"Password reset link is send to {form.email.data}. It might take 1-3 minutes for you to receive the reset link.",
+                        f"Password reset link has been sent to {form.email.data}. It might take 1-3 minutes for you to receive the reset link.",
                         "info",
                     )
                 else:
@@ -52,7 +52,12 @@ def reset_request():
             except Exception as e:
                 db.session.rollback()
                 print(f"Error during password reset request: {e}")
-                flash("An error occurred. Please try again.", "danger")
+                flash(
+                    "We couldn't send your password reset link right now. Please "
+                    "try again in a few minutes, or contact your administrator if "
+                    "this keeps happening.",
+                    "danger",
+                )
         else:
             flash("No account found with that username.", "danger")
     return redirect(url_for("auth.login"))
@@ -88,5 +93,8 @@ def reset_token(token):
         except Exception as e:
             db.session.rollback()
             print(f"Error during password reset: {e}")
-            flash("An error occurred. Please try again.", "danger")
+            flash(
+                "We couldn't update your password. Please try again.",
+                "danger",
+            )
     return render_template("reset_token.html", form=form, token=token)

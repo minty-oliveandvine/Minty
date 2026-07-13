@@ -583,8 +583,7 @@ def report_sale(id=None):
                             f"Draft record {report_draft.id} has no valid ID, creating new draft"
                         )
                         flash(
-                            "Invalid draft was detected. Please reopen from the opening step.",
-                            "error",
+                            "Invalid draft was detected. Please reopen from the opening step.", "danger",
                         )
                         return redirect(url_for("report.report_opening"))
 
@@ -771,8 +770,7 @@ def report_sale(id=None):
                         "Sales form - This should not happen if user came from opening form"
                     )
                     flash(
-                        "Error: No existing draft found. Please start from the opening form first.",
-                        "error",
+                        "Error: No existing draft found. Please start from the opening form first.", "danger",
                     )
                     return redirect(url_for("report.report_opening"))
 
@@ -994,7 +992,7 @@ def report_sale(id=None):
                     f"Error checking draft status after rollback: {check_error}"
                 )
 
-            flash("An error occurred updating sales data. Please try again.", "danger")
+            flash("Couldn't update the sales data. Please try again.", "danger")
             return redirect(url_for("report.report_sale"))
 
     # For GET request, check for existing draft and load data

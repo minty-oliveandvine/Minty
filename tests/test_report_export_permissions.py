@@ -50,7 +50,46 @@ def test_report_export_routes_require_auth_and_view_permission():
 
 
 def test_convert_report_to_draft_uses_report_edit_policy():
+    # convert_report_to_draft is a thin JSON wrapper; the guards live in the
+    # shared revert_report_to_draft, which the ending page's Edit Report button
+    # also goes through.
     service_path = ROOT / "blueprints" / "report" / "services" / "ending.py"
-    convert_fn = _get_function(service_path, "convert_report_to_draft")
+    revert_fn = _get_function(service_path, "revert_report_to_draft")
 
-    assert _has_call(convert_fn, "has_permission")
+    assert _has_call(revert_fn, "has_permission")
+
+
+def test_revert_report_to_draft_preserves_xero_publish_markers():
+    # Publishing stores no Xero object IDs, so a re-publish duplicates every
+    # transaction instead of updating it. publishing_status is the only record
+    # that a prior publish happened, and it lives on the Report row this deletes
+    # -- it has to be carried onto the draft or the duplicate warning is lost.
+    service_path = ROOT / "blueprints" / "report" / "services" / "ending.py"
+    revert_fn = _get_function(service_path, "revert_report_to_draft")
+
+    assigned = {
+        target.attr
+        for node in ast.walk(revert_fn)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Attribute)
+    }
+    assert "publishing_status" in assigned
+    assert "xero_integrated_yes" in assigned
+
+
+def test_revert_report_to_draft_rejects_non_latest_report():
+    # Reports chain opening->closing balances; reverting an older report leaves
+    # every later report's opening balance dangling.
+    service_path = ROOT / "blueprints" / "report" / "services" / "ending.py"
+    revert_fn = _get_function(service_path, "revert_report_to_draft")
+
+    raised = {
+        node.exc.func.id
+        for node in ast.walk(revert_fn)
+        if isinstance(node, ast.Raise)
+        and isinstance(node.exc, ast.Call)
+        and isinstance(node.exc.func, ast.Name)
+    }
+    assert "RevertError" in raised
+    assert _has_call(revert_fn, "first")

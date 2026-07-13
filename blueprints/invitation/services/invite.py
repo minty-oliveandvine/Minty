@@ -113,10 +113,11 @@ def create_invitation(
 ) -> tuple[Invitation | None, str | None]:
     """Create an invitation record and return (invitation, error_message).
 
-    `first_name` and `last_name` aren't persisted (the invitations table only
-    stores email + role + token). They're rolled into the accept URL so the
-    OTP-verify path can create a User row at sign-in time for invitees who
-    don't have a Xero account.
+    `first_name` and `last_name` are persisted on the invitation row so the
+    pending-invite cards keep their name/email/role format when re-read on
+    resume. They're also rolled into the accept URL (see send_invitation_email)
+    so the OTP-verify path can create a User row at sign-in time for invitees
+    who don't have a Xero account.
     """
 
     entity = Entity.query.get(entity_id)
@@ -163,6 +164,8 @@ def create_invitation(
         token=token,
         status="pending",
         invited_by=invited_by,
+        first_name=(first_name or "").strip() or None,
+        last_name=(last_name or "").strip() or None,
         expires_at=datetime.now(tz) + timedelta(days=INVITATION_TTL_DAYS),
     )
     db.session.add(invitation)

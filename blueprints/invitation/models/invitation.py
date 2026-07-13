@@ -15,6 +15,12 @@ class Invitation(db.Model):
     )
     email = db.Column(db.String(150), nullable=False)
     role = db.Column(db.String(20), nullable=False)
+    # Invitee's name captured at invite time. Persisted so the pending-invite
+    # cards (onboarding Step 8 + Settings → Users) keep the name/email/role
+    # format on resume — before this the name lived only in the accept URL and
+    # was lost once the invite was re-read from the DB. Nullable for legacy rows.
+    first_name = db.Column(db.String(100), nullable=True)
+    last_name = db.Column(db.String(100), nullable=True)
     token = db.Column(db.String(64), unique=True, nullable=False)
     status = db.Column(db.String(20), nullable=False, default="pending")
     invited_by = db.Column(

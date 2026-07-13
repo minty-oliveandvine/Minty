@@ -8,6 +8,7 @@ from flask import (flash, jsonify, make_response, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history
@@ -183,7 +184,7 @@ def edit_report(id):
     )
     if report.id != most_recent_report.id:
         flash(
-            "You can only edit the most recent report.ê°???ìµê·¼ ë¦¬í¬?¸ë§ ?ì  ê°??¥í©?ë¤.",
+            "You can only edit the most recent report.",
             "warning",
         )
         return redirect(url_for("report.report_detail", id=report.id))
@@ -337,7 +338,7 @@ def edit_report(id):
             )
 
             flash(
-                "Report updated successfully! ë¦¬í¬???ì ???ë£ ?ìµ?ë¤.",
+                "Report updated successfully!",
                 "success",
             )
             return redirect(url_for("report.report_detail", id=report.id))
@@ -350,7 +351,7 @@ def edit_report(id):
         except Exception:
             logger.exception("Unexpected error editing report")
             db.session.rollback()
-            flash("An unexpected error occurred.", "danger")
+            flash("Couldn't save your changes to this report. Please try again.", "danger")
 
     sales_data = {
         "shop_sales": {
@@ -452,8 +453,7 @@ def delete_report(id):
 
         if newer_report:
             flash(
-                "Cannot delete this report. A newer report exists. Only the latest report can be deleted.",
-                "error",
+                "Cannot delete this report. A newer report exists. Only the latest report can be deleted.", "danger",
             )
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
@@ -517,6 +517,23 @@ def delete_report(id):
         flash("Report deleted successfully.", "success")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
+    except IntegrityError:
+        logger.exception(f"Integrity error deleting report {id}")
+        db.session.rollback()
+        flash(
+            "This report can't be deleted because other records still depend on "
+            "it. Remove or update those first, then try again.",
+            "danger",
+        )
+        entity_id = id
+        r = Report.query.get(id)
+        if r:
+            entity_id = r.company
+        else:
+            rd = ReportDraft.query.get(id)
+            if rd:
+                entity_id = rd.company
+        return redirect(url_for("entity.report_dashboard", id=entity_id))
     except Exception:
         logger.exception(f"Error deleting report {id}")
         db.session.rollback()

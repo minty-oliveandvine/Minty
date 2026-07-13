@@ -685,3 +685,167 @@ class TestInvitationStateTransitions:
 
             refreshed = models["Invitation"].query.get(inv.id)
             assert refreshed.status == "accepted"
+
+
+class TestAcceptInvitationPageEmailBinding:
+    """The /invitation/accept/<token> link is email-bound:
+
+      - no session              -> bounce to onboarding /auth (token preserved)
+      - matching session        -> bounce to onboarding /auth
+      - mismatched session      -> FULL LOGOUT + bounce to /auth as invited email
+      - expired / reused / bad  -> error, no handoff, no logout
+
+    Normalized-email comparison (trim + lowercase) governs the match.
+    """
+
+    def _invite(self, db_session, models, invited="invitee@test.com",
+                inviter_email="pageadmin@test.com"):
+        entity = _make_entity(db_session, models["Entity"])
+        inviter = _make_user(
+            db_session, models["User"], email=inviter_email, role="admin"
+        )
+        from blueprints.invitation.services.invite import create_invitation
+        inv, err = create_invitation(entity.id, invited, "cashier", inviter.id)
+        assert err is None
+        return entity, inv
+
+    def test_no_session_bounces_to_onboarding_auth_with_token(
+        self, app, db_session, models
+    ):
+        with app.test_client() as c:
+            _, inv = self._invite(db_session, models)
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+            loc = resp.headers["Location"]
+            assert "/auth" in loc
+            assert f"invite={inv.token}" in loc
+            assert "email=invitee" in loc  # invited email surfaced for prefill
+
+    def test_matching_session_proceeds_to_handoff(
+        self, app, db_session, models
+    ):
+        with app.test_client() as c:
+            _, inv = self._invite(db_session, models)
+            invitee = _make_user(
+                db_session, models["User"],
+                email="invitee@test.com", role="cashier",
+            )
+            _login(c, invitee)
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+            loc = resp.headers["Location"]
+            # Matching session is NOT logged out: it goes to /auth resume,
+            # never to a Xero end-session URL.
+            assert "/auth" in loc
+            assert "xero.com" not in loc
+            assert f"invite={inv.token}" in loc
+
+    def test_matching_session_case_insensitive(self, app, db_session, models):
+        """Invited 'MixedCase@Test.com', session 'mixedcase@test.com' -> match."""
+        with app.test_client() as c:
+            _, inv = self._invite(
+                db_session, models, invited="MixedCase@Test.com"
+            )
+            invitee = _make_user(
+                db_session, models["User"],
+                email="mixedcase@test.com", role="cashier",
+            )
+            _login(c, invitee)
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+            # No logout for a normalized match.
+            assert "xero.com" not in resp.headers["Location"]
+            assert "/auth" in resp.headers["Location"]
+
+    def test_mismatched_session_logs_out_and_redirects(
+        self, app, db_session, models
+    ):
+        with app.test_client() as c:
+            _, inv = self._invite(db_session, models)
+            # A different, password-only user is logged in (no Xero id_token,
+            # so logout goes straight to /auth, not via Xero end-session).
+            wrong = _make_user(
+                db_session, models["User"],
+                email="wrong@test.com", role="cashier",
+            )
+            _login(c, wrong)
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+
+            # Session was cleared (full logout).
+            with c.session_transaction() as sess:
+                assert sess.get("_user_id") is None
+
+            loc = resp.headers["Location"]
+            assert "/auth" in loc
+            assert f"invite={inv.token}" in loc
+            assert "email=invitee" in loc  # invited email surfaced
+
+            # Nothing was accepted; invite stays pending.
+            refreshed = models["Invitation"].query.get(inv.id)
+            assert refreshed.status == "pending"
+
+    def test_mismatched_session_with_xero_goes_via_end_session(
+        self, app, db_session, models
+    ):
+        """A mismatched session that has a Xero id_token is routed through the
+        Xero end-session URL so the wrong Xero account can't silently resume."""
+        with app.test_client() as c:
+            _, inv = self._invite(db_session, models)
+            wrong = _make_user(
+                db_session, models["User"],
+                email="wrongxero@test.com", role="cashier",
+            )
+            wrong.id_token = "fake.jwt.token"
+            db_session.session.commit()
+            _login(c, wrong)
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+            with c.session_transaction() as sess:
+                assert sess.get("_user_id") is None
+            # Routed to Xero's end-session endpoint.
+            assert "xero.com" in resp.headers["Location"].lower()
+
+    def test_expired_token_errors_without_logout(
+        self, app, db_session, models
+    ):
+        from datetime import timedelta
+        from models.db import tz
+        with app.test_client() as c:
+            _, inv = self._invite(db_session, models)
+            inv.expires_at = datetime.now(tz) - timedelta(days=1)
+            db_session.session.commit()
+
+            # Even a mismatched session must NOT be logged out for an invalid
+            # token — token validity is checked first.
+            wrong = _make_user(
+                db_session, models["User"],
+                email="someone@test.com", role="cashier",
+            )
+            _login(c, wrong)
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+            assert "/auth" not in resp.headers["Location"]  # bounced to home
+            # Session preserved (no logout on a bad token).
+            with c.session_transaction() as sess:
+                assert sess.get("_user_id") is not None
+            # Token marked expired, not resurrected.
+            refreshed = models["Invitation"].query.get(inv.id)
+            assert refreshed.status == "expired"
+
+    def test_already_accepted_token_shows_used_state(
+        self, app, db_session, models
+    ):
+        with app.test_client() as c:
+            _, inv = self._invite(db_session, models)
+            inv.status = "accepted"
+            db_session.session.commit()
+            resp = c.get(f"/invitation/accept/{inv.token}")
+            assert resp.status_code in (301, 302)
+            assert "/auth" not in resp.headers["Location"]  # no handoff
+
+    def test_unknown_token_errors(self, app, db_session, models):
+        with app.test_client() as c:
+            resp = c.get("/invitation/accept/this-token-does-not-exist")
+            assert resp.status_code in (301, 302)
+            assert "/auth" not in resp.headers["Location"]

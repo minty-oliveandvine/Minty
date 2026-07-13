@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import time
 
-from flask import flash, jsonify, redirect, request, session, url_for
+from flask import (flash, jsonify, redirect, render_template, request, session,
+                   url_for)
 from flask_login import current_user, user_logged_in
 from flask_wtf.csrf import CSRFError
 from loguru import logger
@@ -42,7 +43,22 @@ def init_app(app, db):
                     }),
                 500,
             )
-        return exception
+
+        # Friendly, non-technical fallback. The technical detail (type,
+        # traceback) is already logged above; the user only sees plain guidance.
+        friendly_message = (
+            "Something interrupted that action. We've logged it on our end — "
+            "please try again, and let us know if it keeps happening."
+        )
+        wants_json = bool(request) and (
+            request.path.startswith("/api")
+            or request.is_json
+            or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            or "application/json" in (request.headers.get("Accept") or "").lower()
+        )
+        if wants_json:
+            return jsonify({"status": "error", "message": friendly_message}), 500
+        return render_template("errors.html", error=friendly_message), 500
 
     @app.route("/health")
     def health_check():
@@ -260,59 +276,10 @@ def init_app(app, db):
                 return redirect(url_for("auth.home"))
 
             if current_user.is_authenticated:
-                # --- 30-minute idle auto-logout (server-side backstop) ----
-                # The client timer (static/js/idle-logout.js) is the primary
-                # trigger for an open, idle tab; this catches requests that
-                # arrive after a long gap (tab closed/reopened, JS disabled).
-                # We route through /logout so the Xero SSO session is ended
-                # there too. /logout is exempt to avoid a redirect loop.
-                if request.endpoint != "auth.logout":
-                    idle_limit = app.config.get("IDLE_TIMEOUT_SECONDS", 1800)
-                    now_ts = time.time()
-                    last_activity = session.get("last_activity")
-                    if (
-                        last_activity is not None
-                        and (now_ts - last_activity) > idle_limit
-                    ):
-                        logger.info(
-                            "Idle timeout: user %s inactive for %.0fs "
-                            "(limit %ss); logging out",
-                            session.get("_user_id", "?"),
-                            now_ts - last_activity,
-                            idle_limit,
-                        )
-                        if (
-                            request.headers.get("X-Requested-With")
-                            == "XMLHttpRequest"
-                            or request.is_json
-                        ):
-                            return (
-                                jsonify(
-                                    {
-                                        "status": "error",
-                                        "code": "session_expired",
-                                        "message": "Your session has expired due to inactivity. Please login again.",
-                                        "redirect": url_for(
-                                            "auth.logout", reason="idle"
-                                        ),
-                                    }
-                                ),
-                                401,
-                            )
-                        return redirect(url_for("auth.logout", reason="idle"))
-
-                    # Slide the idle window forward on each request.
-                    session["last_activity"] = now_ts
-                    session.permanent = True
-
                 ensure_valid_token(current_user, application=app)
         except Exception:
             logger.exception(
                 "Error validating/refreshing Xero token in before_request")
-
-    # First-time Terms & Conditions gate + modal injector.
-    from pettycash.core import consent_gate
-    consent_gate.register(app, db)
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error):

@@ -32,6 +32,7 @@ from services.authz import (permission_denied, require_entity_access,
                             require_permission)
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity,
+                                         resolve_entity_access_token_for_service,
                                          upsert_user_token)
 from services.auth.token_service import \
     refresh_access_token as refresh_access_token_service
@@ -39,6 +40,8 @@ from services.permission_policy import Permission, has_permission
 from blueprints.auth.services.identity import normalize_email, resolve_user_by_email
 from blueprints.invitation.models.invitation import Invitation
 from blueprints.invitation.services.invite import accept_invitation
+import jwt as pyjwt
+
 from utils import decode_jwt
 
 
@@ -54,12 +57,20 @@ def xero_auth():
     # to auto-create the user + accept the invitation, mirroring the OTP path.
     invite_token = (request.args.get("invite") or "").strip()
     state = f"auth:invite:{invite_token}" if invite_token else "auth"
+    # prompt=login forces Xero to re-authenticate instead of silently reusing an
+    # existing SSO session. Without it, a user already signed into Xero as
+    # someone else (e.g. User A) would be auto-authorized as that account, so an
+    # invitee who needs to sign in as User B could never switch — the callback
+    # would keep resolving User A and block the invite. prompt=login makes Xero
+    # show the login screen so they can authenticate as the correct account. It
+    # does NOT end User A's Xero session; it only re-prompts for this request.
     return redirect(
         "https://login.xero.com/identity/connect/authorize?response_type=code"
         f"&client_id={current_app.config['CLIENT_ID']}"
         f"&redirect_uri={current_app.config['REDIRECT_URI']}"
         f"&scope={scope}"
         f"&state={state}"
+        "&prompt=login"
     )
 
 
@@ -71,18 +82,33 @@ def _onboarding_app_url() -> str:
     ).rstrip("/")
 
 
-def _onboarding_xero_return(connected: bool, org_name: str = ""):
+def _onboarding_xero_return(connected: bool, org_name: str = "",
+                            mismatch: bool = False, expected: str = ""):
     """Redirect back into the onboarding app at the Accounting step (3).
 
     ``org_name`` is the Xero tenant/org name so onboarding can show the real
     Xero entity (not the local entity name).
+
+    ``mismatch`` distinguishes a blocked wrong-account attempt from a plain
+    user cancel. When set, the return flag is ``xero=mismatch`` (NOT
+    ``cancelled``) and ``expected`` (the address the user should have used) is
+    passed as a URL-encoded ``expected`` param so the onboarding UI can show a
+    specific message. The full address is sent, not masked.
     """
     from urllib.parse import urlencode
 
-    flag = "connected" if connected else "cancelled"
+    if mismatch:
+        flag = "mismatch"
+    elif connected:
+        flag = "connected"
+    else:
+        flag = "cancelled"
     qs = {"xero": flag, "step": 3}
     if org_name:
         qs["org"] = org_name
+    if mismatch and expected:
+        qs["expected"] = expected
+    # urlencode handles the URL-encoding of the email (and org name).
     return redirect(f"{_onboarding_app_url()}/?{urlencode(qs)}")
 
 
@@ -132,6 +158,59 @@ def _create_user_from_xero(decoded: dict, xero_email: str) -> User | None:
         return None
 
 
+def _initiator_owned_emails(user) -> set[str]:
+    """The set of addresses the clicker owns, across every identity column.
+
+    Mirrors the ownership check in ``accept_invitation`` (blueprints/invitation/
+    services/invite.py): a person may carry their address on ``email``,
+    ``xero_email``, or ``username``, and different addresses legitimately belong
+    to the same person (see blueprints/auth/services/identity.py). All are
+    normalized; empty values are dropped.
+    """
+    if user is None:
+        return set()
+    return {
+        e
+        for e in (
+            normalize_email(user.email),
+            normalize_email(user.xero_email),
+            normalize_email(user.username),
+        )
+        if e
+    }
+
+
+def _connect_initiator_mismatch(state_initiator_id, xero_email):
+    """Return the expected email(s) when the Xero login is NOT owned by the user
+    who started the connect/reconnect flow, else None.
+
+    Follows the invite-acceptance identity model: the Xero login proves it's the
+    clicker iff ``xero_email`` appears on any of the clicker's identity columns
+    (email / xero_email / username). The creator of the entity is irrelevant.
+
+    ``state_initiator_id`` is the clicker's user id carried through the OAuth
+    state. When absent (links generated before this gate existed) the check is
+    skipped — backward compatible. Returns a display string of the expected
+    address(es) for the error message, or None when the login matches.
+    """
+    if not state_initiator_id:
+        return None
+    initiator = User.query.get(state_initiator_id)
+    owned = _initiator_owned_emails(initiator)
+    if not owned:
+        # We can't determine the clicker's address — don't block (fail open,
+        # matching the no-initiator-id case). resolve_user_by_email downstream
+        # still governs which row the connection attaches to.
+        return None
+    if normalize_email(xero_email) in owned:
+        return None  # the Xero login is one of the clicker's own addresses
+    # For the user-facing message, show only email-shaped addresses (a
+    # form-signup ``username`` handle isn't an email). Matching above still
+    # considered every column; this only tidies the displayed expected value.
+    display = sorted(e for e in owned if "@" in e)
+    return " or ".join(display) if display else "your own Xero account"
+
+
 @xero_bp.route("/xero_connect")
 @login_required
 def xero_connect_entity():
@@ -139,8 +218,15 @@ def xero_connect_entity():
         return permission_denied(
             "You do not have permission to connect a new entity to Xero."
         )
+    # Minimal scope set covering every Xero API call made by this app AND the
+    # billing backend (which reuses this token via the shared user table):
+    # settings → Organisation/Accounts, contacts → Contacts, transactions →
+    # Invoices/BankTransactions/BankTransfers, attachments → receipt uploads,
+    # files → billing's bank-slip Files API. Must stay in sync with
+    # xero_reconnect below; tests/test_xero_scopes.py enforces coverage.
     scope = (
-        "openid profile email offline_access accounting.settings accounting.contacts"
+        "openid profile email offline_access accounting.settings "
+        "accounting.contacts accounting.transactions accounting.attachments files"
     )
     # When launched from the onboarding app, tag the OAuth state so the
     # callback returns to onboarding (step 3) instead of the entity list.
@@ -154,17 +240,29 @@ def xero_connect_entity():
     # it may contain ":" / spaces, which would otherwise break the partition.
     entity_name = (request.args.get("entity_name") or "").strip()
     base_state = "entity_connect_onboarding" if from_onboarding else "entity_connect"
-    # state shape: "<base>" | "<base>:<entity_id>" | "<base>:<entity_id>:<name>"
-    # entity_id may be empty while name is present (id-less resume).
+    # state shape:
+    #   "<base>"
+    #   "<base>:<entity_id>:<name>"
+    #   "<base>:<entity_id>:<name>:<initiator_user_id>"
+    # entity_id may be empty while name is present (id-less resume). The trailing
+    # initiator id is the user who clicked Connect; the callback enforces that the
+    # Xero login email matches this user's email (see _expected_connect_email).
+    # The session does NOT survive the Xero round-trip, so the id rides in state.
     state = base_state
     if entity_id or entity_name:
         state = f"{base_state}:{entity_id}:{quote(entity_name, safe='')}"
+        if current_user.is_authenticated:
+            state = f"{state}:{current_user.id}"
+    # prompt=login forces Xero to re-authenticate instead of silently reusing an
+    # existing SSO session, so a user signed into Xero as a different account can
+    # connect with the correct one (and the callback's email gate then matches).
     return redirect(
         "https://login.xero.com/identity/connect/authorize?response_type=code"
         f"&client_id={current_app.config['CLIENT_ID']}"
         f"&redirect_uri={current_app.config['REDIRECT_URI']}"
         f"&scope={scope}"
         f"&state={state}"
+        "&prompt=login"
     )
 
 
@@ -179,8 +277,21 @@ def xero_connect_entity():
 def xero_reconnect():
     entity_id = request.args.get("entity_id")
     session["reconnect_entity_id"] = entity_id
-    scope = "email profile openid accounting.contacts accounting.contacts.read accounting.settings accounting.settings.read accounting.reports.read accounting.attachments.read files payroll.employees payroll.payruns payroll.payslip payroll.timesheets projects.read projects accounting.attachments files.read accounting.journals.read assets.read assets accounting.transactions payroll.settings accounting.budgets.read offline_access"
+    # Same minimal scope set as xero_connect above — reconnect must not grant
+    # more than connect. tests/test_xero_scopes.py enforces both stay in sync.
+    scope = (
+        "openid profile email offline_access accounting.settings "
+        "accounting.contacts accounting.transactions accounting.attachments files"
+    )
+    # state shape: "entity_reconnect" | "entity_reconnect:<initiator_user_id>".
+    # The trailing id is the user who clicked Reconnect; the callback enforces the
+    # Xero login email matches this user's email. The session does not survive the
+    # Xero round-trip, so it rides in state.
     state = "entity_reconnect"
+    if current_user.is_authenticated:
+        state = f"entity_reconnect:{current_user.id}"
+    # prompt=login forces Xero to re-authenticate instead of silently reusing an
+    # existing SSO session, so the user can reconnect with the correct account.
     return redirect(
         "https://login.xero.com/identity/connect/authorize?response_type=code"
         f"&client_id={current_app.config['CLIENT_ID']}"
@@ -188,6 +299,7 @@ def xero_reconnect():
         f"&scope={scope}"
         f"&state={state}"
         f"&entity_id={entity_id}"
+        "&prompt=login"
     )
 
 
@@ -261,12 +373,21 @@ def xero_callback():
         invite_token = state_suffix[len("invite:"):].strip()
         state_suffix = ""
 
-    # For the entity-connect branches the suffix is "<entity_id>:<name>" (name
-    # url-encoded, either part possibly empty). For other branches it's just the
-    # raw suffix.
-    state_entity_id, _, state_entity_name_raw = state_suffix.partition(":")
-    state_entity_id = state_entity_id.strip()
-    state_entity_name = unquote(state_entity_name_raw).strip()
+    # For the entity-connect branches the suffix is
+    # "<entity_id>:<name>:<initiator_id>" (name url-encoded; any part possibly
+    # empty). For entity_reconnect the suffix is just "<initiator_id>". For other
+    # branches it's the raw suffix.
+    state_initiator_id = ""
+    if base_state == "entity_reconnect":
+        state_initiator_id = state_suffix.strip()
+        state_entity_id = ""
+        state_entity_name = ""
+    else:
+        state_entity_id, _, _rest = state_suffix.partition(":")
+        state_entity_id = state_entity_id.strip()
+        state_entity_name_raw, _, state_initiator_id = _rest.partition(":")
+        state_entity_name = unquote(state_entity_name_raw).strip()
+        state_initiator_id = state_initiator_id.strip()
 
     # Legacy: entity_id could also arrive as a query param (reconnect flow).
     entity_id = state_entity_id or (request.args.get("entity_id") or "").strip()
@@ -302,8 +423,7 @@ def xero_callback():
                 )
                 flash(
                     "Your Xero account didn't share an email address. "
-                    "Please use the email login link instead.",
-                    "error",
+                    "Please use the email login link instead.", "danger",
                 )
                 return redirect(url_for("auth.home"))
 
@@ -316,15 +436,13 @@ def xero_callback():
             ).first()
             if not invitation:
                 flash(
-                    "This invitation is invalid or has already been used.",
-                    "error",
+                    "This invitation is invalid or has already been used.", "danger",
                 )
                 return redirect(url_for("auth.home"))
             if normalize_email(invitation.email) != xero_email:
                 flash(
                     "This invitation was sent to a different email address. "
-                    "Log in with the Xero account matching the invite.",
-                    "error",
+                    "Log in with the Xero account matching the invite.", "danger",
                 )
                 return redirect(url_for("auth.home"))
 
@@ -335,8 +453,7 @@ def xero_callback():
             user = _create_user_from_xero(decoded, xero_email)
             if user is None:
                 flash(
-                    "Could not create your account. Please contact your inviter.",
-                    "error",
+                    "Could not create your account. Please contact your inviter.", "danger",
                 )
                 return redirect(url_for("auth.home"))
 
@@ -348,13 +465,12 @@ def xero_callback():
                 # username, so this is the one case we can't let through.
                 logger.warning("Xero login: id_token carried no email claim")
                 flash(
-                    "Your Xero account didn't share an email address.",
-                    "error",
+                    "Your Xero account didn't share an email address.", "danger",
                 )
                 return redirect(url_for("auth.home"))
             user = _create_user_from_xero(decoded, xero_email)
             if user is None:
-                flash("Could not log you in. Please try again.", "error")
+                flash("Could not log you in. Please try again.", "danger")
                 return redirect(url_for("auth.home"))
             logger.info(f"Xero login: auto-created account for {xero_email}")
 
@@ -384,8 +500,32 @@ def xero_callback():
                         f"Xero invite acceptance failed for user {user.id}: "
                         f"{accept_error}"
                     )
-                    flash(accept_error, "error")
-                    return redirect(url_for("auth.home"))
+                    # Accept-time identity mismatch on a fresh Xero login. Do
+                    # NOT log this (wrong) user in. Send them back to the invited
+                    # /auth page to re-authenticate. We do NOT end the Xero SSO
+                    # session: the Xero login uses ``prompt=login`` (see
+                    # xero_auth), so Xero re-prompts and the user can sign in as
+                    # the correct account even if a different Xero session is
+                    # active — no force-logout, and no Xero-homepage dead-end.
+                    from urllib.parse import urlencode
+
+                    invitation = Invitation.query.filter_by(
+                        token=invite_token
+                    ).first()
+                    invited_email = (
+                        invitation.email if invitation else ""
+                    )
+                    onboarding_base = os.environ.get(
+                        "ONBOARDING_APP_URL", "http://localhost:3001"
+                    ).rstrip("/")
+                    resume_qs = {"invite": invite_token}
+                    if invited_email:
+                        resume_qs["email"] = invited_email
+                    resume_url = (
+                        f"{onboarding_base}/auth?{urlencode(resume_qs)}"
+                    )
+                    flash(accept_error, "danger")
+                    return redirect(resume_url)
                 login_user(user)
                 logger.info(
                     f"Xero login: user {user.id} accepted invite to entity "
@@ -410,7 +550,7 @@ def xero_callback():
         else:
             db.session.rollback()
             logger.error(f"Error in xero auth with user: {user}")
-            flash("Xero Connect: Authentication Error", "error")
+            flash("Xero Connect: Authentication Error", "danger")
             return redirect(url_for("auth.home"))
     elif base_state in ("entity_connect", "entity_connect_onboarding"):
         from_onboarding = base_state == "entity_connect_onboarding"
@@ -421,6 +561,33 @@ def xero_callback():
             decoded = decode_jwt(response.get("id_token"))
             xero_email = normalize_email(
                 decoded.get("email") or decoded.get("preferred_username"))
+
+            # Gate: the Xero account logged in with must match the user who
+            # clicked Connect. Block before any DB write / login_user so a
+            # mismatched account never connects the entity or gets logged in.
+            expected_email = _connect_initiator_mismatch(
+                state_initiator_id, xero_email
+            )
+            if expected_email:
+                logger.warning(
+                    "Xero connect blocked: expected %s, logged in as %s",
+                    expected_email, xero_email,
+                )
+                flash(
+                    f"You must connect with the Xero account for "
+                    f"{expected_email}. You logged in as {xero_email}.", "danger",
+                )
+                if from_onboarding:
+                    # Distinct mismatch signal (not "cancelled") so onboarding
+                    # can show a wrong-account message. expected may list >1
+                    # owned address ("a@x or b@y"); send the first for the param.
+                    return _onboarding_xero_return(
+                        False,
+                        mismatch=True,
+                        expected=expected_email.split(" or ")[0],
+                    )
+                return redirect(url_for("entity.entity_list"))
+
             user = resolve_user_by_email(xero_email)
 
             if user:
@@ -453,7 +620,7 @@ def xero_callback():
                             tenant_id = curr_conn[0]["tenantId"]
                             if tenant_id is None:
                                 flash(
-                                    "Xero Connect: Please select an entity to connect.", "error", )
+                                    "Xero Connect: Please select an entity to connect.", "danger", )
                                 if from_onboarding:
                                     return _onboarding_xero_return(False)
                                 return redirect(
@@ -467,7 +634,7 @@ def xero_callback():
                                 )
                                 if entity is None:
                                     logger.error(f"Entity Connect: entity '{entity_id}' not found")
-                                    flash("Xero Connect: Entity not found.", "error")
+                                    flash("Xero Connect: Entity not found.", "danger")
                                     if from_onboarding:
                                         return _onboarding_xero_return(False)
                                     return redirect(url_for("entity.entity_list"))
@@ -537,7 +704,7 @@ def xero_callback():
                                 return redirect(url_for("entity.entity_list"))
                         except Exception as err:
                             flash(
-                                "Xero Connect: There is an error connecting to xero", "error", )
+                                "Xero Connect: There is an error connecting to xero", "danger", )
                             logger.error(
                                 f"There is an error connecting to xero: {err}")
                             if from_onboarding:
@@ -546,8 +713,7 @@ def xero_callback():
                                 url_for("entity.entity_create_success"))
                 except Exception as error:
                     flash(
-                        "Xero Connect: There is no entity selected to connect",
-                        "error")
+                        "Xero Connect: There is no entity selected to connect", "danger")
                     logger.error(
                         f"There is an error connecting to xero: {error}")
                     if from_onboarding:
@@ -583,7 +749,7 @@ def xero_callback():
 
         if not entity_id:
             logger.error("Entity Reconnect: Missing entity_id after callback")
-            flash("Xero Reconnect: Missing entity to reconnect.", "error")
+            flash("Xero Reconnect: Missing entity to reconnect.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         if not error:
@@ -591,6 +757,24 @@ def xero_callback():
             decoded = decode_jwt(response.get("id_token"))
             xero_email = normalize_email(
                 decoded.get("email") or decoded.get("preferred_username"))
+
+            # Gate: the Xero account logged in with must match the user who
+            # clicked Reconnect. Block before any DB write / login_user.
+            expected_email = _connect_initiator_mismatch(
+                state_initiator_id, xero_email
+            )
+            if expected_email:
+                logger.warning(
+                    "Xero reconnect blocked: expected %s, logged in as %s",
+                    expected_email, xero_email,
+                )
+                flash(
+                    f"You must reconnect with the Xero account for "
+                    f"{expected_email}. You logged in as {xero_email}.", "danger",
+                )
+                return redirect(
+                    url_for("entity_settings", entity_id=entity_id))
+
             user = resolve_user_by_email(xero_email)
 
             if user:
@@ -626,7 +810,7 @@ def xero_callback():
                     curr_conn = curr_conn.json()
                     if not curr_conn:
                         flash(
-                            "Xero Reconnect: Please select a xero entity to connect", "error", )
+                            "Xero Reconnect: Please select a xero entity to connect", "danger", )
                         logger.error(
                             "User did not select an entity in the dropdown in allow in xero's allow access page"
                         )
@@ -635,7 +819,7 @@ def xero_callback():
                             tenant_id = curr_conn[0]["tenantId"]
                             if tenant_id is None:
                                 flash(
-                                    "Xero Reconnect: Please select an entity to connect.", "error", )
+                                    "Xero Reconnect: Please select an entity to connect.", "danger", )
                                 return redirect(
                                     url_for(
                                         "entity_settings",
@@ -705,13 +889,12 @@ def xero_callback():
                                         entity_id=entity_id))
                         except Exception as err:
                             flash(
-                                "Xero Reconnect: There is an error connecting to xero", "error", )
+                                "Xero Reconnect: There is an error connecting to xero", "danger", )
                             logger.error(
                                 f"There is an error connecting to xero: {err}")
                 except Exception as err:
                     flash(
-                        "Xero Reconnect: There is no entity selected to connect",
-                        "error",
+                        "Xero Reconnect: There is no entity selected to connect", "danger",
                     )
                     logger.error(
                         f"There is an error connecting to xero: {err}")
@@ -721,7 +904,7 @@ def xero_callback():
                             entity_id=entity_id))
         else:
             logger.error(f"Error in xero auth {error}")
-            flash("Xero Reconnect: There is an error reconnecting to xero", "error")
+            flash("Xero Reconnect: There is an error reconnecting to xero", "danger")
             return redirect(url_for("entity_settings", entity_id=entity_id))
     return redirect(url_for("entity_settings", entity_id=entity_id))
 
@@ -736,6 +919,79 @@ def refresh_access_token() -> ResponseReturnValue:
         jsonify({"status": "error", "message": "Failed to refresh access token"}),
         500,
     )
+
+
+# Scope claim required on the service JWT. Narrow, so a token minted for one
+# purpose cannot be replayed against this endpoint.
+_INTERNAL_TOKEN_SCOPE = "xero-access-token"
+
+
+def _authenticate_internal_caller():
+    """Verify the caller's service JWT. Returns (claims, error_message)."""
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None, "missing bearer token"
+
+    secret = current_app.config.get("SECRET_KEY")
+    if not secret:
+        return None, "SECRET_KEY not configured"
+
+    try:
+        claims = pyjwt.decode(
+            header[7:].strip(),
+            secret,
+            algorithms=["HS256"],
+            options={"require": ["exp", "scope", "entity_id"]},
+        )
+    except pyjwt.ExpiredSignatureError:
+        return None, "token expired"
+    except pyjwt.InvalidTokenError as exc:
+        return None, f"invalid token: {exc}"
+
+    if claims.get("scope") != _INTERNAL_TOKEN_SCOPE:
+        return None, "wrong scope"
+    return claims, None
+
+
+@xero_bp.route("/api/internal/xero/token", methods=["POST"])
+def internal_xero_access_token() -> ResponseReturnValue:
+    """Return a currently-valid Xero access token for an entity, refreshing if needed.
+
+    Exists so the billing backend never has to refresh. Xero rotates refresh tokens
+    on use and invalidates the old one, so a second refresher would brick the
+    connection; Minty is the only service that ever calls /connect/token.
+
+    Not `@login_required` — the caller is a service, not a browser session. It
+    presents a short-lived HS256 JWT signed with the SECRET_KEY shared with
+    billing. `entity_id` is taken from the *signed claims*, never from the body,
+    so a leaked token cannot be repurposed against a different entity.
+
+    SECURITY: this hands out live Xero access tokens. It must not be routable from
+    the public internet — restrict it at the ingress/firewall, not just here.
+    """
+    claims, error = _authenticate_internal_caller()
+    if error:
+        logger.warning(f"internal xero token: rejected caller ({error})")
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+
+    entity_id = claims["entity_id"]
+    logger.info(f"internal xero token: request for entity {entity_id}")
+
+    result = resolve_entity_access_token_for_service(entity_id)
+    if not result:
+        # Not a server error: the connection genuinely needs a human to reconnect,
+        # or a concurrent refresh is still in flight. Billing surfaces this as a
+        # reconnect prompt rather than sending Xero a dead token.
+        logger.info(f"internal xero token: no usable token for entity {entity_id}")
+        return (
+            jsonify({"status": "reconnect_required",
+                     "message": "No valid Xero token for this entity"}),
+            409,
+        )
+
+    access_token, xero_org_id = result
+    logger.info(f"internal xero token: issued for entity {entity_id}")
+    return jsonify({"access_token": access_token, "xero_org_id": xero_org_id}), 200
 
 
 @xero_bp.route("/api/xero/bank-transactions/latest/<entity_id>",

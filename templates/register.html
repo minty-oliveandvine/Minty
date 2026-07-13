@@ -1,263 +1,960 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register</title>
-    <!-- Bootstrap CSS -->
-    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
-    <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
-
-    <!-- Custom Button and Dropdown Styles -->
-    <style>
-        .btn-primary {
-            background-color: #4a7c59;
-            border-color: #4a7c59;
-        }
-
-        .btn-primary:hover {
-            background-color: #36543a;
-            border-color: #36543a;
-        }
-
-        .btn-block {
-            width: 100%;
-        }
-
-        .btn-close {
-            width: 30%;
-            background-color: #4a7c59;
-            border-color: #4a7c59;
-        }
-
-        .logo {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            width: 80px;
-            height: auto;
-        }
-
-        .disabled {
-            background-color:  red;
-        }
-
-        .form-control {
-            border: 1px solid #515f32;
-            border-radius: 5px;
-            padding: 10px;
-            font-size: 1rem;
-            margin-bottom: 20px;
-        }
-    
-
-        .is-invalid {
-            border-color: red;
-        }
-
-        .text-danger {
-            color: red;
-        }
-
-        @media (min-width: 992px){
-            .flash-message{
-                width: 50%;
-            }
-        }
-
-         @media (min-width: 1200px){
-            .flash-message{
-                width: 30%;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .logo {
-                width: 60px;
-            }
-
-            .btn-block {
-                font-size: 1rem;
-            }
-
-            .text-danger {
-                font-size: 0.85rem;
-            }
-            .flash-container{
-            position: sticky;
-            top: 3rem;
-            z-index: 2;
-            }
-        }
-
-
-    </style>
-</head>
-<body>
-
-    <div class="flash-container">
-        <!-- Render flash messages from app.py /register-->
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-               {% for message in messages %}
-                    <div class="alert text-center col-10 mx-auto position-absolute fixed-top d-flex justify-content-between align-items-center alert-danger flash-message">
-                        {{ message }}
-                        <button type="button" class="close btn btn-danger btn-sm col-1 mt-0" data-dismiss="alert" aria-label="Close">
-                            <span aria-hidden="true">&times;</span>
-                    </button>
-                    </div>
-               {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <!-- Render form inputElement errors -->
-        {% for inputElement, errors in form.errors.items() %}
-            {% for error in errors %}
-            <div class="alert text-center col-6 mx-auto position-absolute fixed-top d-flex justify-content-between align-items-center alert-danger flash-message">
-              <div><strong>{{ form[inputElement].label.text }}: </strong>  {{ error }}</div>
-              <button type="button" class="close btn btn-danger btn-sm col-1 mt-0" data-dismiss="alert" aria-label="Close">
-                <span aria-hidden="true">&times;</span>
-        </button>
-            </div>
-            {% endfor %}
-        {% endfor %}
-    
+{% extends 'base/layout.html' %}
+{%
+  import 'components/components.html' as
+  components
+%}
+{% block title %}- Register{% endblock %}
+{% block header %}
+  <div class="auth-topbar">
+    <div class="auth-topbar-inner">
+      <div class="auth-brand">
+        <img src="{{ url_for('static', filename='img/minty-logo.png') }}" alt="Minty" />
+        <span>Minty</span>
+      </div>
+      <div></div>
     </div>
-
-    <div class="container mt-5">
-        <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo" alt="Logo">
-        <h1 class="text-center">Register</h1>
-
-
-        <form action="{{ url_for('auth.register') }}" enctype="multipart/form-data" method="POST" id="registerForm">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="text" name="first_name" class="form-control" placeholder="Firstname" required value="{{first_name or ''}}" id="first_name">
-            <div class="invalid-feedback firstname-error">{{form.first_name.errors[0] or ''}}</div>
-            <input type="text" name="last_name" class="form-control" placeholder="Lastname" required value="{{last_name or ''}}" id="last_name">
-            <div class="invalid-feedback lastname-error">{{form.last_name.errors[0] or ''}}</div>
-            <input type="text" name="username" class="form-control" placeholder="Username" required value="{{username or ''}}" id="username">
-            <div class="invalid-feedback username-error">{{form.username.errors[0] or ''}}</div>
-            <input type="password" name="password" class="form-control" placeholder="Password" required value="{{password or ''}}" id="password">
-            <div class="invalid-feedback password-error">{{form.password.errors[0] or ''}}</div>
-            <input type="password" name="confirm_password" class="form-control" placeholder="Confirm Password" required value="{{confirm_password or ''}}" id="confirm_password">
-            <div class="invalid-feedback confirmpassword-error">{{form.confirm_password.errors[0] or ''}}</div>
-            <input type="email" name="email" class="form-control" placeholder="Email" required value="{{email or ''}}" id="email">
-            <div class="invalid-feedback email-error">{{form.email.errors[0] or ''}}</div>
-            <button type="submit" class="btn btn-primary" id="submitBtn">Register</button>
-        </form>
-        
-        <p class="text-center">Already have an account? <a href="{{ url_for('auth.login') }}">Login</a></p>
-    </div>
-
-    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-
-    <script>
-  $(document).ready(function() {
-
-
-let first_name = document.querySelector('#first_name')
-let firstnameError = document.querySelector('.firstname-error')
-
-first_name.addEventListener('input', function(e){
-    requestForError(firstnameError, e.target, {first_name: e.target.value}, 'first_name')
-})
-
-let last_name = document.querySelector('#last_name')
-let lastnameError = document.querySelector('.lastname-error')
-
-last_name.addEventListener('input', function(e){
-    requestForError(lastnameError, e.target, {last_name: e.target.value}, 'last_name')
-})
-
-let username = document.querySelector('#username')
-let usernameError = document.querySelector('.username-error')
-
-username.addEventListener('input', function(e){
-    requestForError(usernameError, e.target, {username: e.target.value}, 'username')
-})
-
-let password = document.querySelector('#password')
-let passwordError = document.querySelector('.password-error')
-
-password.addEventListener('input', function(e) {
-    requestForError(passwordError, e.target, {password: e.target.value}, 'password')
-    if(password.value.length >= 6){
-        requestForError(confirmpasswordError, confirm_password, {password: e.target.value,confirm_password: confirm_password.value}, 'confirm_password')
+  </div>
+{% endblock %}
+{% block styles %}
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --auth-bg: #ffffff;
+      --auth-page-bg: #ffffff;
+      --auth-line: #ececea;
+      --auth-line-strong: #d9d9d6;
+      --auth-ink: #1b1d1c;
+      --auth-ink-2: #4a4d4b;
+      --auth-muted: #8a8d8b;
+      --auth-accent: #36c3b4;
+      --auth-accent-hover: #2cb0a2;
+      --auth-accent-ink: #0f7a6e;
+      --auth-surface-2: #f5f5f3;
+      --auth-radius: 14px;
     }
 
-})
+    body {
+      background: var(--auth-page-bg);
+      font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--auth-ink);
+      -webkit-font-smoothing: antialiased;
+    }
 
-let confirm_password = document.querySelector('#confirm_password')
-let confirmpasswordError = document.querySelector('.confirmpassword-error')
-confirm_password.addEventListener('input', function(e) {
-    requestForError(confirmpasswordError, confirm_password, {password: password.value,confirm_password: e.target.value}, 'confirm_password')
-})
+    .main-container {
+      position: static;
+      width: 100%;
+      height: auto;
+      transform: none;
+      left: auto;
+    }
+    .main-content {
+      position: static;
+      top: auto;
+      height: auto;
+      width: auto;
+      overflow: visible;
+      padding: 0;
+    }
 
-let email = document.querySelector('#email')
-let emailError = document.querySelector('.email-error')
-email.addEventListener('input', function(e) {
-    requestForError(emailError, e.target, {email: e.target.value}, 'email')
-})
+    .auth-topbar {
+      border-bottom: 1px solid var(--auth-line);
+      background: var(--auth-bg);
+    }
+    .auth-topbar-inner {
+      width: 100%;
+      max-width: 1920px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 16px;
+    }
+    @media (min-width: 640px) {
+      .auth-topbar-inner {
+        gap: 12px;
+        padding: 16px 24px;
+      }
+    }
+    .auth-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--auth-ink);
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.005em;
+    }
+    .auth-brand img {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      object-fit: contain;
+      display: block;
+    }
 
-const submitBtn = document.querySelector('#submitBtn')
+    .auth-page {
+      /* Positioning context for the toasts (they're position:absolute). The auth
+         pages reset .main-container to static, so anchor toasts to .auth-page. */
+      position: relative;
+      min-height: calc(100vh - 60px);
+      padding: 24px 16px 48px;
+      display: flex;
+      justify-content: center;
+    }
+    /* Shared toast macro is bottom-center for dashboards; on this page put every
+       toast in the top-right corner. Covers the form/error toasts (.auth-page)
+       and any flash toasts the base layout renders inside .main-container.
+       Anchor to the fixed viewport so the corner is consistent. */
+    .main-container .toas:not(#flashMessagesCard),
+    .auth-page .toast:not(#flashMessagesCard) {
+      position: fixed !important;
+      top: 24px !important;
+      right: 24px !important;
+      bottom: auto !important;
+      left: auto !important;
+      transform: none !important;
+    }
 
+    .auth-card {
+      width: 100%;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      padding-top: 24px;
+    }
 
-function requestForError(errorElement, inputElement, inputData, inputErrorKey){
-    const tokenIndex = 0
-    $.ajax({
-                    url: "{{ url_for('validate_register') }}",
-                    method: "POST",
-                    contentType: 'application/json', // Include this to specify content type
-                    headers: {
-                        'X-CSRFToken': $('#registerForm')[tokenIndex][tokenIndex].value
-                    },
-                    data: JSON.stringify(inputData), // Send data as JSON
-                    success: function(response) {
-                        //Hide and show based on validate response
-                        responseJson = JSON.parse(response) //Parse string from server to json
-                        requiredErrorCount = responseJson.errorCount 
-                        console.log(responseJson.errors, requiredErrorCount, Object.entries(responseJson.errors).length)
-                        if (window.sendLogToDataDog && Object.entries(responseJson.errors).length) {
-                            window.sendLogToDataDog('warn', 'Registration validation errors', { errorCount: requiredErrorCount });
-                        }
-                        if (Object.entries(responseJson.errors).length){
+    .auth-head {
+      text-align: center;
+    }
+    .auth-head h2 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      color: var(--auth-ink);
+    }
+    .auth-head p {
+      margin: 0;
+      font-size: 15px;
+      color: var(--auth-ink-2);
+      line-height: 1.5;
+    }
 
-                                $(errorElement).show()
-                                //Element in html below input
-                                errorElement.textContent = responseJson.errors[inputErrorKey]
-                                $(inputElement).addClass('is-invalid')
-                                if(requiredErrorCount != 0 ){
-                                    $(submitBtn).attr('disabled', true)
-                                }
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
 
-                        }else if ((Object.entries(responseJson.errors).length == null || {} || [] || undefined || 0)){
-                                $(errorElement).hide()
-                                errorElement.textContent = ''
-                                $(inputElement).removeClass('is-invalid')
-                                 if(requiredErrorCount != 0 && Object.entries(responseJson.errors).length != 0 ){
-                                    $(submitBtn).attr('disabled', true)
-                                }else{
-                                    $(submitBtn).attr('disabled', false)
-                                }
-                                
-                        }
-                    }
-                });
- }
+    .auth-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .auth-field label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--auth-ink);
+    }
+    .auth-field input {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1px solid var(--auth-line-strong);
+      border-radius: var(--auth-radius);
+      font-size: 15px;
+      font-family: inherit;
+      color: var(--auth-ink);
+      background: var(--auth-bg);
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      box-sizing: border-box;
+    }
+    .auth-field input:focus {
+      border-color: var(--auth-accent);
+      box-shadow: 0 0 0 3px rgba(54, 195, 180, 0.18);
+    }
+    /* Defeat Chrome/Edge autofill yellow-blue background. The 30px inset
+       box-shadow trick is the only reliable way to override -webkit-autofill;
+       transitions also need a long delay so the original color never paints. */
+    .auth-field input:-webkit-autofill,
+    .auth-field input:-webkit-autofill:hover,
+    .auth-field input:-webkit-autofill:focus,
+    .auth-field input:-webkit-autofill:active {
+      -webkit-box-shadow: 0 0 0 30px var(--auth-bg) inset !important;
+      box-shadow: 0 0 0 30px var(--auth-bg) inset !important;
+      -webkit-text-fill-color: var(--auth-ink) !important;
+      caret-color: var(--auth-ink);
+      transition: background-color 9999s ease-out 0s;
+    }
+    .auth-field input:-webkit-autofill:focus {
+      -webkit-box-shadow: 0 0 0 30px var(--auth-bg) inset, 0 0 0 3px rgba(54, 195, 180, 0.18) !important;
+      box-shadow: 0 0 0 30px var(--auth-bg) inset, 0 0 0 3px rgba(54, 195, 180, 0.18) !important;
+    }
+    /* Invalid state driven by the live validation script (adds .is-invalid). */
+    .auth-field input.is-invalid {
+      border-color: #d9534f;
+    }
+    .auth-field input.is-invalid:focus {
+      box-shadow: 0 0 0 3px rgba(217, 83, 79, 0.18);
+    }
 
+    /* Email input + inline Verify button. The button is overlaid at the right
+       edge of the field so it reads as part of the input. */
+    .auth-email-row {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .auth-email-row input {
+      /* Leave room for the Verify button so long emails don't slide under it. */
+      padding-right: 86px;
+    }
+    .auth-verify-btn {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: none;
+      background: var(--auth-accent);
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 9999px;
+      cursor: pointer;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    .auth-verify-btn:hover {
+      background: var(--auth-accent-hover);
+    }
+    .auth-verify-btn:disabled {
+      background: var(--auth-line-strong);
+      cursor: not-allowed;
+    }
+    /* The "code sent" confirmed state — a muted, non-actionable label. */
+    .auth-verify-btn.is-sent {
+      background: var(--auth-surface-2);
+      color: var(--auth-accent-ink);
+      cursor: default;
+    }
 
-    setTimeout(() => {
-            $('.alert').alert('close');
-        }, 5000)
-});
+    .auth-otp-input {
+      letter-spacing: 10px;
+      font-size: 18px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .auth-otp-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 18px;
+      margin-top: 2px;
+    }
+    .auth-otp-timer {
+      font-size: 13px;
+      color: var(--auth-ink-2);
+    }
+    .auth-otp-timer.is-expired {
+      color: #d9534f;
+    }
+    /* Failed-attempts message — shares the right-hand slot with the resend link
+       (only one is visible at a time). */
+    .auth-otp-status {
+      font-size: 13px;
+      color: #d9534f;
+      text-align: right;
+    }
+    .auth-otp-resend {
+      border: none;
+      background: none;
+      color: var(--auth-accent-ink);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      padding: 0;
+    }
+    .auth-otp-resend:hover {
+      color: var(--auth-accent);
+    }
 
-        
+    .auth-error {
+      color: #d9534f;
+      font-size: 13px;
+      text-align: center;
+      margin: -6px 0 0;
+    }
+    /* Per-field inline error text (shown/hidden by the validation script). */
+    .invalid-feedback {
+      display: none;
+      color: #d9534f;
+      font-size: 13px;
+      margin-top: -2px;
+    }
 
+    .auth-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--auth-muted);
+      font-size: 13px;
+      padding: 2px 0;
+    }
+    .auth-divider::before,
+    .auth-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--auth-line);
+    }
 
-    </script>
-</body>
-</html>
+    .auth-btn-primary:disabled,
+    .auth-btn-primary[disabled] {
+      background: var(--auth-line-strong);
+      color: #ffffff;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+    .auth-btn-primary:disabled:hover,
+    .auth-btn-primary[disabled]:hover {
+      background: var(--auth-line-strong);
+      color: #ffffff;
+    }
+
+    .auth-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 9999px;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      text-decoration: none;
+    }
+    .auth-btn-primary {
+      background: var(--auth-accent);
+      color: #ffffff;
+    }
+    .auth-btn-primary:hover {
+      background: var(--auth-accent-hover);
+      color: #ffffff;
+    }
+    .auth-btn-ghost {
+      background: var(--auth-bg);
+      color: var(--auth-ink);
+      border: 1px solid var(--auth-line-strong);
+    }
+    .auth-btn-ghost:hover {
+      background: var(--auth-surface-2);
+      color: var(--auth-ink);
+    }
+    .auth-xero-logo {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+
+    .auth-foot {
+      margin: 4px 0 0;
+      text-align: center;
+      font-size: 14px;
+      color: var(--auth-ink-2);
+    }
+    .auth-link {
+      color: var(--auth-accent-ink);
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .auth-link:hover {
+      color: var(--auth-accent);
+    }
+
+    .auth-notice {
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+      border: 1px solid var(--auth-line);
+      border-radius: var(--auth-radius);
+      background: var(--auth-bg);
+    }
+    .auth-notice-icon {
+      color: var(--auth-accent);
+      flex-shrink: 0;
+      padding-top: 2px;
+      display: inline-flex;
+    }
+    .auth-notice-body {
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--auth-ink-2);
+    }
+    .auth-notice-title {
+      font-weight: 700;
+      color: var(--auth-ink);
+      margin-bottom: 2px;
+      font-size: 14px;
+    }
+    .auth-notice-body p {
+      margin: 0;
+    }
+  </style>
+{% endblock %}
+{% block content %}
+  <main class="auth-page">
+    <div class="auth-card">
+      <!-- Server-side form validation errors, shown as toasts to match every
+           other message (flash messages are already rendered by the base
+           layout's toast block). -->
+      {% for inputElement, errors in form.errors.items() %}
+        {% for error in errors %}
+          {{
+            components.toast(icon='img/error.webp', type='Error',
+            message=form[inputElement].label.text ~ ': ' ~ error,
+            toastBorder='errorBorder', toastBg='errorBg', toastColor='error')
+          }}
+        {% endfor %}
+      {% endfor %}
+
+      <div class="auth-head">
+        <h2>Create your account</h2>
+        <p>Welcome to Minty! Set up your account in a few quick steps to start managing your books.</p>
+      </div>
+
+      <form
+        action="{{ url_for('auth.register') }}"
+        enctype="multipart/form-data"
+        method="POST"
+        id="registerForm"
+        class="auth-form"
+        novalidate
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+        <div class="auth-field">
+          <label for="first_name">First Name</label>
+          <input type="text" name="first_name" placeholder="Firstname" value="{{ first_name or '' }}" id="first_name" />
+          <div class="invalid-feedback firstname-error">{{ form.first_name.errors[0] or '' }}</div>
+        </div>
+
+        <div class="auth-field">
+          <label for="last_name">Last Name</label>
+          <input type="text" name="last_name" placeholder="Lastname" value="{{ last_name or '' }}" id="last_name" />
+          <div class="invalid-feedback lastname-error">{{ form.last_name.errors[0] or '' }}</div>
+        </div>
+
+        <div class="auth-field">
+          <label for="email">Email</label>
+          <div class="auth-email-row">
+            <input type="email" name="email" placeholder="Email" value="{{ email or '' }}" id="email" />
+            <!-- Appears only once a valid email is typed; sends the OTP. -->
+            <button type="button" class="auth-verify-btn" id="verifyBtn" hidden>Verify</button>
+          </div>
+          <div class="invalid-feedback email-error">{{ form.email.errors[0] or '' }}</div>
+        </div>
+
+        <!-- OTP step: revealed after the user clicks Verify. -->
+        <div class="auth-field auth-otp-field" id="otpField" hidden>
+          <label for="otp_code">Enter the 6-digit code sent to your email</label>
+          <input
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            placeholder="------"
+            id="otp_code"
+            class="auth-otp-input"
+          />
+          <div class="auth-otp-meta">
+            <span class="auth-otp-timer" id="otpTimer"></span>
+            <!-- Right-hand slot: holds the failed-attempts message while the
+                 code is live, and is replaced by the Resend link once the code
+                 expires (they share this one spot). This slot is for SERVER
+                 attempt feedback only. -->
+            <span class="auth-otp-status" id="otpStatus"></span>
+            <button type="button" class="auth-otp-resend" id="otpResend" hidden>Resend code</button>
+          </div>
+          <!-- Local input guards (expired / not-6-digits) use the standard
+               inline-error convention, kept separate from the server attempt
+               slot above so the two never get confused. -->
+          <div class="invalid-feedback otp-guard" id="otpGuard"></div>
+        </div>
+
+        {#
+          Password collection temporarily disabled. To restore: uncomment these
+          fields and the password validators in the JS below (validateField /
+          fields map) plus the form class and route.
+        <div class="auth-field">
+            <label for="password">Password</label>
+            <input type="password" name="password" placeholder="Password" value="{{ password or '' }}" id="password" />
+            <div class="invalid-feedback password-error">{{ form.password.errors[0] or '' }}</div>
+          </div>
+
+          <div class="auth-field">
+            <label for="confirm_password">Confirm Password</label>
+            <input type="password" name="confirm_password" placeholder="Confirm Password" value="{{ confirm_password or '' }}" id="confirm_password" />
+            <div class="invalid-feedback confirmpassword-error">{{ form.confirm_password.errors[0] or '' }}</div>
+          </div>
+        #}
+
+        <!-- Disabled (gray) until a 6-digit OTP is entered; the actual code
+             correctness is checked server-side on click. -->
+        <button type="submit" class="auth-btn auth-btn-primary" id="submitBtn" disabled>Register</button>
+      </form>
+
+      <p class="auth-foot">
+        Already have an account?
+        <a href="{{ url_for('auth.home') }}" class="auth-link">Login</a>
+      </p>
+    </div>
+  </main>
+{% endblock %}
+{% block footer %}
+{% endblock %}{% block scripts %}
+  <script>
+  $(document).ready(function () {
+
+    // The base layout's scripts block (which wires toast close/auto-hide) is
+    // overridden by this block, so re-add that behavior for our error toasts.
+    document.querySelectorAll(".toast-close").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const toast = this.closest(".toast");
+        if (toast) toast.style.display = "none";
+      });
+    });
+    setTimeout(function () {
+      document.querySelectorAll(".toast").forEach(function (toast) {
+        toast.style.display = "none";
+      });
+    }, 4000);
+
+    // --- Our own client-side validation (native HTML5 validation is off via
+    // the form's `novalidate`). Messages match the server's friendly wording. ---
+
+    const form = document.querySelector("#registerForm");
+    const submitBtn = document.querySelector("#submitBtn");
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const REQUIRED_MSG = "Please fill in this field";
+
+    const fields = {
+      first_name: { input: document.querySelector("#first_name"), error: document.querySelector(".firstname-error") },
+      last_name: { input: document.querySelector("#last_name"), error: document.querySelector(".lastname-error") },
+      // Password collection temporarily disabled — restore these to re-enable.
+      // password: { input: document.querySelector("#password"), error: document.querySelector(".password-error") },
+      // confirm_password: { input: document.querySelector("#confirm_password"), error: document.querySelector(".confirmpassword-error") },
+      email: { input: document.querySelector("#email"), error: document.querySelector(".email-error") },
+    };
+
+    // Return an error string for a field, or "" if it's valid.
+    function errorFor(name) {
+      const val = (fields[name].input.value || "").trim();
+      switch (name) {
+        case "first_name":
+        case "last_name":
+          if (!val) return REQUIRED_MSG;
+          return "";
+        case "email":
+          if (!val) return REQUIRED_MSG;
+          if (!EMAIL_RE.test(val)) return "Please enter a valid email address";
+          return "";
+        // Password collection temporarily disabled — restore these cases too.
+        // case "password":
+        //   if (!val) return REQUIRED_MSG;
+        //   if (val.length < 6) return "Please use at least 6 characters";
+        //   return "";
+        // case "confirm_password":
+        //   if (!val) return REQUIRED_MSG;
+        //   if (val !== (fields.password.input.value || "").trim()) return "Passwords do not match";
+        //   return "";
+        default:
+          return "";
+      }
+    }
+
+    function showError(name, msg) {
+      const f = fields[name];
+      f.error.textContent = msg;
+      $(f.error).show();
+      $(f.input).addClass("is-invalid");
+    }
+    function clearError(name) {
+      const f = fields[name];
+      f.error.textContent = "";
+      $(f.error).hide();
+      $(f.input).removeClass("is-invalid");
+    }
+
+    // Validate one field and reflect it in the UI. Returns true if valid.
+    function validateField(name) {
+      const msg = errorFor(name);
+      if (msg) { showError(name, msg); return false; }
+      clearError(name);
+      return true;
+    }
+
+    // Wire live validation: validate a field on blur, and clear its error as the
+    // user fixes it while typing (don't nag mid-keystroke before they've left).
+    Object.keys(fields).forEach(function (name) {
+      const input = fields[name].input;
+      input.addEventListener("blur", function () { validateField(name); });
+      input.addEventListener("input", function () {
+        if (!errorFor(name)) clearError(name);
+        // (Password/confirm-password sync removed while those fields are
+        // disabled; restore it when reintroducing the password fields.)
+      });
+    });
+
+    // Ask the server whether an email is already registered. Calls cb(isTaken, msg).
+    function checkEmailTaken(emailVal, cb) {
+      const tokenIndex = 0;
+      $.ajax({
+        url: "{{ url_for('validate_register') }}",
+        method: "POST",
+        contentType: "application/json",
+        headers: { "X-CSRFToken": $("#registerForm")[tokenIndex][tokenIndex].value },
+        data: JSON.stringify({ email: emailVal }),
+        success: function (response) {
+          let json;
+          try { json = JSON.parse(response); } catch (_) { json = response; }
+          const errs = json && json.errors && json.errors["email"];
+          cb(Boolean(errs && errs.length), errs && errs[0]);
+        },
+        error: function () { cb(false); },
+      });
+    }
+
+    // ----------------------------------------------------------------------
+    // OTP email verification.
+    //
+    // Flow:
+    //   1. A valid email reveals the "Verify" button at the right of the field.
+    //   2. Clicking Verify checks the email isn't already taken, then asks the
+    //      server (POST /auth/email/request-code) to email a 6-digit code, and
+    //      reveals the OTP input with a 60-second countdown.
+    //   3. Entering 6 digits enables (greens) the Register button.
+    //   4. Clicking Register verifies the code server-side (POST
+    //      /auth/email/verify-code). The server enforces the 5-attempt /
+    //      60-second lockout; we surface the attempt count / lockout message in
+    //      the UI. On success the server creates the account and returns a
+    //      handoff URL that logs the user in.
+    //
+    // The server allows 5 wrong codes per 60s code, then locks the email for a
+    // window; the messages it returns ("Invalid code." / "Too many attempts.
+    // Try again in about N minute(s).") are shown verbatim, and we track a local
+    // attempts-remaining counter for immediate feedback.
+    // ----------------------------------------------------------------------
+    const REQUEST_CODE_URL = "{{ url_for('auth.email_request_code') }}";
+    const VERIFY_CODE_URL = "{{ url_for('auth.email_verify_code') }}";
+    const OTP_TTL_SECONDS = 60;   // mirrors the server's OTP_EXPIRY_SECONDS
+    const MAX_ATTEMPTS = 5;       // mirrors the server's MAX_OTP_ATTEMPTS
+
+    const verifyBtn = document.querySelector("#verifyBtn");
+    const otpField = document.querySelector("#otpField");
+    const otpInput = document.querySelector("#otp_code");
+    const otpTimer = document.querySelector("#otpTimer");
+    const otpResend = document.querySelector("#otpResend");
+    const otpStatus = document.querySelector("#otpStatus");
+    const otpGuard = document.querySelector("#otpGuard");
+
+    // The email the code was sent to. While a code is live, changing the email
+    // input invalidates the OTP step (the user must re-verify the new address).
+    let otpEmail = null;
+    let attemptsLeft = MAX_ATTEMPTS;
+    let countdownId = null;
+    let codeExpired = false;
+
+    // The failed-attempts / error message lives in the right-hand status slot,
+    // which it shares with the Resend link. Showing a message hides Resend;
+    // showing Resend (on expiry) hides the message.
+    function showOtpError(msg) {
+      otpStatus.textContent = msg || "";
+      otpStatus.hidden = !msg;
+      if (msg) otpResend.hidden = true;
+    }
+
+    // Local input guards (expired / not-6-digits) — shown inline under the OTP
+    // box, separate from the server attempt slot. These don't count as attempts.
+    function showOtpGuard(msg) {
+      otpGuard.textContent = msg || "";
+      $(otpGuard).toggle(Boolean(msg));
+    }
+
+    // Register is green/enabled only once the code has 6 digits and hasn't
+    // expired. (Correctness is confirmed on click, server-side.)
+    function refreshSubmitState() {
+      const ready =
+        Boolean(otpEmail) &&
+        !codeExpired &&
+        /^\d{6}$/.test((otpInput.value || "").trim());
+      submitBtn.disabled = !ready;
+    }
+
+    function stopCountdown() {
+      if (countdownId) { clearInterval(countdownId); countdownId = null; }
+    }
+
+    function startCountdown() {
+      stopCountdown();
+      codeExpired = false;
+      let remaining = OTP_TTL_SECONDS;
+      otpTimer.classList.remove("is-expired");
+      otpResend.hidden = true;
+      otpStatus.hidden = true;
+      const render = function () {
+        otpTimer.textContent = "Code expires in " + remaining + "s";
+      };
+      render();
+      countdownId = setInterval(function () {
+        remaining -= 1;
+        if (remaining <= 0) {
+          stopCountdown();
+          codeExpired = true;
+          otpTimer.textContent = "Code expired";
+          otpTimer.classList.add("is-expired");
+          // Expiry: the Resend link replaces the failed-attempts message in the
+          // shared right-hand slot.
+          otpStatus.hidden = true;
+          otpStatus.textContent = "";
+          otpResend.hidden = false;
+          refreshSubmitState();
+          return;
+        }
+        render();
+      }, 1000);
+    }
+
+    // Toggle the Verify button purely on email format. Hidden once a code has
+    // been sent (replaced by the "Code sent" label); re-shown if the email is
+    // edited afterward so the user can re-verify the new address.
+    // The verify step creates the account (name + email), so the whole form must
+    // be valid before a code can be sent — not just the email. We gate Verify on
+    // first name, last name, AND a valid email so a code is never issued for a
+    // half-filled form (which would later fail account creation with empty names).
+    function nameFieldsFilled() {
+      return (
+        Boolean((fields.first_name.input.value || "").trim()) &&
+        Boolean((fields.last_name.input.value || "").trim())
+      );
+    }
+
+    function refreshVerifyButton() {
+      const val = (fields.email.input.value || "").trim();
+      const ready = EMAIL_RE.test(val) && nameFieldsFilled();
+      // If the email changed away from the verified one, reset the OTP step.
+      if (otpEmail && val.toLowerCase() !== otpEmail) {
+        resetOtpStep();
+      }
+      if (otpEmail) { verifyBtn.hidden = true; return; }  // code already sent
+      // Show the button as soon as the email looks valid (so the user sees the
+      // action), but disable it until the name fields are filled too.
+      verifyBtn.hidden = !EMAIL_RE.test(val);
+      verifyBtn.disabled = !ready;
+    }
+
+    function resetOtpStep() {
+      stopCountdown();
+      otpEmail = null;
+      attemptsLeft = MAX_ATTEMPTS;
+      codeExpired = false;
+      otpInput.value = "";
+      otpField.hidden = true;
+      otpResend.hidden = true;
+      showOtpError("");
+      showOtpGuard("");
+      verifyBtn.classList.remove("is-sent");
+      verifyBtn.textContent = "Verify";
+      verifyBtn.disabled = false;
+      refreshSubmitState();
+    }
+
+    // Re-evaluate the Verify button as the email OR the name fields change, so
+    // it enables/disables the moment the form becomes (in)complete.
+    fields.email.input.addEventListener("input", refreshVerifyButton);
+    fields.first_name.input.addEventListener("input", refreshVerifyButton);
+    fields.last_name.input.addEventListener("input", refreshVerifyButton);
+    refreshVerifyButton();
+
+    // --- Verify button: request an OTP for the typed email. ---
+    function requestCode() {
+      const email = (fields.email.input.value || "").trim();
+      // Backstop: the whole form (name + email) must be valid before a code is
+      // sent — mirror the button's disabled gate so this holds even if the click
+      // is forced (keyboard, devtools). Show the relevant field errors and stop.
+      let firstInvalid = null;
+      ["first_name", "last_name", "email"].forEach(function (name) {
+        if (!validateField(name) && !firstInvalid) firstInvalid = name;
+      });
+      if (firstInvalid) { fields[firstInvalid].input.focus(); return; }
+
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = "Sending…";
+      // Don't issue a code for an email that already has an account.
+      checkEmailTaken(email, function (isTaken, takenMsg) {
+        if (isTaken) {
+          verifyBtn.disabled = false;
+          verifyBtn.textContent = "Verify";
+          showError("email", takenMsg || "An account with this email already exists");
+          return;
+        }
+        fetch(REQUEST_CODE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email }),
+        })
+          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+          .then(function (r) {
+            if (!r.ok || (r.d && r.d.status === "error")) {
+              verifyBtn.disabled = false;
+              verifyBtn.textContent = "Verify";
+              showError("email", (r.d && r.d.message) || "Could not send a code. Please try again.");
+              return;
+            }
+            // Code sent — open the OTP step.
+            clearError("email");
+            otpEmail = email.toLowerCase();
+            attemptsLeft = MAX_ATTEMPTS;
+            otpField.hidden = false;
+            verifyBtn.hidden = true;
+            otpInput.value = "";
+            showOtpError("");
+            showOtpGuard("");
+            startCountdown();
+            otpInput.focus();
+            refreshSubmitState();
+          })
+          .catch(function () {
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = "Verify";
+            showError("email", "Network error — please try again.");
+          });
+      });
+    }
+
+    verifyBtn.addEventListener("click", requestCode);
+    otpResend.addEventListener("click", function () {
+      // Resend reuses the same request; the server enforces its own cooldown.
+      resetOtpStep();
+      requestCode();
+    });
+
+    // Keep the OTP input numeric and drive the Register button's enabled state.
+    otpInput.addEventListener("input", function () {
+      otpInput.value = (otpInput.value || "").replace(/\D/g, "").slice(0, 6);
+      showOtpError("");
+      showOtpGuard("");
+      refreshSubmitState();
+    });
+
+    // --- Register: verify the code, which (on success) creates the account and
+    // logs the user in via the returned handoff URL. ---
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      // Name fields must still be valid (email is already verified by here).
+      let firstInvalid = null;
+      let allValid = true;
+      ["first_name", "last_name", "email"].forEach(function (name) {
+        const ok = validateField(name);
+        if (!ok && !firstInvalid) firstInvalid = name;
+        allValid = allValid && ok;
+      });
+      if (!allValid) {
+        if (firstInvalid) fields[firstInvalid].input.focus();
+        return;
+      }
+
+      const code = (otpInput.value || "").trim();
+      if (!otpEmail) {
+        showError("email", "Please verify your email first");
+        return;
+      }
+      if (codeExpired) {
+        showOtpGuard("This code has expired. Please resend a new one.");
+        return;
+      }
+      if (!/^\d{6}$/.test(code)) {
+        showOtpGuard("Please enter the 6-digit code.");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Verifying…";
+      fetch(VERIFY_CODE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: otpEmail,
+          code: code,
+          first_name: fields.first_name.input.value.trim(),
+          last_name: fields.last_name.input.value.trim(),
+        }),
+      })
+        .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
+        .then(function (r) {
+          const data = r.d || {};
+          if (data.status === "success" && data.redirect_url) {
+            // Account created + logged in — follow the handoff URL.
+            submitBtn.textContent = "Success";
+            window.location.href = data.redirect_url;
+            return;
+          }
+          // Failure. 429 == server lockout (too many attempts); otherwise it's a
+          // wrong/expired code. Reflect remaining attempts in the UI.
+          submitBtn.textContent = "Register";
+          if (r.status === 429) {
+            attemptsLeft = 0;
+            showOtpError(data.message || "Too many attempts. Please try again later.");
+            refreshSubmitState();
+            return;
+          }
+          // A wrong code consumed one attempt server-side; mirror that locally.
+          const msg = data.message || "Invalid code.";
+          if (/expired/i.test(msg)) {
+            // Expired per the server — mirror the expiry UI: show the Resend link
+            // in the shared slot (it replaces any failed-attempts message).
+            stopCountdown();
+            codeExpired = true;
+            otpTimer.textContent = "Code expired";
+            otpTimer.classList.add("is-expired");
+            showOtpError("");
+            otpResend.hidden = false;
+          } else {
+            attemptsLeft = Math.max(0, attemptsLeft - 1);
+            showOtpError(
+              attemptsLeft > 0
+                ? msg + " " + attemptsLeft + " attempt(s) left."
+                : msg
+            );
+          }
+          refreshSubmitState();
+        })
+        .catch(function () {
+          submitBtn.textContent = "Register";
+          showOtpError("Network error — please try again.");
+          refreshSubmitState();
+        });
+    });
+
+  });
+  </script>
+{% endblock %}

@@ -66,62 +66,8 @@
 </style>
 </head>
 <body class="min-h-screen font-inter antialiased">
-  <!-- Toast notifications -->   
-  {% with errors = get_flashed_messages(with_categories=True) %}{% if errors %}
-    {% for category, error in errors %}{% if category == 'success' %}
-      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #a9d7cb; background-color: #f1fffc;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
-        <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-          <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-          <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ error }}</p>
-        </div>
-        <button class="toast-close shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    {% elif category == 'danger' or category == 'error' %}
-      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #ffcccc; background-color: #fff1f1;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
-        <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-          <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
-          <p class="font-[400] break-words w-full" style="color: #f57e7e;">{{ error }}</p>
-        </div>
-        <button class="toast-close shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    {% elif category =='info' %}
-      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #a9d3ff; background-color: #f1f8ff;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
-        <img src="{{ url_for('static', filename='img/info-icon.png') }}" alt="Information" class="shrink-0 w-[36px] h-[44px]" />
-        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-          <p class="font-[500] whitespace-nowrap" style="color: #006FE6;">Information</p>
-          <p class="font-[400] break-words w-full" style="color: #5ba2ee;">{{ error }}</p>
-        </div>
-        <button class="toast-close shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    {% elif category =='warning' %}
-      <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: #fee0aa; background-color: #fffaf1;" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative">
-        <img src="{{ url_for('static', filename='img/warning-icon.png') }}" alt="Warning" class="shrink-0 w-[36px] h-[44px]" />
-        <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-          <p class="font-[500] whitespace-nowrap" style="color: #DA8700;">Warning</p>
-          <p class="font-[400] break-words w-full" style="color: #e8b765;">{{ error }}</p>
-        </div>
-        <button class="toast-close shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-gray-400">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-    {% endif %}{% endfor %}
-  {% endif %}{% endwith %}
+  {# Flash toasts + drain (canonical). #}
+  {% include 'components/flash_messages.html' %}
 
   <div class="flex min-h-screen items-center justify-center main-container">
     <!-- Phone card -->

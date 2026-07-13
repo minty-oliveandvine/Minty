@@ -216,7 +216,12 @@ def save_account_codes(user_id, entity_id, *, expense_codes, mapping):
 
     ``expense_codes`` is the list of Xero account codes to activate for petty
     cash. ``mapping`` is a dict of Xero account ids keyed by pettycash / deposit
-    / director / cash_sale / discrepancy (any subset; missing keys are skipped).
+    / director / cash_sale / discrepancy. Clear-on-revisit semantics:
+
+      * key ABSENT      → leave the stored value untouched (partial save)
+      * key present, "" → CLEAR the stored value (null the column)
+      * key present, id → resolve and set the value
+
     Returns ``(data, status)``.
     """
     if not has_permission_by_user_id(user_id, Permission.COA_UPDATE, entity_id):
@@ -259,8 +264,12 @@ def save_account_codes(user_id, entity_id, *, expense_codes, mapping):
             ("discrepancy", "discrepancy_account_id", "EXPENSE"),
         ]
         for key, column, fallback_type in field_specs:
-            xero_account_id = (mapping.get(key) or "").strip() if mapping.get(key) else ""
+            if key not in mapping:
+                continue  # absent → leave the stored value untouched
+            xero_account_id = (mapping.get(key) or "").strip()
             if not xero_account_id:
+                # present but empty → the user cleared this field; null it
+                setattr(settings_row, column, None)
                 continue
             resolved = _resolve_account_id(
                 entity_id, xero_account_id, xero_org_id, fallback_type=fallback_type
@@ -268,10 +277,14 @@ def save_account_codes(user_id, entity_id, *, expense_codes, mapping):
             if resolved:
                 setattr(settings_row, column, resolved)
 
-        # No discrepancy-bank field in onboarding; default it to the petty cash
+        # No discrepancy-bank field in onboarding; it mirrors the petty cash
         # bank (as Settings does) — it's required by the completeness check.
+        # Keep it in sync: copy when petty cash is set, and clear it when petty
+        # cash has been cleared so we never leave a dangling reference.
         if settings_row.pettycash_account_id:
             settings_row.discrepancy_bank_account_id = settings_row.pettycash_account_id
+        elif "pettycash" in mapping and not (mapping.get("pettycash") or "").strip():
+            settings_row.discrepancy_bank_account_id = None
 
         db.session.commit()
 
@@ -285,9 +298,10 @@ def save_account_codes(user_id, entity_id, *, expense_codes, mapping):
         sync_entity_account_xero_active(entity_id, xero_org_id)
 
         logger.info(
-            "save_account_codes: entity=%s expense_codes=%s mapping_keys=%s",
+            "save_account_codes: entity=%s expense_codes=%s set_keys=%s cleared_keys=%s",
             entity_id, len(expense_codes),
-            [k for k in mapping if mapping.get(k)],
+            [k for k in mapping if (mapping.get(k) or "").strip()],
+            [k for k in mapping if not (mapping.get(k) or "").strip()],
         )
         return {"ok": True, "expense_codes": expense_codes}, 200
     except Exception as exc:  # noqa: BLE001
@@ -300,9 +314,14 @@ def save_contacts(user_id, entity_id, contacts):
     """Persist the Step 6 (Others) contact mappings into entity_pettycash_settings.
 
     ``contacts`` is a dict of Xero contact ids keyed by director / cash_sale /
-    discrepancy (any subset; missing keys are skipped). Resolves each to a local
-    XeroContactSync.id via the shared ``_resolve_contact_id``. Returns
-    ``(data, status)``.
+    discrepancy. Same clear-on-revisit semantics as ``save_account_codes``:
+
+      * key ABSENT      → leave the stored value untouched (partial save)
+      * key present, "" → CLEAR the stored value (null the column)
+      * key present, id → resolve and set the value
+
+    Resolves each id to a local ``XeroContactSync.id`` via ``_resolve_contact_id``.
+    Returns ``(data, status)``.
     """
     if not has_permission_by_user_id(user_id, Permission.COA_UPDATE, entity_id):
         return {"error": "Access denied"}, 403
@@ -333,8 +352,12 @@ def save_contacts(user_id, entity_id, contacts):
             ("discrepancy", "discrepancy_contact_id"),
         ]
         for key, column in contact_specs:
-            xero_contact_id = (contacts.get(key) or "").strip() if contacts.get(key) else ""
+            if key not in contacts:
+                continue  # absent → leave the stored value untouched
+            xero_contact_id = (contacts.get(key) or "").strip()
             if not xero_contact_id:
+                # present but empty → the user cleared this contact; null it
+                setattr(settings_row, column, None)
                 continue
             resolved = _resolve_contact_id(entity_id, xero_contact_id, xero_org_id)
             if resolved:
@@ -342,8 +365,10 @@ def save_contacts(user_id, entity_id, contacts):
 
         db.session.commit()
         logger.info(
-            "save_contacts: entity=%s contact_keys=%s",
-            entity_id, [k for k in contacts if contacts.get(k)],
+            "save_contacts: entity=%s set_keys=%s cleared_keys=%s",
+            entity_id,
+            [k for k in contacts if (contacts.get(k) or "").strip()],
+            [k for k in contacts if not (contacts.get(k) or "").strip()],
         )
         return {"ok": True}, 200
     except Exception as exc:  # noqa: BLE001

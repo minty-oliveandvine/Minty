@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, MutableMapping, cast
 
@@ -10,6 +12,7 @@ import pytz
 import requests
 from flask import current_app, g
 from flask_login import current_user
+from sqlalchemy import nulls_last, text
 
 from models.db import Entity, User, UserToken
 
@@ -85,45 +88,6 @@ def refresh_access_token_for_user(user, application=None):
 def refresh_access_token(application=None):
     user = current_user
     return refresh_access_token_for_user(user, application=application)
-
-
-def xero_logout_url(user, application=None, post_logout_redirect_uri=None):
-    """Build Xero's RP-initiated logout (end-session) URL for ``user``.
-
-    Redirecting the browser here ends the user's Xero SSO session (the Xero
-    IdentityServer cookie), so a subsequent "Login with Xero" prompts for
-    credentials again instead of silently signing back in. Xero turns this into
-    the ``/identity/user/logout?logoutId=...`` page.
-
-    Unlike revocation, this does NOT touch the OAuth grant or stored tokens, so
-    entity Xero connections keep working — it only ends the browser session.
-
-    ``post_logout_redirect_uri`` (optional) is where Xero sends the browser
-    after logout; it MUST be registered in the Xero app's post-logout redirect
-    URIs or Xero will ignore it. Falls back to the ``XERO_POST_LOGOUT_REDIRECT_URI``
-    config value when not passed.
-
-    Returns the URL string, or ``None`` if the user has no Xero ``id_token``
-    (e.g. a password-only account that never linked Xero) and therefore has no
-    Xero session to end.
-    """
-    from urllib.parse import urlencode
-
-    app = _resolve_app(application)
-    id_token = getattr(user, "id_token", None) if user else None
-    if not id_token:
-        return None
-
-    params = {"id_token_hint": id_token}
-    redirect_uri = post_logout_redirect_uri or (
-        app.config.get("XERO_POST_LOGOUT_REDIRECT_URI") if app else None
-    )
-    if redirect_uri:
-        params["post_logout_redirect_uri"] = redirect_uri
-    return (
-        "https://login.xero.com/identity/connect/endsession?"
-        + urlencode(params)
-    )
 
 
 def token_expired(current_user, application=None, tz=None):
@@ -451,3 +415,168 @@ def resolve_xero_token(entity_id, current_user, application=None, token_cache=No
                 return current_user
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Service-to-service token resolution (used by the billing backend)
+#
+# Billing holds no Xero client credentials by design. Xero rotates refresh
+# tokens on every use and invalidates the one it was sent, so a second refresher
+# racing this one would leave a dead token in one of the two stores and break
+# the connection until a human reconnects. Minty is the sole refresher; billing
+# asks for a token through `resolve_entity_access_token_for_service`.
+# ---------------------------------------------------------------------------
+
+# int4; distinct namespace so these locks can't collide with any other
+# advisory lock taken elsewhere in the app.
+_XERO_LOCK_NAMESPACE = 1481594447  # 0x5845524F, "XERO"
+
+
+@contextmanager
+def _xero_refresh_lock(user_id, application=None, wait_seconds: float = 5.0):
+    """Serialize Xero token refreshes for one token bearer across all processes.
+
+    The lock must be held across the HTTP call to Xero, not merely across the
+    database write: /connect/token is what spends the single-use refresh token,
+    so by the time a row is being written the damage is already done.
+
+    Held on a dedicated AUTOCOMMIT connection rather than the request session.
+    `apply_refreshed_tokens` commits twice, and a pooled session may hand back
+    its connection at commit, which would strand a session-scoped lock on a
+    connection we no longer own. Closing this connection releases the lock even
+    if the unlock statement never runs.
+
+    Yields True if the lock was acquired, False if `wait_seconds` elapsed first.
+    """
+    from models.db import db
+
+    app = _resolve_app(application)
+    key = f"xero_refresh:{user_id}"
+    params = {"ns": _XERO_LOCK_NAMESPACE, "k": key}
+    acquired = False
+    conn = db.engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+    try:
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            acquired = bool(
+                conn.execute(
+                    text("SELECT pg_try_advisory_lock(:ns, hashtext(:k))"), params
+                ).scalar()
+            )
+            if acquired or time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                conn.execute(
+                    text("SELECT pg_advisory_unlock(:ns, hashtext(:k))"), params
+                )
+            except Exception as exc:  # pragma: no cover - closing conn frees it anyway
+                _log(app, "warning", f"Failed to release Xero refresh lock: {exc}")
+        conn.close()
+
+
+def _resolve_service_token_bearer(entity, application=None):
+    """Pick the user whose Xero tokens represent ``entity``.
+
+    Prefers ``entity.connected_by_user_id``. Falls back to the legacy
+    ``User.xero_entity_id == entity.xero_org_id`` lookup, because no migration
+    ever backfilled the connector column — entities connected before
+    2026-05-13 have it NULL until someone re-runs the Xero connect flow, and
+    refusing them would break publishing that works today.
+
+    The fallback is scaffolding. Every use is logged at WARNING so the backfill
+    population can be measured from production traffic; once that count reaches
+    zero the fallback (and this function) should be deleted.
+    """
+    app = _resolve_app(application)
+
+    connector_id = getattr(entity, "connected_by_user_id", None)
+    if connector_id:
+        bearer = User.query.filter(User.id == connector_id).first()
+        if bearer is not None:
+            return bearer
+        _log(
+            app,
+            "warning",
+            f"connected_by_user_id {connector_id} on entity {entity.id} "
+            f"points to a missing user; falling back to legacy lookup",
+        )
+
+    # No ORDER BY here would let Postgres return a different user per call.
+    bearer = (
+        User.query.filter(
+            User.xero_entity_id == str(entity.xero_org_id),
+            User.access_token.isnot(None),
+            User.access_token != "",
+        )
+        .order_by(nulls_last(User.token_created_at.desc()), User.id)
+        .first()
+    )
+    if bearer is not None:
+        _log(
+            app,
+            "warning",
+            f"LEGACY_CONNECTOR_FALLBACK entity={entity.id} bearer={bearer.id} "
+            f"— entity.connected_by_user_id is not set; backfill required",
+        )
+    return bearer
+
+
+def resolve_entity_access_token_for_service(entity_id, application=None):
+    """Return ``(access_token, xero_org_id)`` for ``entity_id``, refreshing if needed.
+
+    Called by the billing backend, which cannot refresh. Returns ``None`` when no
+    usable token can be produced, so the caller surfaces a reconnect prompt rather
+    than sending Xero a dead token.
+    """
+    from models.db import db
+
+    app = _resolve_app(application)
+    if not entity_id:
+        return None
+
+    entity = Entity.query.get(entity_id)
+    if not entity or not entity.xero_org_id:
+        _log(app, "info", f"Entity {entity_id} has no Xero org linked")
+        return None
+
+    bearer = _resolve_service_token_bearer(entity, application=application)
+    if bearer is None:
+        _log(app, "info", f"No Xero token bearer for entity {entity_id}; reconnect required")
+        return None
+
+    with _xero_refresh_lock(bearer.id, application=application) as acquired:
+        # Re-read under the lock: whoever held it before us has very likely just
+        # written a fresh bundle, in which case there is nothing left to do.
+        db.session.refresh(bearer)
+        _hydrate_user_from_user_token(bearer, application=application)
+
+        if bearer.access_token and token_expired(bearer, application=application) is False:
+            return bearer.access_token, str(entity.xero_org_id)
+
+        if not acquired:
+            # Another refresh is in flight and did not finish in time. Refreshing
+            # now would spend a refresh token that request is about to spend.
+            _log(
+                app,
+                "warning",
+                f"Timed out waiting for Xero refresh lock on bearer {bearer.id} "
+                f"(entity {entity_id}); not refreshing",
+            )
+            return None
+
+        # `ensure_valid_token` memoises per-request in `g`; pass a private cache so
+        # this genuinely re-evaluates rather than reusing an earlier verdict.
+        if not ensure_valid_token(bearer, application=application, cache={}):
+            _log(
+                app,
+                "info",
+                f"Refresh failed for bearer {bearer.id} (entity {entity_id}); "
+                f"reconnect required",
+            )
+            return None
+
+        return bearer.access_token, str(entity.xero_org_id)

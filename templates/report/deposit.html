@@ -12,6 +12,9 @@
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
+  <!-- Shared currency formatting -->
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
 
@@ -112,6 +115,8 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
   <div class="flex min-h-screen items-center justify-center main-container">
     <!-- Phone card -->
     <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
@@ -169,35 +174,7 @@
               </svg>
             </button>
           </div>
-          {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-            {% for category, message in messages %}{% if category == 'success' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-                <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                  <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification(event)">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% elif category == 'danger' or category == 'error' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-                <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Error</p>
-                  <p class="font-[400] break-words w-full" style="color: #f57e7e;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification(event)">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% endif %}{% endfor %}
-          {% endif %}{% endwith %}
+          {# server flashes handled by canonical flash_messages partial #}
         </div>
 
         <!-- Validation Notification Area -->
@@ -357,123 +334,8 @@
     window.addEventListener('load', fitBalanceText);
     window.addEventListener('resize', fitBalanceText);
 
-    // Function to format currency input
-    function formatCurrency(input) {
-      let value = input.value.replace(/[^\d.]/g, '');
-      const parts = value.split('.');
-      if (parts.length > 2) {
-        value = parts[0] + '.' + parts.slice(1).join('');
-      }
-      if (parts.length === 2 && parts[1].length > 2) {
-        value = parts[0] + '.' + parts[1].substring(0, 2);
-      }
-      input.value = value;
-    }
-
-    function formatWithCommas(input) {
-      let value = input.value;
-      
-      // Skip if empty
-      if (value === '') {
-        return;
-      }
-      
-      // Remove existing commas and format
-      value = value.replace(/,/g, '');
-      const parts = value.split('.');
-      
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        // Add .00 if no decimal part
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
-      }
-      
-      // Update the input value
-      input.value = value;
-    }
-
-    // Function to format currency input for modal (with comma formatting and dash for zero)
-    function formatCurrencyModal(input) {
-      // Store cursor position
-      const cursorPosition = input.selectionStart;
-      
-      // Remove any non-numeric characters except decimal point
-      let value = input.value.replace(/[^\d.]/g, '');
-      
-      // Ensure only one decimal point
-      const parts = value.split('.');
-      if (parts.length > 2) {
-        value = parts[0] + '.' + parts.slice(1).join('');
-      }
-      
-      // Limit to 2 decimal places
-      if (parts.length === 2 && parts[1].length > 2) {
-        value = parts[0] + '.' + parts[1].substring(0, 2);
-      }
-      
-      // Show dash for zero value
-      if (value === '0' || value === '0.0' || value === '0.00' || value === '') {
-        input.value = '-';
-        input.setSelectionRange(1, 1);
-        return;
-      }
-      
-      // Format with commas for display
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '');
-      }
-      
-      // Only update if value actually changed
-      if (input.value !== value) {
-        const oldValue = input.value;
-        input.value = value;
-        
-        // Calculate new cursor position
-        let newCursorPosition = cursorPosition;
-        
-        // Count commas before cursor in old value
-        const commasBeforeCursorOld = (oldValue.substring(0, cursorPosition).match(/,/g) || []).length;
-        
-        // Count commas before cursor in new value
-        const commasBeforeCursorNew = (value.substring(0, cursorPosition).match(/,/g) || []).length;
-        
-        // Adjust cursor position based on comma difference
-        newCursorPosition += (commasBeforeCursorNew - commasBeforeCursorOld);
-        
-        // Ensure cursor position is within bounds
-        newCursorPosition = Math.min(newCursorPosition, value.length);
-        input.setSelectionRange(newCursorPosition, newCursorPosition);
-      }
-    }
-
-    // Format with commas on blur for modal
-    function formatWithCommasModal(input) {
-      let value = input.value;
-      
-      // Skip if empty or dash
-      if (value === '' || value === '-') {
-        return;
-      }
-      
-      // Remove existing commas and format
-      value = value.replace(/,/g, '');
-      const parts = value.split('.');
-      
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        // Add .00 if no decimal part
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
-      }
-      
-      // Only update if we have a valid number
-      if (value !== '' && value !== '-') {
-        input.value = value;
-      }
-    }
+    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
+    // static/js/currency.js
 
     // Function to update deposit amount display
     function updateDepositAmount() {
@@ -1004,9 +866,7 @@
 
      // Show flash notification on page load if it exists
      document.addEventListener('DOMContentLoaded', function() {
-       {% if get_flashed_messages() %}
-         showFlashNotification();
-       {% endif %}
+       {# server flashes handled by canonical flash_messages partial #}
      });
 
   </script>

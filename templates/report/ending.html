@@ -108,6 +108,8 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
 
 <!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
 <script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
@@ -201,35 +203,7 @@ document.addEventListener('submit', function(e){
               </svg>
             </button>
           </div>
-          {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-            {% for category, message in messages %}{% if category == 'success' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-                <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                  <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% elif category == 'danger' or category == 'error' %}
-              <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-                <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-                <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                  <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
-                  <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
-                </div>
-                <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            {% endif %}{% endfor %}
-          {% endif %}{% endwith %}
+          {# server flashes handled by canonical flash_messages partial #}
         </div>       
         <!-- Include the reusable stepper component -->
         {% if not is_shared_link %}
@@ -666,26 +640,18 @@ document.addEventListener('submit', function(e){
               </svg>
               <span>Delete Report</span>
             </button>
-            <!-- Edit Report / Done editing: above Close, non-balance fields only -->
-            {% if is_report_edit_mode %}
-            <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
-              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-              <span>Done editing</span>
-            </a>
-            {% else %}
-            <a href="{{ url_for('report.report_ending', id=current_draft.id, entity_id=request.args.get('entity_id') or org.id, report_edit='true') }}"
-              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
+            <!-- Edit Report: reverts this submitted report to a draft so every
+                 field (balances included) can be re-entered through the flow. -->
+            <button
+              type="button"
+              onclick="handleEditReport()"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
               </svg>
               <span>Edit Report</span>
-            </a>
-            {% endif %}
-            <!-- Close button below Delete Report (hidden in edit mode; "Done editing" closes) -->
-            {% if not is_report_edit_mode %}
+            </button>
+            <!-- Close button below Delete Report -->
             <button
               type="button"
               onclick="closeReport()"
@@ -695,7 +661,6 @@ document.addEventListener('submit', function(e){
               </svg>
               <span>Close</span>
             </button>
-            {% endif %}
             {% endif %}
             {% else %}
             <!-- For older submitted reports (not draft, not latest): Show export buttons and close button -->
@@ -738,7 +703,9 @@ document.addEventListener('submit', function(e){
             </div>
             {% endif %}
             
-            <!-- Edit Report / Done editing: above Close, non-balance fields only -->
+            {# Older reports cannot be reverted to draft -- doing so would orphan
+               the opening balances of every report after them -- so they keep the
+               constrained inline mode, which edits only non-balance fields. #}
             {% if not is_shared_link %}
             {% if is_report_edit_mode %}
             <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
@@ -754,7 +721,7 @@ document.addEventListener('submit', function(e){
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
               </svg>
-              <span>Edit Report</span>
+              <span>Edit Details</span>
             </a>
             {% endif %}
             <!-- Close button for older submitted reports (hidden in edit mode; "Done editing" closes) -->
@@ -1298,6 +1265,56 @@ document.addEventListener('submit', function(e){
        const entityId = '{{ request.args.get("entity_id") or org.id }}';
        const reportHistoryUrl = '/entity/' + entityId + '/reports';
        PageTransition.navigateWithFade(reportHistoryUrl);
+     }
+
+     // Reverts this submitted report to a draft and reopens it at step 1, so
+     // every field (balances included) can be re-entered. Same endpoint as the
+     // Edit action in report history.
+     const REPORT_WAS_PUBLISHED = {{ 'true' if current_draft.xero_integrated_yes or header_publishing_status else 'false' }};
+
+     async function handleEditReport() {
+       const reportId = '{{ current_draft.id }}';
+       const entityId = '{{ request.args.get("entity_id") or org.id }}';
+
+       // Publishing stores no Xero object IDs, so re-publishing after an edit
+       // re-POSTs every transaction instead of updating the originals.
+       if (REPORT_WAS_PUBLISHED && !window.confirm(
+         'This report was already published to Xero.\n\n' +
+         'Editing it and publishing again will create duplicate entries in Xero — ' +
+         'the originals are not removed automatically and must be voided in Xero by hand.\n\n' +
+         'Continue?'
+       )) {
+         return;
+       }
+
+       try {
+         showNotification('Converting report to draft...', 'info');
+
+         const csrfToken = document.querySelector('input[name="csrf_token"]');
+         const formData = new FormData();
+         if (csrfToken) {
+           formData.append('csrf_token', csrfToken.value);
+         }
+
+         const response = await fetch(`/report/${reportId}/convert-to-draft`, {
+           method: 'POST',
+           body: formData,
+           credentials: 'include'
+         });
+         const data = await response.json();
+
+         if (data.status === 'success') {
+           showNotification('Report converted to draft. Opening for editing...', 'success');
+           const editUrl = '{{ url_for("report.report_opening") }}?entity_id=' + entityId +
+             (data.transaction_date ? '&transaction_date=' + data.transaction_date : '');
+           setTimeout(() => { PageTransition.navigateWithFade(editUrl); }, 500);
+         } else {
+           showNotification(data.message || 'Failed to convert report to draft.', 'error');
+         }
+       } catch (error) {
+         console.error('Error converting report to draft:', error);
+         showNotification('An error occurred while converting the report. Please try again.', 'error');
+       }
      }
 
      // Function to generate share link
@@ -2056,9 +2073,7 @@ document.addEventListener('submit', function(e){
 
     // Show flash notification on page load if it exists and calculate cash count totals
     document.addEventListener('DOMContentLoaded', function() {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
       calculateCashCountTotals();
       initializeSalesHistoryChart();
       initializeExpensesPieChart();

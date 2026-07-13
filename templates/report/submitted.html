@@ -56,6 +56,7 @@
   </style>
 </head>
 <body class="min-h-screen  font-inter antialiased">
+  {% include 'components/flash_messages.html' %}
   <!-- Hidden CSRF token for republish functionality -->
   <form style="display: none;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -129,10 +130,18 @@
         <!-- Action Buttons -->
         <div class="w-full max-w-md pt-8 space-y-3">
           {% if can_publish %}
+          {# was_previously_published covers the edited-after-publish case, where
+             xero_integrated_yes is cleared but the report is still in Xero. Both
+             go through the modal: a second publish duplicates every transaction. #}
           {% if is_published_to_xero %}
             <button onclick="showRepublishModal()" id="republishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
               <img src="{{ url_for('static', filename='img/xero-logo.webp') }}" alt="Xero Logo" class="h-5 w-5 sm:h-6 sm:w-6">
               <span class="text-sm font-medium">Republish to Xero</span>
+            </button>
+          {% elif was_previously_published %}
+            <button onclick="showRepublishModal()" id="republishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
+              <img src="{{ url_for('static', filename='img/xero-logo.webp') }}" alt="Xero Logo" class="h-5 w-5 sm:h-6 sm:w-6">
+              <span class="text-sm font-medium">Publish to Xero</span>
             </button>
           {% else %}
             <button onclick="publishToXero()" id="publishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
@@ -163,9 +172,9 @@
      <div id="republishReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4" onclick="if(event.target === this) hideRepublishModal()">
        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto" onclick="event.stopPropagation()">
          <!-- Modal Header -->
-         <div class="flex items-center justify-between mb-6">
+         <div class="relative flex items-center justify-center mb-6">
            <h2 class="text-xl font-bold text-gray-900">Republish Report</h2>
-           <button onclick="hideRepublishModal()" class="text-gray-400 hover:text-gray-600">
+           <button onclick="hideRepublishModal()" class="absolute right-0 text-gray-400 hover:text-gray-600">
              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
              </svg>
@@ -182,16 +191,10 @@
              </div>
              <div class="ml-3">
                <p class="text-sm text-[#B91C1C]">
-                 <span class="font-bold">Warning:</span> The <span class="font-semibold">{{ transaction_date.strftime('%d %b %Y').upper() if transaction_date else 'this' }}</span> report was previously published to Xero.
-               </p>
-               <p class="text-sm text-[#B91C1C] mt-1">
-                 Republishing sends all of this report's transactions to Xero again and may create duplicates.
+                 This report was previously published. This action may create duplicate entries in Xero.
                </p>
                <p class="text-sm text-[#B91C1C] mt-2">
-                 Before continuing, please open Xero and delete the previously published transactions for this report.
-               </p>
-               <p class="text-sm text-[#B91C1C] mt-2">
-                 Are you sure you want to republish this report to Xero?
+                 Do you wish to continue?
                </p>
              </div>
            </div>
@@ -236,26 +239,6 @@
            </svg>
            <span id="loadingText" class="text-gray-700 font-medium">Processing...</span>
          </div>
-       </div>
-     </div>
-
-     <!-- Error Dialog (stays open until the user clicks OK) -->
-     <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
-       <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
-         <div class="flex items-start mb-6">
-           <div class="flex-shrink-0">
-             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
-               <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-             </svg>
-           </div>
-           <div class="ml-3">
-             <h2 class="text-lg font-bold text-gray-900">Error</h2>
-             <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
-           </div>
-         </div>
-         <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
-           OK
-         </button>
        </div>
      </div>
 
@@ -440,9 +423,7 @@
               if (window.sendLogToDataDog) {
                 window.sendLogToDataDog('error', isRepublish ? 'Republishing failed' : 'Publishing failed', { entityId: String(entityId), reportId: String(reportId) });
               }
-              // Prefer the server's specific reason (e.g. Xero lock-date violation)
-              // over the generic fallback message.
-              publishingFailed(data.failure_reason || 'Publishing to Xero failed. Please try again.');
+              publishingFailed('Publishing to Xero failed. Please try again.');
             } else if (attempts >= maxAttempts) {
               clearInterval(interval);
               publishingFailed('Publishing is taking longer than expected. Please check again later.');
@@ -551,13 +532,6 @@
     }
 
     function showNotification(message, type = 'info') {
-      // Errors are blocking: show a dialog that stays open until the user
-      // clicks OK, rather than a toast that auto-dismisses.
-      if (type === 'error') {
-        showErrorDialog(message);
-        return;
-      }
-
       const toast = document.createElement('div');
       toast.className = `absolute top-[0px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50`;
 
@@ -622,9 +596,6 @@
         toast.classList.remove('translate-x-full');
       }, 100);
       
-      // Warnings linger at 8s; success/info auto-dismiss at 4s. (Errors use the
-      // blocking dialog above and never reach this toast path.)
-      const displayDuration = (type === 'warning') ? 8000 : 4000;
       setTimeout(() => {
         toast.classList.add('translate-x-full');
         setTimeout(() => {
@@ -632,24 +603,7 @@
             toast.remove();
           }
         }, 500);
-      }, displayDuration);
-    }
-
-    // Blocking error dialog — stays open until the user clicks OK.
-    function showErrorDialog(message) {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) { alert(message); return; }
-      const msgEl = document.getElementById('errorDialogMessage');
-      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
-      dialog.classList.remove('hidden');
-      dialog.classList.add('flex');
-    }
-
-    function hideErrorDialog() {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) return;
-      dialog.classList.add('hidden');
-      dialog.classList.remove('flex');
+      }, 4000);
     }
 
     // Republish functions

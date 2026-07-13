@@ -11,6 +11,7 @@ from flask import (current_app, flash, g, jsonify, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import billing_settings_app_url
@@ -36,7 +37,7 @@ from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
                        EntityAccountXero, EntityPettycashSettings, User,
                        UserEntity, XeroContactSync, db)
 from services.authz import (permission_denied, require_entity_access,
-                            require_permission)
+                            require_module, require_permission)
 from services.app_runtime.legacy.xero_service import (
     account_info_to_xero_format, contact_sync_to_xero_format)
 from services.auth.token_service import (auto_refresh_token,
@@ -77,19 +78,19 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             name_form = (request.form.get("entity_name") or "").strip()
             if name_form != (entity.name or ""):
                 if not name_form:
-                    flash("Entity name is required.", "error")
+                    flash("Entity name is required.", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 if len(name_form) > 100:
-                    flash("Entity name must be 100 characters or fewer.", "error")
+                    flash("Entity name must be 100 characters or fewer.", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 if Entity.query.filter(
                     Entity.name == name_form, Entity.id != entity_id
                 ).first():
-                    flash("Entity name already exist", "error")
+                    flash("Entity name already exists", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
@@ -110,6 +111,18 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
                     entity.currency_format = currency_info.symbol or "$"
         db.session.commit()
         flash("Settings updated successfully.", "success")
+    except IntegrityError as exc:
+        db.session.rollback()
+        logger.error(
+            "integration_minimal_entity_settings_post integrity error entity=%s: %s",
+            entity_id,
+            exc,
+        )
+        flash(
+            "We couldn't save these settings because one of the values must be "
+            "unique and is already in use. Please review your entries and try again.",
+            "danger",
+        )
     except Exception as exc:
         db.session.rollback()
         logger.error(
@@ -117,7 +130,10 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             entity_id,
             exc,
         )
-        flash("Error updating settings.", "error")
+        flash(
+            "We couldn't save your settings. Please review your entries and try again.",
+            "danger",
+        )
     return _redirect_xero_mapping(entity_id, _from, return_view="entity_settings")
 @entity_bp.route("/entity/<string:entity_id>/settings/xero",
                  methods=["GET", "POST"])
@@ -175,8 +191,7 @@ def entity_settings(entity_id=None):
             return _xero_resp
         if not request.form.get("main_bank"):
             flash(
-                "Please enter all default settings for this entity",
-                "error",
+                "Please enter all default settings for this entity", "danger",
             )
             return _redirect_xero_mapping(entity_id, _from, return_view=return_view)
     try:
@@ -218,10 +233,15 @@ def entity_settings(entity_id=None):
                     f"Failed to backfill xero_tenant_name for {entity_id}: {exc}"
                 )
 
-        # Try to sync status, but don't fail if it doesn't work
+        # Try to sync status, but don't fail if it doesn't work.
+        # Gate on the entity's resolvable Xero token (xero_token_resolved), NOT
+        # current_user's personal token: the sync uses the connector's token
+        # internally, so a viewer who isn't the connector must still trigger it.
+        # Let sync_entity_xero_status validate that connector token itself rather
+        # than asserting validity from the wrong user via token_validated=True.
         try:
-            if token_valid:
-                sync_entity_xero_status(entity_id, token_validated=True)
+            if xero_token_resolved:
+                sync_entity_xero_status(entity_id)
         except Exception as sync_error:
             logger.warning(
                 f"Status sync failed, continuing with database data: {str(sync_error)}"
@@ -587,26 +607,17 @@ def entity_settings_users(org_id):
             entity_acronym = "".join([word[0].upper()
                                      for word in words if word])
 
-        # Get all roles from database; exclude entity_base and super_admin from dropdown/selection
-        from blueprints.user_management.services.roles import get_all_roles
-
-        all_roles = get_all_roles()
-        excluded_roles = {"entity_base", "super_admin"}
-
-        def _normalize_role_name(name):
-            if not name:
-                return ""
-            return str(name).strip().lower().replace(" ", "_").replace("-", "_")
-
-        roles = [
-            r for r in all_roles
-            if r.name and _normalize_role_name(r.name) not in excluded_roles
-        ]
-
+        # Assignable roles, mirroring the onboarding invite step
+        # (onboarding/components/OnboardingSteps.jsx ROLES). Hardcoded to the
+        # canonical four so the dropdown never shows redundant/near-duplicate
+        # rows from the roles table.
         entity_user_role_options = [
-            {"value": _normalize_role_name(r.name), "name": str(r.name)}
-            for r in roles
+            {"value": "admin", "name": "Admin"},
+            {"value": "accountant", "name": "Accountant"},
+            {"value": "shop_manager", "name": "Shop Manager"},
+            {"value": "cashier", "name": "Cashier"},
         ]
+        roles = entity_user_role_options
 
         bills_settings_query = "?from=bills" if from_origin == "bills" else ""
 
@@ -638,14 +649,14 @@ def entity_settings_users(org_id):
         )
     except Exception as e:
         logger.error(f"Error accessing entity settings users: {str(e)}")
-        flash("Error accessing user settings.", "danger")
-        return redirect(
-            url_for(
-                "entity_settings_users",
-                org_id=org_id,
-                **{"from": from_origin} if from_origin == "bills" else {},
-            )
+        flash(
+            "We couldn't load the user settings for this entity. "
+            "Please go back to your entities and try again.",
+            "danger",
         )
+        # Redirect to the entity list rather than back to this same page: if the
+        # failure persists, self-redirecting here would loop indefinitely.
+        return redirect(url_for("entity.entity_list"))
 
 
 @entity_bp.route("/entity/settings/entity/<string:org_id>",
@@ -656,6 +667,11 @@ def entity_settings_users(org_id):
     Permission.COA_VIEW,
     entity_arg="org_id",
     message="You do not have permission to view CoA settings for this entity.",
+)
+@require_module(
+    "PETTY_CASH",
+    entity_arg="org_id",
+    message="Petty Cash is not activated for this entity.",
 )
 def entity_settings_entity(org_id):
     try:
@@ -821,10 +837,31 @@ def entity_settings_entity(org_id):
                         **{"from": _from} if _from == "bills" else {},
                     )
                 )
+            except IntegrityError as e:
+                db.session.rollback()
+                logger.error(f"Entity settings integrity error: {str(e)}")
+                flash(
+                    "We couldn't save these entity settings because one of the "
+                    "values must be unique and is already in use. Please review "
+                    "your entries and try again.",
+                    "danger",
+                )
+                _from = request.form.get("_from") or request.args.get("from")
+                return redirect(
+                    url_for(
+                        "entity_settings_entity",
+                        org_id=org_id,
+                        **{"from": _from} if _from == "bills" else {},
+                    )
+                )
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"Error updating entity settings: {str(e)}")
-                flash("Error updating entity settings.", "error")
+                flash(
+                    "We couldn't save your entity settings. Please review your "
+                    "entries and try again.",
+                    "danger",
+                )
                 _from = request.form.get("_from") or request.args.get("from")
                 return redirect(
                     url_for(
@@ -976,7 +1013,10 @@ def entity_settings_entity(org_id):
     except Exception as e:
         db.session.rollback()
         logger.exception(f"Error accessing entity settings: {str(e)}")
-        flash("Error accessing entity settings.", "danger")
+        flash(
+            "We couldn't load the settings for this entity. Please try again.",
+            "danger",
+        )
         return redirect(url_for("entity_settings", entity_id=org_id))
 
 
@@ -1007,6 +1047,11 @@ def entity_settings_module(org_id):
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
 
+    # Only admins may change modules; everyone else views read-only.
+    can_manage_modules = has_permission(
+        current_user, Permission.MODULE_MANAGE, org_id
+    )
+
     from_param = request.args.get("from")
     template = (
         "entity/settings_module_bills_ui.html"
@@ -1020,6 +1065,7 @@ def entity_settings_module(org_id):
         entity_acronym=entity_acronym,
         module_cards=module_cards,
         subscription_summary=subscription_summary,
+        can_manage_modules=can_manage_modules,
         bill_settings_url=billing_settings_app_url(
             org_id, org, current_user.id, from_bills=from_param == "bills"
         ),
@@ -1030,7 +1076,7 @@ def entity_settings_module(org_id):
 @login_required
 @require_entity_access(entity_arg="org_id")
 @require_permission(
-    Permission.ENTITY_UPDATE,
+    Permission.MODULE_MANAGE,
     entity_arg="org_id",
     message="You do not have permission to change modules for this entity.",
 )
@@ -1042,7 +1088,59 @@ def entity_settings_module_toggle(org_id):
     code = (payload.get("code") or "").strip().upper()
     enabled = bool(payload.get("enabled"))
 
+    # Returns {"modules": {PETTY_CASH: bool, BILL: bool}}; the client uses the
+    # full state to navigate to the correct shell, which re-renders the
+    # subscription summary server-side.
     data, status = set_entity_module(org_id, code, enabled, actor="settings_ui")
+    return jsonify(data), status
+
+
+@entity_bp.route("/entity/settings/module/<string:org_id>/save", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to change modules for this entity.",
+)
+def entity_settings_module_save(org_id):
+    """Apply the staged module on/off selections in one shot (the Save button).
+
+    Body: ``{"modules": {"PETTY_CASH": bool, "BILL": bool}}``. Each canonical
+    module is set to its requested state; returns the full resulting state so
+    the client can navigate to the correct shell.
+    """
+    from blueprints.entity.services.modules import (
+        MODULE_CODES,
+        _enabled_state,
+        set_entity_module,
+    )
+
+    payload = request.get_json(silent=True) or {}
+    desired = payload.get("modules")
+    if not isinstance(desired, dict):
+        return jsonify({"error": "A 'modules' object is required."}), 400
+
+    # At least one module must stay active. Evaluate the resulting state
+    # (requested values overlaid on the current ones) so even a partial save
+    # can't leave the entity with no modules.
+    current = _enabled_state(org_id)
+    resulting = {
+        code
+        for code in MODULE_CODES
+        if (bool(desired[code]) if code in desired else current.get(code, False))
+    }
+    if not resulting:
+        return jsonify({"error": "At least one module must be active."}), 400
+
+    data, status = {"modules": {}}, 200
+    for code in MODULE_CODES:
+        if code in desired:
+            data, status = set_entity_module(
+                org_id, code, bool(desired[code]), actor="settings_ui"
+            )
+            if status != 200:
+                return jsonify(data), status
     return jsonify(data), status
 
 

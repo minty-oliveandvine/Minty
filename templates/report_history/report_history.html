@@ -150,12 +150,24 @@
      .flatpickr-day:hover { background: #f1fbfc; }
      .flatpickr-months .flatpickr-month { color: #374151; }
      .flatpickr-current-month { font-weight: 600; }
-     /* Align day columns with the weekday headers and stop the last (partial)
-        row from spreading edge-to-edge: each day is exactly 1/7, left-aligned. */
-     .flatpickr-calendar .dayContainer { justify-content: flex-start; }
-     .flatpickr-calendar .flatpickr-day {
-       max-width: 14.2857%;
-       flex-basis: 14.2857%;
+     /* Day-column alignment is left to Flatpickr's own layout: the default
+        `justify-content: space-around` with 39px-capped cells makes each day's
+        centre land exactly under its weekday header. */
+
+     /* In two-month mode Flatpickr tags the leading/trailing adjacent-month
+        cells with class "hidden" and relies on `visibility: hidden` to keep
+        their grid slot. But Tailwind's utility `.hidden { display: none }`
+        (generated at runtime by the Play CDN for these dynamically-added
+        classes) removes them from the grid entirely, so every date packed
+        left under the wrong weekday and the final partial row spread out.
+        Re-assert Flatpickr's cell so the slot stays, and show those days
+        greyed like a normal calendar instead of blank. */
+     .flatpickr-calendar .flatpickr-day.hidden,
+     .flatpickr-calendar .flatpickr-day.prevMonthDay,
+     .flatpickr-calendar .flatpickr-day.nextMonthDay {
+       display: inline-block !important;
+       visibility: visible !important;
+       color: rgba(57, 57, 57, 0.3);   /* Flatpickr's own muted "other month" grey */
      }
      /* Footer action buttons inside the calendar popup */
      .fp-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid #f0f0f0; }
@@ -187,9 +199,10 @@
          min-width: 100% !important;
          max-width: 100% !important;
        }
-       /* Let the 7 day cells share the row evenly and stay tap-friendly */
+       /* Taller cells for touch. Width/alignment stay on Flatpickr's default
+          space-around layout (no 1/7 cap) so cells never wrap out of column
+          even though the dayContainer is stretched to the viewport width. */
        .flatpickr-calendar .flatpickr-day {
-         max-width: 14.2857%;
          height: 42px;
          line-height: 42px;
        }
@@ -211,6 +224,8 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
+  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {% include 'components/flash_messages.html' %}
   <!-- Full-screen Publishing Overlay -->
   <div id="publishingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[9999] hidden items-center justify-center" style="display:none;">
     <div class="bg-white rounded-2xl p-8 shadow-2xl w-[320px] max-w-[90vw] flex flex-col items-center">
@@ -314,35 +329,7 @@
 
       <!-- Flash Notification Area (Slider) -->
       <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40">
-        {% with messages = get_flashed_messages(with_categories=True) %}{% if messages %}
-          {% for category, message in messages %}{% if category == 'success' %}
-            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #a9d7cb; background-color: #f1fffc;">
-              <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                <p class="font-[400] break-words w-full" style="color: #92c6b9;">{{ message }}</p>
-              </div>
-              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          {% elif category == 'danger' or category == 'error' %}
-            <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-              <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-              <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Error</p>
-                <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">{{ message }}</p>
-              </div>
-              <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          {% endif %}{% endfor %}
-        {% endif %}{% endwith %}
+        {# server flashes handled by canonical flash_messages partial #}
       </div>
     <!-- Delete Confirmation Modal -->
       <div id="deleteReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
@@ -384,33 +371,13 @@
         </div>
       </div>
 
-      <!-- Error Dialog (stays open until the user clicks OK) -->
-      <div id="errorDialog" class="absolute inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[60] p-4">
-        <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
-          <div class="flex items-start mb-6">
-            <div class="flex-shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-[#F03D3D]">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-              </svg>
-            </div>
-            <div class="ml-3">
-              <h2 class="text-lg font-bold text-gray-900">Error</h2>
-              <p id="errorDialogMessage" class="text-sm text-gray-600 mt-1 break-words"></p>
-            </div>
-          </div>
-          <button onclick="hideErrorDialog()" class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#54D3DA]/80 transition-colors">
-            OK
-          </button>
-        </div>
-      </div>
-
       <!-- Republish Report Confirmation Modal -->
       <div id="republishReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
         <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
           <!-- Modal Header -->
-          <div class="flex items-center justify-between mb-6">
+          <div class="relative flex items-center justify-center mb-6">
             <h2 class="text-xl font-bold text-gray-900">Republish Report</h2>
-            <button onclick="hideRepublishModal()" class="text-gray-400 hover:text-gray-600">
+            <button onclick="hideRepublishModal()" class="absolute right-0 text-gray-400 hover:text-gray-600">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
               </svg>
@@ -426,19 +393,13 @@
                 </svg>
               </div>
               <div class="ml-3">
-                <p class="text-sm text-[#B91C1C]">
-                  <span class="font-bold">Warning:</span>
-                </p>
                 <div id="republishDuplicateWarning" class="hidden">
-                  <p class="text-sm text-[#B91C1C] mt-1">
-                    The <span id="republishReportDate" class="font-semibold"></span> report was previously published to Xero. Republishing sends all of its transactions to Xero again and may create duplicates.
-                  </p>
-                  <p class="text-sm text-[#B91C1C] mt-2">
-                    Before continuing, please open Xero and delete the previously published transactions for this report.
+                  <p class="text-sm text-[#B91C1C]">
+                    This report was previously published. This action may create duplicate entries in Xero.
                   </p>
                 </div>
                 <p class="text-sm text-[#B91C1C] mt-2">
-                  Are you sure you want to republish this report to Xero?
+                  Do you wish to continue?
                 </p>
               </div>
             </div>
@@ -464,7 +425,24 @@
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-semibold text-gray-900">Report Results</h2>
           </div>
-          
+
+          {# Render one Sales/Expenses figure. The columns are a fixed width (see amount_col below), so a
+             long figure has to be stepped down a size or two to stay on one line — CSS cannot shrink text
+             to fit, so the size is chosen here from the formatted length. Amounts up to ~$99,999.99 keep
+             the full size; the tiers below only kick in past that. #}
+          {% macro amount(value, colour) %}
+            {%- set figure = (value or 0) -%}
+            {%- set text = '-' if figure == 0 else '$' + '{:,.2f}'.format(figure) -%}
+            {%- if text|length <= 10 -%}
+              {%- set size = 'text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg' -%}
+            {%- elif text|length <= 13 -%}
+              {%- set size = 'text-[9px] min-[414px]:text-[11px] min-[640px]:text-xs min-[1024px]:text-base' -%}
+            {%- else -%}
+              {%- set size = 'text-[8px] min-[414px]:text-[9px] min-[640px]:text-[10px] min-[1024px]:text-xs' -%}
+            {%- endif -%}
+            <span class="{{ size }} font-semibold {{ colour }} whitespace-nowrap">{{ text }}</span>
+          {% endmacro %}
+
          {% for report in report_history  %}
        <div class="report-entry bg-white rounded-2xl p-4" data-report-id="{{ report.id }}" data-report-date="{{ report.transaction_date.strftime('%Y-%m-%d') }}" data-report-status="{{ report.status }}">
             <div class="flex items-start justify-between">
@@ -477,13 +455,20 @@
                     </div>
                   </div>
                   <div class="flex items-center gap-4 min-[414px]:gap-4 min-[640px]:gap-12 min-[1024px]:gap-16 min-[1280px]:gap-40 flex-1 justify-center">
-                    <div class="flex flex-col">
+                    {# Both amount columns are a fixed width, so neither the label nor the figure decides how
+                       wide they are. A content-sized column moves: a zero renders as "-" and the column
+                       shrinks to its label, an unusually long figure stretches it, and either way
+                       justify-center shifts the pair so the row stops lining up with its neighbours.
+                       Fixed widths hold Sales and Expenses at the same x on every row; the amount() macro
+                       steps the font down so a long figure still fits on one line. #}
+                    {% set amount_col = "flex flex-col w-[62px] min-[414px]:w-[74px] min-[640px]:w-[90px] min-[1024px]:w-[116px]" %}
+                    <div class="{{ amount_col }}">
                       <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-xl font-semibold text-gray-600">Sales</span>
-                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg font-semibold text-[#00C896]">{% set sales = report.total_sales or 0 %}{% if sales == 0 %}-{% else %}${{ "{:,.2f}".format(sales) }}{% endif %}</span>
+                      {{ amount(report.total_sales, 'text-[#00C896]') }}
                     </div>
-                    <div class="flex flex-col">
+                    <div class="{{ amount_col }}">
                       <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-xl font-semibold text-gray-600">Expenses</span>
-                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg font-semibold text-[#EF4444]">{% set expenses = report.expenses or 0 %}{% if expenses == 0 %}-{% else %}${{ "{:,.2f}".format(expenses) }}{% endif %}</span>
+                      {{ amount(report.expenses, 'text-[#EF4444]') }}
                     </div>
                   </div>
                   <div class="flex flex-col min-[414px]:mr-4 min-[640px]:mr-6 min-[1024px]:mr-20">
@@ -516,7 +501,7 @@
                         <div class="flex flex-col">
                           <!-- Edit - latest non-draft report, only when the user can edit (entity-wide perm or they uploaded it). -->
                           {% if report.id == latest_report_id and report.status != 'draft' and (can_edit_entity_reports or report.uploaded_by == current_user.username) %}
-                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}', {{ 'true' if report.xero_integrated_yes or report.publishing_status else 'false' }}); toggleMobileMenu(this.closest('.mobile-menu-button'))">
                             <span class="text-sm font-medium">Edit</span>
                           </div>
                           {% endif %}
@@ -951,13 +936,6 @@
 
     // Function to show notifications
     function showNotification(message, type = 'info') {
-      // Errors are blocking: show a dialog that stays open until the user
-      // clicks OK, rather than a toast that auto-dismisses.
-      if (type === 'error') {
-        showErrorDialog(message);
-        return;
-      }
-
       const toast = document.createElement('div');
       toast.className = `absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40`;
 
@@ -1028,23 +1006,6 @@
           }
         }, 500);
       }, 4000);
-    }
-
-    // Blocking error dialog — stays open until the user clicks OK.
-    function showErrorDialog(message) {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) { alert(message); return; }
-      const msgEl = document.getElementById('errorDialogMessage');
-      if (msgEl) msgEl.textContent = message || 'Something went wrong. Please try again.';
-      dialog.classList.remove('hidden');
-      dialog.classList.add('flex');
-    }
-
-    function hideErrorDialog() {
-      const dialog = document.getElementById('errorDialog');
-      if (!dialog) return;
-      dialog.classList.add('hidden');
-      dialog.classList.remove('flex');
     }
 
     // Handle report entry container click
@@ -1247,15 +1208,6 @@
     let reportToRepublish = null;
     let entityToRepublish = null;
 
-
-    // Function to edit a report
-    function handleEditReport(reportId, entityId, transactionDate) {
-      console.log('Edit report:', reportId, 'for date:', transactionDate);
-      // Navigate to the report ending page for editing
-      const editUrl = `/entity/${entityId}/ending/${reportId}?edit=true&transaction_date=${transactionDate}`;
-      console.log('Navigating to edit URL:', editUrl);
-      PageTransition.navigateWithFade(editUrl);
-    }
 
     // Function to delete a report
     function deleteReport(reportId) {
@@ -1554,8 +1506,6 @@
               publishingPartial(entityId, data.failure_reasons);
             } else if (ps === 'failed') {
               clearInterval(interval);
-              // Prefer the server's specific reason (e.g. Xero lock-date
-              // violation) over the generic fallback message.
               publishingFailed(
                 (data.failure_reason
                   ? 'Publishing to Xero failed: ' + data.failure_reason
@@ -1770,31 +1720,44 @@
       }
     }
 
-    // Function to handle editing submitted reports (Testing Only)
-    // Converts posted report to draft, then navigates to opening page
-    async function handleEditReport(reportId, entityId, transactionDate) {
+    // Reverts a submitted report to a draft and reopens it at step 1, so every
+    // field (balances included) can be re-entered. Same endpoint as the Edit
+    // Report button on the ending page.
+    async function handleEditReport(reportId, entityId, transactionDate, wasPublished) {
       if (!reportId || !entityId) {
         showNotification('Unable to edit report. Missing report information.', 'error');
+        return;
+      }
+
+      // Publishing stores no Xero object IDs, so re-publishing after an edit
+      // re-POSTs every transaction instead of updating the originals.
+      if (wasPublished && !window.confirm(
+        'This report was already published to Xero.\n\n' +
+        'Editing it and publishing again will create duplicate entries in Xero — ' +
+        'the originals are not removed automatically and must be voided in Xero by hand.\n\n' +
+        'Continue?'
+      )) {
         return;
       }
 
       try {
         // Show loading notification
         showNotification('Converting report to draft...', 'info');
-        
+
         // Get CSRF token
         const csrfToken = document.querySelector('input[name="csrf_token"]');
-        
+
         // Create FormData for POST request
         const formData = new FormData();
         if (csrfToken) {
           formData.append('csrf_token', csrfToken.value);
         }
-        
+
         // Call backend to convert report to draft
         const response = await fetch(`/report/${reportId}/convert-to-draft`, {
           method: 'POST',
-          body: formData
+          body: formData,
+          credentials: 'include'
         });
 
         const data = await response.json();
@@ -1932,9 +1895,7 @@
 
     // Show flash notification on page load if it exists
     document.addEventListener('DOMContentLoaded', function() {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
       
       // Format timestamps to Hong Kong timezone
       formatTimestampsToHKTime();
@@ -1942,9 +1903,7 @@
     
     // Fallback initialization - run after a delay regardless of DOMContentLoaded
     setTimeout(() => {
-      {% if get_flashed_messages() %}
-        showFlashNotification();
-      {% endif %}
+      {# server flashes handled by canonical flash_messages partial #}
       
       // Format timestamps to Hong Kong timezone
       formatTimestampsToHKTime();

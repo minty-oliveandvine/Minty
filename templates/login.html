@@ -90,23 +90,8 @@
     </style>
   </head>
   <body>
-    <!-- Flash message display section - Shows alert messages with category styling and dismiss button -->
-    {% with messages = get_flashed_messages(with_categories=true) %} {% if
-    messages %} {% for category, message in messages %}
-    <div
-      class="alert alert-{{ category }} text-center col-6 mx-auto position-absolute fixed-top d-flex justify-content-between align-items-center flash-message"
-    >
-      {{ message }}
-      <button
-        type="button"
-        class="close btn btn-{{ category }} btn-sm col-1 mt-0"
-        data-dismiss="alert"
-        aria-label="Close"
-      >
-        <span aria-hidden="true">&times;</span>
-      </button>
-    </div>
-    {% endfor %} {% endif %} {% endwith %}
+    {# Flash toasts + drain (canonical). #}
+    {% include 'components/flash_messages.html' %}
     <div class="container">
       <img
         src="{{ url_for('static', filename='img/logo.png') }}"
