@@ -24,7 +24,7 @@ def admin():
         )
         from flask import flash, url_for
 
-        flash("Not authorized", "danger")
+        flash("Hmm, I can't let you in there.", "danger")
         return redirect(url_for("auth.index"))
 
     start_date = request.args.get("start_date")

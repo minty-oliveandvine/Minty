@@ -49,14 +49,14 @@ def check_token():
 def refresh_user_token():
     try:
         if ensure_valid_token(current_user):
-            flash("Token refreshed successfully.", "success")
+            flash("Your Xero connection is refreshed.", "success")
             return jsonify({"status": "success",
                             "message": "Token refreshed successfully"})
-        flash("Failed to refresh token. Please re-authenticate with Xero.", "danger")
+        flash("My connection to Xero timed out. Could you sign in to Xero again?", "danger")
         return jsonify(
             {"status": "error", "message": "Failed to refresh token"}), 401
     except Exception as e:
         logger.error("Error refreshing user token: %s", str(e))
-        flash("An error occurred while refreshing token.", "danger")
+        flash("That didn't quite work! One more try to get things back in order?", "danger")
         return jsonify(
             {"status": "error", "message": "An error occurred"}), 500

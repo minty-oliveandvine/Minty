@@ -1,10 +1,10 @@
 """Tests for stale-flash draining in the password-login (``auth.login``) path.
 
 Regression: a flash queued by a pre-login request (e.g. a stale deep link that
-flashed "Entity not found" then redirected) survives redirects because Flask
+flashed "Hmm, I looked everywhere but couldn't find that one." then redirected) survives redirects because Flask
 keeps flashes in the session until a rendered page consumes them. The dashboard
 / layout templates render the ``danger`` category, so without draining, that old
-error toast pops up next to the "Login Successful!" toast after a fresh login.
+error toast pops up next to the "Welcome back!" toast after a fresh login.
 
 Fix: ``login()`` calls ``get_flashed_messages()`` right after ``login_user()``
 to drain any leftover flashes before flashing its own success message — the same
@@ -26,8 +26,8 @@ from blueprints.auth.routes import login as login_route
 
 
 # Flask stores flashes as (category, message) tuples in session["_flashes"].
-SUCCESS = ("success", "Login Successful!")
-STALE = ("danger", "Entity not found")
+SUCCESS = ("success", "Welcome back!")
+STALE = ("danger", "Hmm, I looked everywhere but couldn't find that one.")
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def _patch_login_view(monkeypatch, *, user) -> None:
 # ---------------------------------------------------------------------------
 
 def test_stale_flash_drained_on_login(monkeypatch):
-    """A leftover "Entity not found" flash queued before login must NOT survive
+    """A leftover "Hmm, I looked everywhere but couldn't find that one." flash queued before login must NOT survive
     into the post-login render — only the login-success flash remains."""
     app = _build_app()
     user = _make_user()
@@ -105,7 +105,7 @@ def test_stale_flash_drained_on_login(monkeypatch):
         assert response.status_code == 302
         remaining = session.get("_flashes", [])
 
-    assert STALE not in remaining, "stale 'Entity not found' flash should be drained"
+    assert STALE not in remaining, "stale 'Hmm, I looked everywhere but couldn't find that one.' flash should be drained"
     assert remaining == [SUCCESS], "only the login-success flash should be queued"
 
 

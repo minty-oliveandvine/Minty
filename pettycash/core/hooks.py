@@ -235,7 +235,7 @@ def init_app(app, db):
                         403,
                     )
                 flash(
-                    "Read-only access. You can view this entity but cannot modify it.",
+                    "You have read-only access to this entity - you can look, but not edit.",
                     "warning",
                 )
                 return redirect(request.referrer or url_for("entity.entity_list"))
@@ -272,7 +272,7 @@ def init_app(app, db):
                             }),
                         401,
                     )
-                flash("Your session has expired. Please login again.", "warning")
+                flash("Your session ran out. Mind logging back in?", "warning")
                 return redirect(url_for("auth.home"))
 
             if current_user.is_authenticated:
@@ -302,7 +302,7 @@ def init_app(app, db):
                 400,
             )
         flash(
-            "Form expired or invalid. Please refresh the page and try again.",
+            "This form went stale while you were away. Refresh and try again?",
             "warning")
         return redirect(request.referrer or url_for("auth.home"))
 

@@ -29,12 +29,12 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
             path_segment=entity_and_date).first()
 
         if not share_link:
-            flash("Share link not found", "danger")
+            flash("Hmm, I couldn't find that share link.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         # Check if expired
         if datetime.now() > share_link.expires_at:
-            flash("This share link has expired", "warning")
+            flash("This link has expired. Could you ask for a fresh one?", "warning")
             db.session.delete(share_link)
             db.session.commit()
             return redirect(url_for("entity.entity_list"))
@@ -42,12 +42,12 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
         # Verify token
         secret_key = app.config.get("SECRET_KEY")
         if not secret_key:
-            flash("Server configuration error", "danger")
+            flash("Something's not set up right on my end. Could you let us know?", "danger")
             return redirect(url_for("entity.entity_list"))
 
         is_valid, params = verify_share_token(share_link.token, secret_key)
         if not is_valid or not params:
-            flash("Invalid or expired share link", "danger")
+            flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
             db.session.delete(share_link)
             db.session.commit()
             return redirect(url_for("entity.entity_list"))
@@ -56,18 +56,18 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
         token_entity_id = params.get("entity_id")
         token_transaction_date = params.get("transaction_date")
         if not token_entity_id or not token_transaction_date:
-            flash("Invalid share link", "danger")
+            flash("This link doesn't look right to me.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         # Verify entity_id matches
         if token_entity_id != share_link.entity_id:
-            flash("Invalid share link", "danger")
+            flash("This link doesn't look right to me.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         # Get the entity
         org = Entity.query.get(token_entity_id)
         if not org:
-            flash("Entity not found", "danger")
+            flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         # Find the report for the transaction_date from token
@@ -85,12 +85,12 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
                 entity_id=token_entity_id,
                 skip_auth=True)
         else:
-            flash(f"No report found for {token_transaction_date}", "warning")
+            flash(f"I couldn't find a report for {token_transaction_date}.", "warning")
             return redirect(url_for("entity.entity_list"))
 
     except Exception as e:
         logger.error(f"Error processing share link: {str(e)}")
-        flash("Invalid share link", "danger")
+        flash("This link doesn't look right to me.", "danger")
         return redirect(url_for("entity.entity_list"))
     return redirect(url_for("entity.entity_list"))
 
@@ -103,32 +103,32 @@ def minty_report_ending(entity_and_date: str) -> ResponseReturnValue:
 
     token = request.args.get("token")
     if not token:
-        flash("Invalid share link", "danger")
+        flash("This link doesn't look right to me.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Verify token
     secret_key = app.config.get("SECRET_KEY")
     if not secret_key:
-        flash("Server configuration error", "danger")
+        flash("Something's not set up right on my end. Could you let us know?", "danger")
         return redirect(url_for("entity.entity_list"))
 
     is_valid, params = verify_share_token(token, secret_key)
     if not is_valid or not params:
-        flash("Invalid or expired share link", "danger")
+        flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Extract params from token (use token data, not URL data for security)
     token_entity_id = params.get("entity_id")
     token_transaction_date = params.get("transaction_date")
     if not token_entity_id or not token_transaction_date:
-        flash("Invalid share link", "danger")
+        flash("This link doesn't look right to me.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Get the entity by ID from token (for security, we verify using token
     # data)
     org = Entity.query.get(token_entity_id)
     if not org:
-        flash("Entity not found", "danger")
+        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Find the report for the transaction_date from token
@@ -147,10 +147,10 @@ def minty_report_ending(entity_and_date: str) -> ResponseReturnValue:
                 entity_id=token_entity_id,
                 skip_auth=True)
         else:
-            flash(f"No report found for {token_transaction_date}", "warning")
+            flash(f"I couldn't find a report for {token_transaction_date}.", "warning")
             return redirect(url_for("entity.entity_list"))
     except ValueError:
-        flash("Invalid date format in share link", "warning")
+        flash("There's something wrong with the date in this link.", "warning")
         return redirect(url_for("entity.entity_list"))
     return redirect(url_for("entity.entity_list"))
 

@@ -197,7 +197,7 @@ def process_xero_account_mapping_post(
 
         if main_bank and deposit_bank and main_bank == deposit_bank:
             flash(
-                "Main Bank Account and Deposit Bank Account cannot be the same. Please select different bank accounts.", "danger",
+                "Main Bank Account and Deposit Bank Account can't be the same — please pick a different one for each.", "danger",
             )
             return _mapping_redirect(entity_id, _from, return_view=return_view)
 
@@ -343,7 +343,7 @@ def process_xero_account_mapping_post(
             )
 
         if not (defer_success_redirect and has_existing_settings):
-            flash("Entity settings updated successfully.", "success")
+            flash("Entity settings saved!", "success")
         if entity_id:
             logger.info(f"Entity settings updated for entity ID: {entity_id}")
 

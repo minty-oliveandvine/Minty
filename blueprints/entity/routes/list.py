@@ -61,7 +61,7 @@ def report_dashboard(id):
     id = (id or "").strip()
     if not check_user_has_entities(current_user.id):
         flash(
-            "You need to create an entity first before accessing report dashboard.",
+            "You'll need to create an entity before I can show you the report dashboard.",
             "info",
         )
         return redirect(url_for("entity.entity_list"))
@@ -70,10 +70,10 @@ def report_dashboard(id):
     #new code fix
     org = Entity.query.filter(func.trim(Entity.id) == id.strip()).first()
     if not org:
-        flash("Entity not found", "danger")
+        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
         return redirect(url_for("entity.entity_list"))
     if org.status == "deleted":
-        flash("This entity has been deleted.", "warning")
+        flash("This one's gone — it was deleted.", "warning")
         return redirect(url_for("entity.entity_list"))
 
     user_entity = UserEntity.query.filter(
@@ -307,7 +307,7 @@ def report_dashboard(id):
 def delete_entity(id):
     org = Entity.query.filter(Entity.id == id).first_or_404()
     if org.status == "deleted":
-        flash("Entity is already deleted.", "info")
+        flash("This one's already been deleted.", "info")
         return redirect(url_for("entity.entity_list"))
     org.status = "deleted"
     db.session.commit()

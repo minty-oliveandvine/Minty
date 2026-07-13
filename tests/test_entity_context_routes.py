@@ -64,7 +64,7 @@ def test_report_expense_create_contact_requires_explicit_entity_id(monkeypatch):
         response, status = report_api_routes.report_expense_create_contact.__wrapped__()
 
     assert status == 400
-    assert response.get_json()["message"] == "Entity ID is required."
+    assert response.get_json()["message"] == "Hmm, something went wrong disconnecting from Xero — mind heading back to your entities and trying again?"
 
 
 def test_xero_remove_connections_requires_explicit_entity_id(monkeypatch):
@@ -83,7 +83,7 @@ def test_xero_remove_connections_requires_explicit_entity_id(monkeypatch):
         response, status = xero_settings_routes.remove_connections_all.__wrapped__()
 
     assert status == 400
-    assert response.get_json()["message"] == "Entity ID is required."
+    assert response.get_json()["message"] == "Hmm, something went wrong disconnecting from Xero — mind heading back to your entities and trying again?"
 
 
 def test_resume_report_derives_entity_from_report_identifier(monkeypatch):
