@@ -2551,7 +2551,12 @@
                   if (loadingText) loadingText.textContent = originalText;
                   loadingOverlay.classList.add('hidden');
                 }
-                throw new Error(errorData.message || 'Network response was not ok');
+                // Tag it: only a message the server actually wrote is safe to
+                // show the user. Anything reaching .catch() untagged is a JS/
+                // parser failure and must not be surfaced verbatim.
+                const serverError = new Error(errorData.message || 'Network response was not ok');
+                serverError.fromServer = Boolean(errorData.message);
+                throw serverError;
               });
             } else {
               // Response is HTML (likely an error page)
@@ -2646,7 +2651,9 @@
               if (loadingText) loadingText.textContent = originalText;
               loadingOverlay.classList.add('hidden');
             }
-            throw new Error(data.message || 'Contact creation failed');
+            const serverError = new Error(data.message || 'Contact creation failed');
+            serverError.fromServer = Boolean(data.message);
+            throw serverError;
           }
         })
         .catch(error => {
@@ -2661,10 +2668,20 @@
             if (loadingText) loadingText.textContent = originalText;
             loadingOverlay.classList.add('hidden');
           }
-          alert('Error creating contact: ' + error.message);
+          // Render through the canonical flash toast (components/flash_messages.html,
+          // included at the top of this page) so this reads like every other Minty
+          // message. Only show error.message when the server wrote it — an untagged
+          // error here is a JS/parser failure and would leak "Unexpected token '<'"
+          // or a traceback into the UI.
+          showFlashMessages(
+            error && error.fromServer && error.message
+              ? error.message
+              : "I couldn't add that contact. Mind trying again?",
+            'error'
+          );
         });
       } else {
-        alert('Please enter a contact name');
+        showFlashMessages('Who should I put down as the contact?', 'error');
       }
     }
 

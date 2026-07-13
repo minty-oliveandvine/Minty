@@ -50,8 +50,12 @@ def init_app(app, db):
             "Something interrupted that action. We've logged it on our end — "
             "please try again, and let us know if it keeps happening."
         )
+        # Match "/api/" anywhere in the path, not just as a prefix: the API
+        # routes are mounted under /minty/api/..., so a startswith("/api")
+        # check missed every one of them and handed fetch() an HTML error
+        # page, which then died in response.json() as "Unexpected token '<'".
         wants_json = bool(request) and (
-            request.path.startswith("/api")
+            "/api/" in request.path
             or request.is_json
             or request.headers.get("X-Requested-With") == "XMLHttpRequest"
             or "application/json" in (request.headers.get("Accept") or "").lower()
