@@ -425,7 +425,24 @@
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-semibold text-gray-900">Report Results</h2>
           </div>
-          
+
+          {# Render one Sales/Expenses figure. The columns are a fixed width (see amount_col below), so a
+             long figure has to be stepped down a size or two to stay on one line — CSS cannot shrink text
+             to fit, so the size is chosen here from the formatted length. Amounts up to ~$99,999.99 keep
+             the full size; the tiers below only kick in past that. #}
+          {% macro amount(value, colour) %}
+            {%- set figure = (value or 0) -%}
+            {%- set text = '-' if figure == 0 else '$' + '{:,.2f}'.format(figure) -%}
+            {%- if text|length <= 10 -%}
+              {%- set size = 'text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg' -%}
+            {%- elif text|length <= 13 -%}
+              {%- set size = 'text-[9px] min-[414px]:text-[11px] min-[640px]:text-xs min-[1024px]:text-base' -%}
+            {%- else -%}
+              {%- set size = 'text-[8px] min-[414px]:text-[9px] min-[640px]:text-[10px] min-[1024px]:text-xs' -%}
+            {%- endif -%}
+            <span class="{{ size }} font-semibold {{ colour }} whitespace-nowrap">{{ text }}</span>
+          {% endmacro %}
+
          {% for report in report_history  %}
        <div class="report-entry bg-white rounded-2xl p-4" data-report-id="{{ report.id }}" data-report-date="{{ report.transaction_date.strftime('%Y-%m-%d') }}" data-report-status="{{ report.status }}">
             <div class="flex items-start justify-between">
@@ -438,13 +455,20 @@
                     </div>
                   </div>
                   <div class="flex items-center gap-4 min-[414px]:gap-4 min-[640px]:gap-12 min-[1024px]:gap-16 min-[1280px]:gap-40 flex-1 justify-center">
-                    <div class="flex flex-col">
+                    {# Both amount columns are a fixed width, so neither the label nor the figure decides how
+                       wide they are. A content-sized column moves: a zero renders as "-" and the column
+                       shrinks to its label, an unusually long figure stretches it, and either way
+                       justify-center shifts the pair so the row stops lining up with its neighbours.
+                       Fixed widths hold Sales and Expenses at the same x on every row; the amount() macro
+                       steps the font down so a long figure still fits on one line. #}
+                    {% set amount_col = "flex flex-col w-[62px] min-[414px]:w-[74px] min-[640px]:w-[90px] min-[1024px]:w-[116px]" %}
+                    <div class="{{ amount_col }}">
                       <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-xl font-semibold text-gray-600">Sales</span>
-                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg font-semibold text-[#00C896]">{% set sales = report.total_sales or 0 %}{% if sales == 0 %}-{% else %}${{ "{:,.2f}".format(sales) }}{% endif %}</span>
+                      {{ amount(report.total_sales, 'text-[#00C896]') }}
                     </div>
-                    <div class="flex flex-col">
+                    <div class="{{ amount_col }}">
                       <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-xl font-semibold text-gray-600">Expenses</span>
-                      <span class="text-[10px] min-[414px]:text-xs min-[640px]:text-sm min-[1024px]:text-lg font-semibold text-[#EF4444]">{% set expenses = report.expenses or 0 %}{% if expenses == 0 %}-{% else %}${{ "{:,.2f}".format(expenses) }}{% endif %}</span>
+                      {{ amount(report.expenses, 'text-[#EF4444]') }}
                     </div>
                   </div>
                   <div class="flex flex-col min-[414px]:mr-4 min-[640px]:mr-6 min-[1024px]:mr-20">
@@ -477,7 +501,7 @@
                         <div class="flex flex-col">
                           <!-- Edit - latest non-draft report, only when the user can edit (entity-wide perm or they uploaded it). -->
                           {% if report.id == latest_report_id and report.status != 'draft' and (can_edit_entity_reports or report.uploaded_by == current_user.username) %}
-                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}', {{ 'true' if report.xero_integrated_yes or report.publishing_status else 'false' }}); toggleMobileMenu(this.closest('.mobile-menu-button'))">
                             <span class="text-sm font-medium">Edit</span>
                           </div>
                           {% endif %}
@@ -1185,15 +1209,6 @@
     let entityToRepublish = null;
 
 
-    // Function to edit a report
-    function handleEditReport(reportId, entityId, transactionDate) {
-      console.log('Edit report:', reportId, 'for date:', transactionDate);
-      // Navigate to the report ending page for editing
-      const editUrl = `/entity/${entityId}/ending/${reportId}?edit=true&transaction_date=${transactionDate}`;
-      console.log('Navigating to edit URL:', editUrl);
-      PageTransition.navigateWithFade(editUrl);
-    }
-
     // Function to delete a report
     function deleteReport(reportId) {
       reportToDelete = reportId;
@@ -1705,31 +1720,44 @@
       }
     }
 
-    // Function to handle editing submitted reports (Testing Only)
-    // Converts posted report to draft, then navigates to opening page
-    async function handleEditReport(reportId, entityId, transactionDate) {
+    // Reverts a submitted report to a draft and reopens it at step 1, so every
+    // field (balances included) can be re-entered. Same endpoint as the Edit
+    // Report button on the ending page.
+    async function handleEditReport(reportId, entityId, transactionDate, wasPublished) {
       if (!reportId || !entityId) {
         showNotification('Unable to edit report. Missing report information.', 'error');
+        return;
+      }
+
+      // Publishing stores no Xero object IDs, so re-publishing after an edit
+      // re-POSTs every transaction instead of updating the originals.
+      if (wasPublished && !window.confirm(
+        'This report was already published to Xero.\n\n' +
+        'Editing it and publishing again will create duplicate entries in Xero — ' +
+        'the originals are not removed automatically and must be voided in Xero by hand.\n\n' +
+        'Continue?'
+      )) {
         return;
       }
 
       try {
         // Show loading notification
         showNotification('Converting report to draft...', 'info');
-        
+
         // Get CSRF token
         const csrfToken = document.querySelector('input[name="csrf_token"]');
-        
+
         // Create FormData for POST request
         const formData = new FormData();
         if (csrfToken) {
           formData.append('csrf_token', csrfToken.value);
         }
-        
+
         // Call backend to convert report to draft
         const response = await fetch(`/report/${reportId}/convert-to-draft`, {
           method: 'POST',
-          body: formData
+          body: formData,
+          credentials: 'include'
         });
 
         const data = await response.json();

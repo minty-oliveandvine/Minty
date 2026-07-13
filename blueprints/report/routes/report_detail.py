@@ -8,6 +8,7 @@ from flask import (flash, jsonify, make_response, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history
@@ -165,7 +166,7 @@ def edit_report(id):
     report = db.session.query(Report).filter_by(id=id).first()
 
     if not report:
-        flash("Report not found.", "danger")
+        flash("Hmm, I couldn't find that report.", "danger")
         return redirect(url_for("auth.index" if has_route("auth.index") else "index"))
 
     entity_id = report.company
@@ -183,7 +184,7 @@ def edit_report(id):
     )
     if report.id != most_recent_report.id:
         flash(
-            "You can only edit the most recent report.ê°???ìµê·¼ ë¦¬í¬?¸ë§ ?ì  ê°??¥í©?ë¤.",
+            "I can only let you edit the most recent report.",
             "warning",
         )
         return redirect(url_for("report.report_detail", id=report.id))
@@ -194,13 +195,13 @@ def edit_report(id):
 
             submitted_transaction_date_str = request.form.get("transaction_date")
             if submitted_transaction_date_str is None:
-                flash("Transaction date is required.", "danger")
+                flash("That field can't be empty! Please let me know your transaction date.", "danger")
                 return redirect(url_for("report.edit_report", id=report.id))
             submitted_transaction_date = datetime.strptime(
                 submitted_transaction_date_str, "%Y-%m-%d"
             ).date()
             if submitted_transaction_date != report.transaction_date:
-                flash("The transaction date cannot be changed.", "danger")
+                flash("The transaction date is locked in once a report is saved - I can't change it now.", "danger")
                 return redirect(url_for("report.edit_report", id=report.id))
 
             report.opening_balance = safe_float(request.form.get("opening_balance", 0))
@@ -337,7 +338,7 @@ def edit_report(id):
             )
 
             flash(
-                "Report updated successfully! ë¦¬í¬???ì ???ë£ ?ìµ?ë¤.",
+                "Report updated!",
                 "success",
             )
             return redirect(url_for("report.report_detail", id=report.id))
@@ -350,7 +351,7 @@ def edit_report(id):
         except Exception:
             logger.exception("Unexpected error editing report")
             db.session.rollback()
-            flash("Couldn't save your changes to this report. Please try again.", "error")
+            flash("Something went wrong saving your changes to this report. Mind trying again?", "danger")
 
     sales_data = {
         "shop_sales": {
@@ -431,7 +432,7 @@ def delete_report(id):
 
             db.session.commit()
 
-            flash("Report deleted successfully.", "success")
+            flash("Report deleted.", "success")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
         entity_id = report.company
@@ -452,8 +453,7 @@ def delete_report(id):
 
         if newer_report:
             flash(
-                "Cannot delete this report. A newer report exists. Only the latest report can be deleted.",
-                "error",
+                "I can only delete the most recent report, and there's a newer one after this.", "danger",
             )
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
@@ -514,13 +514,30 @@ def delete_report(id):
         db.session.delete(report)
         db.session.commit()
 
-        flash("Report deleted successfully.", "success")
+        flash("Report deleted.", "success")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
+    except IntegrityError:
+        logger.exception(f"Integrity error deleting report {id}")
+        db.session.rollback()
+        flash(
+            "I can't delete this report — other records still depend on it. "
+            "Could you remove or update those first, then try again?",
+            "danger",
+        )
+        entity_id = id
+        r = Report.query.get(id)
+        if r:
+            entity_id = r.company
+        else:
+            rd = ReportDraft.query.get(id)
+            if rd:
+                entity_id = rd.company
+        return redirect(url_for("entity.report_dashboard", id=entity_id))
     except Exception:
         logger.exception(f"Error deleting report {id}")
         db.session.rollback()
-        flash("Error deleting report. Please try again.", "danger")
+        flash("Something went wrong deleting that report. Mind trying again?", "danger")
         entity_id = id
         r = Report.query.get(id)
         if r:
@@ -537,7 +554,7 @@ def delete_report(id):
 def download_report(id):
     try:
         if not current_user.is_authenticated:
-            flash("Session expired. Please login again.", "warning")
+            flash("Your session ran out. Mind logging back in?", "warning")
             return redirect(url_for("auth.login"))
 
         report = (
@@ -683,7 +700,7 @@ def resume_report():
 
         company_or_entity = entity_id or resolve_report_entity_id(report_or_draft_id)
         if not company_or_entity:
-            flash("Entity context is required.", "danger")
+            flash("I need to know which entity we're working with first!", "danger")
             return redirect(url_for("entity.entity_list"))
 
         next_section, draft_id, is_draft = get_next_section_for_user(
@@ -798,7 +815,7 @@ def resume_report():
 
     except Exception as e:
         logger.error(f"Error determining resume section: {str(e)}")
-        flash("An error occurred. Starting from the beginning.", "warning")
+        flash("Something went wrong picking up where you left off, so I've taken us back to the first step.", "warning")
         entity_id = request.args.get("entity_id")
         if entity_id:
             return redirect(

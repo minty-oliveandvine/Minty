@@ -98,7 +98,7 @@ def report_expense_create_contact():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "This entity is not connected to Xero. Please have an admin reconnect.",
+                        "message": "I can't add contacts yet — this entity isn't connected to Xero. Could an admin reconnect it?",
                     }),
                 400,
             )
@@ -111,7 +111,7 @@ def report_expense_create_contact():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "This entity is not connected to Xero. Please have an admin reconnect.",
+                        "message": "I can't add contacts yet — this entity isn't connected to Xero. Could an admin reconnect it?",
                     }),
                 400,
             )

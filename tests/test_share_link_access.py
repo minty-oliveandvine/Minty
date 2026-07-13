@@ -123,7 +123,7 @@ def test_generate_share_link_denies_membership_missing(app, monkeypatch):
         )
 
     assert status == 403
-    assert response["error"] == "You don't have access to this entity"
+    assert response["error"] == "Hmm, it looks like you don't have permission to look there."
 
 
 def test_create_share_link_for_report_reuses_existing_path_segment(

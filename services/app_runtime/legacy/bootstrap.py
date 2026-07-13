@@ -233,6 +233,11 @@ def create_app():
     csrf.exempt(billing_sync_chart_accounts)
     csrf.exempt(billing_sync_chart_if_changed)
     csrf.exempt(billing_sync_contacts_if_changed)
+    # Same reason: billing asks for a Xero access token with a signed Bearer
+    # assertion and no cookie. Without this the CSRF handler redirects the POST to
+    # the login page, `requests` follows it, and billing parses an HTML 200 as JSON.
+    from blueprints.xero.routes.routes import internal_xero_access_token
+    csrf.exempt(internal_xero_access_token)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,

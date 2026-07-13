@@ -11,6 +11,7 @@ from flask import (current_app, flash, g, jsonify, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import billing_settings_app_url
@@ -77,19 +78,19 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             name_form = (request.form.get("entity_name") or "").strip()
             if name_form != (entity.name or ""):
                 if not name_form:
-                    flash("Entity name is required.", "error")
+                    flash("I need a name for this entity before I can save it.", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 if len(name_form) > 100:
-                    flash("Entity name must be 100 characters or fewer.", "error")
+                    flash("That name goes on a bit! Please keep it to 100 characters or fewer.", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 if Entity.query.filter(
                     Entity.name == name_form, Entity.id != entity_id
                 ).first():
-                    flash("Entity name already exist", "error")
+                    flash("Oh, someone got there first! Do you have another name in mind?", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
@@ -109,7 +110,19 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
                     entity.currency_code = currency_info.currency_code
                     entity.currency_format = currency_info.symbol or "$"
         db.session.commit()
-        flash("Settings updated successfully.", "success")
+        flash("Settings saved!", "success")
+    except IntegrityError as exc:
+        db.session.rollback()
+        logger.error(
+            "integration_minimal_entity_settings_post integrity error entity=%s: %s",
+            entity_id,
+            exc,
+        )
+        flash(
+            "I couldn't save these settings — one of the values needs to be "
+            "unique and it's already in use. Could you check your entries and try again?",
+            "danger",
+        )
     except Exception as exc:
         db.session.rollback()
         logger.error(
@@ -117,7 +130,10 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             entity_id,
             exc,
         )
-        flash("Error updating settings.", "error")
+        flash(
+            "I couldn't save your settings. Could you check your entries and try again?",
+            "danger",
+        )
     return _redirect_xero_mapping(entity_id, _from, return_view="entity_settings")
 @entity_bp.route("/entity/<string:entity_id>/settings/xero",
                  methods=["GET", "POST"])
@@ -133,7 +149,7 @@ def entity_settings(entity_id=None):
     # Check if user has any entities before allowing access to report history
     if not check_user_has_entities(current_user.id):
         flash(
-            "You need to create an entity first before accessing entity settings.",
+            "You'll need to create an entity before I can show you any entity settings.",
             "info",
         )
         return redirect(url_for("entity.entity_list"))
@@ -175,8 +191,7 @@ def entity_settings(entity_id=None):
             return _xero_resp
         if not request.form.get("main_bank"):
             flash(
-                "Please enter all default settings for this entity",
-                "error",
+                "Please enter all default settings for this entity", "danger",
             )
             return _redirect_xero_mapping(entity_id, _from, return_view=return_view)
     try:
@@ -634,14 +649,14 @@ def entity_settings_users(org_id):
         )
     except Exception as e:
         logger.error(f"Error accessing entity settings users: {str(e)}")
-        flash("Error accessing user settings.", "danger")
-        return redirect(
-            url_for(
-                "entity_settings_users",
-                org_id=org_id,
-                **{"from": from_origin} if from_origin == "bills" else {},
-            )
+        flash(
+            "I couldn't load the user settings for this entity. "
+            "Could you go back to your entities and try again?",
+            "danger",
         )
+        # Redirect to the entity list rather than back to this same page: if the
+        # failure persists, self-redirecting here would loop indefinitely.
+        return redirect(url_for("entity.entity_list"))
 
 
 @entity_bp.route("/entity/settings/entity/<string:org_id>",
@@ -813,7 +828,24 @@ def entity_settings_entity(org_id):
                         org_id, eax_err,
                     )
 
-                flash("Entity settings updated successfully.", "success")
+                flash("Entity settings saved!", "success")
+                _from = request.form.get("_from") or request.args.get("from")
+                return redirect(
+                    url_for(
+                        "entity_settings_entity",
+                        org_id=org_id,
+                        **{"from": _from} if _from == "bills" else {},
+                    )
+                )
+            except IntegrityError as e:
+                db.session.rollback()
+                logger.error(f"Entity settings integrity error: {str(e)}")
+                flash(
+                    "I couldn't save these entity settings — one of the values "
+                    "needs to be unique and it's already in use. Could you check "
+                    "your entries and try again?",
+                    "danger",
+                )
                 _from = request.form.get("_from") or request.args.get("from")
                 return redirect(
                     url_for(
@@ -825,7 +857,11 @@ def entity_settings_entity(org_id):
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"Error updating entity settings: {str(e)}")
-                flash("Error updating entity settings.", "error")
+                flash(
+                    "I couldn't save your entity settings. Could you check your "
+                    "entries and try again?",
+                    "danger",
+                )
                 _from = request.form.get("_from") or request.args.get("from")
                 return redirect(
                     url_for(
@@ -977,7 +1013,10 @@ def entity_settings_entity(org_id):
     except Exception as e:
         db.session.rollback()
         logger.exception(f"Error accessing entity settings: {str(e)}")
-        flash("Error accessing entity settings.", "danger")
+        flash(
+            "Something got tangled up while loading these settings. Mind trying again?",
+            "danger",
+        )
         return redirect(url_for("entity_settings", entity_id=org_id))
 
 

@@ -40,21 +40,26 @@ def reset_request():
                     logger.info(
                         f"Password reset link is sent to {form.email.data}")
                     flash(
-                        f"Password reset link is send to {form.email.data}. It might take 1-3 minutes for you to receive the reset link.",
+                        f"I've sent a reset link to {form.email.data} — it can take 1-3 minutes to arrive.",
                         "info",
                     )
                 else:
                     flash(
-                        "No email found or different email used, please contact administrator to request an email.",
+                        "We couldn't send a reset email — our mail service isn't reachable right now. Please let your administrator know.",
                         "danger",
                     )
                 return redirect(url_for("auth.login"))
             except Exception as e:
                 db.session.rollback()
                 print(f"Error during password reset request: {e}")
-                flash("An error occurred. Please try again.", "danger")
+                flash(
+                    "I couldn't get your reset link sent just now. Please try "
+                    "again in a few minutes, or tell your administrator if it "
+                    "keeps happening.",
+                    "danger",
+                )
         else:
-            flash("No account found with that username.", "danger")
+            flash("Hmm, that username doesn't look familiar.", "danger")
     return redirect(url_for("auth.login"))
 
 
@@ -64,16 +69,16 @@ def reset_token(token):
         return redirect(url_for("auth.home"))
     user = User.query.filter_by(reset_token=token).first()
     if user is None:
-        flash("That is an invalid or expired reset token", "warning")
+        flash("This reset link doesn't work anymore. Want me to send a fresh one?", "warning")
         return redirect(url_for("auth.reset_request"))
     if user.reset_token_expiry and user.reset_token_expiry < datetime.now():
-        flash("That reset token has expired", "warning")
+        flash("This reset link has expired. Want me to send a fresh one?", "warning")
         return redirect(url_for("auth.reset_request"))
     form = ResetPasswordForm()
     if form.validate_on_submit():
         try:
             if form.password.data is None:
-                flash("Password cannot be empty.", "danger")
+                flash("I can't let you in without a password.", "danger")
                 return render_template(
                     "reset_token.html", form=form, token=token)
             hashed_password = generate_password_hash(
@@ -83,10 +88,13 @@ def reset_token(token):
             user.reset_token = None
             user.reset_token_expiry = None
             db.session.commit()
-            flash("Your password has been updated! You can now log in.", "success")
+            flash("Your password is all set — you can log in now.", "success")
             return redirect(url_for("auth.login"))
         except Exception as e:
             db.session.rollback()
             print(f"Error during password reset: {e}")
-            flash("An error occurred. Please try again.", "danger")
+            flash(
+                "I couldn't save your new password. Mind trying again?",
+                "danger",
+            )
     return render_template("reset_token.html", form=form, token=token)

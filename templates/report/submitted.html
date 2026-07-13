@@ -130,10 +130,18 @@
         <!-- Action Buttons -->
         <div class="w-full max-w-md pt-8 space-y-3">
           {% if can_publish %}
+          {# was_previously_published covers the edited-after-publish case, where
+             xero_integrated_yes is cleared but the report is still in Xero. Both
+             go through the modal: a second publish duplicates every transaction. #}
           {% if is_published_to_xero %}
             <button onclick="showRepublishModal()" id="republishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
               <img src="{{ url_for('static', filename='img/xero-logo.webp') }}" alt="Xero Logo" class="h-5 w-5 sm:h-6 sm:w-6">
               <span class="text-sm font-medium">Republish to Xero</span>
+            </button>
+          {% elif was_previously_published %}
+            <button onclick="showRepublishModal()" id="republishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">
+              <img src="{{ url_for('static', filename='img/xero-logo.webp') }}" alt="Xero Logo" class="h-5 w-5 sm:h-6 sm:w-6">
+              <span class="text-sm font-medium">Publish to Xero</span>
             </button>
           {% else %}
             <button onclick="publishToXero()" id="publishButton" class="w-full rounded-xl bg-white px-4 py-3 shadow-md ring-1 ring-slate-200 transition hover:shadow-lg flex items-center justify-center gap-3 text-slate-700">

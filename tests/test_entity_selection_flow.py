@@ -230,7 +230,7 @@ def test_get_draft_totals_requires_explicit_entity_id(monkeypatch):
         response, status = api_routes.get_draft_totals.__wrapped__()
 
     assert status == 400
-    assert response.get_json()["message"] == "Entity ID is required."
+    assert response.get_json()["message"] == "Hmm, something went wrong disconnecting from Xero — mind heading back to your entities and trying again?"
 
 
 def test_remove_connections_all_requires_explicit_entity_id(monkeypatch):
@@ -246,7 +246,7 @@ def test_remove_connections_all_requires_explicit_entity_id(monkeypatch):
         response, status = xero_settings_routes.remove_connections_all.__wrapped__()
 
     assert status == 400
-    assert response.get_json()["message"] == "Entity ID is required."
+    assert response.get_json()["message"] == "Hmm, something went wrong disconnecting from Xero — mind heading back to your entities and trying again?"
 
 
 def test_admin_dashboard_passes_membership_summary_map(monkeypatch):

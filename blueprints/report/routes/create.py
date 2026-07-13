@@ -20,7 +20,7 @@ from services.permission_policy import Permission, has_permission
 def create_report():
     entity_id = request.args.get("entity_id") or request.form.get("entity_id")
     if not entity_id:
-        flash("Entity context is required.", "danger")
+        flash("I need to know which entity we're working with first!", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -69,7 +69,7 @@ def create_report():
                     f"Duplicate report detected for date {transaction_date} - {existing_report}"
                 )
                 raise ValueError(
-                    f"A report for {transaction_date} already exists. Please delete it first. ?´ë¹ ? ì§??ë¦¬í¬?¸ê? ?´ë? ?ìµ?ë¤, ?? ?ê³  ?¤ì ?ì¶ ?ìê¸?ë°ë?ë¤."
+                    f"A report for {transaction_date} already exists. Please delete it first."
                 )
 
             last_report = (
@@ -252,7 +252,7 @@ def create_report():
                         "redirect_url": url_for("auth.index", entity_id=entity_id),
                     }
                 )
-            flash("Report submitted successfully.", "success")
+            flash("Report submitted!", "success")
             return redirect(url_for("auth.index", entity_id=entity_id))
 
         except ValueError as ve:
