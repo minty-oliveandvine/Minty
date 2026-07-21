@@ -55,10 +55,6 @@ class ReportDraft(db.Model):
     withdrawal_type = db.Column(db.String(20), nullable=True)
     withdrawal_bank_account = db.Column(db.String(36), nullable=True)
     xero_integrated_yes = db.Column(db.Boolean, default=False)
-    # Carried over from Report when a submitted report is reverted to draft, so
-    # the "was previously published" signal survives the Report row's deletion
-    # and re-submitting can warn about creating duplicates in Xero.
-    publishing_status = db.Column(db.String(20), nullable=True, default=None)
     safe_box_balance = db.Column(db.Float, nullable=True)
     discrepancy_amount = db.Column(db.Float, nullable=True, default=0.0)
     discrepancy_reason = db.Column(db.String(300), nullable=True)

@@ -78,7 +78,7 @@ def report_opening(id=None, entity_id=None):
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:
-        flash("I need to know which entity we're working with first!", "danger")
+        flash("Entity context is required.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -90,7 +90,7 @@ def report_opening(id=None, entity_id=None):
         if not report_for_access:
             report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
-            flash("Hmm, I couldn't find that report.", "danger")
+            flash("Report not found.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
     is_latest_report = False
 
@@ -139,7 +139,7 @@ def report_opening(id=None, entity_id=None):
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
         flash(
-            "You'll need to create an entity before I can show you any reports.",
+            "You need to create an entity first before accessing reports.",
             "warning")
         return redirect(url_for("entity.entity_list"))
 
@@ -200,7 +200,7 @@ def report_opening(id=None, entity_id=None):
                             f"Transaction date {selected_date} is not the day after the last submitted report date {last_report.transaction_date}"
                         )
                         flash(
-                            f"Reports go one day at a time - this one needs to be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).", "danger",
+                            f"Transaction date must be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).", "danger",
                         )
                         if entity_id:
                             return redirect(
@@ -229,7 +229,7 @@ def report_opening(id=None, entity_id=None):
                         else:
                             return redirect(url_for("entity.entity_list"))
         except ValueError:
-            flash("That date doesn't look quite right! Please check the format and try again.", "danger")
+            flash("Invalid date format provided.", "danger")
             selected_date = None
     elif selected_date and id:
         try:
@@ -255,7 +255,7 @@ def report_opening(id=None, entity_id=None):
 
     # Check if entity exists
     if not entity:
-        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
+        flash("Entity not found.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Use entity owner's Xero token so any user can load report opening
@@ -447,7 +447,7 @@ def report_opening(id=None, entity_id=None):
 
             if not entity_id:
                 flash(
-                    "I need to know which entity we're working with first!",
+                    "Entity context is required.",
                     "danger",
                 )
                 return redirect(url_for("entity.entity_list"))
@@ -481,7 +481,7 @@ def report_opening(id=None, entity_id=None):
 
             if (opening_balance + cash_addition) < 0:
                 flash(
-                    "Hmm, it looks like your cash balance is negative. Could you fix that first?",
+                    "Cash balance is negative. Please fix your entries before proceeding.",
                     "danger",
                 )
                 return redirect(
@@ -684,7 +684,7 @@ def report_opening(id=None, entity_id=None):
                                 f"Transaction date {transaction_date} is not the day after the last submitted report date {last_report.transaction_date}"
                             )
                             flash(
-                                f"Reports go one day at a time - this one needs to be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).",
+                                f"Transaction date must be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).",
                                 "danger",
                             )
                             if entity_id:
@@ -894,7 +894,7 @@ def report_opening(id=None, entity_id=None):
                     500,
                 )
             else:
-                flash("Something went wrong on my end. Mind trying again?", "danger")
+                flash("Couldn't save the opening entry. Please try again.", "danger")
                 return redirect(url_for("report.report_opening"))
 
     # For GET request, check for existing drafts first

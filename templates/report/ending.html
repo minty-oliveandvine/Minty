@@ -640,18 +640,26 @@ document.addEventListener('submit', function(e){
               </svg>
               <span>Delete Report</span>
             </button>
-            <!-- Edit Report: reverts this submitted report to a draft so every
-                 field (balances included) can be re-entered through the flow. -->
-            <button
-              type="button"
-              onclick="handleEditReport()"
-              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6">
+            <!-- Edit Report / Done editing: above Close, non-balance fields only -->
+            {% if is_report_edit_mode %}
+            <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+              <span>Done editing</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('report.report_ending', id=current_draft.id, entity_id=request.args.get('entity_id') or org.id, report_edit='true') }}"
+              class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
               </svg>
               <span>Edit Report</span>
-            </button>
-            <!-- Close button below Delete Report -->
+            </a>
+            {% endif %}
+            <!-- Close button below Delete Report (hidden in edit mode; "Done editing" closes) -->
+            {% if not is_report_edit_mode %}
             <button
               type="button"
               onclick="closeReport()"
@@ -661,6 +669,7 @@ document.addEventListener('submit', function(e){
               </svg>
               <span>Close</span>
             </button>
+            {% endif %}
             {% endif %}
             {% else %}
             <!-- For older submitted reports (not draft, not latest): Show export buttons and close button -->
@@ -703,9 +712,7 @@ document.addEventListener('submit', function(e){
             </div>
             {% endif %}
             
-            {# Older reports cannot be reverted to draft -- doing so would orphan
-               the opening balances of every report after them -- so they keep the
-               constrained inline mode, which edits only non-balance fields. #}
+            <!-- Edit Report / Done editing: above Close, non-balance fields only -->
             {% if not is_shared_link %}
             {% if is_report_edit_mode %}
             <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
@@ -721,7 +728,7 @@ document.addEventListener('submit', function(e){
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
               </svg>
-              <span>Edit Details</span>
+              <span>Edit Report</span>
             </a>
             {% endif %}
             <!-- Close button for older submitted reports (hidden in edit mode; "Done editing" closes) -->
@@ -1265,56 +1272,6 @@ document.addEventListener('submit', function(e){
        const entityId = '{{ request.args.get("entity_id") or org.id }}';
        const reportHistoryUrl = '/entity/' + entityId + '/reports';
        PageTransition.navigateWithFade(reportHistoryUrl);
-     }
-
-     // Reverts this submitted report to a draft and reopens it at step 1, so
-     // every field (balances included) can be re-entered. Same endpoint as the
-     // Edit action in report history.
-     const REPORT_WAS_PUBLISHED = {{ 'true' if current_draft.xero_integrated_yes or header_publishing_status else 'false' }};
-
-     async function handleEditReport() {
-       const reportId = '{{ current_draft.id }}';
-       const entityId = '{{ request.args.get("entity_id") or org.id }}';
-
-       // Publishing stores no Xero object IDs, so re-publishing after an edit
-       // re-POSTs every transaction instead of updating the originals.
-       if (REPORT_WAS_PUBLISHED && !window.confirm(
-         'This report was already published to Xero.\n\n' +
-         'Editing it and publishing again will create duplicate entries in Xero — ' +
-         'the originals are not removed automatically and must be voided in Xero by hand.\n\n' +
-         'Continue?'
-       )) {
-         return;
-       }
-
-       try {
-         showNotification('Converting report to draft...', 'info');
-
-         const csrfToken = document.querySelector('input[name="csrf_token"]');
-         const formData = new FormData();
-         if (csrfToken) {
-           formData.append('csrf_token', csrfToken.value);
-         }
-
-         const response = await fetch(`/report/${reportId}/convert-to-draft`, {
-           method: 'POST',
-           body: formData,
-           credentials: 'include'
-         });
-         const data = await response.json();
-
-         if (data.status === 'success') {
-           showNotification('Report converted to draft. Opening for editing...', 'success');
-           const editUrl = '{{ url_for("report.report_opening") }}?entity_id=' + entityId +
-             (data.transaction_date ? '&transaction_date=' + data.transaction_date : '');
-           setTimeout(() => { PageTransition.navigateWithFade(editUrl); }, 500);
-         } else {
-           showNotification(data.message || 'Failed to convert report to draft.', 'error');
-         }
-       } catch (error) {
-         console.error('Error converting report to draft:', error);
-         showNotification('An error occurred while converting the report. Please try again.', 'error');
-       }
      }
 
      // Function to generate share link

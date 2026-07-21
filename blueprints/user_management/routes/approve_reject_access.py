@@ -9,7 +9,7 @@ from models.db import User, db
 @login_required
 def approve_user(user_id):
     if current_user.system_role != User.SYSTEM_ROLE_SUPERUSER:
-        flash("That task is reserved for our Super Admins.", "danger")
+        flash("Only Super Admins can approve users.", "danger")
         return redirect(url_for("user_management.admin_dashboard"))
     user = User.query.get_or_404(user_id)
     user.approved = True
@@ -22,7 +22,7 @@ def approve_user(user_id):
 @login_required
 def reject_user(user_id):
     if current_user.system_role != User.SYSTEM_ROLE_SUPERUSER:
-        flash("Hmm, I can't let you in there.", "danger")
+        flash("Not authorized", "danger")
         return redirect(url_for("user_management.admin_dashboard"))
     user = User.query.get_or_404(user_id)
     user.approved = False

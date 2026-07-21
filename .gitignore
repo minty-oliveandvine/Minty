@@ -11,3 +11,4 @@ __pycache__/
 app.log
 .env
 .DS_Store
+venv

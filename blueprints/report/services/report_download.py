@@ -13,7 +13,7 @@ from services.helpers.xero_bridge import get_entity_account_settings
 def download_report(id):
     try:
         if not current_user.is_authenticated:
-            flash("Your session ran out. Mind logging back in?", "warning")
+            flash("Session expired. Please login again.", "warning")
             return redirect(url_for("auth.login"))
 
         report = (
