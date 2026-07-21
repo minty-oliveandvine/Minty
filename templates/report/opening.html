@@ -16,9 +16,6 @@
     <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
     <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
-    <!-- Shared currency formatting -->
-    <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
-
     <!-- Hover Effects Component -->
     {% include 'components/hover_effects.html' %}
 
@@ -325,8 +322,98 @@
   </div>
 
     <script>
-    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
-    // static/js/currency.js
+      // Function to format currency input (simple and clean)
+      function formatCurrency(input) {
+        // Just remove invalid characters, don't pad yet
+        let value = input.value.replace(/[^\d.]/g, '');
+        
+        // Remove multiple decimal points (keep only first one)
+        const parts = value.split('.');
+        if (parts.length > 2) {
+          value = parts[0] + '.' + parts.slice(1).join('');
+        }
+        
+        // Limit decimal to 2 digits
+        const decimalParts = value.split('.');
+        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
+          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
+        }
+        
+        // Just set the cleaned value - NO padding during input
+        input.value = value;
+      }
+
+
+
+      // Format with commas on blur (simple and clean)
+      function formatWithCommas(input) {
+        let value = input.value;
+        
+        if (value === '') return;
+        
+        // Remove commas
+        value = value.replace(/,/g, '');
+        const parts = value.split('.');
+        const wholeNumber = parts[0];
+        
+        // Add commas to whole number
+        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        
+        // Ensure .00 at the end with proper padding
+        let decimalPart = parts.length > 1 ? parts[1] : '00';
+        if (decimalPart === '') {
+          decimalPart = '00'; // 1234. → 1234.00
+        } else if (decimalPart.length === 1) {
+          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
+        }
+        
+        input.value = formattedWholeNumber + '.' + decimalPart;
+      }
+
+
+      function formatAllCurrencyOnLoad() {
+        // Get all inputs on the page
+        const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
+        
+        allInputs.forEach(input => {
+          if (input.value && input.value.trim() !== '') {
+            // Remove existing commas
+            let value = input.value.replace(/,/g, '');
+            
+            // Split into whole and decimal parts
+            const parts = value.split('.');
+            const wholeNumber = parts[0];
+            
+            // Add commas to whole number
+            const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            
+            // Ensure .00 at the end - handle empty decimal part
+            let decimalPart = parts.length > 1 ? parts[1] : '00';
+            
+            // If decimal part is empty (trailing dot), set to '00'
+            if (decimalPart === '') {
+              decimalPart = '00';
+            } else {
+              // Pad to 2 digits: '1' → '10', '12' → '12'
+              decimalPart = (decimalPart + '00').substring(0, 2);
+            }
+            
+            // Set the formatted value
+            input.value = formattedWholeNumber + '.' + decimalPart;
+          }
+        });
+      }
+
+      // Run when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', formatAllCurrencyOnLoad);
+      } else {
+        formatAllCurrencyOnLoad();
+      }
+
+      // Also run after a short delay
+      setTimeout(formatAllCurrencyOnLoad, 100);
+      setTimeout(formatAllCurrencyOnLoad, 500);
 
       // Call on page load
       document.addEventListener('DOMContentLoaded', function() {

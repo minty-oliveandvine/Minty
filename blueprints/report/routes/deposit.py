@@ -31,7 +31,7 @@ def report_deposit(id=None):
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:
-        flash("I need to know which entity we're working with first!", "danger")
+        flash("Entity context is required.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -43,12 +43,12 @@ def report_deposit(id=None):
         if not report_for_access:
             report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
-            flash("Hmm, I couldn't find that report.", "danger")
+            flash("Report not found.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
         flash(
-            "You'll need to create an entity before I can show you any reports.",
+            "You need to create an entity first before accessing reports.",
             "warning")
         return redirect(url_for("entity.entity_list"))
 
@@ -240,7 +240,7 @@ def report_deposit(id=None):
     )
 
     if not current_draft and not is_edit_mode:
-        flash("I don't see a draft yet - let's start with the opening entry.", "danger")
+        flash("No draft found. Please start with the opening entry first.", "danger")
         return redirect(url_for("report.report_opening"))
 
     if request.method == "POST":
@@ -253,7 +253,7 @@ def report_deposit(id=None):
             - (current_draft.expenses or 0)
         )
         if pre_deposit_balance < 0:
-            flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "danger")
+            flash("Cash balance is negative. Please fix your entries before proceeding.", "danger")
             return redirect(
                 url_for(
                     "report.report_deposit",
@@ -368,7 +368,7 @@ def report_deposit(id=None):
             db.session.rollback()
             print(f"Error updating deposit: {str(e)}")
             flash(
-                "Something went wrong saving your deposit. Mind trying again?",
+                "An error occurred updating deposit. Please try again.",
                 "danger")
             return redirect(url_for("report.report_deposit"))
 

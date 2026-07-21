@@ -18,7 +18,7 @@ def entity_report_history(entity_id):
 
     if not check_user_has_entities(current_user.id):
         flash(
-            "You'll need to create an entity before I can show you your report history.",
+            "You need to create an entity first before accessing report history.",
             "info",
         )
         return redirect(url_for("entity.entity_list"))

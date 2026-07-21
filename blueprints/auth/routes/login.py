@@ -27,18 +27,18 @@ def login():
                     # login-success toast. Same defensive pattern used in the
                     # Xero callback, logout.py and register.py.
                     get_flashed_messages()
-                    flash("Welcome back!", "success")
+                    flash("Login Successful!", "success")
                     if user.system_role == User.SYSTEM_ROLE_SUPERUSER:
                         return redirect(url_for("user_management.admin"))
                     else:
                         return redirect(url_for("auth.index"))
                 else:
-                    flash("That wasn't the right password! Want to try again?", "danger")
+                    flash("Incorrect password.", "danger")
             else:
-                flash("Your account isn't approved just yet — hang tight!", "warning")
+                flash("Your account is not approved yet.", "warning")
         else:
             flash(
-                "Hmm, that username and password don't match anything I have. Want to try again?", "danger"
+                "Login unsuccessful. Please check your username and password.", "danger"
             )
     return render_template("login.html", form=form)
 
