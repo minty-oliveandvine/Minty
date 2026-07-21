@@ -23,7 +23,7 @@ def accept_invitation_page(token):
     invitation = Invitation.query.filter_by(token=token, status="pending").first()
     if not invitation:
         logger.info("invitation.accept_link.invalid token=…{}", token[-6:] if token else "")
-        flash("This invitation doesn't work anymore — it may have already been used.", "warning")
+        flash("This invitation is invalid or has already been used.", "warning")
         return redirect(url_for("auth.home"))
 
     logger.info(
@@ -93,7 +93,7 @@ def xero_not_connected(entity_id):
     """Page shown when user is added to Minty but not invited to Xero org."""
     entity = Entity.query.get(entity_id)
     if not entity:
-        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
+        flash("Entity not found.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     entity_name = entity.name or "Unknown"

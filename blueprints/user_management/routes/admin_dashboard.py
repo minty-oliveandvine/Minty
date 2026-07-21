@@ -22,7 +22,7 @@ def _build_membership_summary_by_user(user_ids: list[str]) -> dict[str, str]:
 @login_required
 def admin_dashboard():
     if current_user.system_role != User.SYSTEM_ROLE_SUPERUSER:
-        flash("Hmm, I can't let you in there.", "danger")
+        flash("Not authorized", "danger")
         return redirect(url_for("auth.index"))
     pending_users = User.query.filter_by(approved=False).all()
     approved_users = User.query.filter_by(approved=True).all()

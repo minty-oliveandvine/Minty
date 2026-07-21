@@ -26,7 +26,7 @@ def report_cash_count(id=None):
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:
-        flash("I need to know which entity we're working with first!", "danger")
+        flash("Entity context is required.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -38,12 +38,12 @@ def report_cash_count(id=None):
         if not report_for_access:
             report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
-            flash("Hmm, I couldn't find that report.", "danger")
+            flash("Report not found.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
         flash(
-            "You'll need to create an entity before I can show you any reports.",
+            "You need to create an entity first before accessing reports.",
             "warning")
         return redirect(url_for("entity.entity_list"))
 
@@ -242,7 +242,7 @@ def report_cash_count(id=None):
         # Check if current_draft exists
         if not current_draft:
             flash(
-                "I don't see a draft for today yet - let's start with the opening entry.",
+                "No draft found for today. Please start with the opening section.",
                 "warning",
             )
             return redirect(url_for("report.report_opening"))
@@ -255,7 +255,7 @@ def report_cash_count(id=None):
             - (current_draft.bank_deposit or 0)
         )
         if expected_balance < 0:
-            flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "danger")
+            flash("Cash balance is negative. Please fix your entries before proceeding.", "danger")
             return redirect(
                 url_for(
                     "report.report_cash_count",
@@ -561,7 +561,7 @@ def report_cash_count(id=None):
             db.session.rollback()
             print(f"Error updating cash count: {str(e)}")
             flash(
-                "Something went wrong saving your cash count. Mind trying again?",
+                "An error occurred updating cash count. Please try again.",
                 "danger")
             return redirect(
                 url_for(
@@ -574,7 +574,7 @@ def report_cash_count(id=None):
     # Handle case where no draft exists
     if not current_draft:
         flash(
-            "I don't see a draft for today yet - let's start with the opening entry.",
+            "No draft found for today. Please start with the opening section.",
             "warning",
         )
         return redirect(url_for("report.report_opening"))
