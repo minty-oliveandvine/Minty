@@ -60,7 +60,7 @@ def report_sale(id=None):
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:
-        flash("I need to know which entity we're working with first!", "danger")
+        flash("Entity context is required.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -72,11 +72,11 @@ def report_sale(id=None):
         if not report_for_access:
             report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
-            flash("Hmm, I couldn't find that report.", "danger")
+            flash("Report not found.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
-        flash("You'll need to create an entity before I can show you any reports.", "warning")
+        flash("You need to create an entity first before accessing reports.", "warning")
         return redirect(url_for("entity.entity_list"))
 
     # Check if edit mode is enabled
@@ -583,7 +583,7 @@ def report_sale(id=None):
                             f"Draft record {report_draft.id} has no valid ID, creating new draft"
                         )
                         flash(
-                            "Something's off with this draft - could you reopen it from the opening step?", "danger",
+                            "Invalid draft was detected. Please reopen from the opening step.", "danger",
                         )
                         return redirect(url_for("report.report_opening"))
 
@@ -770,7 +770,7 @@ def report_sale(id=None):
                         "Sales form - This should not happen if user came from opening form"
                     )
                     flash(
-                        "I don't see a draft yet - let's start with the opening entry.", "danger",
+                        "Error: No existing draft found. Please start from the opening form first.", "danger",
                     )
                     return redirect(url_for("report.report_opening"))
 
@@ -795,7 +795,7 @@ def report_sale(id=None):
                 db.session.rollback()
                 # Don't fail the entire operation for progress tracking issues
                 flash(
-                    "Your sales data is saved! I lost track of where you were in the report, though - please pick the next step yourself.",
+                    "Sales data saved, but progress tracking failed. Please continue manually.",
                     "warning",
                 )
 
@@ -992,7 +992,7 @@ def report_sale(id=None):
                     f"Error checking draft status after rollback: {check_error}"
                 )
 
-            flash("Oops, that didn't go as planned. Please try refreshing or saving your sales data again.", "danger")
+            flash("Couldn't update the sales data. Please try again.", "danger")
             return redirect(url_for("report.report_sale"))
 
     # For GET request, check for existing draft and load data
@@ -1146,13 +1146,13 @@ def report_sale(id=None):
         # Get organization info for template - validate entity_id first
         if not entity_id:
             logger.error("Entity ID is None or empty when loading sales form")
-            flash("Hmm, that entity ID doesn't look quite right. Could you double-check it?", "danger")
+            flash("Invalid entity ID. Please try again.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         org = Entity.query.get(entity_id)
         if not org:
             logger.error(f"Entity with ID {entity_id} not found in database")
-            flash("Hmm, that organization doesn't seem to be in our system.", "danger")
+            flash("Organization not found.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         entity_acronym, display_date = get_entity_badge_data(org)
@@ -1210,7 +1210,7 @@ def report_sale(id=None):
 
     except Exception as e:
         logger.error(f"Error loading sales form: {str(e)}")
-        flash("Something got tangled up while loading the sales form. Please try again!", "danger")
+        flash("An error occurred loading the sales form. Please try again.", "danger")
         return redirect(url_for("report.report_opening"))
 
 

@@ -40,7 +40,7 @@ def _build_app() -> Flask:
 def test_partial_renders_and_drains_stale_flash():
     app = _build_app()
     with app.test_request_context("/anything"):
-        session["_flashes"] = [("danger", "Hmm, I looked everywhere but couldn't find that one.")]
+        session["_flashes"] = [("danger", "Entity not found")]
 
         source = (TEMPLATES / "components" / "flash_messages.html").read_text(
             encoding="utf-8"
@@ -48,7 +48,7 @@ def test_partial_renders_and_drains_stale_flash():
         html = render_template_string(source)
 
         # Rendered: the message text is emitted (into the showFlashMessages call).
-        assert "Hmm, I looked everywhere but couldn't find that one." in html
+        assert "Entity not found" in html
         # Drained: the cross-request leak vector is emptied.
         assert session.get("_flashes", []) == []
 

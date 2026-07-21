@@ -501,7 +501,7 @@
                         <div class="flex flex-col">
                           <!-- Edit - latest non-draft report, only when the user can edit (entity-wide perm or they uploaded it). -->
                           {% if report.id == latest_report_id and report.status != 'draft' and (can_edit_entity_reports or report.uploaded_by == current_user.username) %}
-                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}', {{ 'true' if report.xero_integrated_yes or report.publishing_status else 'false' }}); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); handleEditReport('{{ report.id }}', '{{ entity_id }}', '{{ report.transaction_date.strftime('%Y-%m-%d') }}'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
                             <span class="text-sm font-medium">Edit</span>
                           </div>
                           {% endif %}
@@ -1209,6 +1209,15 @@
     let entityToRepublish = null;
 
 
+    // Function to edit a report
+    function handleEditReport(reportId, entityId, transactionDate) {
+      console.log('Edit report:', reportId, 'for date:', transactionDate);
+      // Navigate to the report ending page for editing
+      const editUrl = `/entity/${entityId}/ending/${reportId}?edit=true&transaction_date=${transactionDate}`;
+      console.log('Navigating to edit URL:', editUrl);
+      PageTransition.navigateWithFade(editUrl);
+    }
+
     // Function to delete a report
     function deleteReport(reportId) {
       reportToDelete = reportId;
@@ -1720,44 +1729,31 @@
       }
     }
 
-    // Reverts a submitted report to a draft and reopens it at step 1, so every
-    // field (balances included) can be re-entered. Same endpoint as the Edit
-    // Report button on the ending page.
-    async function handleEditReport(reportId, entityId, transactionDate, wasPublished) {
+    // Function to handle editing submitted reports (Testing Only)
+    // Converts posted report to draft, then navigates to opening page
+    async function handleEditReport(reportId, entityId, transactionDate) {
       if (!reportId || !entityId) {
         showNotification('Unable to edit report. Missing report information.', 'error');
-        return;
-      }
-
-      // Publishing stores no Xero object IDs, so re-publishing after an edit
-      // re-POSTs every transaction instead of updating the originals.
-      if (wasPublished && !window.confirm(
-        'This report was already published to Xero.\n\n' +
-        'Editing it and publishing again will create duplicate entries in Xero — ' +
-        'the originals are not removed automatically and must be voided in Xero by hand.\n\n' +
-        'Continue?'
-      )) {
         return;
       }
 
       try {
         // Show loading notification
         showNotification('Converting report to draft...', 'info');
-
+        
         // Get CSRF token
         const csrfToken = document.querySelector('input[name="csrf_token"]');
-
+        
         // Create FormData for POST request
         const formData = new FormData();
         if (csrfToken) {
           formData.append('csrf_token', csrfToken.value);
         }
-
+        
         // Call backend to convert report to draft
         const response = await fetch(`/report/${reportId}/convert-to-draft`, {
           method: 'POST',
-          body: formData,
-          credentials: 'include'
+          body: formData
         });
 
         const data = await response.json();

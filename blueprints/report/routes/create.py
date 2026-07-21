@@ -20,7 +20,7 @@ from services.permission_policy import Permission, has_permission
 def create_report():
     entity_id = request.args.get("entity_id") or request.form.get("entity_id")
     if not entity_id:
-        flash("I need to know which entity we're working with first!", "danger")
+        flash("Entity context is required.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -252,7 +252,7 @@ def create_report():
                         "redirect_url": url_for("auth.index", entity_id=entity_id),
                     }
                 )
-            flash("Report submitted!", "success")
+            flash("Report submitted successfully.", "success")
             return redirect(url_for("auth.index", entity_id=entity_id))
 
         except ValueError as ve:
