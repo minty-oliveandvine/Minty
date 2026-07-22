@@ -45,7 +45,8 @@ EXPECTED_SCOPES = frozenset(
         "offline_access",
         "accounting.settings",
         "accounting.contacts",
-        "accounting.transactions",
+        "accounting.invoices",
+        "accounting.banktransactions",
         "accounting.attachments",
         "files",
     }
@@ -197,9 +198,10 @@ class FakeXero:
         (re.compile(r"/Organisation"), "accounting.settings"),
         (re.compile(r"/Accounts"), "accounting.settings"),
         (re.compile(r"/Contacts"), "accounting.contacts"),
+        (re.compile(r"/Invoices"), "accounting.invoices"),
         (
-            re.compile(r"/(Invoices|BankTransactions|BankTransfers)"),
-            "accounting.transactions",
+            re.compile(r"/(BankTransactions|BankTransfers)"),
+            "accounting.banktransactions",
         ),
         (re.compile(r"files\.xro/1\.0/"), "files"),
     )
@@ -381,18 +383,20 @@ def test_every_xero_call_succeeds_with_granted_scopes(app, client, db_session, m
             "POST /Contacts failed — accounting.contacts missing?"
         )
 
-        # accounting.transactions: the publish pipeline's three endpoints.
+        # The publish pipeline's three endpoints, split across two granular
+        # scopes: banktransactions covers transactions + transfers, invoices
+        # covers invoices.
         resp = publish.bank_transaction_to_xero(org_id, token, {"Type": "SPEND"})
         assert resp.status_code == 200, (
-            f"POST /BankTransactions -> {resp.status_code} — accounting.transactions missing?"
+            f"POST /BankTransactions -> {resp.status_code} — accounting.banktransactions missing?"
         )
         resp = publish.bank_transfer_to_xero(org_id, token, {"BankTransfers": []})
         assert resp.status_code == 200, (
-            f"POST /BankTransfers -> {resp.status_code} — accounting.transactions missing?"
+            f"POST /BankTransfers -> {resp.status_code} — accounting.banktransactions missing?"
         )
         resp = publish.invoice_to_xero(org_id, token, {"Invoices": []})
         assert resp is not None and resp.status_code == 200, (
-            "PUT /Invoices failed — accounting.transactions missing?"
+            "PUT /Invoices failed — accounting.invoices missing?"
         )
 
         # accounting.attachments: receipt upload onto a bank transaction.
@@ -427,12 +431,12 @@ def test_harness_detects_missing_scope(app, client, db_session, monkeypatch):
 
     granted = _connect_scopes(app, client, db_session, monkeypatch)
 
-    crippled = FakeXero(granted - {"accounting.transactions"})
+    crippled = FakeXero(granted - {"accounting.invoices"})
     monkeypatch.setattr(publish, "requests", crippled)
     with app.app_context():
         resp = publish.invoice_to_xero("org-1", "fake-access-token", {"Invoices": []})
         assert resp is not None and resp.status_code == 403, (
-            "harness failed to reject a call missing accounting.transactions"
+            "harness failed to reject a call missing accounting.invoices"
         )
 
     no_refresh = FakeXero(granted - {"offline_access"})
@@ -455,9 +459,12 @@ FAMILY_SCOPE = {
     "Organisation": "accounting.settings",
     "Accounts": "accounting.settings",
     "Contacts": "accounting.contacts",
-    "Invoices": "accounting.transactions",
-    "BankTransactions": "accounting.transactions",
-    "BankTransfers": "accounting.transactions",
+    "Invoices": "accounting.invoices",
+    # No dedicated BankTransfers scope exists in the granular set; transfers
+    # ride on accounting.banktransactions. Unverified against live Xero — if a
+    # transfer publish 403s, accounting.payments is the next candidate.
+    "BankTransactions": "accounting.banktransactions",
+    "BankTransfers": "accounting.banktransactions",
     "Attachments": "accounting.attachments",
     "Files": "files",
     "Associations": "files",
