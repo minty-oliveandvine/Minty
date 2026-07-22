@@ -220,13 +220,21 @@ def xero_connect_entity():
         )
     # Minimal scope set covering every Xero API call made by this app AND the
     # billing backend (which reuses this token via the shared user table):
-    # settings → Organisation/Accounts, contacts → Contacts, transactions →
-    # Invoices/BankTransactions/BankTransfers, attachments → receipt uploads,
-    # files → billing's bank-slip Files API. Must stay in sync with
-    # xero_reconnect below; tests/test_xero_scopes.py enforces coverage.
+    # settings → Organisation/Accounts, contacts → Contacts, invoices →
+    # Invoices, banktransactions → BankTransactions/BankTransfers,
+    # attachments → receipt uploads, files → billing's bank-slip Files API.
+    # Must stay in sync with xero_reconnect below; tests/test_xero_scopes.py
+    # enforces coverage.
+    # Xero replaced the broad "accounting.transactions" scope with granular
+    # per-endpoint ones. This app is only granted the granular set, so the broad
+    # name fails the authorize call with access_denied / "Requested wrong apps
+    # scopes" before the consent screen renders.
+    # Do NOT add "app.connections": /connections needs no scope of its own, and
+    # requesting it is rejected the same way (verified against the live app).
     scope = (
         "openid profile email offline_access accounting.settings "
-        "accounting.contacts accounting.transactions accounting.attachments files"
+        "accounting.contacts accounting.invoices accounting.banktransactions "
+        "accounting.attachments files"
     )
     # When launched from the onboarding app, tag the OAuth state so the
     # callback returns to onboarding (step 3) instead of the entity list.
@@ -281,7 +289,8 @@ def xero_reconnect():
     # more than connect. tests/test_xero_scopes.py enforces both stay in sync.
     scope = (
         "openid profile email offline_access accounting.settings "
-        "accounting.contacts accounting.transactions accounting.attachments files"
+        "accounting.contacts accounting.invoices accounting.banktransactions "
+        "accounting.attachments files"
     )
     # state shape: "entity_reconnect" | "entity_reconnect:<initiator_user_id>".
     # The trailing id is the user who clicked Reconnect; the callback enforces the
