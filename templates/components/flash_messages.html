@@ -79,7 +79,11 @@
       if (wrap) wrap.style.transform = 'translateX(calc(100% + 1.5rem))';
     }
 
-    function showFlashMessages(message, type) {
+    // durationMs: how long the toast stays before auto-hiding (default 4000).
+    // Pass a larger value (or 0 to disable auto-hide) for messages the user must
+    // not miss — e.g. the "disconnected from Xero" warning, which can otherwise
+    // fire and vanish behind a page's loading phase before it's seen.
+    function showFlashMessages(message, type, durationMs) {
       var wrap = document.getElementById('flashMessages');
       var card = document.getElementById('flashMessagesCard');
       var icon = document.getElementById('flashMessagesIcon');
@@ -99,6 +103,8 @@
 
       positionToast();
 
+      var timeout = (typeof durationMs === 'number') ? durationMs : 4000;
+
       // Decode the swapped icon before sliding in so the toast never flashes
       // the previously rendered icon for a frame. Auto-dismiss is scoped to
       // THIS toast only (per-invocation timer) — never a global `.toast` sweep,
@@ -106,7 +112,8 @@
       var reveal = function () {
         wrap.style.transform = 'translateX(0)';
         if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(hideFlashMessages, 4000);
+        // timeout <= 0 means "stay until dismissed" (no auto-hide timer).
+        if (timeout > 0) hideTimer = setTimeout(hideFlashMessages, timeout);
       };
       if (typeof icon.decode === 'function') {
         icon.decode().then(reveal).catch(reveal);
@@ -146,7 +153,12 @@
         document.addEventListener('DOMContentLoaded', function () {
           showFlashMessages(
             {{ message|tojson }},
-            {{ ('error' if category in ('error', 'danger') else ('warning' if category == 'warning' else ('info' if category == 'info' else 'success')))|tojson }}
+            {{ ('error' if category in ('error', 'danger') else ('warning' if category == 'warning' else ('info' if category == 'info' else 'success')))|tojson }},
+            // Keep error/warning toasts up a bit longer (12s) so a warning like
+            // "disconnected from Xero" isn't missed behind a page's loading
+            // phase; success/info keep the default 4s. NOT 100s — that leaves a
+            // stale error parked on screen long after the user has moved on.
+            {{ (12000 if category in ('error', 'danger', 'warning') else 4000)|tojson }}
           );
         });
       {% endfor %}

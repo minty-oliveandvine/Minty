@@ -12,6 +12,9 @@
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
+  <!-- Shared currency formatting -->
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
 
@@ -331,135 +334,8 @@
     window.addEventListener('load', fitBalanceText);
     window.addEventListener('resize', fitBalanceText);
 
-    // Function to format currency input (simple and clean)
-      function formatCurrency(input) {
-        // Just remove invalid characters, don't pad yet
-        let value = input.value.replace(/[^\d.]/g, '');
-        
-        // Remove multiple decimal points (keep only first one)
-        const parts = value.split('.');
-        if (parts.length > 2) {
-          value = parts[0] + '.' + parts.slice(1).join('');
-        }
-        
-        // Limit decimal to 2 digits
-        const decimalParts = value.split('.');
-        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
-          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
-        }
-        
-        // Just set the cleaned value - NO padding during input
-        input.value = value;
-      }
-
-
-
-      // Format with commas on blur (simple and clean)
-      function formatWithCommas(input) {
-        let value = input.value;
-        
-        if (value === '') return;
-        
-        // Remove commas
-        value = value.replace(/,/g, '');
-        const parts = value.split('.');
-        const wholeNumber = parts[0];
-        
-        // Add commas to whole number
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        
-        // Ensure .00 at the end with proper padding
-        let decimalPart = parts.length > 1 ? parts[1] : '00';
-        if (decimalPart === '') {
-          decimalPart = '00'; // 1234. → 1234.00
-        } else if (decimalPart.length === 1) {
-          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
-        }
-        
-        input.value = formattedWholeNumber + '.' + decimalPart;
-      }
-
-    // Function to format currency input for modal (with comma formatting and dash for zero)
-    function formatCurrencyModal(input) {
-      // Store cursor position
-      const cursorPosition = input.selectionStart;
-      
-      // Remove any non-numeric characters except decimal point
-      let value = input.value.replace(/[^\d.]/g, '');
-      
-      // Ensure only one decimal point
-      const parts = value.split('.');
-      if (parts.length > 2) {
-        value = parts[0] + '.' + parts.slice(1).join('');
-      }
-      
-      // Limit to 2 decimal places
-      if (parts.length === 2 && parts[1].length > 2) {
-        value = parts[0] + '.' + parts[1].substring(0, 2);
-      }
-      
-      // Show dash for zero value
-      if (value === '0' || value === '0.0' || value === '0.00' || value === '') {
-        input.value = '-';
-        input.setSelectionRange(1, 1);
-        return;
-      }
-      
-      // Format with commas for display
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '');
-      }
-      
-      // Only update if value actually changed
-      if (input.value !== value) {
-        const oldValue = input.value;
-        input.value = value;
-        
-        // Calculate new cursor position
-        let newCursorPosition = cursorPosition;
-        
-        // Count commas before cursor in old value
-        const commasBeforeCursorOld = (oldValue.substring(0, cursorPosition).match(/,/g) || []).length;
-        
-        // Count commas before cursor in new value
-        const commasBeforeCursorNew = (value.substring(0, cursorPosition).match(/,/g) || []).length;
-        
-        // Adjust cursor position based on comma difference
-        newCursorPosition += (commasBeforeCursorNew - commasBeforeCursorOld);
-        
-        // Ensure cursor position is within bounds
-        newCursorPosition = Math.min(newCursorPosition, value.length);
-        input.setSelectionRange(newCursorPosition, newCursorPosition);
-      }
-    }
-
-    // Format with commas on blur for modal
-    function formatWithCommasModal(input) {
-      let value = input.value;
-      
-      // Skip if empty or dash
-      if (value === '' || value === '-') {
-        return;
-      }
-      
-      // Remove existing commas and format
-      value = value.replace(/,/g, '');
-      const parts = value.split('.');
-      
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        // Add .00 if no decimal part
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
-      }
-      
-      // Only update if we have a valid number
-      if (value !== '' && value !== '-') {
-        input.value = value;
-      }
-    }
+    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
+    // static/js/currency.js
 
     // Function to update deposit amount display
     function updateDepositAmount() {
