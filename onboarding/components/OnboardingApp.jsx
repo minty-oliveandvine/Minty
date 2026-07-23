@@ -965,15 +965,27 @@ export default function OnboardingApp() {
     if (!token || !state.entity.id) return { ok: true };
     const base = (process.env.NEXT_PUBLIC_MODULE1_API_URL || 'http://localhost:5001').replace(/\/$/, '');
     const p = state.pettyCash;
-    const idFor = (label) => {
-      const found = label ? (accountOptions.contacts || []).find((o) => o.label === label) : null;
-      return found ? found.id : '';
+    // Three outcomes, deliberately distinct — the server reads a key as
+    // "clear this column" only when it is present and empty:
+    //   no label chosen        -> '' : the user cleared it, so clear it
+    //   label resolves to an id -> id : set it
+    //   label set but unresolved -> omit the key entirely
+    // That last case is a lookup miss, not user intent. It happens whenever the
+    // contact list is short or stale (a failed Xero fetch, or a contact that
+    // has been deactivated), and sending '' there would silently wipe a saved
+    // mapping just because the page was revisited.
+    const contacts = {};
+    const setContact = (key, label) => {
+      if (!label) {
+        contacts[key] = '';
+        return;
+      }
+      const found = (accountOptions.contacts || []).find((o) => o.label === label);
+      if (found) contacts[key] = found.id;
     };
-    const contacts = {
-      director: idFor(p.directorContact),
-      cash_sale: idFor(p.cashSaleContact),
-      discrepancy: idFor(p.discrepancyContact),
-    };
+    setContact('director', p.directorContact);
+    setContact('cash_sale', p.cashSaleContact);
+    setContact('discrepancy', p.discrepancyContact);
     try {
       const res = await fetch(`${base}/api/onboarding/contacts`, {
         method: 'POST',

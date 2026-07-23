@@ -39,10 +39,20 @@ def get_auth_token(code, state):
 def get_contacts_from_xero(
     access_token, xero_org_id, where=None, order=None, token_validated=False
 ):
+    """Fetch all contacts for an org.
+
+    Returns a list on success (``[]`` only when Xero genuinely reports zero
+    contacts), or ``None`` when the fetch failed or completed only partially.
+
+    The None/[] distinction is load-bearing: callers such as
+    ``sync_contacts_if_changed`` reconcile the local contact table against this
+    result, so an API failure that returned ``[]`` would be read as "this org
+    has no contacts" and deactivate every local row.
+    """
     try:
         if not token_validated and not ensure_valid_token(current_user):
             logger.warning("Token validation failed for contacts")
-            return []
+            return None
 
         base_url = f"{app.config['XERO_API_BASE_URL']}/Contacts"
         headers = {
@@ -68,8 +78,13 @@ def get_contacts_from_xero(
             logger.info(f"Fetched contacts from Xero (page {page}): {response}")
 
             if response.status_code != 200:
-                logger.error(f"Xero contacts API returned {response.status_code}")
-                break
+                # Discard anything already collected: a truncated list is
+                # indistinguishable from contacts having been removed in Xero.
+                logger.error(
+                    f"Xero contacts API returned {response.status_code} on page "
+                    f"{page} — discarding {len(all_contacts)} partial result(s)"
+                )
+                return None
 
             contacts = response.json().get("Contacts", [])
             if not contacts:
@@ -85,7 +100,7 @@ def get_contacts_from_xero(
         return all_contacts
     except Exception as e:
         logger.error(f"Error fetching contacts from Xero: {str(e)}")
-        return []
+        return None
 
 def get_accounts_from_xero(
     access_token, xero_org_id, where=None, order=None, token_validated=False
@@ -185,7 +200,8 @@ def get_organisation_lock_dates(access_token, xero_org_id):
 
 def _get_entity_xero_data_from_db(entity_id):
     db_accounts = AccountInfo.query.filter_by(entity_id=entity_id).all()
-    db_contacts = XeroContactSync.query.filter_by(entity_id=entity_id).all()
+    db_contacts = XeroContactSync.query.filter_by(
+        entity_id=entity_id, is_active=True).all()
     if not db_accounts and not db_contacts:
         return None
     all_accounts = [account_info_to_xero_format(acc) for acc in db_accounts]

@@ -61,6 +61,52 @@ def _redirect_xero_mapping(entity_id: str, _from: str | None, *, return_view: st
     return redirect(url_for("entity_settings", entity_id=entity_id, **bills_kw))
 
 
+def _flash_if_xero_disconnected(org) -> bool:
+    """Flash a "Xero disconnected — please reconnect" error when the entity was
+    connected to a Xero org but is no longer live. Returns True if the entity is
+    disconnected.
+
+    Only flashes for entities that are SUPPOSED to be connected
+    (``org.xero_org_id`` is set) so entities that never connected don't nag the
+    user.
+
+    Runs the authoritative LIVE check first: ``sync_entity_xero_status`` hits
+    Xero's /connections endpoint and reconciles ``org.status`` to reality. This
+    matters because a connection revoked on the Xero website can leave the
+    connector token still valid — so a token-only check (``resolve_xero_token``)
+    would wrongly report "connected". We therefore flash when EITHER no token
+    resolves OR the live sync flipped status to "disconnected".
+    """
+    if org is None or not getattr(org, "xero_org_id", None):
+        return False
+
+    token_resolved = resolve_xero_token(org.id, current_user) is not None
+
+    # Authoritative live reconcile (best-effort; gate on a resolvable connector
+    # token since the sync needs one to call Xero).
+    if token_resolved:
+        try:
+            sync_entity_xero_status(org.id)
+            refreshed = Entity.query.get(org.id)
+            if refreshed is not None:
+                org = refreshed
+        except Exception as sync_error:
+            logger.warning(
+                "Xero live status sync failed for entity %s: %s",
+                org.id, sync_error,
+            )
+
+    if token_resolved and getattr(org, "status", None) != "disconnected":
+        return False
+
+    flash(
+        "This entity has been disconnected from Xero. Please reconnect it to "
+        "keep your data in sync.",
+        "danger",
+    )
+    return True
+
+
 def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None):
     """Save country/currency and (admin only) the entity name from the classic
     Xero integration page. No Xero mapping fields are handled here."""
@@ -212,6 +258,33 @@ def entity_settings(entity_id=None):
             resolve_xero_token(entity_id, current_user) is not None
         )
 
+        # Authoritative LIVE check FIRST: hit Xero's /connections and reconcile
+        # org.status (connected/disconnected) to match reality. This must run
+        # BEFORE the reconnect flash below, otherwise a connection revoked on the
+        # Xero website — where the token can still be valid — would leave
+        # org.status stale and the flash would wrongly say "connected". Gate on a
+        # resolvable connector token; sync validates that token itself.
+        if xero_token_resolved:
+            try:
+                sync_entity_xero_status(entity_id)
+                org = Entity.query.get(entity_id) or org  # re-read fresh status
+            except Exception as sync_error:
+                logger.warning(
+                    f"Status sync failed, continuing with database data: {str(sync_error)}"
+                )
+
+        # Live check: flash "reconnect" when the entity was meant to be connected
+        # to Xero but is no longer live — either no token resolves, OR the live
+        # sync above flipped status to "disconnected" (revoked on Xero's side).
+        if org.xero_org_id and (
+            not xero_token_resolved or org.status == "disconnected"
+        ):
+            flash(
+                "This entity has been disconnected from Xero. Please reconnect "
+                "it to keep your data in sync.",
+                "danger",
+            )
+
         if (
             xero_token_resolved
             and org.xero_org_id
@@ -233,19 +306,8 @@ def entity_settings(entity_id=None):
                     f"Failed to backfill xero_tenant_name for {entity_id}: {exc}"
                 )
 
-        # Try to sync status, but don't fail if it doesn't work.
-        # Gate on the entity's resolvable Xero token (xero_token_resolved), NOT
-        # current_user's personal token: the sync uses the connector's token
-        # internally, so a viewer who isn't the connector must still trigger it.
-        # Let sync_entity_xero_status validate that connector token itself rather
-        # than asserting validity from the wrong user via token_validated=True.
-        try:
-            if xero_token_resolved:
-                sync_entity_xero_status(entity_id)
-        except Exception as sync_error:
-            logger.warning(
-                f"Status sync failed, continuing with database data: {str(sync_error)}"
-            )
+        # (Live status sync already ran above, before the reconnect flash, so
+        # org.status reflects Xero's real connection state here.)
 
         # Sync chart of accounts from Xero in the background (non-blocking).
         # Fetches ALL Xero accounts, upserts new ones, and sets status=ACTIVE /
@@ -997,6 +1059,9 @@ def entity_settings_entity(org_id):
             else "entity/settings_entity.html"
         )
         _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
+        # Live check (hits Xero /connections): warn if the entity was connected
+        # to Xero but is no longer live, so the user knows to reconnect.
+        _flash_if_xero_disconnected(org)
         return render_template(
             template,
             org=org,
