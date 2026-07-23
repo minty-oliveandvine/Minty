@@ -16,6 +16,9 @@
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
+  <!-- Shared currency formatting -->
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
 
@@ -220,7 +223,7 @@
                        </div>
                       <div class="text-right">
                         <div class="flex items-center gap-3 justify-end">
-                          <div class="text-red-600 font-medium">${{ expense.amount|comma_format(2) }}</div>
+                          <div class="text-red-600 font-medium">${{ "{:,.2f}".format(expense.amount or 0) }}</div>
                           {% if not current_draft or current_draft.status == 'draft' %}
                           <button type="button" onclick="event.stopPropagation(); deleteExpense('{{ expense.id }}'); return false;" class="text-gray-400 hover:text-red-600 hover-bounce p-2 -m-2 rounded-full">
                             <svg class="w-4 h-4" viewBox="0 0 16 15" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1568,91 +1571,8 @@
     }
 
 
-    // Function to format currency input (simple and clean)
-      function formatCurrency(input) {
-        // Just remove invalid characters, don't pad yet
-        let value = input.value.replace(/[^\d.]/g, '');
-        
-        // Remove multiple decimal points (keep only first one)
-        const parts = value.split('.');
-        if (parts.length > 2) {
-          value = parts[0] + '.' + parts.slice(1).join('');
-        }
-        
-        // Limit decimal to 2 digits
-        const decimalParts = value.split('.');
-        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
-          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
-        }
-        
-        // Just set the cleaned value - NO padding during input
-        input.value = value;
-      }
-
-
-
-      // Format with commas on blur (simple and clean)
-      function formatWithCommas(input) {
-        let value = input.value;
-        
-        if (value === '') return;
-        
-        // Remove commas
-        value = value.replace(/,/g, '');
-        const parts = value.split('.');
-        const wholeNumber = parts[0];
-        
-        // Add commas to whole number
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        
-        // Ensure .00 at the end with proper padding
-        let decimalPart = parts.length > 1 ? parts[1] : '00';
-        if (decimalPart === '') {
-          decimalPart = '00'; // 1234. → 1234.00
-        } else if (decimalPart.length === 1) {
-          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
-        }
-        
-        input.value = formattedWholeNumber + '.' + decimalPart;
-      }
-
-    // Format all currency inputs after page load
-    function formatAllCurrencyFields() {
-      // Get all inputs on the page
-      const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
-      
-      allInputs.forEach(input => {
-        if (input.value && input.value.trim() !== '') {
-          // Remove existing commas
-          let value = input.value.replace(/,/g, '');
-          
-          // Split into whole and decimal parts
-          const parts = value.split('.');
-          const wholeNumber = parts[0];
-          
-          // Add commas to whole number
-          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-          
-          // Ensure .00 at the end
-          const decimalPart = parts.length > 1 ? parts[1] : '00';
-          const paddedDecimal = (decimalPart + '00').substring(0, 2);
-          
-          // Set the formatted value
-          input.value = formattedWholeNumber + '.' + paddedDecimal;
-        }
-      });
-    }
-
-    // Run when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', formatAllCurrencyFields);
-    } else {
-      formatAllCurrencyFields();
-    }
-
-    // Also run after a short delay
-    setTimeout(formatAllCurrencyFields, 100);
-    setTimeout(formatAllCurrencyFields, 500);
+    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
+    // static/js/currency.js
 
 
          // Handle file upload
