@@ -68,8 +68,16 @@ def remove_connections_all() -> ResponseReturnValue:
         )
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error removing Xero connections: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.exception(f"Error removing Xero connections: {str(e)}")
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I couldn't remove those Xero connections. Mind trying again?",
+                }
+            ),
+            500,
+        )
 
 
 @xero_bp.route("/debug/xero-settings/<string:entity_id>")
@@ -122,8 +130,14 @@ def debug_xero_settings(entity_id: str) -> ResponseReturnValue:
                 "contact_categories": [c[0] for c in contact_categories],
             }
         )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception(f"Xero settings debug failed for entity {entity_id}")
+        return (
+            jsonify(
+                {"error": "I couldn't load those Xero settings. Mind trying again?"}
+            ),
+            500,
+        )
 
 
 """Xero domain helper functions moved out of legacy app."""

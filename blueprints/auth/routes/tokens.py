@@ -15,9 +15,14 @@ def mytoken():
         if obtain:
             return obtain()
         return jsonify({"error": "Xero OAuth not configured"}), 501
-    except Exception as e:
+    except Exception:
         logger.exception("mytoken failed")
-        return jsonify({"error": str(e)}), 500
+        return (
+            jsonify(
+                {"error": "I couldn't refresh your Xero connection. Mind reconnecting?"}
+            ),
+            500,
+        )
 
 
 @auth_bp.route("/event_id")
@@ -30,9 +35,14 @@ def event_id():
 
             return serialize(response)
         return jsonify({"error": "Xero OAuth not configured"}), 501
-    except Exception as e:
+    except Exception:
         logger.exception("event_id failed")
-        return jsonify({"error": str(e)}), 500
+        return (
+            jsonify(
+                {"error": "I couldn't refresh your Xero connection. Mind reconnecting?"}
+            ),
+            500,
+        )
 
 
 @auth_bp.route("/check/token", methods=["GET"])

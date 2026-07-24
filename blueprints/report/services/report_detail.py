@@ -29,9 +29,19 @@ def download_file(filename):
             "get_object", Params={"Bucket": bucket, "Key": s3_key}, ExpiresIn=3600
         )
         return redirect(download_url)
-    except Exception as e:
-        print(f"Error generating pre-signed URL: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 404
+    except Exception:
+        # Server-side fault (S3 unreachable, bad creds), not a missing file —
+        # 404 misreported it as "not found".
+        logger.exception(f"Error generating pre-signed URL for {filename}")
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I couldn't open that report. Mind trying again?",
+                }
+            ),
+            500,
+        )
 
 
 def download_statements():

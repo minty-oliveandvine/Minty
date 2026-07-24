@@ -63,7 +63,9 @@ def billing_sync_chart_accounts(entity_id):
         logger.exception(
             "billing_sync_chart_accounts failed entity=%s: %s", entity_id, exc
         )
-        return jsonify({"skipped": True, "reason": "exception", "error": str(exc)}), 200
+        # Detail stays in the log; the response carries only a stable reason
+        # code for Module 2 to branch on.
+        return jsonify({"skipped": True, "reason": "exception"}), 200
 
 
 @entity_bp.route(
@@ -102,7 +104,9 @@ def billing_sync_chart_if_changed(entity_id):
         logger.exception(
             "billing_sync_chart_if_changed failed entity=%s: %s", entity_id, exc
         )
-        return jsonify({"skipped": True, "reason": "exception", "error": str(exc)}), 200
+        # Detail stays in the log; the response carries only a stable reason
+        # code for Module 2 to branch on.
+        return jsonify({"skipped": True, "reason": "exception"}), 200
 
 
 @entity_bp.route(
@@ -146,4 +150,6 @@ def billing_sync_contacts_if_changed(entity_id):
         logger.exception(
             "billing_sync_contacts_if_changed failed entity=%s: %s", entity_id, exc
         )
-        return jsonify({"skipped": True, "reason": "exception", "error": str(exc)}), 200
+        # Detail stays in the log; the response carries only a stable reason
+        # code for Module 2 to branch on.
+        return jsonify({"skipped": True, "reason": "exception"}), 200
