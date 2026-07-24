@@ -25,7 +25,8 @@ from services.helpers.xero_bridge import (account_info_to_xero_format,
                                           contact_sync_to_xero_format,
                                           get_xero_data_dynamic,
                                           resolve_contact_name)
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import (Permission, can_edit_report,
+                                        has_permission)
 from utils import jsonify
 
 
@@ -35,14 +36,11 @@ def _trigger_xero_sync_background(entity_id, org):
     Non-blocking: both syncs run in daemon threads so page load is not delayed.
     Only runs when the entity is connected and has a valid Xero token.
     """
-    from services.auth.token_service import (
-        ensure_valid_token,
-        get_xero_token_user_for_entity,
-    )
     from blueprints.entity.services.settings import (
         sync_chart_of_accounts_if_changed_background,
-        sync_contacts_if_changed_background,
-    )
+        sync_contacts_if_changed_background)
+    from services.auth.token_service import (ensure_valid_token,
+                                             get_xero_token_user_for_entity)
 
     if not org or org.status != "connected" or not org.xero_org_id:
         return
@@ -119,10 +117,7 @@ def report_expense(id=None):
                     "true" or request.form.get("edit") == "true")
 
     def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
+        acronym = build_entity_acronym(entity.name) if entity else ""
 
         badge_date = None
         if entity and entity.created_at:

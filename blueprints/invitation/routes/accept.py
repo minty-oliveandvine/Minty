@@ -7,6 +7,7 @@ from loguru import logger
 
 from blueprints.invitation import invitation_bp
 from blueprints.invitation.models.invitation import Invitation
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import Entity
 
 
@@ -108,7 +109,7 @@ def xero_not_connected(entity_id):
         return redirect(url_for("entity.entity_list"))
 
     entity_name = entity.name or "Unknown"
-    entity_acronym = "".join(w[0].upper() for w in entity_name.split() if w)
+    entity_acronym = build_entity_acronym(entity_name)
 
     return render_template(
         "invitation/xero_not_connected.html",

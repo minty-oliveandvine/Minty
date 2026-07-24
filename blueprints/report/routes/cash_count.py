@@ -12,10 +12,12 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id,
                                                safe_float,
                                                update_draft_progress)
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDetail,
                        ReportDraft, db)
 from services.authz import permission_denied
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import (Permission, can_edit_report,
+                                        has_permission)
 
 
 @report_bp.route("/report/cash_count", methods=["GET", "POST"])
@@ -52,10 +54,7 @@ def report_cash_count(id=None):
                     "true" or request.form.get("edit") == "true")
 
     def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
+        acronym = build_entity_acronym(entity.name) if entity else ""
 
         badge_date = None
         if entity and entity.created_at:

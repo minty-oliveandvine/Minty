@@ -6,6 +6,7 @@ from typing import Any, cast
 from loguru import logger
 from sqlalchemy.orm import joinedload
 
+from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.publish_errors import latest_publish_reason_items
 from blueprints.xero.services.publish_resolution import annotate_resolution
 from models.db import Entity, Report, ReportDraft, User
@@ -208,8 +209,7 @@ def get_entity_report_history(
     entity_acronym = ""
     display_date = None
     if entity and entity.name:
-        words = entity.name.split()
-        entity_acronym = "".join([word[0].upper() for word in words if word])
+        entity_acronym = build_entity_acronym(entity.name)
         display_date = (
             entity.created_at.date()
             if isinstance(entity.created_at, datetime)

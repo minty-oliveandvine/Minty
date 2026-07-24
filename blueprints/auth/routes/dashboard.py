@@ -22,9 +22,7 @@ def index():
         )
 
     reports = (
-        Report.query.filter_by(company=entity_id)
-        .order_by(Report.date.desc())
-        .all()
+        Report.query.filter_by(company=entity_id).order_by(Report.date.desc()).all()
     )
 
     cumulative_shop_sales = 0.0
@@ -35,8 +33,7 @@ def index():
         try:
             total_shop_sales = report.shop_sales or 0.0
             total_delivery_sales = report.delivery_sales or 0.0
-            total_expenses = sum(
-                expense.amount for expense in report.shop_expenses)
+            total_expenses = sum(expense.amount for expense in report.shop_expenses)
             adjusted_opening_balance = report.opening_balance + (
                 report.cash_addition or 0.0
             )

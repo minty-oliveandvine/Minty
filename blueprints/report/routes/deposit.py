@@ -15,12 +15,14 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id,
                                                safe_float,
                                                update_draft_progress)
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
                        ReportCashCountDraft, ReportDraft, ReportV2, UserEntity,
                        db)
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_xero_data_dynamic
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import (Permission, can_edit_report,
+                                        has_permission)
 
 
 @report_bp.route("/report/deposit", methods=["GET", "POST"])
@@ -57,10 +59,7 @@ def report_deposit(id=None):
                     "true" or request.form.get("edit") == "true")
 
     def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
+        acronym = build_entity_acronym(entity.name) if entity else ""
 
         badge_date = None
         if entity and entity.created_at:

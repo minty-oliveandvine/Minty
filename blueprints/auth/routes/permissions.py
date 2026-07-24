@@ -1,7 +1,8 @@
 from flask import render_template, request
-from flask_login import current_user, login_required
+from flask_login import login_required
 
 from blueprints.auth import auth_bp
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import Entity
 
 
@@ -14,8 +15,7 @@ def no_permission():
     if entity_id:
         entity = Entity.query.filter_by(id=entity_id).first()
         if entity and entity.name:
-            words = entity.name.split()
-            entity_acronym = "".join(word[0].upper() for word in words if word)
+            entity_acronym = build_entity_acronym(entity.name)
 
     return render_template(
         "entity/entity_no_permission.html",

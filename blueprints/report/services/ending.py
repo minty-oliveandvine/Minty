@@ -16,19 +16,15 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                future_date_error,
                                                get_cash_sales_from_detail,
                                                resolve_report_entity_id)
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
                        ReportSaleDetail, SaleInfo, ShopExpense,
                        ShopExpenseDraft, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
-from services.permission_policy import (
-    Permission,
-    can_edit_report,
-    can_view_report,
-    has_permission,
-    is_superuser,
-)
+from services.permission_policy import (Permission, can_edit_report,
+                                        can_view_report, has_permission,
+                                        is_superuser)
 from utils import verify_share_token
-
 
 
 def entity_ending_with_report(entity_id, report_id):
@@ -344,10 +340,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             return redirect(url_for("entity.entity_list"))
 
     def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
+        acronym = build_entity_acronym(entity.name) if entity else ""
 
         badge_date = None
         if entity and entity.created_at:

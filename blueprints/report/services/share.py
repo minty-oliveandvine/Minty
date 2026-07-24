@@ -1,24 +1,12 @@
 # Report-related API routes: expense create_contact, submit_all, delete;
 # get_draft_totals; publish_to_xero; publishing_status.
-import re
 from datetime import datetime, timedelta
 
 from flask import current_app, url_for
 
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import Entity, ShareLink, UserEntity, db
 from utils import generate_share_token
-
-
-def _build_entity_acronym(name):
-    if not name:
-        return ""
-    return "".join(
-        [
-            word[0].upper()
-            for word in name.split()
-            if word and re.match(r"[A-Za-z]", word[0])
-        ]
-    )
 
 
 def create_share_link_for_report(user_id, payload):
@@ -48,7 +36,7 @@ def create_share_link_for_report(user_id, payload):
         entity_id, transaction_date, secret_key, expiration_hours=720
     )
 
-    entity_acronym = _build_entity_acronym(entity.name)
+    entity_acronym = build_entity_acronym(entity.name, letters_only=True)
     try:
         date_obj = datetime.strptime(transaction_date, "%Y-%m-%d")
     except ValueError:
