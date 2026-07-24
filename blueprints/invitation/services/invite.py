@@ -11,7 +11,6 @@ from loguru import logger
 from blueprints.invitation.models.invitation import Invitation
 from models.db import Entity, User, UserEntity, db, tz
 
-
 # Invitations are valid for this many days from creation (Hong Kong time).
 INVITATION_TTL_DAYS = int(os.environ.get("INVITATION_TTL_DAYS", 7))
 
@@ -58,9 +57,9 @@ def resend_cooldown_remaining(invitation) -> int:
 # Matched case-insensitively.
 AUTO_SUPERUSER_EMAILS = frozenset(
     e.strip().lower()
-    for e in os.environ.get(
-        "AUTO_SUPERUSER_EMAILS", "viewall@dailyminty.com"
-    ).split(",")
+    for e in os.environ.get("AUTO_SUPERUSER_EMAILS", "viewall@dailyminty.com").split(
+        ","
+    )
     if e.strip()
 )
 
@@ -191,8 +190,12 @@ def send_invitation_email(
     try:
         entity = Entity.query.get(invitation.entity_id)
         entity_name = entity.name if entity else "Unknown Entity"
-        inviter = User.query.get(invitation.invited_by) if invitation.invited_by else None
-        inviter_name = f"{inviter.first_name} {inviter.last_name}" if inviter else "A team member"
+        inviter = (
+            User.query.get(invitation.invited_by) if invitation.invited_by else None
+        )
+        inviter_name = (
+            f"{inviter.first_name} {inviter.last_name}" if inviter else "A team member"
+        )
 
         from urllib.parse import urlencode
 
@@ -201,10 +204,14 @@ def send_invitation_email(
             "invitation.accept_invitation_page",
             token=invitation.token,
         )
-        accept_url = f"{public_url}{accept_path}" if public_url else url_for(
-            "invitation.accept_invitation_page",
-            token=invitation.token,
-            _external=True,
+        accept_url = (
+            f"{public_url}{accept_path}"
+            if public_url
+            else url_for(
+                "invitation.accept_invitation_page",
+                token=invitation.token,
+                _external=True,
+            )
         )
         # Callers that don't have the names to hand (resend) get them off the record.
         first_name = first_name or invitation.first_name or ""
@@ -224,7 +231,9 @@ def send_invitation_email(
             logger.error("Mail extension not configured")
             return False
 
-        base_url = public_url or url_for("static", filename="", _external=True).rstrip("/")
+        base_url = public_url or url_for("static", filename="", _external=True).rstrip(
+            "/"
+        )
         logo_url = f"{base_url}/static/img/logo_v2.png"
         mascot_url = f"{base_url}/static/img/minty_cat.png"
 
@@ -243,14 +252,18 @@ def send_invitation_email(
         )
         mail.send(msg)
         _record_sent(invitation.id)
-        logger.info(f"Invitation email sent to {invitation.email} for entity {entity_name}")
+        logger.info(
+            f"Invitation email sent to {invitation.email} for entity {entity_name}"
+        )
         return True
     except Exception as exc:
         logger.error(f"Failed to send invitation email to {invitation.email}: {exc}")
         return False
 
 
-def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None, str | None]:
+def accept_invitation(
+    token: str, user_id: str
+) -> tuple[str | None, str | None, str | None]:
     """Accept an invitation. Returns (entity_id, error_message, status_hint).
 
     status_hint is one of: 'dashboard', 'xero_not_connected', or None on error.
@@ -275,13 +288,18 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
         db.session.commit()
         logger.info(
             "invitation.accept.expired invitation={} entity={} email={} user={}",
-            invitation.id, invitation.entity_id, invitation.email, user_id,
+            invitation.id,
+            invitation.entity_id,
+            invitation.email,
+            user_id,
         )
         return None, "This invitation has expired. Please request a new one.", None
 
     user = User.query.get(user_id)
     if not user:
-        logger.info("invitation.accept.no_user invitation={} user={}", invitation.id, user_id)
+        logger.info(
+            "invitation.accept.no_user invitation={} user={}", invitation.id, user_id
+        )
         return None, "User not found.", None
 
     # Ownership check. The invite was sent to invitation.email; the user proves
@@ -297,7 +315,10 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
     if invited not in owned:
         logger.warning(
             "invitation.accept.email_mismatch invitation={} entity={} invited={} user={}",
-            invitation.id, invitation.entity_id, invited, user_id,
+            invitation.id,
+            invitation.entity_id,
+            invited,
+            user_id,
         )
         return (
             None,
@@ -319,12 +340,16 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
         if existing_member:
             logger.info(
                 "invitation.accept.reaccept invitation={} entity={} user={}",
-                invitation.id, invitation.entity_id, user_id,
+                invitation.id,
+                invitation.entity_id,
+                user_id,
             )
             return invitation.entity_id, None, "dashboard"
         logger.warning(
             "invitation.accept.conflict invitation={} entity={} user={} reason=accepted_by_other",
-            invitation.id, invitation.entity_id, user_id,
+            invitation.id,
+            invitation.entity_id,
+            user_id,
         )
         return None, "Invitation is invalid or has already been used.", None
 
@@ -332,7 +357,9 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
     if not entity:
         logger.warning(
             "invitation.accept.no_entity invitation={} entity={} user={}",
-            invitation.id, invitation.entity_id, user_id,
+            invitation.id,
+            invitation.entity_id,
+            user_id,
         )
         return None, "The entity no longer exists.", None
 
@@ -365,7 +392,11 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
 
     logger.info(
         "invitation.accept.ok invitation={} entity={} email={} role={} user={}",
-        invitation.id, invitation.entity_id, invitation.email, invitation.role, user_id,
+        invitation.id,
+        invitation.entity_id,
+        invitation.email,
+        invitation.role,
+        user_id,
     )
 
     # Invited users don't need their own Xero connection — the entity
@@ -376,8 +407,7 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
 
 def get_pending_invitations(entity_id: str) -> list[Invitation]:
     return (
-        Invitation.query
-        .filter_by(entity_id=entity_id, status="pending")
+        Invitation.query.filter_by(entity_id=entity_id, status="pending")
         .order_by(Invitation.created_at.desc())
         .all()
     )
@@ -418,7 +448,11 @@ def resend_invitation(
             f"Resend of invitation {invitation.id} ({invitation.email}) blocked by "
             f"cooldown; {remaining}s remaining (actor={actor_id})"
         )
-        return None, f"Please wait {remaining}s before resending this invitation.", remaining
+        return (
+            None,
+            f"Please wait {remaining}s before resending this invitation.",
+            remaining,
+        )
 
     # Invalidate any previously delivered link by rotating the accept token.
     invitation.token = secrets.token_urlsafe(48)
@@ -449,7 +483,9 @@ def _is_user_in_xero_org(user: User, entity: Entity) -> bool:
             "Authorization": f"Bearer {user.access_token}",
             "Content-Type": "application/json",
         }
-        resp = http_requests.get("https://api.xero.com/connections", headers=headers, timeout=10)
+        resp = http_requests.get(
+            "https://api.xero.com/connections", headers=headers, timeout=10
+        )
         if resp.status_code != 200:
             return False
 

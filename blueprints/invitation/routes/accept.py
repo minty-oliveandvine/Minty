@@ -7,7 +7,6 @@ from loguru import logger
 
 from blueprints.invitation import invitation_bp
 from blueprints.invitation.models.invitation import Invitation
-from blueprints.invitation.services.invite import accept_invitation
 from models.db import Entity
 
 
@@ -22,16 +21,25 @@ def accept_invitation_page(token):
     """
     invitation = Invitation.query.filter_by(token=token, status="pending").first()
     if not invitation:
-        logger.info("invitation.accept_link.invalid token=…{}", token[-6:] if token else "")
-        flash("This invitation doesn't work anymore — it may have already been used.", "warning")
+        logger.info(
+            "invitation.accept_link.invalid token=…{}", token[-6:] if token else ""
+        )
+        flash(
+            "This invitation doesn't work anymore — it may have already been used.",
+            "warning",
+        )
         return redirect(url_for("auth.home"))
 
     logger.info(
         "invitation.accept_link.opened invitation={} entity={} email={}",
-        invitation.id, invitation.entity_id, invitation.email,
+        invitation.id,
+        invitation.entity_id,
+        invitation.email,
     )
 
-    onboarding_base = os.environ.get("ONBOARDING_APP_URL", "http://localhost:3001").rstrip("/")
+    onboarding_base = os.environ.get(
+        "ONBOARDING_APP_URL", "http://localhost:3001"
+    ).rstrip("/")
     params = {"invite": token, "email": invitation.email}
     fn = (request.args.get("fn") or "").strip()
     ln = (request.args.get("ln") or "").strip()
@@ -66,7 +74,8 @@ def accept_invitation_page(token):
             logger.warning(
                 "invitation.accept_link.session_mismatch invitation={} "
                 "invited={} user={}",
-                invitation.id, invited_email,
+                invitation.id,
+                invited_email,
                 getattr(current_user, "id", "?"),
             )
             # Clear our app session so the wrong user isn't carried into the
@@ -87,7 +96,9 @@ def accept_invitation_page(token):
     return redirect(resume_url)
 
 
-@invitation_bp.route("/invitation/xero-not-connected/<string:entity_id>", methods=["GET"])
+@invitation_bp.route(
+    "/invitation/xero-not-connected/<string:entity_id>", methods=["GET"]
+)
 @login_required
 def xero_not_connected(entity_id):
     """Page shown when user is added to Minty but not invited to Xero org."""
