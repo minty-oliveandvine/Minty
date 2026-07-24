@@ -1,7 +1,8 @@
-from flask import flash, redirect, render_template, url_for
+from flask import render_template
 from flask_login import current_user, login_required
 
 from blueprints.user_management import user_management_bp
+from blueprints.user_management.services.access_guards import require_superuser
 from models.db import User, UserEntity
 
 
@@ -21,9 +22,9 @@ def _build_membership_summary_by_user(user_ids: list[str]) -> dict[str, str]:
 @user_management_bp.route("/admin_dashboard", methods=["GET"])
 @login_required
 def admin_dashboard():
-    if current_user.system_role != User.SYSTEM_ROLE_SUPERUSER:
-        flash("Hmm, I can't let you in there.", "danger")
-        return redirect(url_for("auth.index"))
+    denied = require_superuser("auth.index")
+    if denied is not None:
+        return denied
     pending_users = User.query.filter_by(approved=False).all()
     approved_users = User.query.filter_by(approved=True).all()
     membership_summary_by_user = _build_membership_summary_by_user(
