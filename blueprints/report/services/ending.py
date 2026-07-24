@@ -161,8 +161,16 @@ def convert_report_to_draft(report_id):
     except RevertError as e:
         return jsonify({"status": "error", "message": e.message}), e.status_code
     except Exception as e:
-        logger.error(f"Error converting report to draft: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.exception(f"Error converting report to draft: {str(e)}")
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I couldn't convert that report to a draft. Mind trying again?",
+                }
+            ),
+            500,
+        )
 
     return jsonify(
         {

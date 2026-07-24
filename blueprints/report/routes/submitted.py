@@ -366,7 +366,7 @@ def report_submitted_publish_to_xero():
             jsonify(
                 {
                     "status": "error",
-                    "error": f"An error occurred: {str(e)}",
+                    "error": "publish_failed",
                     "message": "I couldn't publish this to Xero. Could you check the connection and try again?",
                 }),
             500,

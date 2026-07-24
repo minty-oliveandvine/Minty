@@ -1576,6 +1576,10 @@ def debug_xero_settings(entity_id):
                 "contact_categories": [c[0] for c in contact_categories],
             }
         )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception(f"Entity settings debug failed for entity {entity_id}")
+        return (
+            jsonify({"error": "I couldn't save those settings. Mind trying again?"}),
+            500,
+        )
 

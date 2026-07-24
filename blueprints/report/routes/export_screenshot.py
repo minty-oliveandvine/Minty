@@ -439,5 +439,15 @@ def report_screenshot(id=None):
             download_name=f"Report_Ending_{report.transaction_date}_{report.id}.png",
         )
     except Exception as e:
-        logger.error(f"Error in getting report screenshot: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 404
+        # Screenshot generation failing is a server-side fault, not a missing
+        # report — 404 misreported it as "not found".
+        logger.exception(f"Error in getting report screenshot: {str(e)}")
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I couldn't open that report. Mind trying again?",
+                }
+            ),
+            500,
+        )

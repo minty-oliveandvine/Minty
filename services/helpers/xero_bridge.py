@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import requests
 from flask import current_app
 from flask_login import current_user
@@ -186,12 +188,14 @@ def get_xero_data_dynamic(
                 break
             page += 1
 
-        merged = dict(result) if isinstance(result, dict) else {}
+        merged: dict[str, Any] = dict(result) if isinstance(result, dict) else {}
         merged[resource_key] = all_items
         return merged
     except Exception as e:
-        logger.error(f"Error in get_xero_data_dynamic: {str(e)}")
-        return {"error": f"API call failed: {str(e)}"}
+        # Callers only test for the presence of "error", never its text, so the
+        # exception detail stays in the log rather than riding out to the UI.
+        logger.exception(f"Error in get_xero_data_dynamic: {str(e)}")
+        return {"error": "I couldn't reach Xero just now. Mind trying again?"}
 
 
 def get_entity_account_settings(entity_id, account_type):
