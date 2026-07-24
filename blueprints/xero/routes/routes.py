@@ -230,13 +230,22 @@ def xero_connect_entity():
         )
     # Minimal scope set covering every Xero API call made by this app AND the
     # billing backend (which reuses this token via the shared user table):
-    # settings → Organisation/Accounts, contacts → Contacts, transactions →
-    # Invoices/BankTransactions/BankTransfers, attachments → receipt uploads,
-    # files → billing's bank-slip Files API. Must stay in sync with
-    # xero_reconnect below; tests/test_xero_scopes.py enforces coverage.
+    # settings → Organisation/Accounts, contacts → Contacts, invoices →
+    # Invoices, banktransactions → BankTransactions/BankTransfers, attachments
+    # → receipt uploads, files → billing's bank-slip Files API. Must stay in
+    # sync with xero_reconnect below; tests/test_xero_scopes.py enforces
+    # coverage.
+    #
+    # NOTE: these are Xero's GRANULAR transaction scopes. The older composite
+    # "accounting.transactions" covered Invoices + BankTransactions +
+    # BankTransfers in one grant, but this app's Xero app is provisioned with
+    # the granular set instead, and the two schemes are mutually exclusive per
+    # app — requesting the composite scope gets rejected at the authorize step
+    # with "invalid_scope". Do not collapse these back into one scope.
     scope = (
         "openid profile email offline_access accounting.settings "
-        "accounting.contacts accounting.transactions accounting.attachments files"
+        "accounting.contacts accounting.invoices accounting.banktransactions "
+        "accounting.attachments files"
     )
     # When launched from the onboarding app, tag the OAuth state so the
     # callback returns to onboarding (step 3) instead of the entity list.
@@ -289,9 +298,12 @@ def xero_reconnect():
     session["reconnect_entity_id"] = entity_id
     # Same minimal scope set as xero_connect above — reconnect must not grant
     # more than connect. tests/test_xero_scopes.py enforces both stay in sync.
+    # See xero_connect for why the granular transaction scopes are used rather
+    # than the composite "accounting.transactions".
     scope = (
         "openid profile email offline_access accounting.settings "
-        "accounting.contacts accounting.transactions accounting.attachments files"
+        "accounting.contacts accounting.invoices accounting.banktransactions "
+        "accounting.attachments files"
     )
     # state shape: "entity_reconnect" | "entity_reconnect:<initiator_user_id>".
     # The trailing id is the user who clicked Reconnect; the callback enforces the

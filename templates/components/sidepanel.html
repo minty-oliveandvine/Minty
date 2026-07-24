@@ -118,10 +118,13 @@
       <!-- Spacer pushes the cat to the bottom -->
       <div class="min-h-0 min-w-0 flex-1" aria-hidden="true"></div>
 
-       <!-- Cat -->
+      {% if show_entity_navigation %}
+      <!-- Cat (only when an entity is selected; on the entity-list page the sidebar collapses to Logout only) -->
       <div class="cat-container flex shrink-0 justify-center px-2 pt-2">
         <img src="{{ url_for('static', filename='img/sidepanel_cat.webp') }}" alt="" class="w-[min(100%,10rem)] h-auto object-contain object-bottom select-none" draggable="false">
       </div>
+      {% endif %}
+
     </div>
   </div>
 </div>
