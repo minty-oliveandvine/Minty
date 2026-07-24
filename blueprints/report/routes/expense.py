@@ -17,6 +17,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id,
                                                safe_float,
                                                update_draft_progress)
+from blueprints.shared.entity_display import entity_badge_data
 from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
                        ReportDraft, ReportExpenseDetail, ReportV2, ShopExpense,
                        ShopExpenseDraft, XeroContactSync, db)
@@ -25,8 +26,7 @@ from services.helpers.xero_bridge import (account_info_to_xero_format,
                                           contact_sync_to_xero_format,
                                           get_xero_data_dynamic,
                                           resolve_contact_name)
-from services.permission_policy import (Permission, can_edit_report,
-                                        has_permission)
+from services.permission_policy import Permission, has_permission
 from utils import jsonify
 
 
@@ -115,17 +115,6 @@ def report_expense(id=None):
     # Check if edit mode is enabled
     is_edit_mode = (request.args.get("edit") ==
                     "true" or request.form.get("edit") == "true")
-
-    def get_entity_badge_data(entity):
-        acronym = build_entity_acronym(entity.name) if entity else ""
-
-        badge_date = None
-        if entity and entity.created_at:
-            if isinstance(entity.created_at, datetime):
-                badge_date = entity.created_at.date()
-            else:
-                badge_date = entity.created_at
-        return acronym, badge_date
 
     entity_acronym = ""
     display_date = None
@@ -248,7 +237,7 @@ def report_expense(id=None):
                 id=id) .first())
         if not org:
             org = Entity.query.get_or_404(entity_id)
-        entity_acronym, display_date = get_entity_badge_data(org)
+        entity_acronym, display_date = entity_badge_data(org)
         existing_expenses = (
             ShopExpense.query.join(
                 ShopExpenseDraft,
@@ -749,7 +738,7 @@ def report_expense(id=None):
     # Get organization info for the template (if not already fetched)
     if not org:
         org = Entity.query.filter(Entity.id == entity_id).first()
-    entity_acronym, display_date = get_entity_badge_data(org)
+    entity_acronym, display_date = entity_badge_data(org)
 
     # Don't reset current_section when viewing - it should only update when progressing forward
     # The stepper should always show the latest step reached, not the current

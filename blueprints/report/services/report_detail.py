@@ -13,8 +13,7 @@ from flask_login import current_user
 from loguru import logger
 
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from models.db import (AccountInfo, EntityAccountXero, Report, ReportDraft,
-                       ShopExpense, ShopExpenseDraft, db)
+from models.db import Report, ReportDraft, ShopExpense, ShopExpenseDraft, db
 from services.helpers.xero_bridge import get_entity_account_settings
 
 

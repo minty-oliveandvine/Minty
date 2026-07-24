@@ -17,8 +17,8 @@ from user_agents import parse
 from blueprints.report import report_bp
 from models.db import (Entity, Report, ReportCashCountDraft, ReportSaleDetail,
                        SaleInfo, ShopExpense, db)
-from services.permission_policy import can_view_report
 from services.helpers.docx import convert_docx_to_pdf
+from services.permission_policy import can_view_report
 
 
 @report_bp.route("/report/<string:id>/export", methods=["GET"])

@@ -319,10 +319,86 @@ Not worth a helper.
 Same call as xero — `services/settings.py` (1585) and `routes/settings.py` (1385)
 would produce a reformat diff that swamps the logic change.
 
-## Next up: blueprint #6 = `report` (14447 LOC, 43 files) — the last and largest
+## Blueprint #6: report — ✅ COMPLETE (final blueprint)
 
-## Not yet started
-- Blueprint: `report` — same 3-step recipe.
+Regression check: **OK — no new failures beyond the 79 baseline.**
+`ruff --select F` is now **clean across ALL blueprints**. Net **−49 lines**.
+
+### Dead code removed (55 ruff fixes)
+- ~20 unused imports (`AccountInfo`/`EntityAccountXero` repeated across
+  deposit/download/opening/report_detail/report_download, `can_edit_report`
+  across 6 files, `User` in api.py, `db` in report_download).
+- ~35 f-strings without placeholders (nearly all in `services/ending.py`).
+- 1 dead local (`entity_id` in `generate_share_link` — verified dead:
+  `create_share_link_for_report` receives the whole `data` dict and extracts it).
+
+### 🐛 BUG I INTRODUCED AND FIXED — `expense.py` NameError
+`blueprints/report/routes/expense.py` called `build_entity_acronym()` with **no
+import** — a guaranteed `NameError` on the expense page. I introduced this in
+commit `d70c79f` (the auth-pass acronym migration): that file was hand-edited
+rather than script-edited, and I added the call without the import.
+
+**Why it slipped through:**
+1. After the auth pass I ran `ruff --select F` only on the blueprints I thought
+   I'd touched — but `expense.py` was collateral from a CROSS-blueprint change,
+   and I never re-linted `report`.
+2. The test suite doesn't cover that path, so the regression check stayed green.
+
+**Rule going forward: after any cross-blueprint change, run
+`ruff check blueprints/ --select F821` REPO-WIDE, not per-blueprint.**
+F821 (undefined name) is the check that catches this class of error.
+
+### 🐛 Pre-existing bug fixed — `create.py` missing `tz`
+`routes/create.py:84` called `datetime.now(tz)` but never imported `tz` →
+`NameError` in the report-creation future-date guard. Pre-existing (verified
+present on the pre-cleanse base commit), NOT caused by this work. Fixed with
+the one-word import that sibling files (`legacy.py`, the models) already use;
+`tz` is `pytz.timezone("Asia/Hong_Kong")`, which matches the code comment.
+
+### Consolidation: `entity_badge_data()` / `entity_badge_date()`
+`get_entity_badge_data` was a **byte-identical closure defined 5×** (deposit,
+expense, sales, cash_count, services/ending) — the cleanest duplication in the
+whole project. The same badge-date logic also appeared inline 3× more
+(opening.py, history_query.py, entity/routes/list.py) for 8 copies total.
+
+Added to `blueprints/shared/entity_display.py`, next to the acronym helper they
+already called. Equivalence verified against the original over datetime/date/
+None-created_at/empty-name/None-entity cases.
+
+### Left alone deliberately
+9 model files under `report/models/` start with a **UTF-8 BOM** (U+FEFF).
+Harmless to Python at runtime (the BOM is stripped on read) and pre-existing —
+stripping them is cosmetic churn, so out of scope. Note that `ast.parse()` on
+the decoded text DOES choke on them, which makes bare `ast.parse` checks report
+false syntax errors for these 9 files.
+
+### Formatting: `isort` only (no `black`)
+Same call as xero/entity — `routes/api.py` (2025) and `services/ending.py`
+(1998) would swamp the logic diff.
+
+---
+
+# ✅ ALL 6 BLUEPRINTS COMPLETE
+
+| # | blueprint | LOC | outcome |
+|---|---|---|---|
+| 1 | user_management | 732 | superuser gate + role helpers (DI pattern established) |
+| 2 | invitation | 926 | cancel/resend guard merged |
+| 3 | auth | 1347 | dead code only + shared acronym helper (13 sites) |
+| 4 | xero | 5348 | dead code + token resolver (9 of 11 sites) |
+| 5 | entity | 7961 | 15 dead imports + background-thread runner |
+| 6 | report | 14447 | 55 dead-code fixes + badge helper (5 identical closures) |
+
+`ruff --select F` clean across all blueprints. No new test failures at any step.
+
+## Remaining known debt (NOT addressed — deliberate)
+- **The 79-test red baseline.** Chiefly `test_invitation.py` (31) failing on
+  `Entity(currency_code=...)` fixture drift — the model dropped that field.
+  This is test debt, not product debt, but it means the invitation blueprint is
+  effectively untested. Worth its own effort.
+- **`black` never run** on xero / entity / report (the 4 files over 1200 lines).
+  Worth doing as an isolated formatting-only commit so it's easy to review.
+- **UTF-8 BOMs** on 9 `report/models/*.py` files.
 - Known pre-existing debt found along the way: `blueprints/entity/routes/settings.py`
   has **12 dead imports** (F401) already on HEAD — clean up in the entity pass.
 - Optional deeper dead-code sweep: `vulture` is **not installed**; would need

@@ -9,12 +9,10 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import safe_float
-from blueprints.xero.services.publish import (
-    update_after_deposit_change,
-    update_xero_deposit_after_change,
-)
-from services.helpers.xero_bridge import get_entity_account_settings
+from blueprints.xero.services.publish import (update_after_deposit_change,
+                                              update_xero_deposit_after_change)
 from models.db import Entity, Report, ShareLink, db, tz
+from services.helpers.xero_bridge import get_entity_account_settings
 from utils import verify_share_token
 
 
@@ -22,7 +20,8 @@ from utils import verify_share_token
 def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
     """Handle shared links with clean format: Minty_Report/EntityName/09_Jan_2026/."""
     try:
-        from blueprints.report.services.ending import report_ending as render_report_ending
+        from blueprints.report.services.ending import \
+            report_ending as render_report_ending
 
         # Look up token from database using path segment
         share_link = ShareLink.query.filter_by(
@@ -99,7 +98,8 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
                  methods=["GET"])
 def minty_report_ending(entity_and_date: str) -> ResponseReturnValue:
     """Handle shared links with readable format: Minty_Report_EntityName_dd_mm_yyyy."""
-    from blueprints.report.services.ending import report_ending as render_report_ending
+    from blueprints.report.services.ending import \
+        report_ending as render_report_ending
 
     token = request.args.get("token")
     if not token:
