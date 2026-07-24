@@ -1,5 +1,5 @@
 from flask import flash, redirect, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 from blueprints.user_management import user_management_bp
 from blueprints.user_management.services.access_guards import require_superuser
@@ -12,6 +12,8 @@ def approve_user(user_id):
     denied = require_superuser(
         "user_management.admin_dashboard",
         message="That task is reserved for our Super Admins.",
+        user=current_user,
+        user_model=User,
     )
     if denied is not None:
         return denied
@@ -25,7 +27,9 @@ def approve_user(user_id):
 @user_management_bp.route("/reject_user/<string:user_id>", methods=["POST"])
 @login_required
 def reject_user(user_id):
-    denied = require_superuser("user_management.admin_dashboard")
+    denied = require_superuser(
+        "user_management.admin_dashboard", user=current_user, user_model=User
+    )
     if denied is not None:
         return denied
     user = User.query.get_or_404(user_id)
@@ -33,5 +37,3 @@ def reject_user(user_id):
     db.session.commit()
     flash(f"User {user.username} rejected and deactivated.", "warning")
     return redirect(url_for("user_management.admin_dashboard"))
-
-

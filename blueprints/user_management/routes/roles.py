@@ -11,7 +11,7 @@ from blueprints.user_management.services.roles import (
 )
 from models.db import User, UserEntity, db
 from services.authz import require_permission
-from services.permission_policy import Permission
+from services.permission_policy import Permission, can_manage_role_assignment_for_entity
 
 
 def _resolve_entity_id(payload: dict | None) -> str | None:
@@ -34,15 +34,31 @@ def update_user_details(user_id):
     payload = request.get_json(silent=True) or {}
     entity_id = _resolve_entity_id(payload)
     if not entity_id:
-        return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I need to know which entity we're working with first!",
+                }
+            ),
+            400,
+        )
 
-    membership, error = find_membership_or_error(user_id, entity_id)
+    membership, error = find_membership_or_error(user_id, entity_id, model=UserEntity)
     if error is not None:
         return error
 
     target_user = User.query.get(user_id)
     if not target_user:
-        return jsonify({"status": "error", "message": "Hmm, that name doesn't seem to be in my list."}), 404
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Hmm, that name doesn't seem to be in my list.",
+                }
+            ),
+            404,
+        )
 
     first_name = payload.get("first_name", "").strip()
     last_name = payload.get("last_name", "").strip()
@@ -54,25 +70,40 @@ def update_user_details(user_id):
         target_user.last_name = last_name
 
     if new_role:
-        error = check_role_assignment_or_error(new_role, entity_id)
+        error = check_role_assignment_or_error(
+            new_role,
+            entity_id,
+            user=current_user,
+            policy=can_manage_role_assignment_for_entity,
+        )
         if error is not None:
             return error
-        error = check_can_manage_membership_or_error(membership.role, entity_id)
+        error = check_can_manage_membership_or_error(
+            membership.role,
+            entity_id,
+            user=current_user,
+            policy=can_manage_role_assignment_for_entity,
+        )
         if error is not None:
             return error
         membership.role = new_role
 
     db.session.commit()
-    return jsonify({
-        "status": "success",
-        "message": "User updated successfully.",
-        "user": {
-            "id": target_user.id,
-            "first_name": target_user.first_name,
-            "last_name": target_user.last_name,
-            "role": membership.role,
-        },
-    }), 200
+    return (
+        jsonify(
+            {
+                "status": "success",
+                "message": "User updated successfully.",
+                "user": {
+                    "id": target_user.id,
+                    "first_name": target_user.first_name,
+                    "last_name": target_user.last_name,
+                    "role": membership.role,
+                },
+            }
+        ),
+        200,
+    )
 
 
 @user_management_bp.route("/minty/api/users/<string:user_id>/role", methods=["PATCH"])
@@ -87,19 +118,42 @@ def update_user_role(user_id):
     entity_id = _resolve_entity_id(payload)
     new_role = str(payload.get("role") or "").strip().lower()
     if not entity_id:
-        return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I need to know which entity we're working with first!",
+                }
+            ),
+            400,
+        )
     if not new_role:
-        return jsonify({"status": "error", "message": "I need a role before I can save that."}), 400
+        return (
+            jsonify(
+                {"status": "error", "message": "I need a role before I can save that."}
+            ),
+            400,
+        )
 
-    membership, error = find_membership_or_error(user_id, entity_id)
+    membership, error = find_membership_or_error(user_id, entity_id, model=UserEntity)
     if error is not None:
         return error
 
-    error = check_role_assignment_or_error(new_role, entity_id)
+    error = check_role_assignment_or_error(
+        new_role,
+        entity_id,
+        user=current_user,
+        policy=can_manage_role_assignment_for_entity,
+    )
     if error is not None:
         return error
 
-    error = check_can_manage_membership_or_error(membership.role, entity_id)
+    error = check_can_manage_membership_or_error(
+        membership.role,
+        entity_id,
+        user=current_user,
+        policy=can_manage_role_assignment_for_entity,
+    )
     if error is not None:
         return error
 
@@ -131,9 +185,17 @@ def delete_user_role(user_id):
     payload = request.get_json(silent=True) or {}
     entity_id = _resolve_entity_id(payload)
     if not entity_id:
-        return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I need to know which entity we're working with first!",
+                }
+            ),
+            400,
+        )
 
-    membership, error = find_membership_or_error(user_id, entity_id)
+    membership, error = find_membership_or_error(user_id, entity_id, model=UserEntity)
     if error is not None:
         return error
 

@@ -15,21 +15,28 @@ def require_superuser(
     message: str = "Hmm, I can't let you in there.",
     category: str = "danger",
     log_unauthorized: bool = False,
+    user=None,
+    user_model=None,
 ) -> Response | None:
     """Ensure the current user is a superuser.
 
     Returns ``None`` when the user is a superuser and the caller should proceed.
     Otherwise flashes ``message`` and returns a redirect ``Response`` to
     ``redirect_endpoint`` for the caller to return directly.
+
+    ``user`` and ``user_model`` let callers pass their own module-level
+    ``current_user`` / ``User`` bindings so they stay the objects tests patch on
+    the calling module.
     """
-    user = current_user
-    if getattr(user, "system_role", None) == User.SYSTEM_ROLE_SUPERUSER:
+    actor = user if user is not None else current_user
+    model = user_model if user_model is not None else User
+    if getattr(actor, "system_role", None) == model.SYSTEM_ROLE_SUPERUSER:
         return None
 
     if log_unauthorized:
         logger.warning(
             "Unauthorized admin access attempt by user_id=%s",
-            getattr(user, "id", None),
+            getattr(actor, "id", None),
         )
 
     flash(message, category)

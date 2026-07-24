@@ -22,7 +22,7 @@ def _build_membership_summary_by_user(user_ids: list[str]) -> dict[str, str]:
 @user_management_bp.route("/admin_dashboard", methods=["GET"])
 @login_required
 def admin_dashboard():
-    denied = require_superuser("auth.index")
+    denied = require_superuser("auth.index", user=current_user, user_model=User)
     if denied is not None:
         return denied
     pending_users = User.query.filter_by(approved=False).all()
