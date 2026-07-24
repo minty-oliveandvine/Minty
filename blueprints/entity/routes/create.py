@@ -111,30 +111,51 @@ def _cors(resp):
 
 
 def _resolve_country_code(value: str) -> str:
+    """Payload value → country_info.country_code (ISO alpha-2 PK).
+
+    The wizard sends the code directly; English names are accepted as a
+    fallback so older callers keep working. Returns "" when nothing matches
+    (never an unvalidated value — entities.country_code is an FK).
+    """
+    from models.db import CountryInfo
+
     v = (value or "").strip()
     if not v:
         return ""
-    if len(v) == 2:
-        return v.upper()
-    try:
-        return pycountry.countries.lookup(v).alpha_2
-    except Exception:  # noqa: BLE001
-        return v
+    row = CountryInfo.query.get(v.upper()) if len(v) == 2 else None
+    if row is None:
+        row = CountryInfo.query.filter(
+            CountryInfo.country_name_en.ilike(v)
+        ).first()
+    return row.country_code if row else ""
 
 
-def _resolve_currency_code(value: str) -> str:
+def _resolve_currency_id(value: str) -> str:
+    """Payload value → currency_info.id uuid.
+
+    The wizard sends the uuid directly; ISO codes and currency names are
+    accepted as fallbacks so older callers keep working. Returns "" when
+    nothing matches (never a raw code — entities.currency_id is an FK now).
+    """
+    import uuid as _uuid
+
+    from models.db import CurrencyInfo
+
     v = (value or "").strip()
     if not v:
         return ""
-    if len(v) == 3 and v.isupper():
-        return v
-    try:
-        for c in Currency:
-            if c.currency_name.lower() == v.lower():
-                return c.code
-    except Exception:  # noqa: BLE001
-        pass
-    return v
+    try:  # only hit the uuid PK with a valid uuid (a bad literal aborts the tx)
+        _uuid.UUID(v)
+        row = CurrencyInfo.query.get(v)
+    except ValueError:
+        row = None
+    if row:
+        return row.id
+    row = CurrencyInfo.query.filter(
+        (CurrencyInfo.currency_code == v.upper())
+        | (CurrencyInfo.currency_name.ilike(v))
+    ).first()
+    return row.id if row else ""
 
 
 # --- Routes ---------------------------------------------------------------
@@ -176,8 +197,8 @@ def entity_create():
             entity, error = create_entity_for_user(
                 current_user.id,
                 form.entity_name.data,
-                form.country_code.data,
-                form.currency_code.data,
+                _resolve_country_code(form.country_code.data),
+                _resolve_currency_id(form.currency_code.data),
             )
             if error:
                 form.entity_name.errors = [*form.entity_name.errors, error]
@@ -208,6 +229,70 @@ def onboarding_server_time():
     from models.db import tz
 
     resp = jsonify({"today": datetime.now(tz).date().isoformat()})
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/currencies", methods=["GET", "OPTIONS"])
+def onboarding_currencies():
+    """Currency registry for the onboarding Step 1 dropdown.
+
+    GET → {"currencies": [{"currency_id", "currency_name", "iso_code"}, ...]}
+    ordered by currency_name. The dropdown shows currency_name but submits
+    currency_id (the currency_info uuid PK) so the created entity's
+    currency_id FK gets a uuid. The response keys keep their historical names
+    (iso_code carries currency_info.currency_code) so the wizard needs no
+    change. Public (reference data only); same CORS contract as the other
+    onboarding routes.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from models.db import CurrencyInfo
+
+    rows = (
+        CurrencyInfo.query.with_entities(
+            CurrencyInfo.id,
+            CurrencyInfo.currency_name,
+            CurrencyInfo.currency_code,
+        )
+        .order_by(CurrencyInfo.currency_name)
+        .all()
+    )
+    resp = jsonify({"currencies": [
+        {"currency_id": cid, "currency_name": name, "iso_code": code}
+        for cid, name, code in rows
+    ]})
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/countries", methods=["GET", "OPTIONS"])
+def onboarding_countries():
+    """Country registry for the onboarding Step 1 dropdown.
+
+    GET → {"countries": [{"country_id", "country_name_en", "country_code"}, ...]}
+    ordered by country_name_en. country_info's PK is the ISO alpha-2
+    country_code now, so ``country_id`` carries that code too — the key is
+    kept so the wizard's submit-the-id contract needs no change (the create /
+    update endpoints resolve codes). Public; same CORS contract as the other
+    onboarding routes.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from models.db import CountryInfo
+
+    rows = (
+        CountryInfo.query.with_entities(
+            CountryInfo.country_code,
+            CountryInfo.country_name_en,
+        )
+        .order_by(CountryInfo.country_name_en)
+        .all()
+    )
+    resp = jsonify({"countries": [
+        {"country_id": code, "country_name_en": name, "country_code": code}
+        for code, name in rows
+    ]})
     return _cors(resp)
 
 
@@ -296,10 +381,14 @@ def onboarding_create_entity():
 
     data = request.get_json(silent=True) or {}
     entity_name = data.get("entity_name") or data.get("name") or ""
-    country_code = _resolve_country_code(data.get("country_code") or data.get("country") or "")
-    currency_code = _resolve_currency_code(data.get("currency_code") or data.get("currency") or "")
+    country_code = _resolve_country_code(
+        data.get("country_id") or data.get("country") or data.get("country_code") or ""
+    )
+    currency_id = _resolve_currency_id(
+        data.get("currency_id") or data.get("currency") or data.get("currency_code") or ""
+    )
 
-    entity, error = create_entity_for_user(user_id, entity_name, country_code, currency_code)
+    entity, error = create_entity_for_user(user_id, entity_name, country_code, currency_id)
     if error:
         resp = jsonify({"error": error})
         resp.status_code = 409 if "exist" in error.lower() else 400
@@ -399,30 +488,29 @@ def onboarding_update_entity(entity_id):
             entity.name = name_new
 
     # --- Country / currency ---------------------------------------------------
-    # Mirror the Settings page: a country change re-derives the currency from
-    # CountryInfo/CurrencyInfo. An explicit currency is honoured as a fallback
-    # when no country is supplied (or the country has no mapped currency).
+    # The wizard submits the country code and the currency_info uuid (the
+    # dropdowns show names but carry those values). An explicit currency wins;
+    # when only the country is supplied, its registry currency is derived.
     country_code = _resolve_country_code(
-        payload.get("country_code") or payload.get("country") or ""
+        payload.get("country_id") or payload.get("country")
+        or payload.get("country_code") or ""
     )
     if country_code:
         entity.country_code = country_code
-        country_info = CountryInfo.query.filter_by(
-            country_code=country_code
-        ).first()
-        if country_info and country_info.currency_id:
-            currency_info = CurrencyInfo.query.filter_by(
-                currency_code=country_info.currency_id
-            ).first()
-            if currency_info:
-                entity.currency_code = currency_info.currency_code
-                entity.currency_format = currency_info.symbol or "$"
 
-    currency_code = _resolve_currency_code(
-        payload.get("currency_code") or payload.get("currency") or ""
+    currency_id = _resolve_currency_id(
+        payload.get("currency_id") or payload.get("currency")
+        or payload.get("currency_code") or ""
     )
-    if currency_code and not entity.currency_code:
-        entity.currency_code = currency_code
+    if not currency_id and country_code:
+        country_info = CountryInfo.query.get(country_code)
+        if country_info and country_info.currency_id:
+            currency_id = country_info.currency_id
+    if currency_id:
+        entity.currency_id = currency_id
+        currency_info = CurrencyInfo.query.get(currency_id)
+        if currency_info:
+            entity.currency_format = currency_info.symbol or "$"
 
     try:
         _db.session.commit()

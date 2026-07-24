@@ -29,11 +29,12 @@ def report_submitted(id=None):
     # Get the report to check Xero integration status
     report = None
     is_published_to_xero = False
+    was_previously_published = False
     transaction_date = None
     if id:
         report = Report.query.filter(Report.id == id).first()
         if not report:
-            return jsonify({"status": "error", "message": "Report not found."}), 404
+            return jsonify({"status": "error", "message": "Hmm, I couldn't find that report."}), 404
         if not can_view_report(current_user, report):
             return (
                 jsonify(
@@ -46,6 +47,11 @@ def report_submitted(id=None):
             )
         entity_id = entity_id or report.company
         is_published_to_xero = report.xero_integrated_yes or False
+        # A report edited after a publish has xero_integrated_yes cleared but
+        # keeps publishing_status, so it renders as a first-time publish. Xero
+        # object IDs are never stored, so that second publish duplicates every
+        # transaction rather than updating it -- warn on it like a republish.
+        was_previously_published = report.publishing_status is not None
         transaction_date = report.transaction_date
     if not entity_id:
         can_publish = False
@@ -73,6 +79,7 @@ def report_submitted(id=None):
         id=id,
         entity_id=entity_id,
         is_published_to_xero=is_published_to_xero,
+        was_previously_published=was_previously_published,
         transaction_date=transaction_date,
         DD_CLIENT_TOKEN=DD_CLIENT_TOKEN,
         can_publish=can_publish,
@@ -145,7 +152,7 @@ def report_submitted_publish_to_xero():
                     {
                         "status": "error",
                         "error": "No Xero access token found. Please reconnect to Xero.",
-                        "message": "Xero authentication required. Please go to Settings to reconnect your Xero account.",
+                        "message": "I've lost access to your Xero account. Mind reconnecting it in Settings?",
                         "requires_connection": True,
                     }),
                 400,
@@ -360,7 +367,7 @@ def report_submitted_publish_to_xero():
                 {
                     "status": "error",
                     "error": f"An error occurred: {str(e)}",
-                    "message": "Failed to publish to Xero. Please check your connection and try again.",
+                    "message": "I couldn't publish this to Xero. Could you check the connection and try again?",
                 }),
             500,
         )

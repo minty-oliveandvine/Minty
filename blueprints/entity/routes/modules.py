@@ -34,7 +34,7 @@ from services.permission_policy import Role, is_superuser
 def module_selector(entity_id):
     org = Entity.query.filter(Entity.id == entity_id).first()
     if not org:
-        flash("Entity not found", "danger")
+        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Resume-on-return: an entity left mid-onboarding (Save & Exit, which does
@@ -67,7 +67,7 @@ def module_selector(entity_id):
         UserEntity.entity_id == entity_id,
     ).first()
     if not user_entity and not _user_is_superuser:
-        flash("You don't have access to this entity", "danger")
+        flash("Hmm, it looks like you don't have permission to look there.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     # Superusers viewing an entity they aren't a member of get a view-only
@@ -120,7 +120,7 @@ def module_reenter(entity_id):
 
     token = request.args.get("token", "")
     if not token:
-        flash("Session expired. Please log in again.", "warning")
+        flash("Your session ran out. Mind logging back in?", "warning")
         return redirect(url_for("auth.home"))
 
     try:
@@ -128,17 +128,17 @@ def module_reenter(entity_id):
         decoded = jwt.decode(token, secret, algorithms=["HS256"])
         user = User.query.get(decoded["user_id"])
         if not user:
-            flash("User not found.", "danger")
+            flash("Hmm, that name doesn't seem to be in my list.", "danger")
             return redirect(url_for("auth.home"))
 
         login_user(user)
         return redirect(destination)
 
     except jwt.ExpiredSignatureError:
-        flash("Session expired. Please log in again.", "warning")
+        flash("Your session ran out. Mind logging back in?", "warning")
         return redirect(url_for("auth.home"))
     except (jwt.DecodeError, jwt.InvalidTokenError):
-        flash("Invalid session. Please log in again.", "warning")
+        flash("Something's off with your session. Mind logging back in?", "warning")
         return redirect(url_for("auth.home"))
 
 
@@ -155,7 +155,7 @@ def go_to_bills(entity_id):
     """Direct handoff to Module 2 Bills (skips the module picker)."""
     org = Entity.query.filter(Entity.id == entity_id).first()
     if not org:
-        flash("Entity not found", "danger")
+        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
         return redirect(url_for("entity.entity_list"))
 
     if not is_superuser(current_user):
@@ -164,11 +164,11 @@ def go_to_bills(entity_id):
             UserEntity.entity_id == entity_id,
         ).first()
         if not ue:
-            flash("You don't have access to this entity", "danger")
+            flash("Hmm, it looks like you don't have permission to look there.", "danger")
             return redirect(url_for("entity.entity_list"))
 
     if not _is_module_enabled(entity_id, "BILL"):
-        flash("The Bill module is not activated for this entity.", "warning")
+        flash("The Bill module isn't switched on for this entity yet - an admin can turn it on in the entity's module settings.", "warning")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
     return redirect(billing_app_home_url(entity_id, org, current_user.id))

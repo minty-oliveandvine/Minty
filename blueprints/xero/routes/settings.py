@@ -24,7 +24,7 @@ def remove_connections_all() -> ResponseReturnValue:
     try:
         entity_id = request.args.get("entity_id")
         if not entity_id:
-            return jsonify({"status": "error", "message": "Entity ID is required."}), 400
+            return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
         if not has_permission(current_user, Permission.XERO_SETTINGS_UPDATE, entity_id):
             return (
                 jsonify(

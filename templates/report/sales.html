@@ -12,6 +12,9 @@
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
+  <!-- Shared currency formatting -->
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
 
@@ -106,6 +109,11 @@
       overflow-y: auto;
     }
   </style>
+  <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
+  </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
   {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
@@ -231,9 +239,9 @@
                     <div class="relative">
                       {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (report[sale.value_name] if sale.value_name and report[sale.value_name] is defined and report[sale.value_name] not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
                       <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span class="text-gray-500 text-sm">$</span>
+                        <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                       </div>
-                      <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}" name="sales[shop_sales][{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}]" value="{{ sale_value }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                      <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}" name="sales[shop_sales][{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}]" value="{{ sale_value }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                     </div>
                   </div>
                 {% endfor %}
@@ -243,18 +251,18 @@
                   <label class="block text-sm font-medium text-gray-500 mb-2">Visa</label>
                   <div class="relative">
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <span class="text-gray-500 text-sm">$</span>
+                      <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                     </div>
-                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_visa" name="sales[shop_sales][visa]" value="{{ report.visa_sales if report.visa_sales and report.visa_sales != 0 else '' }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_visa" name="sales[shop_sales][visa]" value="{{ report.visa_sales if report.visa_sales and report.visa_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                   </div>
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-500 mb-2">Mastercard</label>
                   <div class="relative">
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <span class="text-gray-500 text-sm">$</span>
+                      <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                     </div>
-                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_master" name="sales[shop_sales][master]" value="{{ report.master_sales if report.master_sales and report.master_sales != 0 else '' }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_master" name="sales[shop_sales][master]" value="{{ report.master_sales if report.master_sales and report.master_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                   </div>
                 </div>
               {% endif %}
@@ -262,7 +270,7 @@
             <!-- Total Shop Sales -->
             <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
               <span class="text-sm font-medium text-[#31B6BD]">Total Electronic Payment Sales</span>
-              <span class="text-sm font-medium text-[#31B6BD]" id="totalElectronicSales">$0.00</span>
+              <span class="text-sm font-medium text-[#31B6BD]" id="totalElectronicSales">{{ currency_symbol }}0.00</span>
             </div>
           </div>
           <!-- Delivery Sales Section -->
@@ -295,9 +303,9 @@
                     <div class="relative">
                       {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (report[sale.value_name] if sale.value_name and report[sale.value_name] is defined and report[sale.value_name] not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
                       <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span class="text-gray-500 text-sm">$</span>
+                        <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                       </div>
-                      <input type="text" inputmode="decimal" placeholder="0.00" id="delivery_sales_{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}" name="sales[delivery_sales][{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}]" value="{{ sale_value }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                      <input type="text" inputmode="decimal" placeholder="0.00" id="delivery_sales_{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}" name="sales[delivery_sales][{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}]" value="{{ sale_value }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                     </div>
                   </div>
                   {% endif %}
@@ -308,9 +316,9 @@
                   <label class="block text-sm font-medium text-gray-500 mb-2">Food Panda</label>
                   <div class="relative">
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <span class="text-gray-500 text-sm">$</span>
+                      <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                     </div>
-                    <input type="text" inputmode="decimal" placeholder="0.00" id="delivery_sales_foodpanda" name="sales[delivery_sales][foodpanda]" value="{{ report.foodpanda_sales if report.foodpanda_sales and report.foodpanda_sales != 0 else '' }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="delivery_sales_foodpanda" name="sales[delivery_sales][foodpanda]" value="{{ report.foodpanda_sales if report.foodpanda_sales and report.foodpanda_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                   </div>
                 </div>
               {% endif %}
@@ -319,7 +327,7 @@
             <!-- Total Delivery Sales -->
             <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
               <span class="text-sm font-medium text-[#31B6BD]">Total Delivery Sales</span>
-              <span class="text-sm font-medium text-[#31B6BD]" id="totalDeliverySales">$0.00</span>
+              <span class="text-sm font-medium text-[#31B6BD]" id="totalDeliverySales">{{ currency_symbol }}0.00</span>
             </div>
           </div>
 
@@ -339,9 +347,9 @@
                    <div class="relative">
                      {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (report[sale.value_name] if sale.value_name and report[sale.value_name] is defined and report[sale.value_name] not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
                      <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <span class="text-gray-500 text-sm">$</span>
+                      <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                      </div>
-                      <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}" name="sales[shop_sales][{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}]" value="{{ sale_value }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                      <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}" name="sales[shop_sales][{{ (sale.value_name or '').replace('_sales', '') if sale.value_name else '' }}]" value="{{ sale_value }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                    </div>
                  </div>
                {% endfor %}
@@ -350,9 +358,9 @@
                <div class="mb-3">
                  <div class="relative">
                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                     <span class="text-gray-500 text-sm">$</span>
+                     <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                    </div>
-                   <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_cash" name="sales[shop_sales][cash]" value="{{ report.cash_sales if report.cash_sales and report.cash_sales != 0 else '' }}" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                   <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_cash" name="sales[shop_sales][cash]" value="{{ report.cash_sales if report.cash_sales and report.cash_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                  </div>
                </div>
              {% endif %}
@@ -360,7 +368,7 @@
              <!-- Total Cash Sales -->
              <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
                <span class="text-sm font-medium text-[#31B6BD]">Total Cash Sales</span>
-               <span class="text-sm font-medium text-[#31B6BD]" id="totalCashSales">$0.00</span>
+               <span class="text-sm font-medium text-[#31B6BD]" id="totalCashSales">{{ currency_symbol }}0.00</span>
              </div>
            </div>
           </div>
@@ -538,91 +546,8 @@
       }
     }
 
-    // Function to format currency input (simple and clean)
-      function formatCurrency(input) {
-        // Just remove invalid characters, don't pad yet
-        let value = input.value.replace(/[^\d.]/g, '');
-        
-        // Remove multiple decimal points (keep only first one)
-        const parts = value.split('.');
-        if (parts.length > 2) {
-          value = parts[0] + '.' + parts.slice(1).join('');
-        }
-        
-        // Limit decimal to 2 digits
-        const decimalParts = value.split('.');
-        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
-          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
-        }
-        
-        // Just set the cleaned value - NO padding during input
-        input.value = value;
-      }
-
-
-
-      // Format with commas on blur (simple and clean)
-      function formatWithCommas(input) {
-        let value = input.value;
-        
-        if (value === '') return;
-        
-        // Remove commas
-        value = value.replace(/,/g, '');
-        const parts = value.split('.');
-        const wholeNumber = parts[0];
-        
-        // Add commas to whole number
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        
-        // Ensure .00 at the end with proper padding
-        let decimalPart = parts.length > 1 ? parts[1] : '00';
-        if (decimalPart === '') {
-          decimalPart = '00'; // 1234. → 1234.00
-        } else if (decimalPart.length === 1) {
-          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
-        }
-        
-        input.value = formattedWholeNumber + '.' + decimalPart;
-      }
-
-    // Format all currency inputs after page load
-    function formatAllCurrencyFields() {
-      // Get all inputs on the page
-      const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
-      
-      allInputs.forEach(input => {
-        if (input.value && input.value.trim() !== '') {
-          // Remove existing commas
-          let value = input.value.replace(/,/g, '');
-          
-          // Split into whole and decimal parts
-          const parts = value.split('.');
-          const wholeNumber = parts[0];
-          
-          // Add commas to whole number
-          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-          
-          // Ensure .00 at the end
-          const decimalPart = parts.length > 1 ? parts[1] : '00';
-          const paddedDecimal = (decimalPart + '00').substring(0, 2);
-          
-          // Set the formatted value
-          input.value = formattedWholeNumber + '.' + paddedDecimal;
-        }
-      });
-    }
-
-    // Run when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', formatAllCurrencyFields);
-    } else {
-      formatAllCurrencyFields();
-    }
-
-    // Also run after a short delay to catch dynamic content
-    setTimeout(formatAllCurrencyFields, 100);
-    setTimeout(formatAllCurrencyFields, 500);
+    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
+    // static/js/currency.js
 
          // Calculate totals based on input values
      function calculateTotals() {
@@ -694,25 +619,25 @@
          const totalElectronicSalesEl = document.getElementById('totalElectronicSales');
 
          if (totalShopSalesEl) {
-           totalShopSalesEl.textContent = `$${totalShopSales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+           totalShopSalesEl.textContent = `${window.CURRENCY_SYMBOL}${totalShopSales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
          } else {
            console.error('Element totalShopSales not found');
          }
          
          if (totalDeliverySalesEl) {
-           totalDeliverySalesEl.textContent = `$${totalDeliverySales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+           totalDeliverySalesEl.textContent = `${window.CURRENCY_SYMBOL}${totalDeliverySales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
          } else {
            console.error('Element totalDeliverySales not found');
          }
          
          if (totalCashSalesEl) {
-           totalCashSalesEl.textContent = `$${totalCashSales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+           totalCashSalesEl.textContent = `${window.CURRENCY_SYMBOL}${totalCashSales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
          } else {
            console.error('Element totalCashSales not found');
          }
          
          if (totalElectronicSalesEl) {
-           totalElectronicSalesEl.textContent = `$${totalElectronicSales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+           totalElectronicSalesEl.textContent = `${window.CURRENCY_SYMBOL}${totalElectronicSales.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
          } else {
            console.error('Element totalElectronicSales not found');
          }

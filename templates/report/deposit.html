@@ -12,6 +12,9 @@
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
+  <!-- Shared currency formatting -->
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
 
@@ -109,6 +112,11 @@
         } 
       }
     }
+  </script>
+  <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
@@ -221,7 +229,7 @@
              <div class="mb-6">
                <p class="text-sm font-inter text-gray-600">
                  <span>Current Balance: </span>
-                 <span class="font-semibold" id="currentBalanceDisplay">${{ "{:,.2f}".format(current_balance) }}</span>
+                 <span class="font-semibold" id="currentBalanceDisplay">{{ currency_symbol }}{{ "{:,.2f}".format(current_balance) }}</span>
                </p>
              </div>
              <input type="hidden" id="currentBalance" value="{{ current_balance }}">
@@ -230,9 +238,9 @@
                  <label class="block text-sm font-medium text-gray-700 mb-2">Deposit Amount</label>
                 <div class="relative">
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center">
-                    <span class="text-gray-500 text-sm">$</span>
+                    <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                   </div>
-                  <input type="text" inputmode="decimal" id="bank_deposit" name="bank_deposit" value="{{'%.2f'|format(current_draft.bank_deposit) if current_draft.bank_deposit and current_draft.bank_deposit > 0 else ''}}" placeholder="0.00" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this)" onblur="formatWithCommas(this)" onchange="updateDepositAmount()">
+                  <input type="text" inputmode="decimal" id="bank_deposit" name="bank_deposit" value="{{'%.2f'|format(current_draft.bank_deposit) if current_draft.bank_deposit and current_draft.bank_deposit > 0 else ''}}" placeholder="0.00" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this)" onblur="formatWithCommas(this)" onchange="updateDepositAmount()">
                 </div>
               </div>
            </div>
@@ -277,14 +285,14 @@
        <div class="mb-6">
          <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
          <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
-         <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if current_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if current_balance < 0 %}(${{ "{:,.2f}".format(-current_balance) }}){% else %}${{ "{:,.2f}".format(current_balance) }}{% endif %}</p>
+         <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if current_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if current_balance < 0 %}({{ currency_symbol }}{{ "{:,.2f}".format(-current_balance) }}){% else %}{{ currency_symbol }}{{ "{:,.2f}".format(current_balance) }}{% endif %}</p>
          <p class="text-sm text-gray-600">Cash balance cannot be negative. Choose from below to edit the error:</p>
        </div>
       <div class="space-y-3">
         <button onclick="navigateToOpening()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Opening</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(current_draft.cash_addition) }})</p>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(current_draft.cash_addition) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -293,7 +301,7 @@
         <button onclick="navigateToSales()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Sales</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(current_draft.cash_sales) }})</p>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(current_draft.cash_sales) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -302,7 +310,7 @@
         <button onclick="navigateToExpenses()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Expenses</span>
-            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(current_draft.expenses) }})</p>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: {{ currency_symbol }} {{ "{:,.2f}".format(current_draft.expenses) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -331,135 +339,8 @@
     window.addEventListener('load', fitBalanceText);
     window.addEventListener('resize', fitBalanceText);
 
-    // Function to format currency input (simple and clean)
-      function formatCurrency(input) {
-        // Just remove invalid characters, don't pad yet
-        let value = input.value.replace(/[^\d.]/g, '');
-        
-        // Remove multiple decimal points (keep only first one)
-        const parts = value.split('.');
-        if (parts.length > 2) {
-          value = parts[0] + '.' + parts.slice(1).join('');
-        }
-        
-        // Limit decimal to 2 digits
-        const decimalParts = value.split('.');
-        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
-          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
-        }
-        
-        // Just set the cleaned value - NO padding during input
-        input.value = value;
-      }
-
-
-
-      // Format with commas on blur (simple and clean)
-      function formatWithCommas(input) {
-        let value = input.value;
-        
-        if (value === '') return;
-        
-        // Remove commas
-        value = value.replace(/,/g, '');
-        const parts = value.split('.');
-        const wholeNumber = parts[0];
-        
-        // Add commas to whole number
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        
-        // Ensure .00 at the end with proper padding
-        let decimalPart = parts.length > 1 ? parts[1] : '00';
-        if (decimalPart === '') {
-          decimalPart = '00'; // 1234. → 1234.00
-        } else if (decimalPart.length === 1) {
-          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
-        }
-        
-        input.value = formattedWholeNumber + '.' + decimalPart;
-      }
-
-    // Function to format currency input for modal (with comma formatting and dash for zero)
-    function formatCurrencyModal(input) {
-      // Store cursor position
-      const cursorPosition = input.selectionStart;
-      
-      // Remove any non-numeric characters except decimal point
-      let value = input.value.replace(/[^\d.]/g, '');
-      
-      // Ensure only one decimal point
-      const parts = value.split('.');
-      if (parts.length > 2) {
-        value = parts[0] + '.' + parts.slice(1).join('');
-      }
-      
-      // Limit to 2 decimal places
-      if (parts.length === 2 && parts[1].length > 2) {
-        value = parts[0] + '.' + parts[1].substring(0, 2);
-      }
-      
-      // Show dash for zero value
-      if (value === '0' || value === '0.0' || value === '0.00' || value === '') {
-        input.value = '-';
-        input.setSelectionRange(1, 1);
-        return;
-      }
-      
-      // Format with commas for display
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '');
-      }
-      
-      // Only update if value actually changed
-      if (input.value !== value) {
-        const oldValue = input.value;
-        input.value = value;
-        
-        // Calculate new cursor position
-        let newCursorPosition = cursorPosition;
-        
-        // Count commas before cursor in old value
-        const commasBeforeCursorOld = (oldValue.substring(0, cursorPosition).match(/,/g) || []).length;
-        
-        // Count commas before cursor in new value
-        const commasBeforeCursorNew = (value.substring(0, cursorPosition).match(/,/g) || []).length;
-        
-        // Adjust cursor position based on comma difference
-        newCursorPosition += (commasBeforeCursorNew - commasBeforeCursorOld);
-        
-        // Ensure cursor position is within bounds
-        newCursorPosition = Math.min(newCursorPosition, value.length);
-        input.setSelectionRange(newCursorPosition, newCursorPosition);
-      }
-    }
-
-    // Format with commas on blur for modal
-    function formatWithCommasModal(input) {
-      let value = input.value;
-      
-      // Skip if empty or dash
-      if (value === '' || value === '-') {
-        return;
-      }
-      
-      // Remove existing commas and format
-      value = value.replace(/,/g, '');
-      const parts = value.split('.');
-      
-      if (parts.length > 0 && parts[0] !== '') {
-        const wholeNumber = parts[0];
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        // Add .00 if no decimal part
-        value = formattedWholeNumber + (parts.length > 1 ? '.' + parts[1] : '.00');
-      }
-      
-      // Only update if we have a valid number
-      if (value !== '' && value !== '-') {
-        input.value = value;
-      }
-    }
+    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
+    // static/js/currency.js
 
     // Function to update deposit amount display
     function updateDepositAmount() {
@@ -483,7 +364,7 @@
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           });
-          depositDisplay.textContent = `$${formattedAmount}`;
+          depositDisplay.textContent = `${window.CURRENCY_SYMBOL}${formattedAmount}`;
         }
       }
     }

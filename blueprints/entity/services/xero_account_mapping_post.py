@@ -35,6 +35,36 @@ def _mapping_redirect(entity_id: str, _from: str | None, *, return_view: str):
     return redirect(url_for("entity_settings", entity_id=entity_id, **bills_kw))
 
 
+def apply_country_currency_selection(entity, form) -> None:
+    """Persist the Country / Currency dropdown selections onto the entity FKs.
+
+    The settings dropdowns submit the ISO alpha-2 ``country_code`` (the
+    country_info PK) and the ``currency_id`` registry uuid; a legacy
+    ``country_id`` field is accepted as a code alias so older forms keep
+    working. An explicit currency selection wins; when only the country is
+    supplied, its registry currency is derived. Values that don't resolve
+    against country_info / currency_info are ignored (never written raw —
+    both columns are FKs). Shared by the integration minimal save, the
+    entity-tab save, and the Xero mapping save.
+    """
+    country_info = None
+    country_code = (
+        form.get("country_code") or form.get("country_id") or ""
+    ).strip()
+    if country_code:
+        country_info = CountryInfo.query.get(country_code.upper())
+    if country_info:
+        entity.country_code = country_info.country_code
+
+    currency_id = (form.get("currency_id") or "").strip()
+    currency_info = CurrencyInfo.query.get(currency_id) if currency_id else None
+    if currency_info is None and country_info and country_info.currency_id:
+        currency_info = CurrencyInfo.query.get(country_info.currency_id)
+    if currency_info:
+        entity.currency_id = currency_info.id
+        entity.currency_format = currency_info.symbol or "$"
+
+
 def _trunc(value, max_len):
     if not value:
         return value
@@ -197,7 +227,7 @@ def process_xero_account_mapping_post(
 
         if main_bank and deposit_bank and main_bank == deposit_bank:
             flash(
-                "Main Bank Account and Deposit Bank Account cannot be the same. Please select different bank accounts.", "danger",
+                "Main Bank Account and Deposit Bank Account can't be the same — please pick a different one for each.", "danger",
             )
             return _mapping_redirect(entity_id, _from, return_view=return_view)
 
@@ -221,19 +251,7 @@ def process_xero_account_mapping_post(
 
         entity = Entity.query.get_or_404(entity_id)
 
-        country_code_form = request.form.get("country_code")
-        if country_code_form:
-            entity.country_code = country_code_form
-            country_info = CountryInfo.query.filter_by(
-                country_code=country_code_form
-            ).first()
-            if country_info and country_info.currency_id:
-                currency_info = CurrencyInfo.query.filter_by(
-                    currency_code=country_info.currency_id
-                ).first()
-                if currency_info:
-                    entity.currency_code = currency_info.currency_code
-                    entity.currency_format = currency_info.symbol or "$"
+        apply_country_currency_selection(entity, request.form)
 
         has_existing_settings = (
             EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
@@ -343,7 +361,7 @@ def process_xero_account_mapping_post(
             )
 
         if not (defer_success_redirect and has_existing_settings):
-            flash("Entity settings updated successfully.", "success")
+            flash("Entity settings saved!", "success")
         if entity_id:
             logger.info(f"Entity settings updated for entity ID: {entity_id}")
 
@@ -366,7 +384,7 @@ def process_xero_account_mapping_post(
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while updating the entity settings.",
+                    "message": "Something went wrong on my end while saving those settings. Mind trying again?",
                 }
             ),
             500,

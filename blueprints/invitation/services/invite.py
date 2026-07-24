@@ -182,9 +182,11 @@ def send_invitation_email(
     """Send the invitation email. Returns True on success.
 
     `first_name` and `last_name` are appended to the accept URL as ?fn / ?ln
-    so the OTP-verify path can create a User row for non-Xero invitees. They
-    aren't persisted anywhere; if the user trims the URL they're lost and
-    the User would have to be created later via /auth signup.
+    so the OTP-verify path can create a User row for non-Xero invitees. When
+    omitted they fall back to the names persisted on the invitation record,
+    so resends produce the same link as the original send. If the user trims
+    the URL they're lost and the User would have to be created later via
+    /auth signup.
     """
     try:
         entity = Entity.query.get(invitation.entity_id)
@@ -204,6 +206,10 @@ def send_invitation_email(
             token=invitation.token,
             _external=True,
         )
+        # Callers that don't have the names to hand (resend) get them off the record.
+        first_name = first_name or invitation.first_name or ""
+        last_name = last_name or invitation.last_name or ""
+
         name_qs = {}
         if first_name:
             name_qs["fn"] = first_name

@@ -1139,18 +1139,32 @@ def _trunc(value, max_len):
 def sync_contacts_if_changed(entity_id, access_token, xero_org_id):
     """Compare Xero live contacts against xero_contact_sync; upsert if different.
 
-    Checks for new contacts, removed contacts, and name changes.
-    Returns dict with keys: changed (bool), inserted (int), updated (int), deleted (int).
+    Insert/update only — this never removes a local contact. A contact absent
+    from the Xero response is left untouched, because absence is not reliably a
+    deletion: it also happens when a contact is archived in Xero, or when the
+    fetch returns a partial result. Losing contact information is worse than
+    showing a stale one, and rows here are referenced by
+    ``entity_pettycash_settings`` (the onboarding step 6 contact mappings).
+
+    Returns dict with keys: changed (bool), inserted (int), updated (int),
+    aborted (bool). ``aborted`` is True when the Xero fetch failed and the
+    reconcile was skipped, which callers must not treat as "no changes".
     """
     from blueprints.xero.services.integration import get_contacts_from_xero
 
-    result = {"changed": False, "inserted": 0, "updated": 0, "deleted": 0}
+    result = {
+        "changed": False,
+        "inserted": 0,
+        "updated": 0,
+        "aborted": False,
+    }
 
     if not access_token or not xero_org_id:
         logger.warning(
             "sync_contacts_if_changed: skipped (no token/org) entity=%s",
             entity_id,
         )
+        result["aborted"] = True
         return result
 
     try:
@@ -1162,14 +1176,19 @@ def sync_contacts_if_changed(entity_id, access_token, xero_org_id):
             "sync_contacts_if_changed: Xero fetch failed entity=%s: %s",
             entity_id, exc,
         )
+        result["aborted"] = True
         return result
 
     if xero_contacts is None:
-        logger.warning(
-            "sync_contacts_if_changed: Xero fetch returned None (API error) — "
-            "aborting to prevent mass-delete entity=%s",
+        # Logged at ERROR, not WARNING: a persistently failing token makes this
+        # abort every night, and a quiet no-op looks identical to a healthy
+        # no-change run while the local contact list silently goes stale.
+        logger.error(
+            "sync_contacts_if_changed: Xero fetch failed (returned None) — "
+            "aborting reconcile to protect local contacts entity=%s",
             entity_id,
         )
+        result["aborted"] = True
         return result
 
     # Build Xero snapshot keyed by ContactID
@@ -1178,7 +1197,7 @@ def sync_contacts_if_changed(entity_id, access_token, xero_org_id):
         cid = c.get("ContactID")
         if cid:
             xero_by_id[cid] = {
-                "name": _trunc(c.get("Name", ""), 255),
+                "name": _trunc(c.get("Name", ""), 150),
             }
 
     # Build DB snapshot
@@ -1195,10 +1214,11 @@ def sync_contacts_if_changed(entity_id, access_token, xero_org_id):
     if new_ids:
         has_diff = True
 
-    # Contacts in DB but removed from Xero
-    removed_ids = set(db_by_xero_id.keys()) - set(xero_by_id.keys())
-    if removed_ids:
-        has_diff = True
+    # Contacts present locally but absent from Xero are deliberately ignored:
+    # this sync never removes anything. Absence is ambiguous (archived in Xero,
+    # a partial fetch, a Xero-side mistake) and acting on it is what previously
+    # destroyed contact data.
+    stale_ids = set(db_by_xero_id.keys()) - set(xero_by_id.keys())
 
     # Name changes on existing contacts
     changed_ids = []
@@ -1220,8 +1240,8 @@ def sync_contacts_if_changed(entity_id, access_token, xero_org_id):
     result["changed"] = True
     logger.info(
         "sync_contacts_if_changed: changes detected entity=%s "
-        "new=%s removed=%s updated=%s",
-        entity_id, len(new_ids), len(removed_ids), len(changed_ids),
+        "new=%s updated=%s kept_absent=%s",
+        entity_id, len(new_ids), len(changed_ids), len(stale_ids),
     )
 
     # --- Apply sync ---
@@ -1244,15 +1264,22 @@ def sync_contacts_if_changed(entity_id, access_token, xero_org_id):
         db_contact.name = xero_by_id[cid]["name"]
         result["updated"] += 1
 
-    # Remove contacts no longer in Xero
-    for cid in removed_ids:
-        db.session.delete(db_by_xero_id[cid])
-        result["deleted"] += 1
+    # No removal step, by design — see the docstring.
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception:
+        # Runs in a daemon thread — an uncommitted, unrolled-back transaction
+        # would otherwise leak into whatever reuses this session.
+        db.session.rollback()
+        logger.exception(
+            "sync_contacts_if_changed: commit failed entity=%s", entity_id,
+        )
+        raise
+
     logger.info(
-        "sync_contacts_if_changed: synced entity=%s inserted=%s updated=%s deleted=%s",
-        entity_id, result["inserted"], result["updated"], result["deleted"],
+        "sync_contacts_if_changed: synced entity=%s inserted=%s updated=%s",
+        entity_id, result["inserted"], result["updated"],
     )
 
     return result
@@ -1399,7 +1426,7 @@ def sync_all_accounts_and_contacts_background(
                     entity_id=entity_id,
                     xero_contact_id=contact_id,
                     xero_org_id=str(xero_org_id),
-                    name=_trunc(contact.get("Name", ""), 255),
+                    name=_trunc(contact.get("Name", ""), 150),
                     category=None,
                 ))
                 new_contacts += 1

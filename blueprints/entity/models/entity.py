@@ -1,5 +1,7 @@
 import uuid
 
+from sqlalchemy.dialects.postgresql import UUID
+
 from models.db import db
 
 
@@ -7,8 +9,12 @@ class Entity(db.Model):
     __tablename__ = "entities"
     __table_args__ = {"schema": "pettycashv2"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    country_code = db.Column(db.String(3))
-    currency_code = db.Column(db.String(10))
+    country_code = db.Column(
+        db.CHAR(2), db.ForeignKey("pettycashv2.country_info.country_code")
+    )
+    currency_id = db.Column(
+        UUID(as_uuid=False), db.ForeignKey("pettycashv2.currency_info.id")
+    )
     name = db.Column(db.String(100), nullable=False)
     minimum_qty = db.Column(db.Integer)
     deposit_frequency = db.Column(db.Integer)

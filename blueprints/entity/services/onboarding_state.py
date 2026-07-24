@@ -282,8 +282,11 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
         "saved_step": entity.onboarding_saved_step,
         "entity": {
             "name": entity.name or "",
+            # country: ISO alpha-2 code (country_info PK); currency: uuid into
+            # currency_info — the wizard's Step 1 dropdowns carry these values
+            # (labels come from the registries).
             "country": entity.country_code or "",
-            "currency": entity.currency_code or "",
+            "currency": entity.currency_id or "",
         },
         "modules": modules,
         "xero": xero,

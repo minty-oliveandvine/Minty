@@ -94,7 +94,7 @@ def require_entity_access(
     *,
     entity_arg: str | None = None,
     entity_keys: Iterable[str] | None = None,
-    message: str = "You do not have access to this entity.",
+    message: str = "Hmm, it looks like you don't have permission to look there.",
 ):
     def decorator(func):
         @wraps(func)
@@ -106,7 +106,9 @@ def require_entity_access(
                 kwargs, entity_arg=entity_arg, entity_keys=entity_keys
             )
             if not entity_id:
-                return _bad_request("Entity context is required.")
+                return _bad_request(
+                    "I need to know which entity we're working with first!"
+                )
 
             if not has_entity_access(current_user, entity_id):
                 return _forbidden(message, entity_id=entity_id)
@@ -143,7 +145,9 @@ def require_module(
                 kwargs, entity_arg=entity_arg, entity_keys=entity_keys
             )
             if not entity_id:
-                return _bad_request("Entity context is required.")
+                return _bad_request(
+                    "I need to know which entity we're working with first!"
+                )
 
             # Lazy import: the resolver lives in the entity blueprint, which
             # imports this module — importing at call time avoids the cycle.

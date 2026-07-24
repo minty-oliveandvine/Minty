@@ -280,13 +280,97 @@
 
       <!-- ─────────────────── CONTENT ─────────────────── -->
 
+      <!-- Country & currency (listed from the country_info / currency_info
+           registries; preselected via the entity's country_code / currency_id
+           FKs; picks are mirrored into the form's hidden country_code /
+           currency_id inputs and saved with the form) -->
+      <div class="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <h3 class="text-lg font-semibold text-gray-800">Country &amp; currency</h3>
+        <div class="mt-4">
+          <label for="ci_country_display" class="block text-sm font-medium text-gray-700 mb-2">Select Country</label>
+          <div class="relative">
+            <input type="text" id="ci_country_display" placeholder="Select a country" autocomplete="off"
+                   value="{{ selected_country.country_name if selected_country else '' }}"
+                   class="box-border h-[50px] w-full rounded-xl border border-gray-300 bg-white pl-3 pr-10 text-sm text-gray-700 placeholder:text-gray-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#54D3DA]" />
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+              <svg class="size-5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <div id="ci_country_suggestions" class="absolute z-50 mt-1 hidden max-h-60 w-full overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg"></div>
+          </div>
+        </div>
+        <div class="mt-4">
+          <label for="ci_currency_display" class="block text-sm font-medium text-gray-700 mb-2">Select Currency</label>
+          <div class="relative">
+            <input type="text" id="ci_currency_display" placeholder="Select a currency" autocomplete="off"
+                   value="{{ selected_currency.currency_name if selected_currency else '' }}"
+                   class="box-border h-[50px] w-full rounded-xl border border-gray-300 bg-white pl-3 pr-10 text-sm text-gray-700 placeholder:text-gray-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#54D3DA]" />
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+              <svg class="size-5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <div id="ci_currency_suggestions" class="absolute z-50 mt-1 hidden max-h-60 w-full overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg"></div>
+          </div>
+        </div>
+      </div>
+      <script>
+      (function () {
+        var countries = {{ country_code | tojson }};
+        var currencies = {{ currencies | tojson }};
+        function wirePicker(inputId, listId, rows, labelKey, onPick) {
+          var input = document.getElementById(inputId);
+          var list = document.getElementById(listId);
+          if (!input || !list) return;
+          function hide() { list.classList.add('hidden'); }
+          function render(items) {
+            list.innerHTML = '';
+            items.forEach(function (r) {
+              var row = document.createElement('div');
+              row.className = 'cursor-pointer border-b border-gray-100 px-4 py-2 last:border-b-0 hover:bg-gray-100 text-sm font-medium text-gray-900';
+              row.textContent = r[labelKey];
+              row.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                input.value = r[labelKey];
+                if (onPick) onPick(r);
+                hide();
+              });
+              list.appendChild(row);
+            });
+            if (items.length) { list.classList.remove('hidden'); } else { hide(); }
+          }
+          input.addEventListener('focus', function () { render(rows); });
+          input.addEventListener('click', function () { render(rows); });
+          input.addEventListener('input', function () {
+            var q = this.value.trim().toLowerCase();
+            render(!q ? rows : rows.filter(function (r) {
+              return r[labelKey].toLowerCase().includes(q);
+            }));
+          });
+          document.addEventListener('click', function (e) {
+            if (!input.contains(e.target) && !list.contains(e.target)) hide();
+          });
+        }
+        wirePicker('ci_country_display', 'ci_country_suggestions', countries, 'country_name', function (r) {
+          var code = document.getElementById('ci_country_code_hidden');
+          if (code) code.value = r.country_code || '';
+        });
+        wirePicker('ci_currency_display', 'ci_currency_suggestions', currencies, 'currency_name', function (r) {
+          var id = document.getElementById('ci_currency_id_hidden');
+          if (id) id.value = r.currency_id || '';
+        });
+      })();
+      </script>
+
       <form method="POST"
             action="{{ url_for('entity_settings_entity', org_id=org.id) }}"
             id="entitySettingsForm"
             novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="_from" value="bills" />
-        <input type="hidden" name="country_code" value="{{ org.country_code or '' }}" />
+        <input type="hidden" id="ci_country_code_hidden" name="country_code" value="{{ selected_country.country_code if selected_country else '' }}" />
+        <input type="hidden" id="ci_currency_id_hidden" name="currency_id" value="{{ selected_currency.currency_id if selected_currency else '' }}" />
 
         <!-- Header Section (matches settings_entity.html) -->
         <div class="mb-6 flex items-center justify-between">

@@ -28,6 +28,7 @@ from blueprints.entity.services.settings import (
     COA_INCLUDED_TYPES,
 )
 from blueprints.entity.services.xero_account_mapping_post import (
+    apply_country_currency_selection,
     process_xero_account_mapping_post,
 )
 from blueprints.entity.services.shared import check_user_has_entities
@@ -61,6 +62,52 @@ def _redirect_xero_mapping(entity_id: str, _from: str | None, *, return_view: st
     return redirect(url_for("entity_settings", entity_id=entity_id, **bills_kw))
 
 
+def _flash_if_xero_disconnected(org) -> bool:
+    """Flash a "Xero disconnected — please reconnect" error when the entity was
+    connected to a Xero org but is no longer live. Returns True if the entity is
+    disconnected.
+
+    Only flashes for entities that are SUPPOSED to be connected
+    (``org.xero_org_id`` is set) so entities that never connected don't nag the
+    user.
+
+    Runs the authoritative LIVE check first: ``sync_entity_xero_status`` hits
+    Xero's /connections endpoint and reconciles ``org.status`` to reality. This
+    matters because a connection revoked on the Xero website can leave the
+    connector token still valid — so a token-only check (``resolve_xero_token``)
+    would wrongly report "connected". We therefore flash when EITHER no token
+    resolves OR the live sync flipped status to "disconnected".
+    """
+    if org is None or not getattr(org, "xero_org_id", None):
+        return False
+
+    token_resolved = resolve_xero_token(org.id, current_user) is not None
+
+    # Authoritative live reconcile (best-effort; gate on a resolvable connector
+    # token since the sync needs one to call Xero).
+    if token_resolved:
+        try:
+            sync_entity_xero_status(org.id)
+            refreshed = Entity.query.get(org.id)
+            if refreshed is not None:
+                org = refreshed
+        except Exception as sync_error:
+            logger.warning(
+                "Xero live status sync failed for entity %s: %s",
+                org.id, sync_error,
+            )
+
+    if token_resolved and getattr(org, "status", None) != "disconnected":
+        return False
+
+    flash(
+        "This entity has been disconnected from Xero. Please reconnect it to "
+        "keep your data in sync.",
+        "danger",
+    )
+    return True
+
+
 def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None):
     """Save country/currency and (admin only) the entity name from the classic
     Xero integration page. No Xero mapping fields are handled here."""
@@ -78,39 +125,27 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             name_form = (request.form.get("entity_name") or "").strip()
             if name_form != (entity.name or ""):
                 if not name_form:
-                    flash("Entity name is required.", "danger")
+                    flash("I need a name for this entity before I can save it.", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 if len(name_form) > 100:
-                    flash("Entity name must be 100 characters or fewer.", "danger")
+                    flash("That name goes on a bit! Please keep it to 100 characters or fewer.", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 if Entity.query.filter(
                     Entity.name == name_form, Entity.id != entity_id
                 ).first():
-                    flash("Entity name already exists", "danger")
+                    flash("Oh, someone got there first! Do you have another name in mind?", "danger")
                     return _redirect_xero_mapping(
                         entity_id, _from, return_view="entity_settings"
                     )
                 entity.name = name_form
 
-        country_code_form = request.form.get("country_code")
-        if country_code_form:
-            entity.country_code = country_code_form
-            country_info = CountryInfo.query.filter_by(
-                country_code=country_code_form
-            ).first()
-            if country_info and country_info.currency_id:
-                currency_info = CurrencyInfo.query.filter_by(
-                    currency_code=country_info.currency_id
-                ).first()
-                if currency_info:
-                    entity.currency_code = currency_info.currency_code
-                    entity.currency_format = currency_info.symbol or "$"
+        apply_country_currency_selection(entity, request.form)
         db.session.commit()
-        flash("Settings updated successfully.", "success")
+        flash("Settings saved!", "success")
     except IntegrityError as exc:
         db.session.rollback()
         logger.error(
@@ -119,8 +154,8 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             exc,
         )
         flash(
-            "We couldn't save these settings because one of the values must be "
-            "unique and is already in use. Please review your entries and try again.",
+            "I couldn't save these settings — one of the values needs to be "
+            "unique and it's already in use. Could you check your entries and try again?",
             "danger",
         )
     except Exception as exc:
@@ -131,7 +166,7 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             exc,
         )
         flash(
-            "We couldn't save your settings. Please review your entries and try again.",
+            "I couldn't save your settings. Could you check your entries and try again?",
             "danger",
         )
     return _redirect_xero_mapping(entity_id, _from, return_view="entity_settings")
@@ -149,7 +184,7 @@ def entity_settings(entity_id=None):
     # Check if user has any entities before allowing access to report history
     if not check_user_has_entities(current_user.id):
         flash(
-            "You need to create an entity first before accessing entity settings.",
+            "You'll need to create an entity before I can show you any entity settings.",
             "info",
         )
         return redirect(url_for("entity.entity_list"))
@@ -212,6 +247,33 @@ def entity_settings(entity_id=None):
             resolve_xero_token(entity_id, current_user) is not None
         )
 
+        # Authoritative LIVE check FIRST: hit Xero's /connections and reconcile
+        # org.status (connected/disconnected) to match reality. This must run
+        # BEFORE the reconnect flash below, otherwise a connection revoked on the
+        # Xero website — where the token can still be valid — would leave
+        # org.status stale and the flash would wrongly say "connected". Gate on a
+        # resolvable connector token; sync validates that token itself.
+        if xero_token_resolved:
+            try:
+                sync_entity_xero_status(entity_id)
+                org = Entity.query.get(entity_id) or org  # re-read fresh status
+            except Exception as sync_error:
+                logger.warning(
+                    f"Status sync failed, continuing with database data: {str(sync_error)}"
+                )
+
+        # Live check: flash "reconnect" when the entity was meant to be connected
+        # to Xero but is no longer live — either no token resolves, OR the live
+        # sync above flipped status to "disconnected" (revoked on Xero's side).
+        if org.xero_org_id and (
+            not xero_token_resolved or org.status == "disconnected"
+        ):
+            flash(
+                "This entity has been disconnected from Xero. Please reconnect "
+                "it to keep your data in sync.",
+                "danger",
+            )
+
         if (
             xero_token_resolved
             and org.xero_org_id
@@ -233,19 +295,8 @@ def entity_settings(entity_id=None):
                     f"Failed to backfill xero_tenant_name for {entity_id}: {exc}"
                 )
 
-        # Try to sync status, but don't fail if it doesn't work.
-        # Gate on the entity's resolvable Xero token (xero_token_resolved), NOT
-        # current_user's personal token: the sync uses the connector's token
-        # internally, so a viewer who isn't the connector must still trigger it.
-        # Let sync_entity_xero_status validate that connector token itself rather
-        # than asserting validity from the wrong user via token_validated=True.
-        try:
-            if xero_token_resolved:
-                sync_entity_xero_status(entity_id)
-        except Exception as sync_error:
-            logger.warning(
-                f"Status sync failed, continuing with database data: {str(sync_error)}"
-            )
+        # (Live status sync already ran above, before the reconnect flash, so
+        # org.status reflects Xero's real connection state here.)
 
         # Sync chart of accounts from Xero in the background (non-blocking).
         # Fetches ALL Xero accounts, upserts new ones, and sets status=ACTIVE /
@@ -499,11 +550,26 @@ def entity_settings(entity_id=None):
     roles = get_all_roles()
     roles = [role.name for role in roles]
 
-    countries = cast(Iterable[_PyCountryCountry], pycountry.countries)
+    # Country / currency registries: the dropdowns list these and preselect
+    # via the entity's country_code / currency_id FKs. Keys mirror the old
+    # pycountry shape so the existing suggestion JS keeps working.
     country_code = [
-        {"country_code": country.alpha_2, "country_name": country.name}
-        for country in countries
+        {
+            "country_code": c.country_code,
+            "country_name": c.country_name_en,
+        }
+        for c in CountryInfo.query.order_by(CountryInfo.country_name_en).all()
     ]
+    currencies = [
+        {"currency_id": c.id, "currency_name": c.currency_name}
+        for c in CurrencyInfo.query.order_by(CurrencyInfo.currency_name).all()
+    ]
+    selected_country = next(
+        (c for c in country_code if c["country_code"] == org.country_code), None
+    )
+    selected_currency = next(
+        (c for c in currencies if c["currency_id"] == org.currency_id), None
+    )
 
     can_edit_xero_settings = has_permission(
         current_user, Permission.XERO_SETTINGS_UPDATE, entity_id
@@ -533,6 +599,9 @@ def entity_settings(entity_id=None):
         can_edit_xero_settings=can_edit_xero_settings,
         can_rename_entity=can_rename_entity,
         country_code=country_code,
+        currencies=currencies,
+        selected_country=selected_country,
+        selected_currency=selected_currency,
         cashsale_account_default=cashsale_account_default,
         cashsale_contact_default=cashsale_contact_default,
         deposit_bank_account_default=deposit_bank_account_default,
@@ -650,8 +719,8 @@ def entity_settings_users(org_id):
     except Exception as e:
         logger.error(f"Error accessing entity settings users: {str(e)}")
         flash(
-            "We couldn't load the user settings for this entity. "
-            "Please go back to your entities and try again.",
+            "I couldn't load the user settings for this entity. "
+            "Could you go back to your entities and try again?",
             "danger",
         )
         # Redirect to the entity list rather than back to this same page: if the
@@ -712,20 +781,7 @@ def entity_settings_entity(org_id):
                     if _xr is not None:
                         return _xr
 
-                country_code = request.form.get("country_code")
-                if country_code:
-                    org.country_code = country_code
-                    # Get currency info from country
-                    country_info = CountryInfo.query.filter_by(
-                        country_code=country_code
-                    ).first()
-                    if country_info and country_info.currency_id:
-                        currency_info = CurrencyInfo.query.filter_by(
-                            currency_code=country_info.currency_id
-                        ).first()
-                        if currency_info:
-                            org.currency_code = currency_info.currency_code
-                            org.currency_format = currency_info.symbol or "$"
+                apply_country_currency_selection(org, request.form)
 
                 selected_account_codes = request.form.getlist(
                     "account_codes[]")
@@ -828,7 +884,7 @@ def entity_settings_entity(org_id):
                         org_id, eax_err,
                     )
 
-                flash("Entity settings updated successfully.", "success")
+                flash("Entity settings saved!", "success")
                 _from = request.form.get("_from") or request.args.get("from")
                 return redirect(
                     url_for(
@@ -841,9 +897,9 @@ def entity_settings_entity(org_id):
                 db.session.rollback()
                 logger.error(f"Entity settings integrity error: {str(e)}")
                 flash(
-                    "We couldn't save these entity settings because one of the "
-                    "values must be unique and is already in use. Please review "
-                    "your entries and try again.",
+                    "I couldn't save these entity settings — one of the values "
+                    "needs to be unique and it's already in use. Could you check "
+                    "your entries and try again?",
                     "danger",
                 )
                 _from = request.form.get("_from") or request.args.get("from")
@@ -858,8 +914,8 @@ def entity_settings_entity(org_id):
                 db.session.rollback()
                 logger.error(f"Error updating entity settings: {str(e)}")
                 flash(
-                    "We couldn't save your entity settings. Please review your "
-                    "entries and try again.",
+                    "I couldn't save your entity settings. Could you check your "
+                    "entries and try again?",
                     "danger",
                 )
                 _from = request.form.get("_from") or request.args.get("from")
@@ -910,13 +966,25 @@ def entity_settings_entity(org_id):
             if org.xero_org_id and (org.period_lock_date is None or org.end_of_year_lock_date is None):
                 backfill_lock_dates_if_needed_background(org.id, current_user.access_token, org.xero_org_id)
 
-        # Get country data (same as entity_create)
-        countries = cast(Iterable[_PyCountryCountry], pycountry.countries)
-        country_code = []
-        for country in countries:
-            country_code.append(
-                {"country_code": country.alpha_2, "country_name": country.name}
-            )
+        # Country / currency registries: the dropdowns list these and
+        # preselect via the entity's country_code / currency_id FKs.
+        country_code = [
+            {
+                "country_code": c.country_code,
+                "country_name": c.country_name_en,
+            }
+            for c in CountryInfo.query.order_by(CountryInfo.country_name_en).all()
+        ]
+        currencies = [
+            {"currency_id": c.id, "currency_name": c.currency_name}
+            for c in CurrencyInfo.query.order_by(CurrencyInfo.currency_name).all()
+        ]
+        selected_country = next(
+            (c for c in country_code if c["country_code"] == org.country_code), None
+        )
+        selected_currency = next(
+            (c for c in currencies if c["currency_id"] == org.currency_id), None
+        )
 
         # Petty cash CoA list is sourced from entity_account_xero (joined to
         # account_info) — the single source of truth — instead of a live Xero
@@ -997,6 +1065,9 @@ def entity_settings_entity(org_id):
             else "entity/settings_entity.html"
         )
         _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
+        # Live check (hits Xero /connections): warn if the entity was connected
+        # to Xero but is no longer live, so the user knows to reconnect.
+        _flash_if_xero_disconnected(org)
         return render_template(
             template,
             org=org,
@@ -1004,6 +1075,9 @@ def entity_settings_entity(org_id):
                 org_id, org, current_user.id, from_bills=from_param == "bills"
             ),
             country_code=country_code,
+            currencies=currencies,
+            selected_country=selected_country,
+            selected_currency=selected_currency,
             expense_account_code=expense_account_code,
             entity_acronym=entity_acronym,
             is_view_only=not _can_edit_coa,
@@ -1014,7 +1088,7 @@ def entity_settings_entity(org_id):
         db.session.rollback()
         logger.exception(f"Error accessing entity settings: {str(e)}")
         flash(
-            "We couldn't load the settings for this entity. Please try again.",
+            "Something got tangled up while loading these settings. Mind trying again?",
             "danger",
         )
         return redirect(url_for("entity_settings", entity_id=org_id))
@@ -1194,7 +1268,7 @@ def entity_contact_create():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "This entity is not connected to Xero. Please have an admin reconnect.",
+                        "message": "This entity isn't connected to Xero yet. Could you ask an admin to connect it?",
                     }),
                 400,
             )
@@ -1206,7 +1280,7 @@ def entity_contact_create():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "This entity is not connected to Xero. Please have an admin reconnect.",
+                        "message": "This entity isn't connected to Xero yet. Could you ask an admin to connect it?",
                     }),
                 400,
             )
@@ -1217,7 +1291,7 @@ def entity_contact_create():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Xero authentication failed. Please have an admin reconnect.",
+                        "message": "Xero wouldn't let me in. Could you ask an admin to reconnect it?",
                     }),
                 400,
             )
@@ -1249,9 +1323,22 @@ def entity_contact_create():
                 logger.info(f"Retry Xero response: {xero_response.text}")
 
         if xero_response.status_code not in (200, 201):
-            error_message = f"Failed to create contact in Xero. Status: {xero_response.status_code}, Response: {xero_response.text}"
-            logger.error(error_message)
-            return jsonify({"status": "error", "message": error_message}), 400
+            # Log Xero's raw body; show the user plain language. This message is
+            # rendered directly into a toast.
+            logger.error(
+                "Failed to create contact in Xero. Status: %s, Response: %s",
+                xero_response.status_code,
+                xero_response.text,
+            )
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "I couldn't add that contact to Xero. Mind trying again?",
+                    }
+                ),
+                400,
+            )
 
         xero_contact_data = xero_response.json()
         contacts = xero_contact_data.get("Contacts", [])
@@ -1260,7 +1347,7 @@ def entity_contact_create():
             logger.error("No contacts returned from Xero")
             return (
                 jsonify(
-                    {"status": "error", "message": "Failed to create contact in Xero"}
+                    {"status": "error", "message": "I couldn't add that contact to Xero. Mind trying again?"}
                 ),
                 400,
             )
@@ -1273,7 +1360,7 @@ def entity_contact_create():
             logger.error("No ContactID returned from Xero")
             return (
                 jsonify(
-                    {"status": "error", "message": "Failed to get contact ID from Xero"}
+                    {"status": "error", "message": "Xero didn't tell me which contact it created. Mind trying again?"}
                 ),
                 400,
             )
@@ -1301,7 +1388,7 @@ def entity_contact_create():
             jsonify(
                 {
                     "status": "error",
-                    "message": f"An error occurred while creating the contact: {str(e)}",
+                    "message": "I couldn't add that contact. Mind trying again?",
                 }),
             500,
         )

@@ -3,7 +3,7 @@ render AND drain flash messages.
 
 Bug: index.html had the toast close/auto-hide JS but no
 ``get_flashed_messages`` block, so a flash queued by a prior request (e.g. a
-redirect into the entity list that flashed "Entity not found") was never
+redirect into the entity list that flashed "Hmm, I looked everywhere but couldn't find that one.") was never
 consumed there. It survived in the session and popped up on the next page that
 renders the ``danger`` category — the dashboard — i.e. "when you enter an
 entity". The empty-state sibling (entity_list_empty.html) already drained.
@@ -61,12 +61,12 @@ def _render_index(app: Flask) -> str:
 def test_entity_list_renders_and_drains_stale_flash():
     app = _build_app()
     with app.test_request_context("/entity"):
-        session["_flashes"] = [("danger", "Entity not found")]
+        session["_flashes"] = [("danger", "Hmm, I looked everywhere but couldn't find that one.")]
 
         html = _render_index(app)
 
         # Rendered: the stale message is shown on the list (not silently dropped).
-        assert "Entity not found" in html
+        assert "Hmm, I looked everywhere but couldn't find that one." in html
         # Drained from the session (the cross-request leak vector) so it can't
         # resurface on the dashboard next render.
         assert session.get("_flashes", []) == []

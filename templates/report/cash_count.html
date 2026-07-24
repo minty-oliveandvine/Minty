@@ -12,6 +12,9 @@
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
+  <!-- Shared currency formatting -->
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
 
@@ -85,6 +88,11 @@
         } 
       }
     }
+  </script>
+  <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
   </script>
 </head>
 <!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
@@ -211,7 +219,7 @@ document.addEventListener('submit', function(e){
            <!-- Expected Cash Count Balance -->
           <div class="inline-flex items-center mt-2 bg-[#E5E7EB] rounded-2xl px-4 py-2 gap-4">
             <span class="text-sm font-medium text-gray-500 flex-shrink-0">Expected Cash Count Balance</span>
-            <span id="expected_cash_count_balance" class="text-sm font-medium text-gray-500 whitespace-nowrap flex-shrink-0 flex-grow-0 w-fit">$0.00</span>
+            <span id="expected_cash_count_balance" class="text-sm font-medium text-gray-500 whitespace-nowrap flex-shrink-0 flex-grow-0 w-fit">{{ currency_symbol }}0.00</span>
           </div>
         </div>
         <!-- Form Content -->
@@ -266,11 +274,11 @@ document.addEventListener('submit', function(e){
               </div>
           <div class="flex items-center justify-between mt-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
             <span class="text-sm font-medium text-[#33969C]">Total Cash Count</span>
-            <span id="totalCashCount" class="text-sm font-medium text-[#33969C]">$0.00</span>
+            <span id="totalCashCount" class="text-sm font-medium text-[#33969C]">{{ currency_symbol }}0.00</span>
           </div>
           <!-- <div class="flex items-center justify-between mt-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
            <span class="text-sm font-medium text-[#33969C]">Variance</span>
-           <span id="variance" class="text-sm font-medium text-[#33969C]">$0.00</span>
+           <span id="variance" class="text-sm font-medium text-[#33969C]">{{ currency_symbol }}0.00</span>
           </div> -->
         </div>
       </div>
@@ -290,7 +298,7 @@ document.addEventListener('submit', function(e){
               </div>
               <input type="hidden" name="discrepancy_amount" id="discrepancyAmount"  />
               <div class="ml-3 flex-1 min-w-0">
-                <h3 class="text-sm font-medium text-red-800">Cash Shortage: <span id="shortageAmount" class="break-all">$11.50</span></h3>
+                <h3 class="text-sm font-medium text-red-800">Cash Shortage: <span id="shortageAmount" class="break-all">{{ currency_symbol }}11.50</span></h3>
                 <p class="text-sm text-gray-600 mt-1">Please review your entries or provide a reason for the discrepancy below.</p>
               </div>
             </div>
@@ -362,14 +370,14 @@ document.addEventListener('submit', function(e){
       <div class="mb-6">
         <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
         <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
-        <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if expected_cash_count_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if expected_cash_count_balance < 0 %}(${{ "{:,.2f}".format(-expected_cash_count_balance) }}){% else %}${{ "{:,.2f}".format(expected_cash_count_balance) }}{% endif %}</p>
+        <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if expected_cash_count_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if expected_cash_count_balance < 0 %}({{ currency_symbol }}{{ "{:,.2f}".format(-expected_cash_count_balance) }}){% else %}{{ currency_symbol }}{{ "{:,.2f}".format(expected_cash_count_balance) }}{% endif %}</p>
         <p class="text-sm text-gray-600">Cash balance cannot be negative, let's go back to</p>
       </div>
       <div class="space-y-3">
         <button onclick="navigateToFixStep('opening')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Opening</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(cash_addition) }})</p>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(cash_addition) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -378,7 +386,7 @@ document.addEventListener('submit', function(e){
         <button onclick="navigateToFixStep('sales')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Sales</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(cash_sales) }})</p>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(cash_sales) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -387,7 +395,7 @@ document.addEventListener('submit', function(e){
         <button onclick="navigateToFixStep('expenses')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Expenses</span>
-            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(cash_expenses) }})</p>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: {{ currency_symbol }} {{ "{:,.2f}".format(cash_expenses) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -396,7 +404,7 @@ document.addEventListener('submit', function(e){
         <button onclick="navigateToFixStep('deposit')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Deposit</span>
-            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(bank_deposit) }})</p>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: {{ currency_symbol }} {{ "{:,.2f}".format(bank_deposit) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -409,91 +417,8 @@ document.addEventListener('submit', function(e){
   <script>
     const EXPECTED_CASH_COUNT_BALANCE = {{ expected_cash_count_balance }};
     // Format number inputs to show .00
-    // Function to format currency input (simple and clean)
-      function formatCurrency(input) {
-        // Just remove invalid characters, don't pad yet
-        let value = input.value.replace(/[^\d.]/g, '');
-        
-        // Remove multiple decimal points (keep only first one)
-        const parts = value.split('.');
-        if (parts.length > 2) {
-          value = parts[0] + '.' + parts.slice(1).join('');
-        }
-        
-        // Limit decimal to 2 digits
-        const decimalParts = value.split('.');
-        if (decimalParts.length === 2 && decimalParts[1].length > 2) {
-          value = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
-        }
-        
-        // Just set the cleaned value - NO padding during input
-        input.value = value;
-      }
-
-
-
-      // Format with commas on blur (simple and clean)
-      function formatWithCommas(input) {
-        let value = input.value;
-        
-        if (value === '') return;
-        
-        // Remove commas
-        value = value.replace(/,/g, '');
-        const parts = value.split('.');
-        const wholeNumber = parts[0];
-        
-        // Add commas to whole number
-        const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        
-        // Ensure .00 at the end with proper padding
-        let decimalPart = parts.length > 1 ? parts[1] : '00';
-        if (decimalPart === '') {
-          decimalPart = '00'; // 1234. → 1234.00
-        } else if (decimalPart.length === 1) {
-          decimalPart = decimalPart + '0'; // 1234.1 → 1234.10
-        }
-        
-        input.value = formattedWholeNumber + '.' + decimalPart;
-      }
-
-    // Format all currency inputs after page load
-    function formatAllCurrencyFields() {
-      // Get all inputs on the page
-      const allInputs = document.querySelectorAll('input[type="text"][inputmode="decimal"]');
-      
-      allInputs.forEach(input => {
-        if (input.value && input.value.trim() !== '') {
-          // Remove existing commas
-          let value = input.value.replace(/,/g, '');
-          
-          // Split into whole and decimal parts
-          const parts = value.split('.');
-          const wholeNumber = parts[0];
-          
-          // Add commas to whole number
-          const formattedWholeNumber = wholeNumber.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-          
-          // Ensure .00 at the end
-          const decimalPart = parts.length > 1 ? parts[1] : '00';
-          const paddedDecimal = (decimalPart + '00').substring(0, 2);
-          
-          // Set the formatted value
-          input.value = formattedWholeNumber + '.' + paddedDecimal;
-        }
-      });
-    }
-
-    // Run when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', formatAllCurrencyFields);
-    } else {
-      formatAllCurrencyFields();
-    }
-
-    // Also run after a short delay to catch dynamic content
-    setTimeout(formatAllCurrencyFields, 100);
-    setTimeout(formatAllCurrencyFields, 500);
+    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
+    // static/js/currency.js
 
 
 
@@ -623,8 +548,8 @@ document.addEventListener('submit', function(e){
       const actualCashBalanceInput = document.getElementById('actualCashBalance');
       if (actualCashBalanceInput) {
         const inputId = actualCashBalanceInput.id;
-        const currentValue = actualCashBalanceInput.value.trim().replace(/,/g, '').replace(/\$/g, '');
-        const initialValue = (initialFormValues[inputId] || '').trim().replace(/,/g, '').replace(/\$/g, '');
+        const currentValue = actualCashBalanceInput.value.trim().replace(/[^0-9.-]/g, '');
+        const initialValue = (initialFormValues[inputId] || '').trim().replace(/[^0-9.-]/g, '');
         
         // Normalize empty values
         const normalizedCurrent = (currentValue === '' || currentValue === '-') ? '' : currentValue;
@@ -749,7 +674,7 @@ document.addEventListener('submit', function(e){
       const expectedCashTotal = openingBalance + cashAddition + cashSales - expenses - depositCash;
       const cash_till_balance = expectedCashTotal - safeBoxBalance;
       
-      document.getElementById('cash_till_balance').textContent = `$${cash_till_balance.toFixed(2)}`;
+      document.getElementById('cash_till_balance').textContent = `${window.CURRENCY_SYMBOL}${Currency.formatMoney(cash_till_balance)}`;
     }
 
     // Calculate totals when inputs change
@@ -835,7 +760,7 @@ document.addEventListener('submit', function(e){
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       });
-      document.getElementById('cash_count_balance').textContent = `$${formattedCashCountBalance}`;
+      document.getElementById('cash_count_balance').textContent = `${window.CURRENCY_SYMBOL}${formattedCashCountBalance}`;
 
       // Calculate Expected Cash Count Balance: opening balance + cash addition + cash sales - expense - deposit bank
       const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
@@ -852,7 +777,7 @@ document.addEventListener('submit', function(e){
       });
       const expectedCashCountBalanceEl = document.getElementById('expected_cash_count_balance');
       if (expectedCashCountBalanceEl) {
-        expectedCashCountBalanceEl.textContent = `$${formattedExpectedCashCountBalance}`;
+        expectedCashCountBalanceEl.textContent = `${window.CURRENCY_SYMBOL}${formattedExpectedCashCountBalance}`;
       }
 
       // Calculate Variance: expected cash count balance - cash count balance
@@ -863,12 +788,12 @@ document.addEventListener('submit', function(e){
       });
       const varianceEl = document.getElementById('variance');
       if (varianceEl) {
-        varianceEl.textContent = `$${formattedVariance}`;
+        varianceEl.textContent = `${window.CURRENCY_SYMBOL}${formattedVariance}`;
       }
 
       // Calculate Total Cash Count: actualCashBalance + safeBoxBalance
       const actualCashBalanceInput = document.getElementById('actualCashBalance');
-      const actualCashBalanceValue = actualCashBalanceInput ? parseFloat(actualCashBalanceInput.value.replace(/[$,]/g, '')) || 0 : 0;
+      const actualCashBalanceValue = actualCashBalanceInput ? parseFloat(actualCashBalanceInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
       const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
       const totalCashCountValue = actualCashBalanceValue + safeBoxBalance;
       const formattedTotalCashCount = totalCashCountValue.toLocaleString('en-US', {
@@ -877,7 +802,7 @@ document.addEventListener('submit', function(e){
       });
       const totalCashCountEl = document.getElementById('totalCashCount');
       if (totalCashCountEl) {
-        totalCashCountEl.textContent = `$${formattedTotalCashCount}`;
+        totalCashCountEl.textContent = `${window.CURRENCY_SYMBOL}${formattedTotalCashCount}`;
       }
 
       // Calculate discrepancy between counted cash and expected cash total
@@ -899,18 +824,18 @@ document.addEventListener('submit', function(e){
         // Update shortage amount text and styling
         if (discrepancy < 0) {
           // Cash Shortage - Red styling
-          document.getElementById('shortageAmount').textContent = `$${formattedDiscrepancy}`;
+          document.getElementById('shortageAmount').textContent = `${window.CURRENCY_SYMBOL}${formattedDiscrepancy}`;
           document.getElementById('discrepancyAmount').value = discrepancy;
-          document.getElementById('shortageAmount').parentElement.innerHTML = `Cash Shortage: <span id="shortageAmount" class="break-all">$${formattedDiscrepancy}</span>`;
+          document.getElementById('shortageAmount').parentElement.innerHTML = `Cash Shortage: <span id="shortageAmount" class="break-all">${window.CURRENCY_SYMBOL}${formattedDiscrepancy}</span>`;
           document.getElementById('discrepancyAlert').className = 'bg-red-50 rounded-lg p-4 mb-4';
           document.getElementById('discrepancyAlert').querySelector('h3').className = 'text-sm font-medium text-red-800';
           document.getElementById('discrepancyAlert').querySelector('p').className = 'text-sm text-gray-600 mt-1';
           document.getElementById('discrepancyAlert').querySelector('svg').style.color = '#EF4444';
         } else {
           // Cash Surplus - Green styling
-          document.getElementById('shortageAmount').textContent = `$${formattedDiscrepancy}`;
+          document.getElementById('shortageAmount').textContent = `${window.CURRENCY_SYMBOL}${formattedDiscrepancy}`;
           document.getElementById('discrepancyAmount').value = discrepancy;
-          document.getElementById('shortageAmount').parentElement.innerHTML = `Cash Surplus: <span id="shortageAmount" class="break-all">$${formattedDiscrepancy}</span>`;
+          document.getElementById('shortageAmount').parentElement.innerHTML = `Cash Surplus: <span id="shortageAmount" class="break-all">${window.CURRENCY_SYMBOL}${formattedDiscrepancy}</span>`;
           document.getElementById('discrepancyAlert').className = 'bg-green-50 rounded-lg p-4 mb-4';
           document.getElementById('discrepancyAlert').querySelector('h3').className = 'text-sm font-medium text-green-800';
           document.getElementById('discrepancyAlert').querySelector('p').className = 'text-sm text-gray-600 mt-1';
@@ -1150,7 +1075,7 @@ document.addEventListener('submit', function(e){
       if (totalCashCount > 0) {
         const actualCashBalanceInput = document.getElementById('actualCashBalance');
         if (actualCashBalanceInput) {
-          const formattedValue = '$' + totalCashCount.toLocaleString('en-US', { 
+          const formattedValue = window.CURRENCY_SYMBOL + totalCashCount.toLocaleString('en-US', { 
             minimumFractionDigits: 2, 
             maximumFractionDigits: 2 
           });
@@ -1818,73 +1743,73 @@ document.addEventListener('submit', function(e){
         <!-- Notes Section -->
         <!-- $1000 Notes -->
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$1000</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}1000</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
             <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note1000" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
             <input type="text" id="note1000Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
           </div>
         </div>
         <!-- $500 Notes -->
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$500</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}500</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
             <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note500" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
             <input type="text" id="note500Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
           </div>
         </div>
         <!-- $100 Notes -->
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$100</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}100</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
             <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note100" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
             <input type="text" id="note100Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
           </div>
         </div>
         <!-- $50 Notes -->
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$50</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}50</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
             <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note50" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
             <input type="text" id="note50Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
           </div>
         </div>
         <!-- $20 Notes -->
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$20</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}20</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
             <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note20" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
             <input type="text" id="note20Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
           </div>
         </div>
         <!-- $10 Notes -->
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$10</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}10</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
             <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note10" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
             <input type="text" id="note10Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
           </div>
         </div>
@@ -1894,37 +1819,37 @@ document.addEventListener('submit', function(e){
           <div class="mb-8">
             <!-- $5 Coins -->
             <div class="flex items-center gap-3 mb-4">
-              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$5</label>
+              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}5</label>
               <div class="relative flex-1">
                 <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
                 <input type="number" inputmode="numeric" id="5coins" placeholder="0" min="0" step="1" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
               </div>
               <div class="relative w-24 sm:w-32">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
                 <input type="text" id="5coinsTotal" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
               </div>
             </div>
             <!-- $2 Coins -->
             <div class="flex items-center gap-3 mb-4">
-              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$2</label>
+              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}2</label>
               <div class="relative flex-1">
                 <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
                 <input type="number" inputmode="numeric" id="2coins" placeholder="0" min="0" step="1" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
               </div>
               <div class="relative w-24 sm:w-32">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
                 <input type="text" id="2coinsTotal" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
               </div>
             </div>
             <!-- $1 Coins -->
             <div class="flex items-center gap-3 mb-4">
-              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">$1</label>
+              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}1</label>
               <div class="relative flex-1">
                 <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
                 <input type="number" inputmode="numeric" id="1coins" placeholder="0" min="0" step="1" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
               </div>
               <div class="relative w-24 sm:w-32">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">$</div>
+                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
                 <input type="text" id="1coinsTotal" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
               </div>
             </div>
@@ -1934,7 +1859,7 @@ document.addEventListener('submit', function(e){
         <!-- Total Cash Till Balance Display -->
         <div class="flex items-center justify-between rounded-2xl mb-4">
           <span class="text-sm font-medium text-gray-700">Total Cash Till Balance</span>
-          <span id="cash_count_balance" class="text-sm font-medium text-gray-700">$0.00</span>
+          <span id="cash_count_balance" class="text-sm font-medium text-gray-700">{{ currency_symbol }}0.00</span>
         </div>
 
         <!-- Add Button -->
@@ -2056,7 +1981,7 @@ document.addEventListener('submit', function(e){
         const totalText = totalDisplay.textContent.replace('$', '').replace(/,/g, '').trim();
         const totalValue = parseFloat(totalText) || 0;
         // Format with commas and dollar sign for display
-        const formattedValue = '$' + totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const formattedValue = window.CURRENCY_SYMBOL + totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         actualCashBalanceInput.value = formattedValue;
         
         // Trigger input event to mark form as changed
