@@ -211,10 +211,68 @@ Note: only `isort` was run on the touched report/entity files, NOT `black` —
 those blueprints have not had their formatting pass yet and reformatting them
 now would bloat this diff. Their `black` pass comes with their own turn.
 
-## Next up: blueprint #4 = `xero` (5348 LOC, 17 files)
+## Blueprint #4: xero — ✅ COMPLETE (dead code + token resolver)
+
+Regression check: **OK — no new failures beyond the 79 baseline.** ruff `F` clean.
+
+### Dead code removed
+- `routes/routes.py`: `current_app as app` (verified unused — every other "app"
+  match was prose in comments), `XeroContactSync`.
+- `services/publish.py`: `EntityAccountXero`, now-orphaned `BytesIO`, 2 f-strings
+  without placeholders, and 2 dead locals.
+- `services/settings.py`: `EntityAccountXero`, `XeroContactSync`.
+
+**Two dead locals needed real investigation — do NOT blind-`ruff --fix` this file:**
+- `files` dict (attachment upload) *looked* like a dropped-attachment bug, since
+  it's built right before an upload. It isn't: the upload uses `data=file_bytes`
+  (raw PUT) and an adjacent comment confirms multipart was abandoned. Vestigial.
+- `reference` in `xero_discrepancy` *looked* like a dropped Xero field, since
+  sibling functions do send `"Reference"`. It isn't: `create_bank_transaction`
+  derives the identical `"MT{date}Discrepancy"` internally from
+  `type_of_transaction`. Left a comment there so the next reader doesn't re-ask.
+
+### Consolidation: `_resolve_access_token(entity_id)`
+The token-resolution preamble was duplicated **11×**. Owner's call was to extract
+**only the identical lookup** and keep every call site's own failure handling —
+this is the money path (it posts real transactions to Xero) and several xero
+tests are already red at baseline, so the safety net is weak.
+
+Returns `(access_token, None)` on success, else `(None, "no_token" | "no_user")`.
+The two failure modes are kept DISTINCT because the original logged different
+messages for each, and that distinction matters when debugging a failed publish.
+All 10 no-token + 10 no-user log messages are preserved verbatim.
+
+Call sites keep their own contracts, which is exactly why they weren't merged
+further — three different return shapes:
+| sites | returns | records error |
+|---|---|---|
+| 4 low-level `create_*` / upload | `False` | no |
+| 5 module-level `xero_*` | `(0, 1)` | `_record_module_error` |
+| 1 orchestrator | `_aggregate_error_result(...)` | no |
+
+**9 of 11 sites migrated. 2 deliberately left alone** because their structure
+genuinely differs:
+- `xero_integrated_module` (~line 1402) — different return + comment placement.
+- `update_xero_deposit_after_change` (~line 1708) — `except` precedes the
+  `if not token_user` check and it returns `(bool, message)`, not a bare value.
+
+### Formatting: intentionally SKIPPED for xero
+`black` was NOT run here. `publish.py` (2023 LOC) and `routes/routes.py` (1872
+LOC) would produce a reformat diff that swamps the logic change on the financial
+path. Do this as its own isolated commit if wanted.
+
+### ⚠️ LESSON — stop scripting after the second failure
+Three scripted attempts at the preamble migration failed: one regex hit
+catastrophic backtracking and hung for 120s (no file damage — it never reached
+the write), then two line-based versions tripped over shape variants. What
+actually worked: dump every site, look at them, then use explicit
+full-text replacements for the uniform ones and hand-edit the odd ones.
+Also note `timeout` is NOT available on macOS.
+
+## Next up: blueprint #5 = `entity` (7961 LOC, 32 files)
 
 ## Not yet started
-- Blueprints: `xero`, `entity`, `report` — same 3-step recipe.
+- Blueprints: `entity`, `report` — same 3-step recipe.
 - Known pre-existing debt found along the way: `blueprints/entity/routes/settings.py`
   has **12 dead imports** (F401) already on HEAD — clean up in the entity pass.
 - Optional deeper dead-code sweep: `vulture` is **not installed**; would need

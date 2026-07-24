@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-from io import BytesIO
 import uuid
 from datetime import datetime, date, timedelta
 import time
@@ -17,7 +16,7 @@ from loguru import logger
 from blueprints.report.services.shared import update_report_after_deposit_change
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
 from models.db import (AccountInfo, Report, ReportExpenseDetail, ReportHistory,
-                       ReportDraft, User, XeroReportSync, EntityAccountXero,
+                       ReportDraft, User, XeroReportSync,
                        Entity,
                        ShopExpense, ShopExpenseDraft, XeroContactSync, db)
 from services.auth.token_service import ensure_valid_token, resolve_xero_token
@@ -53,6 +52,33 @@ def _record_module_error(pfr, module_label, reason, error_meta=None):
             failed_contact_id=meta.get("failed_contact_id"),
             module=meta.get("module"),
         )
+
+
+def _resolve_access_token(entity_id):
+    """Look up a Xero access token for ``entity_id``.
+
+    Returns ``(access_token, None)`` on success, or ``(None, failure)`` where
+    ``failure`` is:
+
+    - ``"no_token"``  — the lookup succeeded but there is no usable token;
+    - ``"no_user"``   — ``current_user`` isn't in scope (e.g. a background
+      thread) and the caller passed no ``access_token``.
+
+    The two are kept distinct because they mean different things when
+    debugging a failed publish, and each call site logs its own message.
+
+    Callers keep their own failure handling: the low-level ``create_*`` helpers
+    return ``False``, the module-level ``xero_*`` publishers return ``(0, 1)``
+    after ``_record_module_error``, and ``xero_integrated_module`` aggregates.
+    This shares only the lookup, which is identical at every call site.
+    """
+    try:
+        token_user = resolve_xero_token(entity_id, current_user)
+    except RuntimeError:
+        return None, "no_user"
+    if token_user:
+        return token_user.access_token, None
+    return None, "no_token"
 
 
 def _normalize_xero_date(value):
@@ -267,14 +293,11 @@ def create_bank_transaction(
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available for bank transaction")
-                    return False
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available for bank transaction")
+                return False
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided for bank transaction")
                 return False
 
@@ -513,14 +536,11 @@ def create_bank_transfer(
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available for bank transfer")
-                    return False
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available for bank transfer")
+                return False
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided for bank transfer")
                 return False
 
@@ -581,7 +601,7 @@ def create_bank_transfer(
         logger.info(f"Bank transfer response text: {response_withdrawal.text}")
 
         if response_withdrawal.status_code == 200:
-            logger.info(f"Bank transfer for company successful")
+            logger.info("Bank transfer for company successful")
             return True
         else:
             logger.error(
@@ -621,14 +641,11 @@ def create_invoice(
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available for invoice")
-                    return False
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available for invoice")
+                return False
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided for invoice")
                 return False
 
@@ -707,21 +724,18 @@ def upload_each_file(expense, entity, bank_transction_id, access_token=None):
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(
-                    entity.id if entity else None, current_user
-                )
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available for file upload")
-                    return False
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(
+                entity.id if entity else None
+            )
+            if failure == "no_token":
+                logger.error("No access token available for file upload")
+                return False
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided for file upload")
                 return False
 
         if not expense or not expense.files:
-            logger.warning(f"No file found for expense, skipping upload")
+            logger.warning("No file found for expense, skipping upload")
             return False
 
         file_url = expense.files
@@ -743,7 +757,6 @@ def upload_each_file(expense, entity, bank_transction_id, access_token=None):
             content_type = (
                 mimetypes.guess_type(file_name)[0] or "application/octet-stream"
             )
-            files = {"file": (file_name, BytesIO(file_bytes), content_type)}
             upload_url = f"https://api.xero.com/api.xro/2.0/BankTransactions/{bank_transction_id}/Attachments/{file_name}"
             headers = {
                 "Authorization": f"Bearer {access_token}",
@@ -787,15 +800,12 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available in xero_withdrawal_from")
-                    _record_module_error(pfr, "Withdrawal", _pub_err.XERO_AUTH_EXPIRED)
-                    return (0, 1)
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available in xero_withdrawal_from")
+                _record_module_error(pfr, "Withdrawal", _pub_err.XERO_AUTH_EXPIRED)
+                return (0, 1)
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided in xero_withdrawal_from")
                 _record_module_error(pfr, "Withdrawal", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
@@ -912,15 +922,12 @@ def xero_invoices(entity_id, posted_report, date, amount, access_token=None, pfr
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available in xero_invoices")
-                    _record_module_error(pfr, "Cash sales", _pub_err.XERO_AUTH_EXPIRED)
-                    return (0, 1)
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available in xero_invoices")
+                _record_module_error(pfr, "Cash sales", _pub_err.XERO_AUTH_EXPIRED)
+                return (0, 1)
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided in xero_invoices")
                 _record_module_error(pfr, "Cash sales", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
@@ -987,15 +994,12 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available in xero_expenses")
-                    _record_module_error(pfr, "Expenses", _pub_err.XERO_AUTH_EXPIRED)
-                    return (0, 1)
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available in xero_expenses")
+                _record_module_error(pfr, "Expenses", _pub_err.XERO_AUTH_EXPIRED)
+                return (0, 1)
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided in xero_expenses")
                 _record_module_error(pfr, "Expenses", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
@@ -1148,15 +1152,12 @@ def xero_deposit(entity_id, posted_report, date, access_token=None, pfr=None):
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available in xero_deposit")
-                    _record_module_error(pfr, "Deposit", _pub_err.XERO_AUTH_EXPIRED)
-                    return (0, 1)
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available in xero_deposit")
+                _record_module_error(pfr, "Deposit", _pub_err.XERO_AUTH_EXPIRED)
+                return (0, 1)
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided in xero_deposit")
                 _record_module_error(pfr, "Deposit", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
@@ -1195,15 +1196,12 @@ def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None):
     try:
         # Get access_token if not provided
         if access_token is None:
-            try:
-                token_user = resolve_xero_token(entity_id, current_user)
-                if token_user:
-                    access_token = token_user.access_token
-                else:
-                    logger.error("No access token available in xero_discrepancy")
-                    _record_module_error(pfr, "Discrepancy", _pub_err.XERO_AUTH_EXPIRED)
-                    return (0, 1)
-            except RuntimeError:
+            access_token, failure = _resolve_access_token(entity_id)
+            if failure == "no_token":
+                logger.error("No access token available in xero_discrepancy")
+                _record_module_error(pfr, "Discrepancy", _pub_err.XERO_AUTH_EXPIRED)
+                return (0, 1)
+            if failure == "no_user":
                 logger.error("current_user not available and no access_token provided in xero_discrepancy")
                 _record_module_error(pfr, "Discrepancy", _pub_err.XERO_AUTH_EXPIRED)
                 return (0, 1)
@@ -1213,7 +1211,8 @@ def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None):
             logger.error(f"Invalid discrepancy date for report {report.id}")
             _record_module_error(pfr, "Discrepancy", "the discrepancy date is invalid")
             return (0, 1)
-        reference = "MT" + discrepancy_date.replace("-", "") + "Discrepancy"
+        # NB: the Xero "Reference" is derived inside create_bank_transaction
+        # from type_of_transaction ("discrepancy"), so it isn't built here.
         discrepancy_type = report.discrepancy_type
 
         # Validate discrepancy_type is set correctly
