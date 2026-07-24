@@ -269,10 +269,60 @@ actually worked: dump every site, look at them, then use explicit
 full-text replacements for the uniform ones and hand-edit the odd ones.
 Also note `timeout` is NOT available on macOS.
 
-## Next up: blueprint #5 = `entity` (7961 LOC, 32 files)
+## Blueprint #5: entity — ✅ COMPLETE
+
+Regression check: **OK — no new failures beyond the 79 baseline.** ruff `F` clean.
+Net **−41 lines** (95 insertions / 136 deletions across 9 files).
+
+### Dead code removed — 15 dead imports
+- `routes/settings.py` ×10 (`Iterable`, `cast`, `pycountry`, `COA_EXCLUDED_TYPES`,
+  `reconcile_account_info_status`, `sync_entity_account_xero_active`,
+  `get_account`, `get_contact`, `has_entity_membership`, `is_superuser`)
+- `services/shared.py` ×2 (`select`, `EntityAccountXero`)
+- `services/xero_account_mapping_post.py` ×3 (`current_user`,
+  `account_info_to_xero_format`, `contact_sync_to_xero_format`)
+
+Verified none were monkeypatch targets before removing (the DI lesson).
+
+### Consolidation: `_run_in_background(label, target, *args, entity_id, ...)`
+Four `*_background` wrappers in `services/settings.py` shared an identical
+skeleton (resolve `flask_app` → define `_run()` with app context + try/except
+logging → spawn daemon thread → log start):
+`sync_xero_accounts_to_db_background`, `sync_chart_of_accounts_if_changed_background`,
+`sync_contacts_if_changed_background`, `backfill_lock_dates_if_needed_background`.
+
+Variations preserved:
+- only the first passes a thread name (`XeroAccountsSync-{entity_id}`) →
+  `thread_name=` param, omitted entirely when not set (so `Thread()` still gets
+  no `name` kwarg, as before);
+- wrapped call signatures differ (chart-of-accounts also takes `user_id`) →
+  `*args` passthrough.
+- `label` is passed as a `%s` arg rather than baked into the format string;
+  verified the rendered output is byte-identical, so log greps still work.
+
+**All four public signatures are unchanged** (diffed against HEAD) — callers in
+`routes/settings.py`, `routes/billing_sync.py` and `report/routes/expense.py`
+are unaffected. `test_billing_sync_contacts.py` patches
+`sync_contacts_if_changed_background` wholesale on the *route* module, so it
+never executes the consolidated body — safe.
+
+**NOT consolidated:** `sync_all_accounts_and_contacts_background` looks like a
+fifth wrapper by name, but it runs inline and spawns NO thread. Merging it into
+the helper would have wrongly moved it onto a background thread.
+
+### Checked and rejected
+The entity-not-found flash/redirect idiom looked like a candidate but is only
+**3 sites**, one of which uses a different lookup (`func.trim(Entity.id)`).
+Not worth a helper.
+
+### Formatting: `isort` only (no `black`)
+Same call as xero — `services/settings.py` (1585) and `routes/settings.py` (1385)
+would produce a reformat diff that swamps the logic change.
+
+## Next up: blueprint #6 = `report` (14447 LOC, 43 files) — the last and largest
 
 ## Not yet started
-- Blueprints: `entity`, `report` — same 3-step recipe.
+- Blueprint: `report` — same 3-step recipe.
 - Known pre-existing debt found along the way: `blueprints/entity/routes/settings.py`
   has **12 dead imports** (F401) already on HEAD — clean up in the entity pass.
 - Optional deeper dead-code sweep: `vulture` is **not installed**; would need

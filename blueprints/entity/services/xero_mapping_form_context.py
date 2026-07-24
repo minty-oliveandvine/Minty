@@ -3,12 +3,9 @@
 from flask import g
 from loguru import logger
 
-from models.db import (AccountInfo, EntityPettycashSettings, XeroContactSync,
-                       db)
+from models.db import AccountInfo, EntityPettycashSettings, XeroContactSync, db
 from services.app_runtime.legacy.xero_service import (
-    account_info_to_xero_format,
-    contact_sync_to_xero_format,
-)
+    account_info_to_xero_format, contact_sync_to_xero_format)
 
 
 def build_xero_mapping_form_context(entity_id, org, token_valid):

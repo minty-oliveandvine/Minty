@@ -6,26 +6,16 @@ import uuid
 from typing import Any, Optional
 
 from flask import flash, jsonify, redirect, request, url_for
-from flask_login import current_user
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from blueprints.entity.services.settings import sync_expense_account_info_from_xero
+from blueprints.entity.services.settings import \
+    sync_expense_account_info_from_xero
 from blueprints.xero.services.settings import get_account, get_contact
-from models.db import (
-    AccountInfo,
-    CountryInfo,
-    CurrencyInfo,
-    Entity,
-    EntityPettycashSettings,
-    XeroContactSync,
-    db,
-)
-from services.app_runtime.legacy.xero_service import (
-    account_info_to_xero_format,
-    contact_sync_to_xero_format,
-)
-from services.auth.token_service import ensure_valid_token, get_xero_token_user_for_entity
+from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
+                       EntityPettycashSettings, XeroContactSync, db)
+from services.auth.token_service import (ensure_valid_token,
+                                         get_xero_token_user_for_entity)
 
 
 def _mapping_redirect(entity_id: str, _from: str | None, *, return_view: str):
