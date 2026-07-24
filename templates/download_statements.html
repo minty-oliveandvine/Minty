@@ -101,7 +101,7 @@
                 const company = document.getElementById('company')?.value;
 
                 if (!startDate || !endDate) {
-                    alert("Please select a start date and end date.");
+                    showFlashMessages('Pick a start and end date first.', 'error');
                     return;
                 }
 
@@ -130,7 +130,11 @@
                         } else if (contentType?.includes('application/json')) {
                             return response.json().then(data => {
                                 console.error("Server returned an error:", data);
-                                throw new Error(data.message || 'Failed to download attachments.');
+                                // Tag server-authored copy so the catch below can
+                                // safely show it; anything untagged is a JS failure.
+                                const serverError = new Error(data.message || "I couldn't download those statements. Mind trying again?");
+                                serverError.fromServer = Boolean(data.message);
+                                throw serverError;
                             });
                         } else {
                             return response.text().then(html => {
@@ -154,7 +158,12 @@
                         if (window.sendLogToDataDog) {
                             window.sendLogToDataDog('error', 'Error downloading attachments', { message: error && error.message });
                         }
-                        alert(`Error: ${error.message}`);
+                        showFlashMessages(
+                            error && error.fromServer && error.message
+                                ? error.message
+                                : "I couldn't download those statements. Mind trying again?",
+                            'error'
+                        );
                     })
                     .finally(() => {
                         setLoading(downloadAttachmentsButton, false);

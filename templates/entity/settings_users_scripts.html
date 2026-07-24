@@ -434,7 +434,7 @@
           loadPendingInvitations();
         } else {
           if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to send invitation', { message: data.message }); }
-          showErrorToast(data.message || 'Unknown error.');
+          showErrorToast(data.message || "I couldn't send that invitation. Mind trying again?");
         }
       })
       .catch(error => {
@@ -770,10 +770,11 @@
            closeEditUserModal();
            setTimeout(() => location.reload(), 600);
          } else {
-           showErrorToast(data.message || 'Failed to update user.');
+           showErrorToast(data.message || "I couldn't update that user. Mind trying again?");
          }
        })
-       .catch(err => showErrorToast('Error: ' + err.message))
+       // Only network/parse failures reach here — never show err.message.
+       .catch(() => showErrorToast("I couldn't update that user. Mind trying again?"))
        .finally(function () { hideUsersBillsSaving(); });
      });
 
@@ -816,10 +817,11 @@
            closeDeleteUserModal();
            setTimeout(() => location.reload(), 600);
          } else {
-           showErrorToast(data.message || 'Failed to remove user.');
+           showErrorToast(data.message || "I couldn't remove that user. Mind trying again?");
          }
        })
-       .catch(err => showErrorToast('Error: ' + err.message))
+       // Only network/parse failures reach here — never show err.message.
+       .catch(() => showErrorToast("I couldn't remove that user. Mind trying again?"))
        .finally(function () { hideUsersBillsSaving(); });
      }
 
@@ -976,12 +978,12 @@
            loadPendingInvitations();
          } else {
            if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to cancel invitation', { invitation_id: invitationId, message: data.message }); }
-           showErrorToast(data.message || 'Failed to cancel invitation.');
+           showErrorToast(data.message || "I couldn't cancel that invitation. Mind trying again?");
          }
        })
        .catch(err => {
          if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to cancel invitation', { invitation_id: invitationId, message: err && err.message }); }
-         showErrorToast('Error: ' + err.message);
+         showErrorToast("I couldn't cancel that invitation. Mind trying again?");
        })
        .finally(function () { hideUsersBillsSaving(); });
      }
@@ -1012,12 +1014,12 @@
              startResendCooldownTicker();
            }
            if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to resend invitation', { invitation_id: invitationId, message: data.message, retry_after: cooldown }); }
-           showErrorToast(data.message || 'Failed to resend invitation.');
+           showErrorToast(data.message || "I couldn't resend that invitation. Mind trying again?");
          }
        })
        .catch(err => {
          if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to resend invitation', { invitation_id: invitationId, message: err && err.message }); }
-         showErrorToast('Error: ' + err.message);
+         showErrorToast("I couldn't resend that invitation. Mind trying again?");
        })
        .finally(function () { hideUsersBillsSaving(); });
      }

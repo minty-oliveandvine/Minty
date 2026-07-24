@@ -1567,9 +1567,7 @@
           });
         }
         showAddExpenseNotification(
-           (error && error.message) ?
-             'Sorry, we were unable to save your expense information: ' + error.message :
-             'An unexpected error occurred while saving your expense. Please try again or contact support.',
+           "I couldn't save that expense. Mind trying again?",
            'error'
          );
       }
@@ -3262,7 +3260,7 @@
 
      const csrfTokenElement = document.querySelector('input[name="csrf_token"]');
      if (!csrfTokenElement) {
-       alert('Error: CSRF token not found. Please refresh the page.');
+       showFlashMessages('Your session expired. Refresh the page to keep going.', 'error');
        return;
      }
      const csrfToken = csrfTokenElement.value;
@@ -3299,14 +3297,17 @@
          } else {
            if (loadingText) loadingText.textContent = originalText;
            if (loadingOverlay) loadingOverlay.classList.add('hidden');
-           alert('Error updating expense: ' + (data.message || 'Unknown error'));
+           showFlashMessages(
+             data.message || "I couldn't update that expense. Mind trying again?",
+             'error'
+           );
          }
        })
        .catch(err => {
          console.error('Update expense failed:', err);
          if (loadingText) loadingText.textContent = originalText;
          if (loadingOverlay) loadingOverlay.classList.add('hidden');
-         alert('Error updating expense. Please try again.');
+         showFlashMessages("I couldn't update that expense. Mind trying again?", 'error');
        });
    }
 
@@ -3955,7 +3956,7 @@
         if (loadingOverlay) {
           loadingOverlay.classList.add('hidden');
         }
-        alert('Error: CSRF token not found. Please refresh the page.');
+        showFlashMessages('Your session expired. Refresh the page to keep going.', 'error');
         return;
       }
       const csrfToken = csrfTokenElement.value;
@@ -3997,7 +3998,10 @@
           if (window.sendLogToDataDog) {
             window.sendLogToDataDog('error', 'Delete expense failed', { context: 'delete_expense', message: data.message });
           }
-          alert('Error deleting expense: ' + (data.message || 'Unknown error'));
+          showFlashMessages(
+            data.message || "I couldn't delete that expense. Mind trying again?",
+            'error'
+          );
           }
         })
         .catch(error => {
@@ -4012,7 +4016,7 @@
         if (loadingOverlay) {
           loadingOverlay.classList.add('hidden');
         }
-        alert('Error deleting expense: ' + error.message);
+        showFlashMessages("I couldn't delete that expense. Mind trying again?", 'error');
         });
       }
     }
@@ -4266,9 +4270,7 @@
            });
          }
          showAddExpenseNotification(
-           (error && error.message) ?
-             'Sorry, we were unable to save your expense information: ' + error.message :
-             'An unexpected error occurred while saving your expense. Please try again or contact support.',
+           "I couldn't save that expense. Mind trying again?",
            'error'
          );
        }

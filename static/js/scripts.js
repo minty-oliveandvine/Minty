@@ -772,7 +772,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         window.location.href = data.redirect_url;
                     }
                 } else {
-                    alert(`Error: ${data.message || 'An unknown error occurred.'}`);
+                    showFlashMessages(data.message || "I couldn't save that. Mind trying again?", 'error');
                 }
             } else {
                 const errorText = await response.text();
