@@ -299,7 +299,11 @@ def accept_invitation(token: str, user_id: str) -> tuple[str | None, str | None,
             "invitation.accept.email_mismatch invitation={} entity={} invited={} user={}",
             invitation.id, invitation.entity_id, invited, user_id,
         )
-        return None, "This invitation was sent to a different email address.", None
+        return (
+            None,
+            "This invite went to a different account — mind signing in as that one?",
+            None,
+        )
 
     # The dailyminty view-all account is always a system superuser. Apply this
     # before the re-accept short-circuit below so it holds on every accept path.
