@@ -19,8 +19,8 @@ services:
 
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: minty-ref-app
     restart: unless-stopped
     depends_on:

@@ -19,7 +19,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --active --frozen --no-dev --no-default-groups --no-install-project
 
 COPY . .
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV PYTHONDONTWRITEBYTECODE=1
