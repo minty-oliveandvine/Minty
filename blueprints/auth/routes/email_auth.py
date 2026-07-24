@@ -117,6 +117,16 @@ def email_request_code():
     if data.get("mode") == "login" and not _email_is_registered(email):
         return jsonify({"status": "error", "message": "Please sign up first"}), 404
 
+    # Invited users only: if this OTP request carries an invite token, the email
+    # they're logging in with must be the invited address. Catch the mismatch
+    # here — before an OTP is sent — instead of only at verify-code. Requests
+    # without an invite token are ordinary logins and skip this entirely.
+    invite_token = (data.get("invite") or "").strip()
+    if invite_token:
+        invite_error = _validate_invite_for_email(invite_token, email)
+        if invite_error:
+            return jsonify({"status": "error", "message": invite_error}), 400
+
     ok, error = request_email_otp(email)
     if not ok:
         return jsonify({"status": "error", "message": error or "Could not send a code."}), 400
