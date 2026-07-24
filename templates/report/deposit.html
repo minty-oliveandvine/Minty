@@ -113,6 +113,11 @@
       }
     }
   </script>
+  <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
+  </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
   {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
@@ -224,7 +229,7 @@
              <div class="mb-6">
                <p class="text-sm font-inter text-gray-600">
                  <span>Current Balance: </span>
-                 <span class="font-semibold" id="currentBalanceDisplay">${{ "{:,.2f}".format(current_balance) }}</span>
+                 <span class="font-semibold" id="currentBalanceDisplay">{{ currency_symbol }}{{ "{:,.2f}".format(current_balance) }}</span>
                </p>
              </div>
              <input type="hidden" id="currentBalance" value="{{ current_balance }}">
@@ -233,9 +238,9 @@
                  <label class="block text-sm font-medium text-gray-700 mb-2">Deposit Amount</label>
                 <div class="relative">
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center">
-                    <span class="text-gray-500 text-sm">$</span>
+                    <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                   </div>
-                  <input type="text" inputmode="decimal" id="bank_deposit" name="bank_deposit" value="{{'%.2f'|format(current_draft.bank_deposit) if current_draft.bank_deposit and current_draft.bank_deposit > 0 else ''}}" placeholder="0.00" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this)" onblur="formatWithCommas(this)" onchange="updateDepositAmount()">
+                  <input type="text" inputmode="decimal" id="bank_deposit" name="bank_deposit" value="{{'%.2f'|format(current_draft.bank_deposit) if current_draft.bank_deposit and current_draft.bank_deposit > 0 else ''}}" placeholder="0.00" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this)" onblur="formatWithCommas(this)" onchange="updateDepositAmount()">
                 </div>
               </div>
            </div>
@@ -280,14 +285,14 @@
        <div class="mb-6">
          <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
          <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
-         <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if current_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if current_balance < 0 %}(${{ "{:,.2f}".format(-current_balance) }}){% else %}${{ "{:,.2f}".format(current_balance) }}{% endif %}</p>
+         <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if current_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if current_balance < 0 %}({{ currency_symbol }}{{ "{:,.2f}".format(-current_balance) }}){% else %}{{ currency_symbol }}{{ "{:,.2f}".format(current_balance) }}{% endif %}</p>
          <p class="text-sm text-gray-600">Cash balance cannot be negative. Choose from below to edit the error:</p>
        </div>
       <div class="space-y-3">
         <button onclick="navigateToOpening()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Opening</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(current_draft.cash_addition) }})</p>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(current_draft.cash_addition) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -296,7 +301,7 @@
         <button onclick="navigateToSales()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Sales</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: HK$ {{ "{:,.2f}".format(current_draft.cash_sales) }})</p>
+            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(current_draft.cash_sales) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -305,7 +310,7 @@
         <button onclick="navigateToExpenses()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
           <div class="flex items-center">
             <span>Expenses</span>
-            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: HK$ {{ "{:,.2f}".format(current_draft.expenses) }})</p>
+            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: {{ currency_symbol }} {{ "{:,.2f}".format(current_draft.expenses) }})</p>
           </div>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -359,7 +364,7 @@
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           });
-          depositDisplay.textContent = `$${formattedAmount}`;
+          depositDisplay.textContent = `${window.CURRENCY_SYMBOL}${formattedAmount}`;
         }
       }
     }

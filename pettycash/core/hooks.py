@@ -39,7 +39,7 @@ def init_app(app, db):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "An error occurred while submitting expenses. Please try again.",
+                        "message": "Something went wrong on my end while submitting your expenses. Mind trying again?",
                     }),
                 500,
             )
@@ -50,8 +50,17 @@ def init_app(app, db):
             "Something interrupted that action. We've logged it on our end — "
             "please try again, and let us know if it keeps happening."
         )
+        # Match "/api/" anywhere in the path, not just as a prefix. Blueprints
+        # register with no url_prefix, so routes mount at their literal path —
+        # and while most sit at /api/..., the user_management and invitation
+        # ones are declared as /minty/api/... A startswith("/api") check missed
+        # exactly those, handing fetch() an HTML error page that then died in
+        # response.json() as "Unexpected token '<'". Every route containing
+        # "/api/" returns JSON today, so the wider match cannot catch an HTML
+        # page; if that ever stops being true, key off request.blueprint or the
+        # Accept/X-Requested-With clauses below rather than the path.
         wants_json = bool(request) and (
-            request.path.startswith("/api")
+            "/api/" in request.path
             or request.is_json
             or request.headers.get("X-Requested-With") == "XMLHttpRequest"
             or "application/json" in (request.headers.get("Accept") or "").lower()
@@ -145,6 +154,38 @@ def init_app(app, db):
                 )
                 return True
 
+        def _entity_currency_symbol():
+            """ISO code of the request entity's selected currency
+            (entities.currency_id -> currency_info.currency_code, e.g. "HKD").
+
+            Money amounts across the UI render with the ISO code, not the
+            symbol. The entity is taken from ``entity_id`` / ``org_id`` in the
+            query string or URL view args (never the bare ``id`` view arg — on
+            report routes that's a report id). Falls back to "$" when no
+            entity or currency resolves. Routes that pass an explicit
+            ``currency_symbol`` to render_template override this default.
+            """
+            try:
+                view_args = request.view_args or {}
+                entity_id = (
+                    request.args.get("entity_id")
+                    or request.args.get("org_id")
+                    or view_args.get("entity_id")
+                    or view_args.get("org_id")
+                )
+                if not entity_id:
+                    return "$"
+                org = Entity.query.get(str(entity_id).strip())
+                if org and org.currency_id:
+                    from models.db import CurrencyInfo
+
+                    currency = CurrencyInfo.query.get(org.currency_id)
+                    if currency and currency.currency_code:
+                        return currency.currency_code
+            except Exception as exc:
+                logger.error(f"currency_symbol lookup failed: {exc}")
+            return "$"
+
         def is_readonly_for(entity_id):
             """True when the current user is a superuser viewing an entity
             they have no user_entity row on. Templates should disable any
@@ -170,6 +211,7 @@ def init_app(app, db):
             "is_billing_enabled": is_billing_enabled,
             "is_petty_cash_enabled": is_petty_cash_enabled,
             "is_readonly_for": is_readonly_for,
+            "currency_symbol": _entity_currency_symbol(),
         }
 
     @app.teardown_appcontext
@@ -230,12 +272,12 @@ def init_app(app, db):
                     return (
                         jsonify({
                             "status": "error",
-                            "message": "Read-only access. You can view this entity but cannot modify it.",
+                            "message": "You have read-only access to this entity - you can look, but not edit.",
                         }),
                         403,
                     )
                 flash(
-                    "Read-only access. You can view this entity but cannot modify it.",
+                    "You have read-only access to this entity - you can look, but not edit.",
                     "warning",
                 )
                 return redirect(request.referrer or url_for("entity.entity_list"))
@@ -272,7 +314,7 @@ def init_app(app, db):
                             }),
                         401,
                     )
-                flash("Your session has expired. Please login again.", "warning")
+                flash("Your session ran out. Mind logging back in?", "warning")
                 return redirect(url_for("auth.home"))
 
             if current_user.is_authenticated:
@@ -302,7 +344,7 @@ def init_app(app, db):
                 400,
             )
         flash(
-            "Form expired or invalid. Please refresh the page and try again.",
+            "This form went stale while you were away. Refresh and try again?",
             "warning")
         return redirect(request.referrer or url_for("auth.home"))
 

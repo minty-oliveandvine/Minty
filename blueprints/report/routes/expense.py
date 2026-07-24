@@ -93,7 +93,7 @@ def report_expense(id=None):
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:
-        flash("Entity context is required.", "danger")
+        flash("I need to know which entity we're working with first!", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(
@@ -105,12 +105,12 @@ def report_expense(id=None):
         if not report_for_access:
             report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
-            flash("Report not found.", "danger")
+            flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
         flash(
-            "You need to create an entity first before accessing reports.",
+            "You'll need to create an entity before I can show you any reports.",
             "warning")
         return redirect(url_for("entity.entity_list"))
 
@@ -364,7 +364,7 @@ def report_expense(id=None):
 
             if not current_draft:
                 flash(
-                    "No draft found. Please start with the opening entry first.",
+                    "I don't see a draft yet - let's start with the opening entry.",
                     "danger",
                 )
                 return redirect(url_for("report.report_opening", entity_id=entity_id))
@@ -661,14 +661,14 @@ def report_expense(id=None):
                     jsonify(
                         {
                             "status": "error",
-                            "message": "An error occurred adding expenses.",
+                            "message": "Something went wrong on my end while adding those expenses. Mind trying again?",
                         }
                     ),
                     500,
                 )
             else:
                 flash(
-                    "An error occurred adding expenses. Please try again.",
+                    "Something went wrong adding those expenses. Mind trying again?",
                     "danger")
                 return redirect(url_for("report.report_expense"))
 
@@ -739,7 +739,7 @@ def report_expense(id=None):
     # Handle case where no draft exists
     if not current_draft and not is_edit_mode:
         flash(
-            "No draft found for today. Please start with the opening section.",
+            "I don't see a draft for today yet - let's start with the opening entry.",
             "warning",
         )
         return redirect(url_for("report.report_opening", entity_id=entity_id))

@@ -32,15 +32,15 @@ def update_user_details(user_id):
     payload = request.get_json(silent=True) or {}
     entity_id = _resolve_entity_id(payload)
     if not entity_id:
-        return jsonify({"status": "error", "message": "Entity ID is required."}), 400
+        return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
 
     membership = UserEntity.query.filter_by(user_id=user_id, entity_id=entity_id).first()
     if not membership:
-        return jsonify({"status": "error", "message": "User membership not found."}), 404
+        return jsonify({"status": "error", "message": "I couldn't find that person on this entity."}), 404
 
     target_user = User.query.get(user_id)
     if not target_user:
-        return jsonify({"status": "error", "message": "User not found."}), 404
+        return jsonify({"status": "error", "message": "Hmm, that name doesn't seem to be in my list."}), 404
 
     first_name = payload.get("first_name", "").strip()
     last_name = payload.get("last_name", "").strip()
@@ -53,9 +53,9 @@ def update_user_details(user_id):
 
     if new_role:
         if not can_manage_role_assignment_for_entity(current_user, new_role, entity_id):
-            return jsonify({"status": "error", "message": "You cannot assign a role higher than your own."}), 403
+            return jsonify({"status": "error", "message": "I can't let you give someone a role above your own."}), 403
         if not can_manage_role_assignment_for_entity(current_user, membership.role, entity_id):
-            return jsonify({"status": "error", "message": "You cannot manage a user with a role equal to or higher than your own."}), 403
+            return jsonify({"status": "error", "message": "I can't let you manage someone whose role matches or outranks your own."}), 403
         membership.role = new_role
 
     db.session.commit()
@@ -83,20 +83,20 @@ def update_user_role(user_id):
     entity_id = _resolve_entity_id(payload)
     new_role = str(payload.get("role") or "").strip().lower()
     if not entity_id:
-        return jsonify({"status": "error", "message": "Entity ID is required."}), 400
+        return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
     if not new_role:
-        return jsonify({"status": "error", "message": "Role is required."}), 400
+        return jsonify({"status": "error", "message": "I need a role before I can save that."}), 400
 
     membership = UserEntity.query.filter_by(user_id=user_id, entity_id=entity_id).first()
     if not membership:
-        return jsonify({"status": "error", "message": "User membership not found."}), 404
+        return jsonify({"status": "error", "message": "I couldn't find that person on this entity."}), 404
 
     if not can_manage_role_assignment_for_entity(current_user, new_role, entity_id):
         return (
             jsonify(
                 {
                     "status": "error",
-                    "message": "You cannot assign a role higher than your own.",
+                    "message": "I can't let you give someone a role above your own.",
                 }
             ),
             403,
@@ -107,7 +107,7 @@ def update_user_role(user_id):
             jsonify(
                 {
                     "status": "error",
-                    "message": "You cannot manage a user with a role equal to or higher than your own.",
+                    "message": "I can't let you manage someone whose role matches or outranks your own.",
                 }
             ),
             403,
@@ -141,11 +141,11 @@ def delete_user_role(user_id):
     payload = request.get_json(silent=True) or {}
     entity_id = _resolve_entity_id(payload)
     if not entity_id:
-        return jsonify({"status": "error", "message": "Entity ID is required."}), 400
+        return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
 
     membership = UserEntity.query.filter_by(user_id=user_id, entity_id=entity_id).first()
     if not membership:
-        return jsonify({"status": "error", "message": "User membership not found."}), 404
+        return jsonify({"status": "error", "message": "I couldn't find that person on this entity."}), 404
 
     db.session.delete(membership)
     db.session.commit()

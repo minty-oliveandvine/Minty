@@ -236,13 +236,34 @@
                 {% if not can_edit_xero_settings %}readonly{% endif %}
                 class="box-border h-[50px] w-full rounded-xl border border-gray-300 bg-white pl-3 pr-10 text-sm text-gray-700 placeholder:text-gray-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#54D3DA]{% if not can_edit_xero_settings %} cursor-not-allowed !bg-gray-200 !text-gray-500 !border-gray-300{% endif %}"
               />
-              <input type="hidden" id="country_code_value" name="country_code" value="{{ org.country_code or 'US' }}" />
+              <input type="hidden" id="country_code_value" name="country_code" value="{{ selected_country.country_code if selected_country else '' }}" />
               <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
                 <svg id="countryDropdownIcon" class="size-5 shrink-0 origin-center text-gray-400 transition-transform duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
                 </svg>
               </div>
               <div id="countrySuggestions" class="absolute z-50 mt-1 hidden max-h-60 w-full overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg"></div>
+            </div>
+          </div>
+          <div class="mt-4">
+            <label for="currency_code_display" class="block text-sm font-medium text-gray-700 mb-2">Select Currency</label>
+            <div class="relative">
+              <input
+                type="text"
+                id="currency_code_display"
+                placeholder="Select a currency"
+                autocomplete="off"
+                value="{{ selected_currency.currency_name if selected_currency else '' }}"
+                {% if not can_edit_xero_settings %}readonly{% endif %}
+                class="box-border h-[50px] w-full rounded-xl border border-gray-300 bg-white pl-3 pr-10 text-sm text-gray-700 placeholder:text-gray-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#54D3DA]{% if not can_edit_xero_settings %} cursor-not-allowed !bg-gray-200 !text-gray-500 !border-gray-300{% endif %}"
+              />
+              <input type="hidden" id="currency_id_value" name="currency_id" value="{{ selected_currency.currency_id if selected_currency else '' }}" />
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                <svg id="currencyDropdownIcon" class="size-5 shrink-0 origin-center text-gray-400 transition-transform duration-200 ease-in-out" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                </svg>
+              </div>
+              <div id="currencySuggestions" class="absolute z-50 mt-1 hidden max-h-60 w-full overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg"></div>
             </div>
           </div>
         </div>
@@ -497,6 +518,76 @@
   }
 
   initCountryPicker();
+
+  var currenciesData = {{ currencies | tojson }};
+
+  function initCurrencyPicker() {
+    var display = document.getElementById('currency_code_display');
+    var suggestions = document.getElementById('currencySuggestions');
+    var icon = document.getElementById('currencyDropdownIcon');
+    if (!display || !suggestions || !currenciesData || !currenciesData.length) return;
+
+    function setOpen(open) {
+      if (open) {
+        suggestions.classList.remove('hidden');
+        if (icon) icon.classList.add('rotate-180');
+      } else {
+        suggestions.classList.add('hidden');
+        if (icon) icon.classList.remove('rotate-180');
+      }
+    }
+
+    function render(list) {
+      suggestions.innerHTML = '';
+      if (!list.length) {
+        var empty = document.createElement('div');
+        empty.className = 'px-4 py-2 text-sm italic text-gray-500';
+        empty.textContent = 'No currencies match';
+        suggestions.appendChild(empty);
+      } else {
+        list.forEach(function(c) {
+          var row = document.createElement('div');
+          row.className =
+            'cursor-pointer border-b border-gray-100 px-4 py-2 last:border-b-0 hover:bg-gray-100';
+          row.innerHTML =
+            '<div class="text-sm font-medium text-gray-900">' + escapeHtml(c.currency_name) + '</div>';
+          row.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            display.value = c.currency_name;
+            var hiddenId = document.getElementById('currency_id_value');
+            if (hiddenId) hiddenId.value = c.currency_id || '';
+            setOpen(false);
+          });
+          suggestions.appendChild(row);
+        });
+      }
+      setOpen(true);
+    }
+
+    if (display.readOnly) return;
+
+    display.addEventListener('focus', function() {
+      render(currenciesData.slice());
+    });
+    display.addEventListener('input', function() {
+      var q = this.value.trim().toLowerCase();
+      if (!q) {
+        render(currenciesData.slice());
+        return;
+      }
+      var filtered = currenciesData.filter(function(c) {
+        return c.currency_name.toLowerCase().includes(q);
+      });
+      render(filtered);
+    });
+    document.addEventListener('click', function(e) {
+      if (!display.contains(e.target) && !suggestions.contains(e.target)) {
+        setOpen(false);
+      }
+    });
+  }
+
+  initCurrencyPicker();
 
   // Clear the entity-name error highlight + toast as the user types.
   (function () {

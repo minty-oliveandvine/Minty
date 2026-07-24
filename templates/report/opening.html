@@ -87,7 +87,12 @@
         }
       }
     </style>
-  </head>
+    <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
+  </script>
+</head>
   <body class="min-h-screen font-inter antialiased">
     {% include 'components/flash_messages.html' %}
     <div class="flex min-h-screen items-center justify-center main-container relative">
@@ -206,15 +211,15 @@
               <div class=" bg-gray-100 rounded-2xl p-4">
                 <div class="flex justify-between items-center border-b border-gray-300 pb-2">
                   <span class="text-sm font-medium text-gray-500">Starting Cash Balance</span>
-                  <span class="text-sm font-medium text-gray-500" id="startingCashBalance">${{ "{:,.2f}".format(yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0)) }}</span>
+                  <span class="text-sm font-medium text-gray-500" id="startingCashBalance">{{ currency_symbol }}{{ "{:,.2f}".format(yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0)) }}</span>
                 </div>
                 <div class="flex justify-between items-center pt-2">
                   <span class="text-sm font-medium text-gray-400">Cash Till Balance</span>
-                  <span class="text-sm font-medium text-gray-400" id="yesterdayClosingBalance">${{ "{:,.2f}".format((yesterday_closing_balance or 0) - (safebox_balance or 0)) }}</span>
+                  <span class="text-sm font-medium text-gray-400" id="yesterdayClosingBalance">{{ currency_symbol }}{{ "{:,.2f}".format((yesterday_closing_balance or 0) - (safebox_balance or 0)) }}</span>
                 </div>
                 <div class="flex justify-between items-center">
                   <span class="text-sm font-medium text-gray-400">Safebox</span>
-                  <span class="text-sm font-medium text-gray-400" id="safeboxBalance">${{ "{:,.2f}".format(safebox_balance or 0) }}</span>
+                  <span class="text-sm font-medium text-gray-400" id="safeboxBalance">{{ currency_symbol }}{{ "{:,.2f}".format(safebox_balance or 0) }}</span>
                 </div>
               </div>
             </div>
@@ -225,9 +230,9 @@
               <label class="block text-sm font-medium text-gray-700 mb-2">Addition to Cash Drawer</label>
               <div class="relative">
                 <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <span class="text-gray-500 text-sm">$</span>
+                  <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                 </div>
-                  <input type="text" inputmode="decimal" id="additiontocashbalance" name="cash_addition" value="{{ (current_draft.cash_addition if current_draft and current_draft.cash_addition else report.cash_addition if report and report.cash_addition else '') }}" placeholder="Please enter any cash addition" class="w-full pl-8 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-gray-700{% endif %} border border-gray-300 rounded-xl placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); updateOpeningCashBalance();" onblur="formatWithCommas(this); updateOpeningCashBalance();"/>
+                  <input type="text" inputmode="decimal" id="additiontocashbalance" name="cash_addition" value="{{ (current_draft.cash_addition if current_draft and current_draft.cash_addition else report.cash_addition if report and report.cash_addition else '') }}" placeholder="Please enter any cash addition" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-gray-700{% endif %} border border-gray-300 rounded-xl placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); updateOpeningCashBalance();" onblur="formatWithCommas(this); updateOpeningCashBalance();"/>
               </div>
             </div>
             <!-- Withdrawal from -->
@@ -258,7 +263,7 @@
             <div>
               <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
                 <span class="text-sm font-medium text-[#31B6BD]">Opening Cash Balance</span>
-                <span class="text-sm font-medium text-[#31B6BD]" id="openingCashBalance">${{ "{:,.2f}".format((yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0)) + (current_draft.cash_addition if current_draft and current_draft.cash_addition else (report.cash_addition if report and report.cash_addition else 0))) }}</span>
+                <span class="text-sm font-medium text-[#31B6BD]" id="openingCashBalance">{{ currency_symbol }}{{ "{:,.2f}".format((yesterday_closing_balance if yesterday_closing_balance else (current_draft.opening_balance if current_draft and current_draft.opening_balance else 0)) + (current_draft.cash_addition if current_draft and current_draft.cash_addition else (report.cash_addition if report and report.cash_addition else 0))) }}</span>
               </div>
             </div>
           </div>
@@ -305,14 +310,14 @@
           <div class="mb-6">
             <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
             <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
-            <p class="text-3xl font-semibold text-center mb-4 {% if _yesterday_closing_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if _yesterday_closing_balance < 0 %}(${{ "{:,.2f}".format(-_yesterday_closing_balance) }}){% else %}${{ "{:,.2f}".format(_yesterday_closing_balance) }}{% endif %}</p>
+            <p class="text-3xl font-semibold text-center mb-4 {% if _yesterday_closing_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if _yesterday_closing_balance < 0 %}({{ currency_symbol }}{{ "{:,.2f}".format(-_yesterday_closing_balance) }}){% else %}{{ currency_symbol }}{{ "{:,.2f}".format(_yesterday_closing_balance) }}{% endif %}</p>
             <p class="text-sm text-gray-600">Starting cash balance is negative. The deposit amount may exceed available cash. Please go back and adjust.</p>
           </div>
           <div class="space-y-3">
             <button onclick="navigateToDashboard()" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
               <div class="flex items-center">
                 <span>Dashboard</span>
-                <p class="ml-2 text-medium font-base text-[#FF6B6B]">(Balance: HK$ {{ "{:,.2f}".format(yesterday_closing_balance or 0) }})</p>
+                <p class="ml-2 text-medium font-base text-[#FF6B6B]">(Balance: {{ currency_symbol }} {{ "{:,.2f}".format(yesterday_closing_balance or 0) }})</p>
               </div>
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -532,7 +537,7 @@
       function calculateOpeningBalance() {
         const startingBalanceEl = document.getElementById('startingCashBalance');
         const startingBalance = startingBalanceEl
-          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          ? parseFloat(startingBalanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0
           : 0;
         const additions =
           parseFloat(
@@ -560,7 +565,7 @@
       function updateAdjustedOpeningBalance() {
         const startingBalanceEl = document.getElementById('startingCashBalance');
         const startingBalance = startingBalanceEl
-          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          ? parseFloat(startingBalanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0
           : 0;
         const additions =
           parseFloat(
@@ -583,7 +588,7 @@
       function updateOpeningCashBalance() {
         const startingBalanceEl = document.getElementById('startingCashBalance');
         const startingBalance = startingBalanceEl
-          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          ? parseFloat(startingBalanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0
           : 0;
         const additions =
           parseFloat(
@@ -598,7 +603,7 @@
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           });
-          openingCashBalanceEl.textContent = `$${formattedDisplay}`;
+          openingCashBalanceEl.textContent = `${window.CURRENCY_SYMBOL}${formattedDisplay}`;
         }
       }
 
@@ -631,7 +636,7 @@
       function validateOpeningCashBalance() {
         const startingBalanceEl = document.getElementById('startingCashBalance');
         const startingBalance = startingBalanceEl
-          ? parseFloat(startingBalanceEl.textContent.replace(/[$,]/g, '')) || 0
+          ? parseFloat(startingBalanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0
           : 0;
         const additions = parseFloat(
           (document.querySelector('input[name="cash_addition"]').value || '0').replace(/,/g, '')

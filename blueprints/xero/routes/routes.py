@@ -695,8 +695,8 @@ def xero_callback():
                     "Xero invite login: id_token carried no email claim"
                 )
                 flash(
-                    "Your Xero account didn't share an email address. "
-                    "Please use the email login link instead.", "danger",
+                    "Xero didn't pass me an email address. "
+                    "Could you sign in with the email link instead?", "danger",
                 )
                 return redirect(url_for("auth.home"))
 
@@ -709,13 +709,13 @@ def xero_callback():
             ).first()
             if not invitation:
                 flash(
-                    "This invitation is invalid or has already been used.", "danger",
+                    "This invitation doesn't work anymore — it may have already been used.", "danger",
                 )
                 return redirect(url_for("auth.home"))
             if normalize_email(invitation.email) != xero_email:
                 flash(
                     "This invitation was sent to a different email address. "
-                    "Log in with the Xero account matching the invite.", "danger",
+                    "Could you sign in with the Xero account it was sent to?", "danger",
                 )
                 return redirect(url_for("auth.home"))
 
@@ -726,7 +726,7 @@ def xero_callback():
             user = _create_user_from_xero(decoded, xero_email)
             if user is None:
                 flash(
-                    "Could not create your account. Please contact your inviter.", "danger",
+                    "Something went wrong on my end while setting up your account. Could you let your inviter know?", "danger",
                 )
                 return redirect(url_for("auth.home"))
 
@@ -738,12 +738,12 @@ def xero_callback():
                 # username, so this is the one case we can't let through.
                 logger.warning("Xero login: id_token carried no email claim")
                 flash(
-                    "Your Xero account didn't share an email address.", "danger",
+                    "Xero didn't pass me an email address. Could you sign in with the email link instead?", "danger",
                 )
                 return redirect(url_for("auth.home"))
             user = _create_user_from_xero(decoded, xero_email)
             if user is None:
-                flash("Could not log you in. Please try again.", "danger")
+                flash("I couldn't get you in just now. Mind trying again?", "danger")
                 return redirect(url_for("auth.home"))
             logger.info(f"Xero login: auto-created account for {xero_email}")
 
@@ -804,7 +804,7 @@ def xero_callback():
                     f"Xero login: user {user.id} accepted invite to entity "
                     f"{entity_id_accepted}."
                 )
-                flash("Invitation accepted. Welcome!", "success")
+                flash("Invitation accepted — welcome aboard!", "success")
                 return redirect(
                     url_for("entity.report_dashboard", id=entity_id_accepted)
                 )
@@ -817,13 +817,13 @@ def xero_callback():
             # this the old error pops up next to the login-success toast.
             # Same defensive pattern used in auth/logout.py and register.py.
             get_flashed_messages()
-            flash("Xero Authentication: Logged in successfully", "success")
+            flash("You're signed in with Xero.", "success")
             next_url = session.pop("next_after_login", None)
             return redirect(next_url or url_for("entity.entity_list"))
         else:
             db.session.rollback()
             logger.error(f"Error in xero auth with user: {user}")
-            flash("Xero Connect: Authentication Error", "danger")
+            flash("I couldn't get you in with that Xero account. Mind trying again?", "danger")
             return redirect(url_for("auth.home"))
     elif base_state in ("entity_connect", "entity_connect_onboarding"):
         from_onboarding = base_state == "entity_connect_onboarding"
@@ -883,7 +883,7 @@ def xero_callback():
                     curr_conn = curr_conn.json()
                     if not curr_conn:
                         flash(
-                            "Entity Created, but not connected to Xero.",
+                            "Entity created! It's not connected to Xero yet — want to connect it now?",
                             "warning",
                         )
                         logger.error(
@@ -897,7 +897,7 @@ def xero_callback():
                             tenant_id = curr_conn[0]["tenantId"]
                             if tenant_id is None:
                                 flash(
-                                    "Xero Connect: Please select an entity to connect.", "danger", )
+                                    "I couldn't connect that to Xero. Mind trying again?", "danger", )
                                 if from_onboarding:
                                     return _onboarding_xero_return(False)
                                 return redirect(
@@ -911,11 +911,11 @@ def xero_callback():
                                 )
                                 if entity is None:
                                     logger.error(f"Entity Connect: entity '{entity_id}' not found")
-                                    flash("Xero Connect: Entity not found.", "danger")
+                                    flash("Hmm, I couldn't find that entity to connect.", "danger")
                                     if from_onboarding:
                                         return _onboarding_xero_return(False)
                                     return redirect(url_for("entity.entity_list"))
-                                # One Xero org = one entity. Block if the org
+                                # One Xero org = one entity. Block if this tenant
                                 # is already connected to a DIFFERENT entity so a
                                 # second user/entity can't claim it. Same-entity
                                 # re-connect is allowed (id != entity.id).
@@ -956,7 +956,8 @@ def xero_callback():
                                             conflict=True,
                                             conflict_entity=conflict.name,
                                         )
-                                    return redirect(url_for("entity.entity_list"))
+                                    return redirect(
+                                        url_for("entity.entity_list"))
                                 # ``user`` is already the user resolved from the
                                 # Xero id_token email above. Do NOT re-fetch via
                                 # current_user: /callback has no @login_required
@@ -1013,7 +1014,7 @@ def xero_callback():
 
                                 login_user(user)
                                 flash(
-                                    "Xero connect: Successfully connected. Syncing accounts and contacts in background...",
+                                    "Connected to Xero! I'm pulling in your accounts and contacts now.",
                                     "success",
                                 )
                                 if from_onboarding:
@@ -1023,7 +1024,7 @@ def xero_callback():
                                 return redirect(url_for("entity.entity_list"))
                         except Exception as err:
                             flash(
-                                "Xero Connect: There is an error connecting to xero", "danger", )
+                                "I couldn't connect that to Xero. Mind trying again?", "danger", )
                             logger.error(
                                 f"There is an error connecting to xero: {err}")
                             if from_onboarding:
@@ -1032,7 +1033,7 @@ def xero_callback():
                                 url_for("entity.entity_create_success"))
                 except Exception as error:
                     flash(
-                        "Xero Connect: There is no entity selected to connect", "danger")
+                        "I couldn't connect that to Xero. Mind trying again?", "danger")
                     logger.error(
                         f"There is an error connecting to xero: {error}")
                     if from_onboarding:
@@ -1068,7 +1069,7 @@ def xero_callback():
 
         if not entity_id:
             logger.error("Entity Reconnect: Missing entity_id after callback")
-            flash("Xero Reconnect: Missing entity to reconnect.", "danger")
+            flash("I need to know which entity to reconnect.", "danger")
             return redirect(url_for("entity.entity_list"))
 
         if not error:
@@ -1133,7 +1134,7 @@ def xero_callback():
                     curr_conn = curr_conn.json()
                     if not curr_conn:
                         flash(
-                            "Xero Reconnect: Please select a xero entity to connect", "danger", )
+                            "No organization was picked on Xero's approval screen, so this entity is still disconnected. Mind trying again?", "danger", )
                         logger.error(
                             "User did not select an entity in the dropdown in allow in xero's allow access page"
                         )
@@ -1142,7 +1143,7 @@ def xero_callback():
                             tenant_id = curr_conn[0]["tenantId"]
                             if tenant_id is None:
                                 flash(
-                                    "Xero Reconnect: Please select an entity to connect.", "danger", )
+                                    "I couldn't reconnect that to Xero, so it's still disconnected. Mind trying again?", "danger", )
                                 return redirect(
                                     url_for(
                                         "entity_settings",
@@ -1187,6 +1188,46 @@ def xero_callback():
                                 entity = Entity.query.filter(
                                     Entity.id == entity_id
                                 ).first()
+                                # One Xero org = one entity. Block if the tenant
+                                # the user picked in Xero is already connected to
+                                # a DIFFERENT entity, so reconnect can't steal
+                                # another entity's org. A claim held by this same
+                                # user can't be verified (shared token), so it is
+                                # unlinked instead of blocking; that entity then
+                                # reads "disconnected" via its own status sync.
+                                conflict = _live_org_claimant(
+                                    tenant_id, entity_id, curr_conn,
+                                    connecting_user_id=user.id,
+                                )
+                                if conflict is not None:
+                                    logger.warning(
+                                        "Xero reconnect blocked: tenant %s "
+                                        "already connected to entity %s (%s)",
+                                        tenant_id, conflict.id, conflict.name,
+                                    )
+                                    # Same as the connect branch: the OAuth
+                                    # exchange has already completed, so hand the
+                                    # grant back rather than leave the user
+                                    # connected on Xero while we say they are not.
+                                    _revoke_new_grant(
+                                        response.get("access_token"),
+                                        curr_conn,
+                                        tenant_id,
+                                    )
+                                    flash(
+                                        "This Xero organisation is already "
+                                        f"connected to your entity "
+                                        f"\"{conflict.name}\". A Xero organisation "
+                                        "can only be linked to one entity at a "
+                                        f"time — open \"{conflict.name}\" and "
+                                        "disconnect it from Xero there first, then "
+                                        "reconnect it here.",
+                                        "danger",
+                                    )
+                                    return redirect(
+                                        url_for(
+                                            "entity_settings",
+                                            entity_id=entity_id))
                                 if entity:
                                     if not entity.xero_org_id or str(
                                         entity.xero_org_id
@@ -1236,8 +1277,13 @@ def xero_callback():
                                     logger.warning(
                                         "Entity Reconnect: status sync skipped"
                                     )
+                                # Drain any danger flash left queued from a prior
+                                # BLOCKED reconnect attempt (e.g. "already
+                                # connected to another entity") so it doesn't sit
+                                # on the settings page next to this success toast.
+                                get_flashed_messages()
                                 flash(
-                                    "Xero Reconnect: Successfully reconnected. Syncing accounts and contacts in background...",
+                                    "Reconnected to Xero! I'm pulling in your accounts and contacts now.",
                                     "success",
                                 )
                                 logger.info(
@@ -1248,12 +1294,12 @@ def xero_callback():
                                         entity_id=entity_id))
                         except Exception as err:
                             flash(
-                                "Xero Reconnect: There is an error connecting to xero", "danger", )
+                                "Something went wrong reconnecting to Xero. Mind trying again?", "danger", )
                             logger.error(
                                 f"There is an error connecting to xero: {err}")
                 except Exception as err:
                     flash(
-                        "Xero Reconnect: There is no entity selected to connect", "danger",
+                        "I couldn't reconnect that to Xero, so it's still disconnected. Mind trying again?", "danger",
                     )
                     logger.error(
                         f"There is an error connecting to xero: {err}")
@@ -1263,7 +1309,11 @@ def xero_callback():
                             entity_id=entity_id))
         else:
             logger.error(f"Error in xero auth {error}")
-            flash("Xero Reconnect: There is an error reconnecting to xero", "danger")
+            flash(
+                "Xero didn't approve that, so this entity is still disconnected. "
+                "Mind trying again and allowing access?",
+                "danger",
+            )
             return redirect(url_for("entity_settings", entity_id=entity_id))
     return redirect(url_for("entity_settings", entity_id=entity_id))
 
@@ -1275,7 +1325,7 @@ def refresh_access_token() -> ResponseReturnValue:
     if token_response:
         return jsonify(token_response), 200
     return (
-        jsonify({"status": "error", "message": "Failed to refresh access token"}),
+        jsonify({"status": "error", "message": "Xero wouldn't renew your session. Mind reconnecting to Xero?"}),
         500,
     )
 
@@ -1391,17 +1441,32 @@ def get_latest_xero_bank_transactions(entity_id: str) -> ResponseReturnValue:
                     return jsonify(
                         {"status": "success", "data": transaction}), 200
         else:
+            # Xero's raw response body is diagnostic detail, not something to put
+            # on screen — log it, show the user plain language.
+            logger.error(
+                "Failed to fetch bank transactions: status=%s body=%s",
+                response.status_code,
+                response.text,
+            )
             return (
                 jsonify(
                     {
                         "status": "error",
-                        "message": f"Failed to fetch bank transactions: {response.text}",
+                        "message": "I couldn't get your bank transactions from Xero. Mind trying again?",
                     }),
                 response.status_code,
             )
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-    return jsonify({"status": "not_found", "message": "No transaction found"}), 404
+    except Exception:
+        logger.exception("Error fetching latest bank transactions")
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Something went wrong reaching Xero. Mind trying again?",
+                }),
+            500,
+        )
+    return jsonify({"status": "not_found", "message": "I couldn't find a matching bank transaction in Xero."}), 404
 
 
 @xero_bp.route("/api/xero/bank-transactions/update/<entity_id>",
@@ -1437,7 +1502,7 @@ def update_bank_transaction(entity_id):
         if new_amount is not None and float(new_amount) > previous_deposit:
             return jsonify({
                 "status": "error",
-                "message": "Deposit cannot be higher than previous deposit amount",
+                "message": "That deposit is larger than the previous one — could you double-check the amount?",
             }), 400
 
     headers = {
@@ -1531,7 +1596,14 @@ def disconnect_from_xero():
     entity_id = request.args.get("entity_id")
 
     if not entity_id:
-        flash("Entity ID is required.", "danger")
+        # Nothing has touched Xero at this point — the request just arrived
+        # without an entity. Say that, so the user doesn't read this as a
+        # half-finished disconnect and go hunting for a broken connection.
+        flash(
+            "I need to know which entity to disconnect. Nothing has changed — "
+            "could you pick the entity and try again?",
+            "danger",
+        )
         return redirect(url_for("entity.entity_list"))
 
     try:
@@ -1634,12 +1706,20 @@ def disconnect_from_xero():
         org.connected_by_user_id = None
         db.session.commit()
         logger.info(f"Successfully disconnected entity: {entity_id}")
-        flash("Disconnected from Xero successfully.", "success")
+        flash("You're disconnected from Xero.", "success")
         return redirect(url_for("entity_settings", entity_id=entity_id))
     except Exception as e:
         logger.error(f"Error disconnecting from Xero: {str(e)}")
         db.session.rollback()
-        flash("An error occurred while disconnecting from Xero.", "danger")
+        # The rollback reverts our own records, but the revoke call to Xero may
+        # already have gone through — so the two sides can disagree. Say so
+        # rather than implying a clean no-op.
+        flash(
+            "I couldn't finish disconnecting this entity from Xero, so it may "
+            "still show as connected. Mind checking the connection in settings "
+            "before trying again?",
+            "danger",
+        )
         return redirect(url_for("entity_settings", entity_id=entity_id))
 
 
@@ -1660,7 +1740,7 @@ def get_entity_xero_data(entity_id):
         org = Entity.query.filter(Entity.id == entity_id).first()
         if not org:
             return jsonify(
-                {"status": "error", "message": "Entity not found"}), 404
+                {"status": "error", "message": "Hmm, I looked everywhere but couldn't find that one."}), 404
 
         if not org.xero_org_id:
             return jsonify(
@@ -1778,7 +1858,7 @@ def get_entity_xero_data(entity_id):
         logger.error(
             f"Error fetching Xero data for entity {entity_id}: {str(e)}")
         return jsonify(
-            {"status": "error", "message": "Failed to fetch Xero data"}), 500
+            {"status": "error", "message": "I couldn't get your data from Xero. Mind trying again?"}), 500
 
 
 """Xero connection and integration route handlers extracted from legacy."""

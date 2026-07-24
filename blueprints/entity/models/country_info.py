@@ -1,13 +1,25 @@
-﻿from models.db import db
+from sqlalchemy.dialects.postgresql import UUID
+
+from models.db import db
 
 
 class CountryInfo(db.Model):
+    """Mirror of pettycashv2.country_info.
+
+    country_code (ISO 3166-1 alpha-2) is the primary key; alpha3_code carries
+    the alpha-3 code. currency_id links to the currency registry (ON DELETE
+    SET NULL in the DB).
+    """
+
     __tablename__ = "country_info"
     __table_args__ = {"schema": "pettycashv2"}
-    country_code = db.Column(db.String(3), primary_key=True, nullable=False)
-    country_name_en = db.Column(db.String(50), nullable=False)
-    country_name_ko = db.Column(db.String(50))
+    country_code = db.Column(db.CHAR(2), primary_key=True)
+    alpha3_code = db.Column(db.CHAR(3), nullable=False)
+    country_name_en = db.Column(db.String(100), nullable=False)
     currency_id = db.Column(
-        db.String(10), db.ForeignKey("pettycashv2.currency_info.currency_code")
+        UUID(as_uuid=False), db.ForeignKey("pettycashv2.currency_info.id")
     )
+    phone_code = db.Column(db.String(10))
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    display_order = db.Column(db.Integer, nullable=False, default=999)
     cash_info = db.relationship("CashInfo", backref="country_info", lazy=True)

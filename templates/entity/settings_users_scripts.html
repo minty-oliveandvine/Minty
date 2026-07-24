@@ -440,7 +440,7 @@
       .catch(error => {
         console.error('Error:', error);
         if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to send invitation', { message: error && error.message }); }
-        showErrorToast('Failed to send invitation: ' + error.message);
+        showErrorToast("I couldn't send that invitation. Mind trying again?");
       })
       .finally(function () { hideUsersBillsSaving(); });
     });

@@ -39,14 +39,14 @@ def send_invitation():
             "invitation.send.invalid actor={} entity={} email={} role={}",
             current_user.id, entity_id, email, role,
         )
-        return jsonify({"status": "error", "message": "entity_id, email, and role are required."}), 400
+        return jsonify({"status": "error", "message": "I need an entity, an email, and a role before I can send that invitation."}), 400
 
     if not can_manage_role_assignment_for_entity(current_user, role, entity_id):
         logger.warning(
             "invitation.send.denied actor={} entity={} email={} role={} reason=role_above_actor",
             current_user.id, entity_id, email, role,
         )
-        return jsonify({"status": "error", "message": "You cannot assign a role higher than your own."}), 403
+        return jsonify({"status": "error", "message": "I can't let you give someone a role above your own."}), 403
 
     invitation, error = create_invitation(
         entity_id=entity_id,
@@ -125,7 +125,7 @@ def cancel_invite(invitation_id):
             "invitation.cancel.not_found actor={} invitation={}",
             current_user.id, invitation_id,
         )
-        return jsonify({"status": "error", "message": "Invitation not found."}), 404
+        return jsonify({"status": "error", "message": "Hmm, I couldn't find that invitation."}), 404
 
     from services.permission_policy import can_manage_role_assignment_for_entity, has_permission
 
@@ -141,7 +141,7 @@ def cancel_invite(invitation_id):
             "invitation.cancel.denied actor={} entity={} invitation={} role={} reason=role_above_actor",
             current_user.id, invitation.entity_id, invitation_id, invitation.role,
         )
-        return jsonify({"status": "error", "message": "You cannot cancel an invitation for a role equal to or higher than your own."}), 403
+        return jsonify({"status": "error", "message": "I can't let you cancel an invitation for a role that matches or outranks your own."}), 403
 
     success, error = cancel_invitation(invitation_id)
     if not success:
@@ -169,7 +169,7 @@ def resend_invite(invitation_id):
             "invitation.resend.not_found actor={} invitation={}",
             current_user.id, invitation_id,
         )
-        return jsonify({"status": "error", "message": "Invitation not found."}), 404
+        return jsonify({"status": "error", "message": "Hmm, I couldn't find that invitation."}), 404
 
     from services.permission_policy import can_manage_role_assignment_for_entity, has_permission
 
@@ -185,7 +185,7 @@ def resend_invite(invitation_id):
             "invitation.resend.denied actor={} entity={} invitation={} role={} reason=role_above_actor",
             current_user.id, invitation.entity_id, invitation_id, invitation.role,
         )
-        return jsonify({"status": "error", "message": "You cannot resend an invitation for a role equal to or higher than your own."}), 403
+        return jsonify({"status": "error", "message": "I can't let you resend an invitation for a role that matches or outranks your own."}), 403
 
     entity_id = invitation.entity_id
     invitation, error, retry_after = resend_invitation(invitation_id, actor_id=current_user.id)

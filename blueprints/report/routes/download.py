@@ -59,7 +59,7 @@ def download_statements():
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Start date and end date are required.",
+                            "message": "I need both a start and an end date to do that.",
                         }
                     ),
                     400,
@@ -73,7 +73,7 @@ def download_statements():
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Invalid date format. Use YYYY-MM-DD.",
+                            "message": "That date doesn't look quite right — could you use YYYY-MM-DD?",
                         }
                     ),
                     400,
@@ -166,7 +166,7 @@ def download_statements():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "An error occurred while generating the statements.",
+                        "message": "Something went wrong on my end while building those statements. Mind trying again?",
                     }
                 ),
                 500,
@@ -190,7 +190,7 @@ def download_attachments():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Start date and end date are required.",
+                        "message": "I need both a start and an end date to do that.",
                     }
                 ),
                 400,
@@ -204,7 +204,7 @@ def download_attachments():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Invalid date format. Use YYYY-MM-DD.",
+                        "message": "That date doesn't look quite right — could you use YYYY-MM-DD?",
                     }
                 ),
                 400,
@@ -258,7 +258,7 @@ def download_attachments():
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while generating the attachments ZIP.",
+                    "message": "Something went wrong on my end while packaging those attachments. Mind trying again?",
                 }
             ),
             500,
@@ -298,7 +298,7 @@ def download_reports_csv(entity_id):
             report = Report.query.filter_by(id=report_id).first()
             if not report:
                 return (
-                    jsonify({"status": "error", "message": "Report not found. Only submitted or published reports can be downloaded as CSV."}),
+                    jsonify({"status": "error", "message": "I can only download submitted or published reports as CSV."}),
                     404,
                 )
 
@@ -501,7 +501,7 @@ def download_reports_csv(entity_id):
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Both start_date and end_date are required.",
+                            "message": "I need both a start and an end date to do that.",
                         }
                     ),
                     400,
@@ -512,7 +512,7 @@ def download_reports_csv(entity_id):
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Start date cannot be after end date.",
+                            "message": "Your start date lands after your end date — could you flip them around?",
                         }
                     ),
                     400,
@@ -735,7 +735,7 @@ def download_reports_csv(entity_id):
             jsonify(
                 {
                     "status": "error",
-                    "message": f"Error generating CSV report: {str(e)}",
+                    "message": "Something went wrong on my end while building that CSV. Mind trying again?",
                 }
             ),
             500,

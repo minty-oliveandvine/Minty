@@ -36,13 +36,13 @@ def generate_pdf_report(id):
                 Report.id == id) .first())
         if query_result is None:
             return (
-                jsonify({"status": "error", "message": "Report or entity not found."}),
+                jsonify({"status": "error", "message": "Hmm, I couldn't find that report."}),
                 404,
             )
         report, entity = cast(tuple[Report, Entity], query_result)
         if not report or not entity:
             return (
-                jsonify({"status": "error", "message": "Report or entity not found."}),
+                jsonify({"status": "error", "message": "Hmm, I couldn't find that report."}),
                 404,
             )
         if not can_view_report(current_user, report):
@@ -61,7 +61,7 @@ def generate_pdf_report(id):
         if not cash_count:
             return (
                 jsonify(
-                    {"status": "error", "message": "Cash count not found for report."}
+                    {"status": "error", "message": "I couldn't find a cash count for that report."}
                 ),
                 404,
             )
@@ -90,7 +90,7 @@ def generate_pdf_report(id):
         )
         if not os.path.exists(template_path):
             return (
-                jsonify({"status": "error", "message": "Report template not found."}),
+                jsonify({"status": "error", "message": "Something's not set up right on my end — I'm missing the report template. Could you let us know?"}),
                 500,
             )
         doc = DocxTemplate(template_path)
@@ -281,7 +281,7 @@ def generate_pdf_report(id):
 
         if not os.path.exists(docx_path):
             return (
-                jsonify({"status": "error", "message": "Failed to create DOCX file"}),
+                jsonify({"status": "error", "message": "Something went wrong on my end while building that document. Mind trying again?"}),
                 500,
             )
 
@@ -292,7 +292,7 @@ def generate_pdf_report(id):
                         jsonify(
                             {
                                 "status": "error",
-                                "message": "Failed to create PDF file",
+                                "message": "Something went wrong on my end while building that PDF. Mind trying again?",
                             }
                         ),
                         500,
@@ -328,7 +328,7 @@ def generate_pdf_report(id):
                     jsonify(
                         {
                             "status": "error",
-                            "message": "Failed to convert DOCX to PDF",
+                            "message": "Something went wrong on my end while making that PDF. Mind trying again?",
                         }
                     ),
                     500,
@@ -339,14 +339,14 @@ def generate_pdf_report(id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "An error occurred while converting the report to PDF.",
+                        "message": "Something went wrong on my end while making that PDF. Mind trying again?",
                     }),
                 500,
             )
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}")
         return (jsonify({"status": "error",
-                         "message": "An error occurred while generating the report.",
+                         "message": "Something went wrong on my end while building that report. Mind trying again?",
                          }),
                 500,
                 )

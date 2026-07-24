@@ -59,7 +59,7 @@ def test_require_entity_access_returns_400_when_entity_missing(monkeypatch):
         response, status = protected()
 
     assert status == 400
-    assert response.get_json()["message"] == "Entity context is required."
+    assert response.get_json()["message"] == "I need to know which entity we're working with first!"
 
 
 def test_require_entity_access_returns_403_when_membership_missing(monkeypatch):
@@ -80,7 +80,7 @@ def test_require_entity_access_returns_403_when_membership_missing(monkeypatch):
         response, status = protected()
 
     assert status == 403
-    assert response.get_json()["message"] == "You do not have access to this entity."
+    assert response.get_json()["message"] == "Hmm, it looks like you don't have permission to look there."
 
 
 def test_require_permission_uses_entity_from_json_body(monkeypatch):
