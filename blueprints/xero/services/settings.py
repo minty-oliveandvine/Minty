@@ -6,8 +6,7 @@ import requests
 from flask import current_app as app
 from loguru import logger
 
-from models.db import (AccountInfo, Entity, EntityAccountXero,
-                       EntityPettycashSettings, XeroContactSync, db)
+from models.db import (AccountInfo, Entity, EntityPettycashSettings, db)
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
 from services.helpers.xero import mask_account_number
