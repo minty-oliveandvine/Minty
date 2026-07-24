@@ -863,7 +863,7 @@
            submitButton.disabled = false;
            submitButton.innerHTML = originalButtonText;
            loadingOverlay.classList.add('hidden');
-           alert('An error occurred while saving. Please try again.');
+           showFlashMessages("I couldn't save that. Mind trying again?", 'error');
          }
        }
 
@@ -924,7 +924,7 @@
           saveExitButton.disabled = false;
           saveExitButton.innerHTML = originalButtonText;
           loadingOverlay.classList.add('hidden');
-          alert('An error occurred while saving. Please try again.');
+          showFlashMessages("I couldn't save that. Mind trying again?", 'error');
         }
       }
 

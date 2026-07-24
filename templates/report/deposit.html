@@ -402,7 +402,7 @@
         submitButton.disabled = false;
         submitButton.innerHTML = originalButtonText;
         loadingOverlay.classList.add('hidden');
-        alert('An error occurred while saving. Please try again.');
+        showFlashMessages("I couldn't save that. Mind trying again?", 'error');
       }
     }
 
@@ -449,14 +449,14 @@
         saveExitButton.disabled = false;
         saveExitButton.innerHTML = originalButtonText;
         loadingOverlay.classList.add('hidden');
-        alert('An error occurred while saving. Please try again.');
+        showFlashMessages("I couldn't save that. Mind trying again?", 'error');
       }
     }
 
 
      // Function to show continue report message
      function showCompleteReportMessage() {
-       alert('Please complete the current report before navigating away.');
+       showFlashMessages('Finish this report first, then you can move on.', 'error');
      }
 
      // Function to navigate to different steps

@@ -357,7 +357,7 @@
 
     // Function to show continue report message
     function showContinueReportMessage() {
-      alert('This feature is currently in progress, Stay Tuned!');
+      showFlashMessages('This one is still on the way.', 'info');
     }
 
     // ── Unsaved-changes guard for tab navigation ──────────────────────────
@@ -863,7 +863,7 @@
         connectionButton.innerHTML = originalButtonContent;
         xeroLoadingOverlay.classList.add('hidden');
         
-        alert('An error occurred while processing the connection. Please try again.');
+        showFlashMessages("I couldn't finish connecting. Mind trying again?", 'error');
       }
     }
 
