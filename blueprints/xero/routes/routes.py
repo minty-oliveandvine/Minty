@@ -714,8 +714,8 @@ def xero_callback():
                 return redirect(url_for("auth.home"))
             if normalize_email(invitation.email) != xero_email:
                 flash(
-                    "This invitation was sent to a different email address. "
-                    "Could you sign in with the Xero account it was sent to?", "danger",
+                    "This invite went to a different account — mind signing in "
+                    "with the Xero account it was sent to?", "danger",
                 )
                 return redirect(url_for("auth.home"))
 

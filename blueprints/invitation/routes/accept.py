@@ -78,8 +78,8 @@ def accept_invitation_page(token):
             session.pop("last_activity", None)
             logout_user()
             flash(
-                f"This invitation was sent to {invitation.email}. Please sign "
-                f"in as that account to accept it.",
+                f"This invite went to {invitation.email} — mind signing in as "
+                f"that account?",
                 "warning",
             )
             return redirect(resume_url)

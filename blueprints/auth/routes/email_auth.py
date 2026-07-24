@@ -86,7 +86,7 @@ def _validate_invite_for_email(invite_token: str, verified_email: str) -> str | 
     if not invitation:
         return "This invitation is invalid or has already been used."
     if invitation.email.strip().lower() != email:
-        return "This invitation was sent to a different email address."
+        return "This invite went to a different account — mind signing in as that one?"
     return None
 
 
