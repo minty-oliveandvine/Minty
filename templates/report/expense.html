@@ -98,6 +98,11 @@
       }
     }
   </script>
+  <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
+  </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
   {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
@@ -223,7 +228,7 @@
                        </div>
                       <div class="text-right">
                         <div class="flex items-center gap-3 justify-end">
-                          <div class="text-red-600 font-medium">${{ "{:,.2f}".format(expense.amount or 0) }}</div>
+                          <div class="text-red-600 font-medium">{{ currency_symbol }}{{ "{:,.2f}".format(expense.amount or 0) }}</div>
                           {% if not current_draft or current_draft.status == 'draft' %}
                           <button type="button" onclick="event.stopPropagation(); deleteExpense('{{ expense.id }}'); return false;" class="text-gray-400 hover:text-red-600 hover-bounce p-2 -m-2 rounded-full">
                             <svg class="w-4 h-4" viewBox="0 0 16 15" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -244,7 +249,7 @@
              <p id="noExpensesMessage" class="text-gray-500 text-center py-8" style="display: none;">No expenses added yet</p>
               <div class="flex justify-between items-center py-2 bg-[#CAF1F4]/50 rounded-2xl p-3 mt-4">
                 <span class="text-sm font-medium text-[#31B6BD]">Total Expense</span>
-                <span class="text-sm font-medium text-[#31B6BD]" id="grossTotal">$0.00</span>
+                <span class="text-sm font-medium text-[#31B6BD]" id="grossTotal">{{ currency_symbol }}0.00</span>
               </div>
               <!-- Add New Expense Button (inside the expense entries container) -->
               {% if not current_draft or current_draft.status == 'draft' %}
@@ -296,9 +301,9 @@
                 <label class="block text-sm font-medium text-gray-700 mb-2">Expense Amount <span class="text-red-500">*</span></label>
                 <div class="relative">
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span class="text-gray-500 text-sm">$</span>
+                    <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                   </div>
-                  <input type="text" inputmode="decimal" placeholder="0.00" id="expense_amount" value="" class="w-full pl-8 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-black focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                  <input type="text" inputmode="decimal" placeholder="0.00" id="expense_amount" value="" class="w-full pl-12 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-black focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                 </div>
               </div>
 
@@ -597,7 +602,7 @@
                </div>
                <div class="text-right">
                  <div class="flex items-center gap-3 justify-end">
-                   <div class="text-red-600 font-medium">$${expense.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                   <div class="text-red-600 font-medium">${window.CURRENCY_SYMBOL}${expense.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                    ${isDraft ? `<button type="button" onclick="event.stopPropagation(); deleteLocalExpense(${index}); return false;" class="text-gray-400 hover:text-red-600 hover-bounce">
                      <svg class="w-4 h-4" viewBox="0 0 16 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                        <path d="M10.9156 4.00065H13.8312V5.16732H12.665V12.7507C12.665 12.914 12.6086 13.052 12.4958 13.1648C12.3831 13.2776 12.2451 13.334 12.0818 13.334H3.91808C3.7548 13.334 3.61679 13.2776 3.50406 13.1648C3.39132 13.052 3.33495 12.914 3.33495 12.7507V5.16732H2.1687V4.00065H5.08433V2.25065C5.08433 2.08732 5.14069 1.94926 5.25343 1.83648C5.36617 1.72371 5.50418 1.66732 5.66745 1.66732H10.3325C10.4957 1.66732 10.6337 1.72371 10.7465 1.83648C10.8592 1.94926 10.9156 2.08732 10.9156 2.25065V4.00065ZM11.4987 5.16732H4.5012V12.1673H11.4987V5.16732ZM6.25058 6.91732H7.41683V10.4173H6.25058V6.91732ZM8.58308 6.91732H9.74933V10.4173H8.58308V6.91732ZM6.25058 2.83398V4.00065H9.74933V2.83398H6.25058Z" fill="currentColor"/>
@@ -644,13 +649,13 @@
       if (grossTotal) {
         // Format total with commas and handle zero value
         if (total === 0) {
-          grossTotal.textContent = '$0.00';
+          grossTotal.textContent = window.CURRENCY_SYMBOL + '0.00';
         } else {
           const formattedTotal = total.toLocaleString('en-US', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           });
-          grossTotal.textContent = `$${formattedTotal}`;
+          grossTotal.textContent = `${window.CURRENCY_SYMBOL}${formattedTotal}`;
         }
       }
     }
@@ -683,13 +688,13 @@
           const grossTotal = document.getElementById('grossTotal');
           if (grossTotal) {
             if (total === 0) {
-              grossTotal.textContent = '$0.00';
+              grossTotal.textContent = window.CURRENCY_SYMBOL + '0.00';
             } else {
               const formattedTotal = total.toLocaleString('en-US', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
               });
-              grossTotal.textContent = `$${formattedTotal}`;
+              grossTotal.textContent = `${window.CURRENCY_SYMBOL}${formattedTotal}`;
             }
           }
         }
@@ -1087,7 +1092,7 @@
           const grossTotal = document.getElementById('grossTotal');
           if (grossTotal && result.totals) {
             const total = Number(result.totals.total_expenses) || 0;
-            grossTotal.textContent = total === 0 ? '$0.00' : `$${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            grossTotal.textContent = total === 0 ? window.CURRENCY_SYMBOL + '0.00' : `${window.CURRENCY_SYMBOL}${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           }
           const noExpensesMessage = document.getElementById('noExpensesMessage');
           if (noExpensesMessage) noExpensesMessage.style.display = 'none';
@@ -1175,7 +1180,7 @@
           </div>
           <div class="text-right">
             <div class="flex items-center gap-3 justify-end">
-              <div class="text-red-600 font-medium">$${amountText}</div>
+              <div class="text-red-600 font-medium">${window.CURRENCY_SYMBOL}${amountText}</div>
               ${deleteBtnHtml}
             </div>
           </div>
@@ -2551,7 +2556,12 @@
                   if (loadingText) loadingText.textContent = originalText;
                   loadingOverlay.classList.add('hidden');
                 }
-                throw new Error(errorData.message || 'Network response was not ok');
+                // Tag it: only a message the server actually wrote is safe to
+                // show the user. Anything reaching .catch() untagged is a JS/
+                // parser failure and must not be surfaced verbatim.
+                const serverError = new Error(errorData.message || 'Network response was not ok');
+                serverError.fromServer = Boolean(errorData.message);
+                throw serverError;
               });
             } else {
               // Response is HTML (likely an error page)
@@ -2646,7 +2656,9 @@
               if (loadingText) loadingText.textContent = originalText;
               loadingOverlay.classList.add('hidden');
             }
-            throw new Error(data.message || 'Contact creation failed');
+            const serverError = new Error(data.message || 'Contact creation failed');
+            serverError.fromServer = Boolean(data.message);
+            throw serverError;
           }
         })
         .catch(error => {
@@ -2661,10 +2673,20 @@
             if (loadingText) loadingText.textContent = originalText;
             loadingOverlay.classList.add('hidden');
           }
-          alert('Error creating contact: ' + error.message);
+          // Render through the canonical flash toast (components/flash_messages.html,
+          // included at the top of this page) so this reads like every other Minty
+          // message. Only show error.message when the server wrote it — an untagged
+          // error here is a JS/parser failure and would leak "Unexpected token '<'"
+          // or a traceback into the UI.
+          showFlashMessages(
+            error && error.fromServer && error.message
+              ? error.message
+              : "I couldn't add that contact. Mind trying again?",
+            'error'
+          );
         });
       } else {
-        alert('Please enter a contact name');
+        showFlashMessages('Who should I put down as the contact?', 'error');
       }
     }
 
@@ -3313,8 +3335,8 @@
        const formattedAmount = typeof expense.amount === 'string'
          ? expense.amount
          : (expense.amount
-             ? '$' + parseFloat(expense.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
-             : '$0.00');
+             ? window.CURRENCY_SYMBOL + parseFloat(expense.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+             : window.CURRENCY_SYMBOL + '0.00');
        const accountName = expense.category || 'N/A';
        const accountCode = expense.account_code || '';
        const itemName = expense.item || '';

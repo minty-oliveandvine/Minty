@@ -57,7 +57,7 @@ def create_user():
             jsonify(
                 {
                     "status": "error",
-                    "message": "You cannot assign a role higher than your own.",
+                    "message": "I can't let you give someone a role above your own.",
                 }
             ),
             403,

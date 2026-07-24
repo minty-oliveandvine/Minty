@@ -159,7 +159,7 @@ def email_verify_code():
         # logging them in. A bogus invite still fails there and gets bounced,
         # so this doesn't let unapproved users in through a fake token.
         if not user.approved and not invite_token:
-            return jsonify({"status": "error", "message": "Your account is not approved yet."}), 403
+            return jsonify({"status": "error", "message": "Your account isn't approved just yet — hang tight!"}), 403
         # Don't login_user here — the cookie wouldn't stick on a cross-origin
         # POST response. Mint a same-origin handoff URL; the browser GETs it,
         # Flask logs the user in there and the cookie is set on a same-origin

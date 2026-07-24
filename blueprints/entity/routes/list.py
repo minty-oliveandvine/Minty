@@ -61,7 +61,7 @@ def report_dashboard(id):
     id = (id or "").strip()
     if not check_user_has_entities(current_user.id):
         flash(
-            "You need to create an entity first before accessing report dashboard.",
+            "You'll need to create an entity before I can show you the report dashboard.",
             "info",
         )
         return redirect(url_for("entity.entity_list"))
@@ -70,10 +70,10 @@ def report_dashboard(id):
     #new code fix
     org = Entity.query.filter(func.trim(Entity.id) == id.strip()).first()
     if not org:
-        flash("Entity not found", "danger")
+        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
         return redirect(url_for("entity.entity_list"))
     if org.status == "deleted":
-        flash("This entity has been deleted.", "warning")
+        flash("This one's gone — it was deleted.", "warning")
         return redirect(url_for("entity.entity_list"))
 
     user_entity = UserEntity.query.filter(
@@ -276,9 +276,20 @@ def report_dashboard(id):
     # matches the users' local midnight regardless of the device timezone.
     server_today_hk = datetime.now(tz).date().isoformat()
 
+    # Money amounts on the dashboard render with the ISO code of the entity's
+    # selected currency (entities.currency_id -> currency_info.currency_code).
+    from models.db import CurrencyInfo
+
+    currency_symbol = "$"
+    if org and org.currency_id:
+        _currency = CurrencyInfo.query.get(org.currency_id)
+        if _currency and _currency.currency_code:
+            currency_symbol = _currency.currency_code
+
     return render_template(
         "entity/entity_dashboard_v2.html",
         org=org,
+        currency_symbol=currency_symbol,
         server_today_hk=server_today_hk,
         main_bank_account=main_bank_account,
         bank_accounts=bank_accounts,
@@ -307,7 +318,7 @@ def report_dashboard(id):
 def delete_entity(id):
     org = Entity.query.filter(Entity.id == id).first_or_404()
     if org.status == "deleted":
-        flash("Entity is already deleted.", "info")
+        flash("This one's already been deleted.", "info")
         return redirect(url_for("entity.entity_list"))
     org.status = "deleted"
     db.session.commit()

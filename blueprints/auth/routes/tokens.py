@@ -49,14 +49,21 @@ def check_token():
 def refresh_user_token():
     try:
         if ensure_valid_token(current_user):
-            flash("Token refreshed successfully.", "success")
+            flash("Your Xero connection is refreshed.", "success")
             return jsonify({"status": "success",
                             "message": "Token refreshed successfully"})
-        flash("Failed to refresh token. Please re-authenticate with Xero.", "danger")
+        # ensure_valid_token returning falsy means Xero refused to renew the
+        # session — an expired or already-used refresh token. It is not a
+        # timeout, and retrying will not help: only reconnecting will.
+        flash(
+            "Xero wouldn't renew your session, so I've lost access to your "
+            "Xero data. Mind reconnecting to Xero to get it back?",
+            "danger",
+        )
         return jsonify(
-            {"status": "error", "message": "Failed to refresh token"}), 401
+            {"status": "error", "message": "Xero wouldn't renew your session. Mind reconnecting to Xero?"}), 401
     except Exception as e:
         logger.error("Error refreshing user token: %s", str(e))
-        flash("An error occurred while refreshing token.", "danger")
+        flash("That didn't quite work! One more try to get things back in order?", "danger")
         return jsonify(
-            {"status": "error", "message": "An error occurred"}), 500
+            {"status": "error", "message": "Something went wrong on my end. Mind trying again?"}), 500

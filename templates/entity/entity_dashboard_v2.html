@@ -9,6 +9,11 @@
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
   <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script>
+    // Symbol of the entity's selected currency (entities.currency_id ->
+    // currency_info.currency_code); all money amounts render with it.
+    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
+  </script>
   <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
 
   <!-- Hover Effects Component -->
@@ -194,7 +199,7 @@
             <div class="space-y-3">
               <div class="flex justify-between items-center">
                 <span class="deposit_submitter_label text-sm text-gray-600">Deposited</span>
-                <span class="deposit_amount text-sm font-bold text-gray-900">${{ "{:,.2f}".format(org.latest_deposit) }}</span>
+                <span class="deposit_amount text-sm font-bold text-gray-900">{{ currency_symbol }}{{ "{:,.2f}".format(org.latest_deposit) }}</span>
               </div>
               <div class="flex justify-between items-center">
                 <span class="text-sm text-gray-600">To</span>
@@ -377,7 +382,7 @@
             <!-- Current Balance -->
             <div class="current_balance">
               <label class="block text-sm font-regular text-gray-500 mb-1">Current balance</label>
-                <div class="current_balance_amount text-lg font-semibold text-gray-900 text-right">${{ "{:,.2f}".format(org.closing_balance or 0) }}</div>
+                <div class="current_balance_amount text-lg font-semibold text-gray-900 text-right">{{ currency_symbol }}{{ "{:,.2f}".format(org.closing_balance or 0) }}</div>
             </div>
           </div>
           {% endif %}
@@ -927,7 +932,7 @@
              }
              
              if (depositAmountElement) {
-               depositAmountElement.textContent = `$${depositAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+               depositAmountElement.textContent = `${window.CURRENCY_SYMBOL}${depositAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
              }
              
              // Update bank account - show bank account if there's a deposit, otherwise show "No deposit"
@@ -962,7 +967,7 @@
              }
              
              if (depositAmountElement) {
-               depositAmountElement.textContent = `$${originalDeposit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+               depositAmountElement.textContent = `${window.CURRENCY_SYMBOL}${originalDeposit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
              }
              
              if (depositBankAccountElement) {
@@ -1767,7 +1772,7 @@
       const currentBalanceAmount = document.querySelector('.current_balance_amount');
       if (currentBalanceAmount) {
         const orgClosingBalance = {{ org.closing_balance | tojson }} || 0;
-        currentBalanceAmount.textContent = '$' + orgClosingBalance.toLocaleString('en-US', {
+        currentBalanceAmount.textContent = window.CURRENCY_SYMBOL + orgClosingBalance.toLocaleString('en-US', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2
         });
@@ -1827,14 +1832,14 @@
         const currentBalanceAmount = document.querySelector('.current_balance_amount');
         if (currentBalanceAmount) {
           if (latestReportBefore && latestReportBefore.closing_balance !== undefined) {
-            currentBalanceAmount.textContent = '$' + latestReportBefore.closing_balance.toLocaleString('en-US', {
+            currentBalanceAmount.textContent = window.CURRENCY_SYMBOL + latestReportBefore.closing_balance.toLocaleString('en-US', {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2
             });
             console.log('Using closing balance from latest report before:', latestReportBefore.closing_balance);
           } else {
             // If no previous report found, use 0
-            currentBalanceAmount.textContent = '$0.00';
+            currentBalanceAmount.textContent = window.CURRENCY_SYMBOL + '0.00';
             console.log('No previous report found, using $0.00');
           }
         }
@@ -1865,7 +1870,7 @@
         // Update the current balance amount
         const currentBalanceAmount = document.querySelector('.current_balance_amount');
         if (currentBalanceAmount && reportData.closing_balance !== undefined) {
-          currentBalanceAmount.textContent = '$' + reportData.closing_balance.toLocaleString('en-US', {
+          currentBalanceAmount.textContent = window.CURRENCY_SYMBOL + reportData.closing_balance.toLocaleString('en-US', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           });
@@ -1901,7 +1906,7 @@
       const currentBalanceAmount = document.querySelector('.current_balance_amount');
       if (currentBalanceAmount) {
         const orgClosingBalance = {{ org.closing_balance | tojson }} || 0;
-        currentBalanceAmount.textContent = '$' + orgClosingBalance.toLocaleString('en-US', {
+        currentBalanceAmount.textContent = window.CURRENCY_SYMBOL + orgClosingBalance.toLocaleString('en-US', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2
         });
@@ -2410,9 +2415,9 @@
             <label class="deposit_amount_label block text-sm font-medium text-gray-700 mb-2">Deposit Amount <span class="text-red-500">*</span></label>
             <div class="deposit_amount_input_container relative">
               <div class="deposit_amount_currency_icon absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <span class="text-gray-500 text-sm">$</span>
+                <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
               </div>
-              <input type="text" placeholder="Enter amount deposited to bank" class="deposit_amount_input w-full pl-8 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" oninput="formatCurrencyModal(this)" onblur="formatWithCommasModal(this)">
+              <input type="text" placeholder="Enter amount deposited to bank" class="deposit_amount_input w-full pl-12 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" oninput="formatCurrencyModal(this)" onblur="formatWithCommasModal(this)">
             </div>
           </div>
 

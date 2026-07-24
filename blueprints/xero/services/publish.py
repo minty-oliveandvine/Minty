@@ -1347,7 +1347,9 @@ def validate_expenses_for_system_accounts(
             {
                 "expense": "unknown",
                 "account_code": "unknown",
-                "message": f"Validation failed: {str(exc)}",
+                # Rendered back to the user in the validation list — keep the
+                # exception in the log above, not on screen.
+                "message": "I couldn't check this report's accounts against Xero. Mind trying again?",
             }
         ]
 

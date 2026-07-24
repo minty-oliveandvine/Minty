@@ -13,14 +13,14 @@ from services.helpers.xero_bridge import get_entity_account_settings
 def download_report(id):
     try:
         if not current_user.is_authenticated:
-            flash("Session expired. Please login again.", "warning")
+            flash("Your session ran out. Mind logging back in?", "warning")
             return redirect(url_for("auth.login"))
 
         report = (
             Report.query.join(ShopExpense, isouter=True).filter(Report.id == id).first()
         )
         if not report:
-            return jsonify({"status": "error", "message": "Report not found."}), 404
+            return jsonify({"status": "error", "message": "Hmm, I couldn't find that report."}), 404
 
         entity_id = report.company
         expenses = ShopExpense.query.filter_by(report_id=report.id).all()
@@ -95,7 +95,7 @@ def download_report(id):
             print(f"Excel generation error: {excel_error}")
             return (
                 jsonify(
-                    {"status": "error", "message": "Failed to generate Excel file"}
+                    {"status": "error", "message": "Something went wrong on my end while building that Excel file. Mind trying again?"}
                 ),
                 500,
             )
@@ -109,7 +109,7 @@ def download_report(id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Failed to generate download response",
+                        "message": "Something went wrong on my end while preparing that download. Mind trying again?",
                     }
                 ),
                 500,
@@ -131,7 +131,7 @@ def download_report(id):
             jsonify(
                 {
                     "status": "error",
-                    "message": f"Error generating the Excel report: {str(e)}",
+                    "message": "Something went wrong on my end while building that Excel report. Mind trying again?",
                 }
             ),
             500,

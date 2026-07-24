@@ -32,8 +32,12 @@ def check_user_has_entities(user_id):
     return count > 0
 
 
-def create_entity_for_user(user_id, entity_name, country_code, currency_code):
+def create_entity_for_user(user_id, entity_name, country_code, currency_id):
     """Create an entity owned (admin) by ``user_id`` plus its default settings.
+
+    ``country_code`` is the ISO alpha-2 country_info PK and ``currency_id``
+    a currency_info uuid (the entities columns are FKs to those registries —
+    callers resolve names to them first, e.g. via ``_resolve_country_code``).
 
     Shared by the entity-create form route and the onboarding API endpoint so
     both go through identical creation logic. Returns ``(entity, error)`` where
@@ -70,8 +74,8 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_code):
         entity = Entity(
             id=str(_uuid.uuid4()),
             name=name,
-            country_code=country_code,
-            currency_code=currency_code,
+            country_code=country_code or None,
+            currency_id=currency_id or None,
         )
         db.session.add(entity)
         db.session.commit()

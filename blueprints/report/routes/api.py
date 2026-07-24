@@ -77,7 +77,7 @@ def report_expense_create_contact():
         )
         if not entity_id:
             return (
-                jsonify({"status": "error", "message": "Entity ID is required."}),
+                jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}),
                 400,
             )
         if not has_permission(current_user, Permission.CONTACT_CREATE, entity_id):
@@ -98,7 +98,7 @@ def report_expense_create_contact():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "This entity is not connected to Xero. Please have an admin reconnect.",
+                        "message": "I can't add contacts yet — this entity isn't connected to Xero. Could an admin reconnect it?",
                     }),
                 400,
             )
@@ -111,7 +111,7 @@ def report_expense_create_contact():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "This entity is not connected to Xero. Please have an admin reconnect.",
+                        "message": "I can't add contacts yet — this entity isn't connected to Xero. Could an admin reconnect it?",
                     }),
                 400,
             )
@@ -122,7 +122,7 @@ def report_expense_create_contact():
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Xero authentication failed. Please have an admin reconnect.",
+                        "message": "Xero wouldn't let me in. Could you ask an admin to reconnect it?",
                     }),
                 400,
             )
@@ -155,19 +155,37 @@ def report_expense_create_contact():
                 logger.info("Retry Xero response text: %s", xero_response.text)
 
         if xero_response.status_code not in (200, 201):
-            error_message = (
-                f"Failed to create contact in Xero. Status: {xero_response.status_code}, "
-                f"Response: {xero_response.text}")
-            logger.error(error_message)
-            return jsonify({"status": "error", "message": error_message}), 400
+            # Xero's raw response body is diagnostic detail — log it, but never
+            # hand it to the browser: this message renders straight into a toast.
+            logger.error(
+                "Failed to create contact in Xero. Status: %s, Response: %s",
+                xero_response.status_code,
+                xero_response.text,
+            )
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "I couldn't add that contact to Xero. Mind trying again?",
+                    }
+                ),
+                400,
+            )
 
         xero_contact = xero_response.json()
         logger.info("Successfully created contact: %s", xero_contact)
         return xero_contact
     except Exception as e:
-        error_message = f"Error creating contact: {str(e)}"
-        logger.error(error_message)
-        return jsonify({"status": "error", "message": error_message}), 500
+        logger.error(f"Error creating contact: {str(e)}")
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I couldn't add that contact. Mind trying again?",
+                }
+            ),
+            500,
+        )
 
 
 @report_bp.route("/report/expense/submit_all", methods=["POST"])
@@ -179,7 +197,7 @@ def report_expense_submit_all():
 
         if not entity_id:
             return (
-                jsonify({"status": "error", "message": "Entity ID is required."}),
+                jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}),
                 400,
             )
         if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
@@ -536,7 +554,7 @@ def report_expense_submit_all():
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while submitting expenses. Please try again.",
+                    "message": "Something went wrong on my end while submitting your expenses. Mind trying again?",
                 }),
             500,
         )
@@ -572,7 +590,7 @@ def report_expense_add():
 
         if not entity_id:
             return (
-                jsonify({"status": "error", "message": "Entity ID is required."}),
+                jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}),
                 400,
             )
         if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
@@ -818,7 +836,7 @@ def report_expense_add():
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while adding the expense. Please try again.",
+                    "message": "Something went wrong on my end while adding that expense. Mind trying again?",
                 }),
             500,
         )
@@ -845,19 +863,19 @@ def report_expense_update(expense_id):
         expense = ShopExpenseDraft.query.get(expense_id)
         if not expense:
             return jsonify(
-                {"status": "error", "message": "Expense not found."}), 404
+                {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
 
         draft = expense.report_draft
         if not draft:
             return jsonify(
-                {"status": "error", "message": "Draft not found."}), 404
+                {"status": "error", "message": "I don't see a draft for that yet."}), 404
 
         if draft.status != "draft":
             return (
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Cannot edit expenses on a non-draft report.",
+                        "message": "This report isn't a draft anymore, so I can't change its expenses.",
                     }
                 ),
                 400,
@@ -869,7 +887,7 @@ def report_expense_update(expense_id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Unauthorized to edit this expense.",
+                        "message": "It looks like you don't have permission to edit this expense.",
                     }
                 ),
                 403,
@@ -987,7 +1005,7 @@ def report_expense_update(expense_id):
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while updating the expense.",
+                    "message": "Something went wrong on my end while updating that expense. Mind trying again?",
                 }
             ),
             500,
@@ -1038,7 +1056,7 @@ def report_expense_edit_submitted(expense_id):
         expense = ShopExpense.query.get(expense_id)
         if not expense:
             return jsonify(
-                {"status": "error", "message": "Expense not found."}), 404
+                {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
 
         report = Report.query.filter_by(id=expense.report_id).first()
         entity_id = _report_for_edit(report)
@@ -1047,7 +1065,7 @@ def report_expense_edit_submitted(expense_id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Unauthorized to edit this expense.",
+                        "message": "It looks like you don't have permission to edit this expense.",
                     }
                 ),
                 403,
@@ -1140,7 +1158,7 @@ def report_expense_edit_submitted(expense_id):
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while updating the expense.",
+                    "message": "Something went wrong on my end while updating that expense. Mind trying again?",
                 }
             ),
             500,
@@ -1164,7 +1182,7 @@ def report_edit_discrepancy_reason(id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Unauthorized to edit this report.",
+                        "message": "It looks like you don't have permission to edit this report.",
                     }
                 ),
                 403,
@@ -1222,7 +1240,7 @@ def report_edit_discrepancy_reason(id):
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while updating the report.",
+                    "message": "Something went wrong on my end while updating that report. Mind trying again?",
                 }
             ),
             500,
@@ -1248,7 +1266,7 @@ def report_edit_withdrawal(id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Unauthorized to edit this report.",
+                        "message": "It looks like you don't have permission to edit this report.",
                     }
                 ),
                 403,
@@ -1260,7 +1278,7 @@ def report_edit_withdrawal(id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Invalid withdrawal type.",
+                        "message": "That withdrawal type doesn't look quite right to me.",
                     }
                 ),
                 400,
@@ -1280,7 +1298,7 @@ def report_edit_withdrawal(id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "No linked draft found for this report; cannot update withdrawal source.",
+                        "message": "I couldn't find the draft behind this report, so I can't change the withdrawal source.",
                     }
                 ),
                 404,
@@ -1312,7 +1330,7 @@ def report_edit_withdrawal(id):
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while updating the report.",
+                    "message": "Something went wrong on my end while updating that report. Mind trying again?",
                 }
             ),
             500,
@@ -1330,11 +1348,11 @@ def report_expense_delete(expense_id):
         if not expense:
             logger.warning("Expense not found: %s", expense_id)
             return jsonify(
-                {"status": "error", "message": "Expense not found."}), 404
+                {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
 
         draft = expense.report_draft
         if not draft:
-            return jsonify({"status": "error", "message": "Draft not found."}), 404
+            return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
         entity_id = draft.company
         is_owner = draft.uploaded_by == current_user.username
         can_delete = False
@@ -1347,7 +1365,7 @@ def report_expense_delete(expense_id):
                 jsonify(
                     {
                         "status": "error",
-                        "message": "Unauthorized to delete this expense.",
+                        "message": "It looks like you don't have permission to delete this expense.",
                     }
                 ),
                 403,
@@ -1406,7 +1424,7 @@ def report_expense_delete(expense_id):
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while deleting the expense.",
+                    "message": "Something went wrong on my end while deleting that expense. Mind trying again?",
                 }
             ),
             500,
@@ -1421,7 +1439,7 @@ def get_draft_totals():
             "transaction_date") or request.form.get("transaction_date")
         if not transaction_date_str:
             return (
-                jsonify({"status": "error", "message": "Transaction date required"}),
+                jsonify({"status": "error", "message": "That field can't be empty! Please let me know your transaction date."}),
                 400,
             )
 
@@ -1433,7 +1451,7 @@ def get_draft_totals():
             ).date()
         except ValueError:
             return jsonify(
-                {"status": "error", "message": "Invalid date format"}), 400
+                {"status": "error", "message": "That date doesn't look quite right to me."}), 400
 
         entity_id_param = (
             request.args.get("entity_id")
@@ -1441,7 +1459,7 @@ def get_draft_totals():
         )
         if not entity_id_param:
             return (
-                jsonify({"status": "error", "message": "Entity ID is required."}),
+                jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}),
                 400,
             )
         if not has_permission(current_user, Permission.REPORT_VIEW_OWN, entity_id_param):
@@ -1462,7 +1480,7 @@ def get_draft_totals():
 
         if not current_draft:
             return jsonify(
-                {"status": "error", "message": "Draft not found"}), 404
+                {"status": "error", "message": "I don't see a draft for that yet."}), 404
         if not _can_view_report_draft(current_draft):
             return (
                 jsonify(
@@ -1531,7 +1549,7 @@ def get_draft_totals():
             jsonify(
                 {
                     "status": "error",
-                    "message": "An error occurred while fetching totals",
+                    "message": "Something went wrong on my end while adding up your totals. Mind trying again?",
                 }
             ),
             500,
@@ -1627,7 +1645,12 @@ def report_publishing_status(report_id):
             str(e),
         )
         return (
-            jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}),
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Something went wrong checking that report's publishing status. Mind trying again?",
+                }
+            ),
             500,
         )
 
@@ -1659,19 +1682,19 @@ def expense_upload_files():
         report_draft_id = request.form.get("report_draft_id")
 
         if not entity_id:
-            return jsonify({"status": "error", "message": "entity_id is required."}), 400
+            return jsonify({"status": "error", "message": "I need to know which entity we're working with first!"}), 400
         if not report_draft_id:
-            return jsonify({"status": "error", "message": "report_draft_id is required."}), 400
+            return jsonify({"status": "error", "message": "I need to know which draft we're working with first!"}), 400
 
         if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
             return (
-                jsonify({"status": "error", "message": "Permission denied."}),
+                jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}),
                 403,
             )
 
         draft = ReportDraft.query.filter_by(id=report_draft_id).first()
         if not draft or str(draft.company) != str(entity_id):
-            return jsonify({"status": "error", "message": "Draft not found."}), 404
+            return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
         files = request.files.getlist("files[]")
         files = [f for f in files if f and f.filename.strip()]
@@ -1802,7 +1825,7 @@ def expense_upload_files():
     except Exception as exc:
         db.session.rollback()
         logger.error("expense_upload_files error: %s", exc)
-        return jsonify({"status": "error", "message": "Upload failed. Please try again."}), 500
+        return jsonify({"status": "error", "message": "That upload didn't go through. Mind trying again?"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -1816,11 +1839,11 @@ def expense_draft_get(draft_id):
     """Return the detail fields of one ShopExpenseDraft record."""
     expense = ShopExpenseDraft.query.get(draft_id)
     if not expense:
-        return jsonify({"status": "error", "message": "Draft not found."}), 404
+        return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
     entity_id = expense.report_draft.company
     if not has_permission(current_user, Permission.REPORT_VIEW_OWN, entity_id):
-        return jsonify({"status": "error", "message": "Permission denied."}), 403
+        return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}), 403
 
     # Determine which S3 key to use for the presigned preview URL.
     #
@@ -1904,11 +1927,11 @@ def expense_draft_patch(draft_id):
     """
     expense = ShopExpenseDraft.query.get(draft_id)
     if not expense:
-        return jsonify({"status": "error", "message": "Draft not found."}), 404
+        return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
     entity_id = expense.report_draft.company
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
-        return jsonify({"status": "error", "message": "Permission denied."}), 403
+        return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}), 403
 
     data = request.get_json(silent=True) or {}
 
@@ -1916,7 +1939,7 @@ def expense_draft_patch(draft_id):
         try:
             expense.amount = float(str(data["amount"]).replace(",", ""))
         except (ValueError, TypeError):
-            return jsonify({"status": "error", "message": "Invalid amount."}), 400
+            return jsonify({"status": "error", "message": "That amount doesn't look quite right to me."}), 400
 
     if "item" in data:
         expense.item = str(data["item"])[:150]
@@ -1968,12 +1991,12 @@ def expense_validate_drafts():
 
     if not report_draft_id or not entity_id:
         return (
-            jsonify({"status": "error", "message": "report_draft_id and entity_id are required."}),
+            jsonify({"status": "error", "message": "I need to know which entity and draft we're working with first!"}),
             400,
         )
 
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
-        return jsonify({"status": "error", "message": "Permission denied."}), 403
+        return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}), 403
 
     drafts = ShopExpenseDraft.query.filter_by(report_draft_id=report_draft_id).all()
 
