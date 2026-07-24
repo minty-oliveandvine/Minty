@@ -485,11 +485,11 @@ document.addEventListener('submit', function(e){
 
     // Function to show continue report message
     function showContinueReportMessage() {
-      alert('This feature is currently in progress, Stay Tuned!');
+      showFlashMessages('This one is still on the way.', 'info');
     }
     
     function showCompleteReportMessage() {
-      alert('Please complete the current report before navigating away.');
+      showFlashMessages('Finish this report first, then you can move on.', 'error');
     }
 
     // Navigation function for stepper
@@ -1501,7 +1501,7 @@ document.addEventListener('submit', function(e){
             window.sendLogToDataDog('error', 'Cash count form submit failed', { message: error && error.message });
           }
           resetCashCountLoadingState(submitButton, loadingOverlay);
-          alert('An error occurred while saving. Please try again.');
+          showFlashMessages("I couldn't save that. Mind trying again?", 'error');
         }
       }
       
@@ -1625,7 +1625,7 @@ document.addEventListener('submit', function(e){
           saveExitButton.disabled = false;
           saveExitButton.innerHTML = originalButtonText;
           loadingOverlay.classList.add('hidden');
-          alert('An error occurred while saving. Please try again.');
+          showFlashMessages("I couldn't save that. Mind trying again?", 'error');
         }
       }
 

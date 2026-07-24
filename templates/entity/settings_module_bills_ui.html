@@ -364,7 +364,7 @@
       window.location.href = resolveShellUrl(data.modules);
     } catch (err) {
       console.error('Module save failed:', err);
-      alert('Could not save modules. Please try again.');
+      showFlashMessages("I couldn't save those modules. Mind trying again?", 'error');
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
     }
   }
@@ -379,7 +379,7 @@
       if (typeof showWarningToast === 'function') {
         showWarningToast('At least one module should be active.');
       } else {
-        alert('At least one module should be active.');
+        showFlashMessages('Keep at least one module active.', 'error');
       }
       return;
     }

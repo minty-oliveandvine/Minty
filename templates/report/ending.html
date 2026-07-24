@@ -1035,11 +1035,11 @@ document.addEventListener('submit', function(e){
 
      // Function to show continue report message
      function showContinueReportMessage() {
-       alert('This feature is currently in progress, Stay Tuned!');
+       showFlashMessages('This one is still on the way.', 'info');
      }
      
      function showCompleteReportMessage() {
-       alert('Please complete the current report before navigating away.');
+       showFlashMessages('Finish this report first, then you can move on.', 'error');
      }
 
      // Function to go back to previous step
@@ -1057,7 +1057,7 @@ document.addEventListener('submit', function(e){
       const isLatest = deleteButton.getAttribute('data-is-latest') === 'True';
       
       if (!isLatest) {
-        alert('You can only delete the latest submitted report. A newer report exists.');
+        showFlashMessages('Only the newest report can be deleted.', 'error');
         return;
       }
       

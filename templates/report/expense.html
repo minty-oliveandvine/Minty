@@ -1468,7 +1468,7 @@
        
        // Check if all required elements exist
        if (!amountInput || !contactInput || !accountCodeSelect || !fileInput) {
-         alert('Form elements not found. Please refresh the page.');
+         showFlashMessages('Something got out of sync. Refresh the page to keep going.', 'error');
          return;
        }
        
@@ -1595,7 +1595,7 @@
        for (let i = 0; i < files.length; i++) {
          const file = files[i];
          if (file.size > 10 * 1024 * 1024) {
-           alert('File size must be less than 10MB');
+           showAddExpenseNotification('Files need to be under 10MB.', 'error');
            if (inputElement) {
              inputElement.value = ''; // Clear the file input
            }
@@ -1603,7 +1603,7 @@
            return;
          }
          if (!allowedTypes.includes(file.type)) {
-           alert('Please upload PDF, JPEG, or PNG files only');
+           showAddExpenseNotification('I can take PDF, JPEG, or PNG files.', 'error');
            if (inputElement) {
              inputElement.value = ''; // Clear the file input
            }
@@ -2084,12 +2084,12 @@
             }
 
             if (hasOversizedFiles) {
-              alert('File size must be less than 10MB: ' + invalidFileNames.join(', '));
+              showAddExpenseNotification('Files need to be under 10MB: ' + invalidFileNames.join(', '), 'error');
               return;
             }
 
             if (hasInvalidFiles) {
-              alert('Please upload PDF, JPEG, or PNG files only: ' + invalidFileNames.join(', '));
+              showAddExpenseNotification('I can take PDF, JPEG, or PNG files: ' + invalidFileNames.join(', '), 'error');
               return;
             }
 
@@ -2958,7 +2958,7 @@
        }
        
        if (!expenseElement) {
-         alert('Could not find expense details');
+         showFlashMessages("I couldn't find that expense.", 'error');
          return false;
        }
        
@@ -3079,7 +3079,7 @@
 
      const expenseElement = document.querySelector(`[data-expense-id="${expenseId}"]`);
      if (!expenseElement) {
-       alert('Could not find expense to edit.');
+       showFlashMessages("I couldn't find that expense.", 'error');
        return;
      }
 
@@ -4132,11 +4132,11 @@
 
     // Function to show continue report message
     function showContinueReportMessage() {
-      alert('This feature is currently in progress, Stay Tuned!');
+      showFlashMessages('This one is still on the way.', 'info');
     }
     
     function showCompleteReportMessage() {
-      alert('Please complete the current report before navigating away.');
+      showFlashMessages('Finish this report first, then you can move on.', 'error');
     }
 
     // Initialize page transition

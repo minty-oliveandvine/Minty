@@ -136,8 +136,10 @@
     function _mappingToast(msg) {
       if (typeof showErrorToast === 'function') {
         showErrorToast(msg);
+      } else if (typeof showFlashMessages === 'function') {
+        showFlashMessages(msg, 'error');
       } else {
-        alert(msg);
+        console.error(msg);
       }
     }
 

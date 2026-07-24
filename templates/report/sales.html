@@ -779,7 +779,7 @@
           submitButton.innerHTML = submitButton.dataset.originalText || originalButtonText;
         }
         loadingOverlay.classList.add('hidden');
-        alert('An error occurred while saving. Please try again.');
+        showFlashMessages("I couldn't save that. Mind trying again?", 'error');
       }
     }
     // Restore UI after bfcache/back navigation
@@ -838,7 +838,7 @@
         saveExitButton.disabled = false;
         saveExitButton.innerHTML = originalButtonText;
         loadingOverlay.classList.add('hidden');
-        alert('An error occurred while saving. Please try again.');
+        showFlashMessages("I couldn't save that. Mind trying again?", 'error');
       }
     }
 
