@@ -40,6 +40,44 @@ must not be surfaced verbatim.
 
 ---
 
+## The copy standard
+
+Every replacement string in this document follows these rules. They are derived
+from the only three strings in the repo already written in the intended voice:
+
+```
+"I couldn't add that contact. Mind trying again?"      templates/report/expense.html:2684
+"I couldn't send that invitation. Mind trying again?"  templates/entity/settings_users_scripts.html:443
+"Who should I put down as the contact?"                showFlashMessages call site
+```
+
+**Rules**
+
+1. **Under two sentences.** One clause naming what failed, one short offer to
+   retry. Never a third.
+2. **First person, Minty speaking.** *"I couldn't …"* — not *"Error:"*, not
+   *"The system encountered"*, not *"Failed to"*.
+3. **Name the specific thing.** *"that invitation"*, *"that expense"* — never
+   *"the operation"* or *"your request"*.
+4. **Warm close, no blame.** *"Mind trying again?"* is the house default. Drop it
+   when retrying won't help (a validation error, a hard limit) and say what to do
+   instead.
+5. **No error codes, stack text, or jargon** in the visible string. That detail
+   goes to DataDog/logs, never the toast.
+6. **Sentence case, no `Error:` prefix, no exclamation marks** on failures.
+
+**Shape**
+
+> `I couldn't <do the specific thing>. <Short next step>?`
+
+Validation and limit messages skip the apology — they aren't Minty's fault and
+retrying unchanged won't fix them. State the requirement instead:
+
+> `Files need to be under 10MB.`
+> `Pick a start and end date first.`
+
+---
+
 # Class 1 — Raw exception text leaking to users
 
 ## 1a. Frontend — 22 sites
@@ -49,12 +87,17 @@ Highest priority: user-management screen, all four bare `'Error: ' + err.message
 
 | Line | Context | Suggested copy |
 |---|---|---|
-| 776 | update user | "I couldn't update that user. Mind trying again?" |
-| 822 | remove user | "I couldn't remove that user. Mind trying again?" |
-| 984 | cancel invitation | "I couldn't cancel that invitation. Mind trying again?" |
-| 1020 | resend invitation | "I couldn't resend that invitation. Mind trying again?" |
+| 776 | update user | `I couldn't update that user. Mind trying again?` |
+| 822 | remove user | `I couldn't remove that user. Mind trying again?` |
+| 984 | cancel invitation | `I couldn't cancel that invitation. Mind trying again?` |
+| 1020 | resend invitation | `I couldn't resend that invitation. Mind trying again?` |
 
 Lines 984 and 1020 log to DataDog on the line above — keep that, replace only the toast.
+
+Line **437** in this file is also worth fixing while you're here:
+`showErrorToast(data.message || 'Unknown error.')` — the fallback `Unknown error.`
+is the opposite of the house voice. Use `I couldn't send that invitation. Mind trying again?`,
+matching line 443 four lines below it.
 
 ### `templates/entity/settings.html` — 3 sites
 Lines **2757**, **3595**, **4724** — all `showErrorToast('Error creating contact: ' + error.message);`
@@ -62,30 +105,45 @@ Lines **2757**, **3595**, **4724** — all `showErrorToast('Error creating conta
 ### `templates/entity/partials/xero_mapping_classic_script_fragment.html` — 3 sites
 Lines **1925**, **2763**, **3892** — identical to the above.
 
+All six: `I couldn't add that contact. Mind trying again?` — the exact string
+already live at `templates/report/expense.html:2684`.
+
 > These six create-contact handlers are the same duplicated block. Worth
 > collapsing into one shared function rather than fixing six times.
 
 ### `templates/report/expense.html` — 6 sites
-| Line | Current | Note |
+| Line | Current | Suggested copy |
 |---|---|---|
-| 1571 | `'...unable to save your expense information: ' + error.message` | has a fallback, but still leaks when `message` exists |
-| 3302 | `alert('Error updating expense: ' + (data.message \|\| 'Unknown error'))` | blocking alert |
-| 3309 | `alert('Error updating expense. Please try again.')` | blocking alert; copy OK |
-| 4000 | `alert('Error deleting expense: ' + (data.message \|\| 'Unknown error'))` | blocking alert |
-| 4015 | `alert('Error deleting expense: ' + error.message)` | leaks raw JS errors |
-| 4270 | `'...unable to save your expense information: ' + error.message` | duplicate of 1571 |
+| 1571 | `'...unable to save your expense information: ' + error.message` | `I couldn't save that expense. Mind trying again?` |
+| 3302 | `alert('Error updating expense: ' + (data.message \|\| 'Unknown error'))` | `I couldn't update that expense. Mind trying again?` |
+| 3309 | `alert('Error updating expense. Please try again.')` | `I couldn't update that expense. Mind trying again?` |
+| 4000 | `alert('Error deleting expense: ' + (data.message \|\| 'Unknown error'))` | `I couldn't delete that expense. Mind trying again?` |
+| 4015 | `alert('Error deleting expense: ' + error.message)` | `I couldn't delete that expense. Mind trying again?` |
+| 4270 | `'...unable to save your expense information: ' + error.message` | `I couldn't save that expense. Mind trying again?` |
 
-This file already has the `fromServer` guard elsewhere — these were missed.
+All six also need `alert()` → toast (Class 3). This file already has the
+`fromServer` guard elsewhere — these were missed.
+
+The two CSRF alerts in the same file (**3265**, **3958**,
+`'Error: CSRF token not found. Please refresh the page.'`) are a different case:
+retrying won't help, so skip the apology and give the action —
+`Your session expired. Refresh the page to keep going.`
 
 ### `templates/download_statements.html` — 1 site
 Line **157**: ``alert(`Error: ${error.message}`)``. Logs to DataDog above — keep that.
-Suggested: *"I couldn't download those statements. Mind trying again?"*
+Suggested: `I couldn't download those statements. Mind trying again?`
+
+Line **104** in the same file is a validation message, not a failure —
+`'Please select a start date and end date.'` → `Pick a start and end date first.`
 
 ### `static/js/` — 3 sites
 `opening.js:179`, `expense.js:398`, `scripts.js:775` — all
 ``alert(`Error: ${data.message || 'An unknown error occurred.'}`)``.
 Server-authored `data.message`, so lower risk, but blocking `alert()` and
-`'Error: '` prefix both need normalizing.
+`'Error: '` prefix both need normalizing. Fallback copy, per file:
+`I couldn't save that opening entry. Mind trying again?` /
+`I couldn't add that expense. Mind trying again?` /
+`I couldn't save that. Mind trying again?`
 
 ## 1b. Backend — 13 user-facing sites
 
@@ -106,6 +164,20 @@ Server-authored `data.message`, so lower risk, but blocking `alert()` and
 | `services/helpers/xero_bridge.py` | 194 |
 
 Fix: log the exception server-side, return a generic message in the body.
+
+Backend strings follow the same standard — these are rendered directly by
+clients that surface `message` to the user:
+
+| Context | Suggested copy |
+|---|---|
+| token refresh/exchange (`tokens.py`) | `I couldn't refresh your Xero connection. Mind reconnecting?` |
+| billing sync (`billing_sync.py`) | `I couldn't sync with Xero. Mind trying again?` |
+| entity settings save (`settings.py:1580`) | `I couldn't save those settings. Mind trying again?` |
+| Xero settings (`xero/routes/settings.py`) | `I couldn't save those Xero settings. Mind trying again?` |
+| report download/detail/export | `I couldn't open that report. Mind trying again?` |
+| report history (`history.py:53`) | `I couldn't load your report history. Mind trying again?` |
+| ending balance (`ending.py:165`) | `I couldn't save that closing balance. Mind trying again?` |
+| Xero API bridge (`xero_bridge.py:194`) | `I couldn't reach Xero just now. Mind trying again?` |
 
 **Not** in scope — these are logger calls, correctly keeping detail server-side:
 `services/auth/token_service.py` lines 84, 118, 134, 182, 226, 262.
@@ -140,6 +212,13 @@ disabled, or given real copy.
 — any caller invoking `showErrorToast()` with no argument tells the user to
 connect Xero regardless of the real cause.
 
+Defaults must be cause-neutral, since they fire for unknown reasons. Use
+`Something went wrong on my end. Mind trying again?` for all four duplicate
+implementations' defaults (see Class 3), and let callers pass the specific string.
+Same applies to `settings_entity.html:2291` and
+`electronic_delivery_scripts.html:1544`, both defaulting to
+`'Error updating entity settings'`.
+
 ---
 
 # Class 3 — Inconsistent tone & delivery
@@ -152,7 +231,28 @@ every error path in `templates/report/` (`deposit`, `cash_count`, `sales`,
 
 Worst offender — `templates/report/cash_count.html:1218`:
 `alert('Saving data and proceeding to next step...')` — a blocking modal for a
-*progress* message.
+*progress* message. This shouldn't be a message at all; use the existing saving
+indicator.
+
+Recurring strings and their replacements:
+
+| Current (repeated across report/) | Suggested copy |
+|---|---|
+| `An error occurred while saving. Please try again.` (8 sites) | `I couldn't save that. Mind trying again?` |
+| `Please complete the current report before navigating away.` (4 sites) | `Finish this report first, then you can move on.` |
+| `File size must be less than 10MB` | `Files need to be under 10MB.` |
+| `Please upload PDF, JPEG, or PNG files only` | `I can take PDF, JPEG, or PNG files.` |
+| `Please fix the validation errors before submitting.` | `Some fields need a second look before I can save.` |
+| `Please fill in all required fields and ensure valid values.` | `A few required fields still need filling in.` |
+| `Could not find expense details` / `Could not find expense to edit.` | `I couldn't find that expense.` |
+| `Could not save modules. Please try again.` | `I couldn't save those modules. Mind trying again?` |
+| `At least one module should be active.` | `Keep at least one module active.` |
+| `You can only delete the latest submitted report. A newer report exists.` | `Only the newest report can be deleted.` |
+| `An error occurred while processing the connection. Please try again.` | `I couldn't finish connecting. Mind trying again?` |
+| `Form elements not found. Please refresh the page.` | `Something got out of sync. Refresh the page to keep going.` |
+
+Note the validation rows drop *"Please"* and the apology — they state the rule
+directly, per rule 4 of the copy standard.
 
 ### Five duplicate toast implementations
 `showErrorToast` / `showSuccessToast` are redefined independently in:
