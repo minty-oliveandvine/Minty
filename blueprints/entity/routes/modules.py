@@ -25,7 +25,8 @@ from flask import current_app, flash, redirect, request, url_for
 from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
-from models.db import Entity, EntityFunction, EntityFunctionMap, User, UserEntity
+from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
+                       UserEntity)
 from services.permission_policy import Role, is_superuser
 
 

@@ -2,10 +2,8 @@
 
 import html
 import uuid
-from collections.abc import Iterable
-from typing import Protocol, cast
+from typing import Protocol
 
-import pycountry
 import requests
 from flask import (current_app, flash, g, jsonify, redirect, render_template,
                    request, url_for)
@@ -16,17 +14,15 @@ from sqlalchemy.exc import IntegrityError
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import billing_settings_app_url
 from blueprints.entity.services.settings import (
-    COA_EXCLUDED_TYPES, COA_INCLUDED_TYPES,
-    backfill_lock_dates_if_needed_background, reconcile_account_info_status,
+    COA_INCLUDED_TYPES, backfill_lock_dates_if_needed_background,
     sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
-    sync_entity_account_xero_active, sync_expense_account_info_from_xero,
-    sync_xero_accounts_to_db_background, sync_xero_coa_pettycash)
+    sync_expense_account_info_from_xero, sync_xero_accounts_to_db_background,
+    sync_xero_coa_pettycash)
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.entity.services.xero_account_mapping_post import (
     apply_country_currency_selection, process_xero_account_mapping_post)
 from blueprints.shared.entity_display import build_entity_acronym
-from blueprints.xero.services.settings import (get_account, get_contact,
-                                               sync_entity_xero_status)
+from blueprints.xero.services.settings import sync_entity_xero_status
 from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
                        EntityAccountXero, EntityPettycashSettings, User,
                        UserEntity, XeroContactSync, db)
@@ -39,8 +35,7 @@ from services.auth.token_service import (auto_refresh_token,
 from services.authz import (permission_denied, require_entity_access,
                             require_module, require_permission)
 from services.helpers.xero_bridge import get_xero_data_dynamic
-from services.permission_policy import (Permission, has_entity_membership,
-                                        has_permission, is_superuser)
+from services.permission_policy import Permission, has_permission
 
 
 class _PyCountryCountry(Protocol):

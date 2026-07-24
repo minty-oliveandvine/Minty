@@ -321,7 +321,8 @@ def onboarding_state():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.entity.services.onboarding_state import get_onboarding_state
+    from blueprints.entity.services.onboarding_state import \
+        get_onboarding_state
 
     data, status = get_onboarding_state(user_id, entity_id)
     resp = jsonify(data)
@@ -354,7 +355,8 @@ def onboarding_saved_step():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.entity.services.onboarding_state import save_onboarding_step
+    from blueprints.entity.services.onboarding_state import \
+        save_onboarding_step
 
     data, status = save_onboarding_step(user_id, entity_id, payload.get("saved_step"))
     resp = jsonify(data)
@@ -435,8 +437,8 @@ def onboarding_update_entity(entity_id):
         resp.status_code = 400
         return _cors(resp)
 
-    from models.db import (CountryInfo, CurrencyInfo, Entity, UserEntity,
-                           db as _db)
+    from models.db import CountryInfo, CurrencyInfo, Entity, UserEntity
+    from models.db import db as _db
     from services.permission_policy import (Permission,
                                             has_permission_by_user_id)
 
@@ -618,7 +620,8 @@ def onboarding_finalize():
         resp.status_code = 400
         return _cors(resp)
 
-    from models.db import Entity, UserEntity, db as _db
+    from models.db import Entity, UserEntity
+    from models.db import db as _db
     membership = UserEntity.query.filter(
         UserEntity.user_id == str(user_id),
         UserEntity.entity_id == entity_id,
@@ -805,7 +808,8 @@ def onboarding_contacts():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.entity.services.onboarding_account_codes import save_contacts
+    from blueprints.entity.services.onboarding_account_codes import \
+        save_contacts
 
     data, status = save_contacts(user_id, entity_id, payload.get("contacts") or {})
     resp = jsonify(data)
@@ -840,7 +844,8 @@ def onboarding_contacts_create():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.entity.services.onboarding_account_codes import create_contact
+    from blueprints.entity.services.onboarding_account_codes import \
+        create_contact
 
     data, status = create_contact(
         user_id, entity_id, payload.get("name") or payload.get("contact_name") or ""
@@ -876,7 +881,8 @@ def onboarding_xero_disconnect():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.entity.services.onboarding_xero import disconnect_entity_xero
+    from blueprints.entity.services.onboarding_xero import \
+        disconnect_entity_xero
 
     data, status = disconnect_entity_xero(user_id, entity_id)
     resp = jsonify(data)

@@ -13,7 +13,6 @@ from blueprints.xero.services.settings import \
 from models.db import (AccountInfo, Entity, EntityAccountXero, XeroContactSync,
                        db)
 
-
 # Columns refreshed when an account_info row already exists for an
 # (entity_id, xero_account_id) pair. id / entity_id / xero_account_id are the
 # identity and are never updated.
@@ -21,6 +20,34 @@ _ACCOUNT_INFO_UPSERT_COLS = (
     "name", "type", "xero_code", "status", "class_type",
     "bank_account_number", "bank_account_type", "description",
 )
+
+
+def _run_in_background(label, target, *args, entity_id, flask_app=None,
+                       thread_name=None):
+    """Run ``target(*args)`` in a daemon thread under an app context.
+
+    Shared by the ``*_background`` fire-and-forget wrappers below. If the work
+    raises, the thread logs and exits silently — callers are page renders that
+    must still succeed from cached DB data when Xero is unreachable.
+
+    ``label`` is the wrapper's own name, used verbatim in both log lines so
+    existing log greps keep working.
+    """
+    if flask_app is None:
+        flask_app = current_app._get_current_object()
+
+    def _run():
+        with flask_app.app_context():
+            try:
+                target(*args)
+            except Exception as exc:
+                logger.error("%s failed entity=%s: %s", label, entity_id, exc)
+
+    kwargs = {"target": _run, "daemon": True}
+    if thread_name:
+        kwargs["name"] = thread_name
+    threading.Thread(**kwargs).start()
+    logger.info("%s: started entity=%s", label, entity_id)
 
 
 def _upsert_account_info(values: dict):
@@ -566,28 +593,13 @@ def sync_xero_accounts_to_db_background(
     Safe to call on every Xero settings page GET: if Xero is unreachable the
     thread exits silently and the page still renders from cached DB data.
     """
-    if flask_app is None:
-        flask_app = current_app._get_current_object()
-
-    def _run():
-        with flask_app.app_context():
-            try:
-                sync_xero_accounts_to_db(entity_id, access_token, xero_org_id)
-            except Exception as exc:
-                logger.error(
-                    "sync_xero_accounts_to_db_background failed entity=%s: %s",
-                    entity_id,
-                    exc,
-                )
-
-    thread = threading.Thread(
-        target=_run,
-        daemon=True,
-        name=f"XeroAccountsSync-{entity_id}",
-    )
-    thread.start()
-    logger.info(
-        "sync_xero_accounts_to_db_background: started entity=%s", entity_id
+    _run_in_background(
+        "sync_xero_accounts_to_db_background",
+        sync_xero_accounts_to_db,
+        entity_id, access_token, xero_org_id,
+        entity_id=entity_id,
+        flask_app=flask_app,
+        thread_name=f"XeroAccountsSync-{entity_id}",
     )
 
 
@@ -831,25 +843,12 @@ def sync_chart_of_accounts_if_changed_background(
     entity_id, access_token, xero_org_id, user_id="", flask_app=None,
 ):
     """Fire-and-forget version — runs sync_chart_of_accounts_if_changed in a daemon thread."""
-    if flask_app is None:
-        flask_app = current_app._get_current_object()
-
-    def _run():
-        with flask_app.app_context():
-            try:
-                sync_chart_of_accounts_if_changed(
-                    entity_id, access_token, xero_org_id, user_id,
-                )
-            except Exception as exc:
-                logger.error(
-                    "sync_chart_of_accounts_if_changed_background failed entity=%s: %s",
-                    entity_id, exc,
-                )
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    logger.info(
-        "sync_chart_of_accounts_if_changed_background: started entity=%s", entity_id,
+    _run_in_background(
+        "sync_chart_of_accounts_if_changed_background",
+        sync_chart_of_accounts_if_changed,
+        entity_id, access_token, xero_org_id, user_id,
+        entity_id=entity_id,
+        flask_app=flask_app,
     )
 
 
@@ -857,23 +856,12 @@ def sync_contacts_if_changed_background(
     entity_id, access_token, xero_org_id, flask_app=None,
 ):
     """Fire-and-forget version — runs sync_contacts_if_changed in a daemon thread."""
-    if flask_app is None:
-        flask_app = current_app._get_current_object()
-
-    def _run():
-        with flask_app.app_context():
-            try:
-                sync_contacts_if_changed(entity_id, access_token, xero_org_id)
-            except Exception as exc:
-                logger.error(
-                    "sync_contacts_if_changed_background failed entity=%s: %s",
-                    entity_id, exc,
-                )
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    logger.info(
-        "sync_contacts_if_changed_background: started entity=%s", entity_id,
+    _run_in_background(
+        "sync_contacts_if_changed_background",
+        sync_contacts_if_changed,
+        entity_id, access_token, xero_org_id,
+        entity_id=entity_id,
+        flask_app=flask_app,
     )
 
 
@@ -889,7 +877,8 @@ def backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id):
         if entity.period_lock_date is not None and entity.end_of_year_lock_date is not None:
             return
 
-        from blueprints.xero.services.integration import get_organisation_lock_dates
+        from blueprints.xero.services.integration import \
+            get_organisation_lock_dates
         lock_dates = get_organisation_lock_dates(access_token, xero_org_id)
         entity.period_lock_date = lock_dates["period_lock_date"]
         entity.end_of_year_lock_date = lock_dates["end_of_year_lock_date"]
@@ -905,23 +894,12 @@ def backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id):
 
 def backfill_lock_dates_if_needed_background(entity_id, access_token, xero_org_id, flask_app=None):
     """Fire-and-forget version — runs backfill_lock_dates_if_needed in a daemon thread."""
-    if flask_app is None:
-        flask_app = current_app._get_current_object()
-
-    def _run():
-        with flask_app.app_context():
-            try:
-                backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id)
-            except Exception as exc:
-                logger.error(
-                    "backfill_lock_dates_if_needed_background failed entity=%s: %s",
-                    entity_id, exc,
-                )
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    logger.info(
-        "backfill_lock_dates_if_needed_background: started entity=%s", entity_id,
+    _run_in_background(
+        "backfill_lock_dates_if_needed_background",
+        backfill_lock_dates_if_needed,
+        entity_id, access_token, xero_org_id,
+        entity_id=entity_id,
+        flask_app=flask_app,
     )
 
 
@@ -1313,9 +1291,7 @@ def sync_all_entities_contacts_and_accounts(flask_app=None):
 
             try:
                 from services.auth.token_service import (
-                    ensure_valid_token,
-                    get_xero_token_user_for_entity,
-                )
+                    ensure_valid_token, get_xero_token_user_for_entity)
 
                 token_user = get_xero_token_user_for_entity(entity_id)
                 if not token_user or not getattr(token_user, "access_token", None):
@@ -1393,8 +1369,8 @@ def sync_all_accounts_and_contacts_background(
     Each section (contacts, general accounts, expense account_info) runs in its own
     transaction so a failure in one does not block the others.
     """
-    from blueprints.xero.services.integration import (
-        get_accounts_from_xero, get_contacts_from_xero)
+    from blueprints.xero.services.integration import (get_accounts_from_xero,
+                                                      get_contacts_from_xero)
 
     if flask_app is None:
         flask_app = current_app._get_current_object()
