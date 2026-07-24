@@ -14,9 +14,10 @@ from blueprints.xero.services.publish import (
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, sync_entity_xero_status)
 from models.db import Entity, Report, User, db
-from services.authz import require_entity_access, require_permission
 from services.auth.token_service import ensure_valid_token
-from services.permission_policy import Permission, can_view_report, has_permission
+from services.authz import require_entity_access, require_permission
+from services.permission_policy import (Permission, can_view_report,
+                                        has_permission)
 
 
 @report_bp.route("/report/submitted", methods=["GET"])

@@ -5,13 +5,11 @@ from datetime import datetime, timedelta
 
 from flask import url_for
 from loguru import logger
-from sqlalchemy import select
 
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
-from models.db import (AccountInfo, EntityAccountXero,
-                       EntityPettycashSettings, ReportV2, SaleInfo,
-                       UserEntity, db, tz)
+from models.db import (AccountInfo, EntityPettycashSettings, ReportV2,
+                       SaleInfo, UserEntity, db, tz)
 
 
 def check_user_has_entities(user_id):

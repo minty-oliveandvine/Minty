@@ -15,12 +15,12 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id,
                                                safe_float,
                                                update_draft_progress)
-from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
-                       ReportCashCountDraft, ReportDraft, ReportV2, UserEntity,
-                       db)
+from blueprints.shared.entity_display import entity_badge_data
+from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
+                       ReportV2, UserEntity, db)
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_xero_data_dynamic
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import Permission, has_permission
 
 
 @report_bp.route("/report/deposit", methods=["GET", "POST"])
@@ -55,20 +55,6 @@ def report_deposit(id=None):
     # Check if edit mode is enabled
     is_edit_mode = (request.args.get("edit") ==
                     "true" or request.form.get("edit") == "true")
-
-    def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
-
-        badge_date = None
-        if entity and entity.created_at:
-            if isinstance(entity.created_at, datetime):
-                badge_date = entity.created_at.date()
-            else:
-                badge_date = entity.created_at
-        return acronym, badge_date
 
     entity_acronym = ""
     display_date = None
@@ -138,7 +124,7 @@ def report_deposit(id=None):
             .filter(UserEntity.entity_id == report.company)
             .first()
         )
-        entity_acronym, display_date = get_entity_badge_data(entity)
+        entity_acronym, display_date = entity_badge_data(entity)
         completed_sections = (
             report.completed_sections if report.completed_sections else []
         )
@@ -374,7 +360,7 @@ def report_deposit(id=None):
 
     # Get entity for the template
     entity = Entity.query.filter(Entity.id == entity_id).first()
-    entity_acronym, display_date = get_entity_badge_data(entity)
+    entity_acronym, display_date = entity_badge_data(entity)
 
     # Ensure completed_sections is a list
     completed_sections = (

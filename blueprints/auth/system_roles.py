@@ -27,9 +27,7 @@ def legacy_role_to_system_role(role: Any) -> str:
     if role is None:
         return SYSTEM_ROLE_DEFAULT
 
-    normalized_role = (
-        str(role).strip().lower().replace(" ", "_").replace("-", "_")
-    )
+    normalized_role = str(role).strip().lower().replace(" ", "_").replace("-", "_")
     if normalized_role in LEGACY_SUPERUSER_ROLES:
         return SYSTEM_ROLE_SUPERUSER
     return SYSTEM_ROLE_DEFAULT

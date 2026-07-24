@@ -14,15 +14,16 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                header_publishing_status_for,
                                                recalculate_report,
                                                resolve_report_entity_id,
-                                               safe_float, update_draft_progress)
-from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
-                       ReportCashCountDraft, ReportDraft, db, tz)
-from services.authz import permission_denied
+                                               safe_float,
+                                               update_draft_progress)
+from blueprints.shared.entity_display import build_entity_acronym
+from models.db import Entity, Report, ReportCashCountDraft, ReportDraft, db, tz
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
+from services.authz import permission_denied
 from services.helpers.xero_bridge import (get_accounts_from_xero,
                                           get_entity_account_settings)
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import Permission, has_permission
 from utils import jsonify
 
 
@@ -241,10 +242,7 @@ def report_opening(id=None, entity_id=None):
     entity = Entity.query.filter(Entity.id == entity_id).first()
 
     # Prepare display metadata for headers
-    entity_acronym = ""
-    if entity and entity.name:
-        words = entity.name.split()
-        entity_acronym = "".join([word[0].upper() for word in words if word])
+    entity_acronym = build_entity_acronym(entity.name) if entity else ""
 
     display_date = None
     if entity and entity.created_at:

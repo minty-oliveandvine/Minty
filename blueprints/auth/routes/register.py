@@ -34,11 +34,7 @@ def validate_register():
     for key, error in form.errors.items():
         # Skip the "required" error while typing — an empty field the user hasn't
         # filled yet shouldn't flash an error inline (it's still enforced on submit).
-        if (
-            isinstance(error, list)
-            and len(error) > 0
-            and error[0] != _REQUIRED
-        ):
+        if isinstance(error, list) and len(error) > 0 and error[0] != _REQUIRED:
             errors[key] = error
     # Duplicate-email check, reported inline like any other field error so the
     # client can flag just the email field (no full-page submit/redirect that
@@ -48,13 +44,11 @@ def validate_register():
     json_body = request.get_json(silent=True) or {}
     email = (json_body.get("email") or form.email.data or "").strip()
     if email and not form.email.errors:
-        existing = User.query.with_entities(User.username).filter_by(
-            username=email
-        ).first()
+        existing = (
+            User.query.with_entities(User.username).filter_by(username=email).first()
+        )
         if existing:
             errors["email"] = ["An account with this email already exists"]
 
     error_count = len(errors)
     return jsonify({"errors": errors, "errorCount": error_count})
-
-

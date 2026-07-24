@@ -16,19 +16,14 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                future_date_error,
                                                get_cash_sales_from_detail,
                                                resolve_report_entity_id)
+from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
                        ReportSaleDetail, SaleInfo, ShopExpense,
                        ShopExpenseDraft, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
-from services.permission_policy import (
-    Permission,
-    can_edit_report,
-    can_view_report,
-    has_permission,
-    is_superuser,
-)
+from services.permission_policy import (Permission, can_view_report,
+                                        has_permission, is_superuser)
 from utils import verify_share_token
-
 
 
 def entity_ending_with_report(entity_id, report_id):
@@ -343,20 +338,6 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             )
             return redirect(url_for("entity.entity_list"))
 
-    def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
-
-        badge_date = None
-        if entity and entity.created_at:
-            if isinstance(entity.created_at, datetime):
-                badge_date = entity.created_at.date()
-            else:
-                badge_date = entity.created_at
-        return acronym, badge_date
-
     entity_acronym = ""
     display_date = None
 
@@ -524,7 +505,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 report.status = "posted"
 
         user_entity = Entity.query.get_or_404(entity_id)
-        entity_acronym, display_date = get_entity_badge_data(user_entity)
+        entity_acronym, display_date = entity_badge_data(user_entity)
         completed_sections = (
             report.completed_sections if report.completed_sections else []
         )
@@ -882,7 +863,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Get user entity
     user_entity = Entity.query.get(entity_id)
     entity_acronym, display_date = (
-        get_entity_badge_data(user_entity) if user_entity else ("", None)
+        entity_badge_data(user_entity) if user_entity else ("", None)
     )
 
     # If edit mode is enabled and no id provided, try to load any existing report for this date
@@ -1222,7 +1203,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             )
 
         try:
-            logger.info(f"=== STARTING REPORT ENDING SUBMISSION ===")
+            logger.info("=== STARTING REPORT ENDING SUBMISSION ===")
             logger.info(
                 f"Draft ID: {current_draft.id if current_draft else 'None'}"
             )
@@ -1348,27 +1329,27 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
             # If validation errors exist, return error response
             if validation_errors:
-                logger.error(f"=== VALIDATION FAILED ===")
+                logger.error("=== VALIDATION FAILED ===")
                 logger.error(
                     f"Draft ID: {current_draft.id if current_draft else 'unknown'}"
                 )
                 logger.error(f"Validation Errors: {validation_errors}")
-                logger.error(f"=== END VALIDATION FAILURE ===")
+                logger.error("=== END VALIDATION FAILURE ===")
                 flash(f"Hmm, a few things need fixing before I can submit: {'; '.join(validation_errors)}", "danger")
                 return redirect(url_for("report.report_ending", entity_id=entity_id))
 
-            logger.info(f"=== VALIDATION PASSED ===")
+            logger.info("=== VALIDATION PASSED ===")
             logger.info(
                 f"All validation checks passed for draft {current_draft.id}"
             )
-            logger.info(f"=== PROCEEDING TO SUBMISSION ===")
+            logger.info("=== PROCEEDING TO SUBMISSION ===")
 
             if "submitted" not in completed_sections:
                 # Check if report already exists
                 existing_report = Report.query.filter(
                     Report.id == current_draft.id
                 ).first()
-                logger.info(f"=== REPORT CREATION PHASE ===")
+                logger.info("=== REPORT CREATION PHASE ===")
                 logger.info(f"Existing report found: {existing_report is not None}")
 
                 if not existing_report:
@@ -1510,7 +1491,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
                 # Process expense drafts with rollback protection
                 try:
-                    logger.info(f"=== EXPENSE PROCESSING PHASE ===")
+                    logger.info("=== EXPENSE PROCESSING PHASE ===")
                     logger.info(
                         f"Processing expense drafts for draft {current_draft.id}"
                     )
@@ -1537,13 +1518,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                             logger.error(
                                 f"Expense draft {expense_draft.id} has empty item name"
                             )
-                            raise ValueError(f"Expense item cannot be empty")
+                            raise ValueError("Expense item cannot be empty")
                         if not expense_draft.amount or expense_draft.amount <= 0:
                             logger.error(
                                 f"Expense draft {expense_draft.id} has invalid amount: {expense_draft.amount}"
                             )
                             raise ValueError(
-                                f"Expense amount must be greater than zero"
+                                "Expense amount must be greater than zero"
                             )
 
                     shop_expenses = ShopExpense.query.filter(
@@ -1637,7 +1618,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 # Final commit and status update with rollback protection
                 if "submitted" not in completed_sections:
                     try:
-                        logger.info(f"=== FINAL COMMIT PHASE ===")
+                        logger.info("=== FINAL COMMIT PHASE ===")
                         # Final validation before commit
                         logger.info(
                             f"Performing final validation before commit for {current_draft.id}"
@@ -1683,16 +1664,16 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         logger.info(
                             f"Updating draft status to submitted for {current_draft.id}"
                         )
-                        logger.info(f"Adding 'submitted' to completed sections")
+                        logger.info("Adding 'submitted' to completed sections")
                         completed_sections.append("submitted")
                         current_draft.completed_sections = completed_sections
                         current_draft.current_section = "submitted"
                         current_draft.status = "posted"
 
-                        logger.info(f"Committing database changes...")
+                        logger.info("Committing database changes...")
                         db.session.commit()
 
-                        logger.info(f"=== SUBMISSION SUCCESSFUL ===")
+                        logger.info("=== SUBMISSION SUCCESSFUL ===")
                         logger.info(
                             f"Report {current_draft.id} submitted successfully"
                         )
@@ -1704,7 +1685,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                             f"Final draft section: {current_draft.current_section}"
                         )
                         logger.info(f"Posted report ID: {posted_report.id}")
-                        logger.info(f"=== END SUBMISSION SUCCESS ===")
+                        logger.info("=== END SUBMISSION SUCCESS ===")
 
                         return redirect(
                             url_for(
@@ -1714,14 +1695,14 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                             )
                         )
                     except Exception as commit_error:
-                        logger.error(f"=== FINAL COMMIT ERROR ===")
+                        logger.error("=== FINAL COMMIT ERROR ===")
                         logger.error(
                             f"Error during final commit for draft {current_draft.id}: {str(commit_error)}"
                         )
                         logger.error(f"Error type: {type(commit_error).__name__}")
-                        logger.error(f"Rolling back database session...")
+                        logger.error("Rolling back database session...")
                         db.session.rollback()
-                        logger.error(f"=== END FINAL COMMIT ERROR ===")
+                        logger.error("=== END FINAL COMMIT ERROR ===")
                         raise commit_error
                 else:
                     logger.warning(f"Report {current_draft.id} already submitted")
@@ -1741,7 +1722,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         except Exception as e:
             # Comprehensive rollback on error
-            logger.error(f"=== SUBMISSION FAILURE ===")
+            logger.error("=== SUBMISSION FAILURE ===")
             logger.error(
                 f"Unexpected error during report ending submission for draft {current_draft.id if current_draft else 'unknown'}"
             )
@@ -1761,7 +1742,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             logger.error(
                 f"Completed Sections: {completed_sections if 'completed_sections' in locals() else 'Unknown'}"
             )
-            logger.error(f"=== ROLLING BACK DATABASE ===")
+            logger.error("=== ROLLING BACK DATABASE ===")
 
             # Perform comprehensive rollback
             try:
@@ -1777,7 +1758,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
             # Check and restore draft state after rollback
             try:
-                logger.info(f"Checking draft state after rollback...")
+                logger.info("Checking draft state after rollback...")
                 draft_check = ReportDraft.query.filter_by(id=current_draft.id).first()
                 if not draft_check:
                     logger.error(
@@ -1804,7 +1785,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                     ).all()
 
                     if existing_report or existing_expenses:
-                        logger.warning(f"=== PARTIAL DATA CLEANUP ===")
+                        logger.warning("=== PARTIAL DATA CLEANUP ===")
                         logger.warning(
                             f"Partial data exists for {current_draft.id} - attempting cleanup"
                         )
@@ -1825,7 +1806,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                             logger.error(
                                 f"Failed to clean up partial data for {current_draft.id} - manual cleanup may be required"
                             )
-                        logger.warning(f"=== END PARTIAL DATA CLEANUP ===")
+                        logger.warning("=== END PARTIAL DATA CLEANUP ===")
 
             except Exception as check_error:
                 logger.error(
@@ -1833,49 +1814,49 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 )
 
             # Determine error type and provide appropriate user message
-            logger.info(f"=== ERROR TYPE DETERMINATION ===")
+            logger.info("=== ERROR TYPE DETERMINATION ===")
             error_type = "database"
             if "connection" in str(e).lower() or "timeout" in str(e).lower():
                 error_type = "connection"
-                logger.info(f"Error classified as connection issue")
+                logger.info("Error classified as connection issue")
             elif "constraint" in str(e).lower() or "foreign key" in str(e).lower():
                 error_type = "constraint"
-                logger.info(f"Error classified as constraint violation")
+                logger.info("Error classified as constraint violation")
             elif "permission" in str(e).lower() or "access" in str(e).lower():
                 error_type = "permission"
-                logger.info(f"Error classified as permission issue")
+                logger.info("Error classified as permission issue")
             else:
-                logger.info(f"Error classified as general database issue")
-            logger.info(f"=== END ERROR TYPE DETERMINATION ===")
+                logger.info("Error classified as general database issue")
+            logger.info("=== END ERROR TYPE DETERMINATION ===")
 
             if error_type == "connection":
-                logger.info(f"Showing connection error message to user")
+                logger.info("Showing connection error message to user")
                 flash(
                     "Something went wrong reaching the server. Could you check your connection and try again?",
                     "warning",
                 )
             elif error_type == "constraint":
-                logger.info(f"Showing constraint error message to user")
+                logger.info("Showing constraint error message to user")
                 flash(
                     "Something in the report data doesn't look right to me. Could you check your entries and try again?",
                     "warning",
                 )
             elif error_type == "permission":
-                logger.info(f"Showing permission error message to user")
+                logger.info("Showing permission error message to user")
                 flash(
                     "I couldn't save your report - something on our end blocked it. Nothing was submitted, so please contact your administrator before trying again.",
                     "danger",
                 )
             else:
-                logger.info(f"Showing general error message to user")
+                logger.info("Showing general error message to user")
                 flash(
                     "Something went wrong on my end while submitting your report. Mind trying again?",
                     "danger",
                 )
 
-            logger.info(f"=== REDIRECTING TO REPORT ENDING ===")
+            logger.info("=== REDIRECTING TO REPORT ENDING ===")
             logger.info(f"Redirecting to report_ending with entity_id: {entity_id}")
-            logger.error(f"=== END SUBMISSION FAILURE ===")
+            logger.error("=== END SUBMISSION FAILURE ===")
             return redirect(url_for("report.report_ending", entity_id=entity_id))
 
     bank_deposit = current_draft.bank_deposit if current_draft.bank_deposit else 0

@@ -74,7 +74,11 @@ def request_email_otp(email: str) -> tuple[bool, str | None]:
         minutes = max(1, (locked_seconds + 59) // 60)
         return False, f"Too many attempts. Try again in about {minutes} minute(s)."
 
-    if latest and (datetime.utcnow() - latest.created_at).total_seconds() < RESEND_COOLDOWN_SECONDS:
+    if (
+        latest
+        and (datetime.utcnow() - latest.created_at).total_seconds()
+        < RESEND_COOLDOWN_SECONDS
+    ):
         return False, "Please wait a moment before requesting another code."
 
     # Carry the failure count forward across resends so a fresh code can't reset
@@ -224,7 +228,9 @@ def complete_email_signup(
         username=username,
         first_name=first_name,
         last_name=last_name,
-        password=generate_password_hash(secrets.token_urlsafe(32), method="pbkdf2:sha256"),
+        password=generate_password_hash(
+            secrets.token_urlsafe(32), method="pbkdf2:sha256"
+        ),
         system_role=User.SYSTEM_ROLE_DEFAULT,
         approved=True,
         # xero_user_id / xero_token / access_token ... all left NULL → personal account

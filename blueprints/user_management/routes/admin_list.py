@@ -5,28 +5,23 @@ import json
 from datetime import datetime
 from typing import Any, cast
 
-from flask import jsonify, redirect, render_template, request
+from flask import jsonify, render_template, request
 from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.user_management import user_management_bp
+from blueprints.user_management.services.access_guards import require_superuser
 from models.db import Report
 
 
 @user_management_bp.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin():
+    denied = require_superuser("auth.index", log_unauthorized=True, user=current_user)
+    if denied is not None:
+        return denied
+
     user = cast(Any, current_user)
-    if getattr(user, "system_role", None) != "superuser":
-        logger.warning(
-            "Unauthorized admin access attempt by user_id=%s",
-            getattr(user, "id", None),
-        )
-        from flask import flash, url_for
-
-        flash("Hmm, I can't let you in there.", "danger")
-        return redirect(url_for("auth.index"))
-
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     company = request.args.get("company")
@@ -38,12 +33,12 @@ def admin():
 
     if start_date:
         query = query.filter(
-            Report.transaction_date >= datetime.strptime(
-                start_date, "%Y-%m-%d").date())
+            Report.transaction_date >= datetime.strptime(start_date, "%Y-%m-%d").date()
+        )
     if end_date:
         query = query.filter(
-            Report.transaction_date <= datetime.strptime(
-                end_date, "%Y-%m-%d").date())
+            Report.transaction_date <= datetime.strptime(end_date, "%Y-%m-%d").date()
+        )
     if company:
         query = query.filter(Report.company == company)
     if uploaded_by:
@@ -89,9 +84,8 @@ def admin():
             + (report.total_sales or 0)
         )
         cumulative_expenses_by_company[company_id] = cumulative_expenses_by_company.get(
-            company_id, 0) + (report.expenses or 0)
-
-    from flask import flash
+            company_id, 0
+        ) + (report.expenses or 0)
 
     return render_template(
         "admin.html",
@@ -118,8 +112,7 @@ def client_logs():
         timestamp = data.get("timestamp", "")
         user = cast(Any, current_user)
         user_id = user.id if user.is_authenticated else None
-        username = (
-            user.username if user.is_authenticated else "anonymous")
+        username = user.username if user.is_authenticated else "anonymous"
 
         log_message = f"FRONTEND [{level}] {message}"
         if url:

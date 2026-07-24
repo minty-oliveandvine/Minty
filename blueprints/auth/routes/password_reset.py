@@ -33,12 +33,10 @@ def reset_request():
                         subject="Reset Link: Pettycash-dev",
                         body=f"To reset your password you can click the reset link you will be redirected to a new browser tab to reset your password: <br> <a href={url_link} target='_blank'>Reset link</a>",
                         sender=current_app.config["BREVO_EMAIL"],
-                        recipients=[
-                            user.email],
+                        recipients=[user.email],
                     )
                     mail.send(msg)
-                    logger.info(
-                        f"Password reset link is sent to {form.email.data}")
+                    logger.info(f"Password reset link is sent to {form.email.data}")
                     flash(
                         f"I've sent a reset link to {form.email.data} — it can take 1-3 minutes to arrive.",
                         "info",
@@ -69,7 +67,10 @@ def reset_token(token):
         return redirect(url_for("auth.home"))
     user = User.query.filter_by(reset_token=token).first()
     if user is None:
-        flash("This reset link doesn't work anymore. Want me to send a fresh one?", "warning")
+        flash(
+            "This reset link doesn't work anymore. Want me to send a fresh one?",
+            "warning",
+        )
         return redirect(url_for("auth.reset_request"))
     if user.reset_token_expiry and user.reset_token_expiry < datetime.now():
         flash("This reset link has expired. Want me to send a fresh one?", "warning")
@@ -79,8 +80,7 @@ def reset_token(token):
         try:
             if form.password.data is None:
                 flash("I can't let you in without a password.", "danger")
-                return render_template(
-                    "reset_token.html", form=form, token=token)
+                return render_template("reset_token.html", form=form, token=token)
             hashed_password = generate_password_hash(
                 form.password.data, method="pbkdf2:sha256"
             )
