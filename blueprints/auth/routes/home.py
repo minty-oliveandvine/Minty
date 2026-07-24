@@ -14,4 +14,3 @@ def home():
         "ONBOARDING_APP_URL", "http://localhost:3001"
     ).rstrip("/")
     return render_template("login/index.html", onboarding_base=onboarding_base)
-

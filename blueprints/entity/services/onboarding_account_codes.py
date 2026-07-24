@@ -11,14 +11,12 @@ from __future__ import annotations
 from loguru import logger
 
 from blueprints.entity.services.settings import (
-    COA_INCLUDED_TYPES,
-    sync_entity_account_xero_active,
-    sync_expense_account_info_from_xero,
-)
+    COA_INCLUDED_TYPES, sync_entity_account_xero_active,
+    sync_expense_account_info_from_xero)
 from blueprints.entity.services.xero_account_mapping_post import (
     _resolve_account_id, _resolve_contact_id)
-from models.db import (AccountInfo, EntityAccountXero, EntityPettycashSettings,
-                       Entity, XeroContactSync, db)
+from models.db import (AccountInfo, Entity, EntityAccountXero,
+                       EntityPettycashSettings, XeroContactSync, db)
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
 from services.helpers.xero import mask_account_number

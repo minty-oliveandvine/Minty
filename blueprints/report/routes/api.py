@@ -20,19 +20,11 @@ from blueprints.report.services.share import create_share_link_for_report
 from blueprints.report.services.shared import get_cash_sales_from_detail
 from blueprints.xero.services.publish_errors import latest_publish_reason_items
 from blueprints.xero.services.publish_resolution import annotate_resolution
-from models.db import (
-    Entity,
-    Report,
-    ReportDraft,
-    ReportHistory,
-    ShopExpense,
-    ShopExpenseDraft,
-    User,
-    UserEntity,
-    db,
-)
-from services.auth.token_service import (auto_refresh_token, ensure_valid_token,
-                                        get_xero_token_user_for_entity)
+from models.db import (Entity, Report, ReportDraft, ReportHistory, ShopExpense,
+                       ShopExpenseDraft, UserEntity, db)
+from services.auth.token_service import (auto_refresh_token,
+                                         ensure_valid_token,
+                                         get_xero_token_user_for_entity)
 from services.permission_policy import Permission, has_permission
 
 
@@ -1561,7 +1553,6 @@ def get_draft_totals():
 def generate_share_link():
     try:
         data = request.get_json(silent=True) or {}
-        entity_id = data.get("entity_id")
         response, status = create_share_link_for_report(current_user.id, data)
         return jsonify(response), status
     except Exception as exc:

@@ -11,13 +11,13 @@ from blueprints.report import report_bp
 from blueprints.report.services.history import log_history_draft
 from blueprints.report.services.shared import (
     check_user_has_entities, get_cash_sales_from_detail,
-    header_publishing_status_for, parse_nested_keys,
-    resolve_report_entity_id, safe_float, update_draft_progress,
-    update_report_draft_sales_from_detail)
+    header_publishing_status_for, parse_nested_keys, resolve_report_entity_id,
+    safe_float, update_draft_progress, update_report_draft_sales_from_detail)
+from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportDraft, ReportSaleDetail, ReportV2,
                        SaleInfo, db, tz)
 from services.authz import permission_denied
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import Permission, has_permission
 
 
 def get_unique_sale_info_for_entity(entity_id):
@@ -84,20 +84,6 @@ def report_sale(id=None):
         request.args.get("edit") == "true" or request.form.get("edit") == "true"
     )
 
-    def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
-
-        badge_date = None
-        if entity and entity.created_at:
-            if isinstance(entity.created_at, datetime):
-                badge_date = entity.created_at.date()
-            else:
-                badge_date = entity.created_at
-        return acronym, badge_date
-
     entity_acronym = ""
     display_date = None
 
@@ -140,7 +126,7 @@ def report_sale(id=None):
             .first()
         )
         entity = Entity.query.get_or_404(entity_id)
-        entity_acronym, display_date = get_entity_badge_data(entity)
+        entity_acronym, display_date = entity_badge_data(entity)
 
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
@@ -232,7 +218,7 @@ def report_sale(id=None):
             .first()
         )
         entity = Entity.query.get_or_404(entity_id)
-        entity_acronym, display_date = get_entity_badge_data(entity)
+        entity_acronym, display_date = entity_badge_data(entity)
 
         # Get sale_info for the entity (unique, no duplicates, proper order)
         sale_info_list = get_unique_sale_info_for_entity(entity_id)
@@ -1155,7 +1141,7 @@ def report_sale(id=None):
             flash("Hmm, that organization doesn't seem to be in our system.", "danger")
             return redirect(url_for("entity.entity_list"))
 
-        entity_acronym, display_date = get_entity_badge_data(org)
+        entity_acronym, display_date = entity_badge_data(org)
         sale_info_query = get_unique_sale_info_for_entity(org.id)
 
         # Attach amounts from ReportSaleDetail if draft exists

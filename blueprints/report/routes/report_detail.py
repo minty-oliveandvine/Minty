@@ -18,23 +18,17 @@ from blueprints.report.services.s3_storage import (delete_files_from_s3,
                                                    get_s3_client,
                                                    upload_file_to_s3)
 from blueprints.report.services.shared import (get_cash_sales_from_detail,
-                                                get_next_section_for_user,
-                                                parse_nested_keys,
-                                                resolve_report_entity_id,
-                                                safe_float)
-from models.db import (AccountInfo, EntityAccountXero, Report,
-                       ReportCashCountDraft, ReportDraft, ReportExpenseDetail,
-                       ReportHistory, ReportSaleDetail, ReportV2, ShopExpense,
-                       ShopExpenseDraft, db)
+                                               get_next_section_for_user,
+                                               parse_nested_keys,
+                                               resolve_report_entity_id,
+                                               safe_float)
+from models.db import (Report, ReportCashCountDraft, ReportDraft,
+                       ReportExpenseDetail, ReportHistory, ReportSaleDetail,
+                       ReportV2, ShopExpense, ShopExpenseDraft, db)
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_entity_account_settings
-from services.permission_policy import (
-    Permission,
-    can_delete_report,
-    can_edit_report,
-    can_view_report,
-    has_permission,
-)
+from services.permission_policy import (Permission, can_delete_report,
+                                        can_view_report, has_permission)
 
 
 @report_bp.route("/report/<string:id>")
@@ -395,7 +389,7 @@ def delete_report(id):
         """Delete ReportV2 and all records that reference it via FK."""
         ReportExpenseDetail.query.filter_by(report_id=report_id).delete()
         ReportSaleDetail.query.filter_by(report_id=report_id).delete()
-        from models.db import XeroReportSync, XeroBankTransfer
+        from models.db import XeroBankTransfer, XeroReportSync
         XeroReportSync.query.filter_by(report_id=report_id).delete()
         XeroBankTransfer.query.filter_by(sync_report_id=report_id).delete()
         ReportV2.query.filter_by(report_id=report_id).delete()

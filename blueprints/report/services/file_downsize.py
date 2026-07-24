@@ -14,6 +14,7 @@ is returned anyway — callers should not block on size.
 """
 
 import io
+
 from loguru import logger
 
 TARGET_BYTES = 1 * 1024 * 1024  # 1 MB

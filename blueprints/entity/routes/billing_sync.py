@@ -14,9 +14,7 @@ from loguru import logger
 from blueprints.entity import entity_bp
 from blueprints.entity.services.settings import (
     sync_chart_of_accounts_if_changed_background,
-    sync_contacts_if_changed_background,
-    sync_xero_coa_bill,
-)
+    sync_contacts_if_changed_background, sync_xero_coa_bill)
 from models.db import Entity
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)

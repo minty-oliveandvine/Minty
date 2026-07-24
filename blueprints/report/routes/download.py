@@ -15,8 +15,7 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from models.db import (AccountInfo, EntityAccountXero, Report,
-                       ShopExpense, db)
+from models.db import Report, ShopExpense, db
 from services.helpers.xero_bridge import get_entity_account_settings
 from services.permission_policy import Permission, has_permission
 

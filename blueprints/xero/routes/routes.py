@@ -9,7 +9,6 @@ from urllib.parse import quote, unquote
 import requests
 from dateutil import parser
 from flask import current_app
-from flask import current_app as app
 from flask import (flash, g, get_flashed_messages, jsonify, redirect, request,
                    session, url_for)
 from flask.typing import ResponseReturnValue
@@ -27,7 +26,7 @@ from blueprints.xero.services.integration import (
 from blueprints.xero.services.settings import (get_entity_account_settings,
                                                sync_entity_xero_status)
 from services.helpers.xero_bridge import get_entity_contact_settings
-from models.db import Entity, Report, User, UserToken, XeroContactSync, db, tz
+from models.db import Entity, Report, User, UserToken, db, tz
 from services.authz import (permission_denied, require_entity_access,
                             require_permission)
 from services.auth.token_service import (ensure_valid_token,
