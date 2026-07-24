@@ -12,12 +12,11 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id,
                                                safe_float,
                                                update_draft_progress)
-from blueprints.shared.entity_display import build_entity_acronym
+from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDetail,
                        ReportDraft, db)
 from services.authz import permission_denied
-from services.permission_policy import (Permission, can_edit_report,
-                                        has_permission)
+from services.permission_policy import Permission, has_permission
 
 
 @report_bp.route("/report/cash_count", methods=["GET", "POST"])
@@ -52,17 +51,6 @@ def report_cash_count(id=None):
     # Check if edit mode is enabled
     is_edit_mode = (request.args.get("edit") ==
                     "true" or request.form.get("edit") == "true")
-
-    def get_entity_badge_data(entity):
-        acronym = build_entity_acronym(entity.name) if entity else ""
-
-        badge_date = None
-        if entity and entity.created_at:
-            if isinstance(entity.created_at, datetime):
-                badge_date = entity.created_at.date()
-            else:
-                badge_date = entity.created_at
-        return acronym, badge_date
 
     if id:
         report = (
@@ -124,7 +112,7 @@ def report_cash_count(id=None):
                 ReportCashCountDraft.discrepancy_reason,
             ) .first())
         user_entity = Entity.query.get_or_404(report.company)
-        entity_acronym, display_date = get_entity_badge_data(user_entity)
+        entity_acronym, display_date = entity_badge_data(user_entity)
         completed_sections = (
             report.completed_sections if report.completed_sections else []
         )
@@ -580,7 +568,7 @@ def report_cash_count(id=None):
 
     # Get entity for the template
     entity = Entity.query.filter(Entity.id == entity_id).first()
-    entity_acronym, display_date = get_entity_badge_data(entity)
+    entity_acronym, display_date = entity_badge_data(entity)
 
     # Ensure completed_sections is a list
     completed_sections = (

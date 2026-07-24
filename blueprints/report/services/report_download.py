@@ -6,7 +6,7 @@ from flask import flash, jsonify, make_response, redirect, url_for
 from flask_login import current_user
 from loguru import logger
 
-from models.db import AccountInfo, EntityAccountXero, Report, ShopExpense, db
+from models.db import Report, ShopExpense
 from services.helpers.xero_bridge import get_entity_account_settings
 
 
