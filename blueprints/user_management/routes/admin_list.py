@@ -17,7 +17,7 @@ from models.db import Report
 @user_management_bp.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin():
-    denied = require_superuser("auth.index", log_unauthorized=True)
+    denied = require_superuser("auth.index", log_unauthorized=True, user=current_user)
     if denied is not None:
         return denied
 
@@ -33,12 +33,12 @@ def admin():
 
     if start_date:
         query = query.filter(
-            Report.transaction_date >= datetime.strptime(
-                start_date, "%Y-%m-%d").date())
+            Report.transaction_date >= datetime.strptime(start_date, "%Y-%m-%d").date()
+        )
     if end_date:
         query = query.filter(
-            Report.transaction_date <= datetime.strptime(
-                end_date, "%Y-%m-%d").date())
+            Report.transaction_date <= datetime.strptime(end_date, "%Y-%m-%d").date()
+        )
     if company:
         query = query.filter(Report.company == company)
     if uploaded_by:
@@ -84,7 +84,8 @@ def admin():
             + (report.total_sales or 0)
         )
         cumulative_expenses_by_company[company_id] = cumulative_expenses_by_company.get(
-            company_id, 0) + (report.expenses or 0)
+            company_id, 0
+        ) + (report.expenses or 0)
 
     return render_template(
         "admin.html",
@@ -111,8 +112,7 @@ def client_logs():
         timestamp = data.get("timestamp", "")
         user = cast(Any, current_user)
         user_id = user.id if user.is_authenticated else None
-        username = (
-            user.username if user.is_authenticated else "anonymous")
+        username = user.username if user.is_authenticated else "anonymous"
 
         log_message = f"FRONTEND [{level}] {message}"
         if url:

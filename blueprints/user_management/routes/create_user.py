@@ -5,14 +5,10 @@ from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.user_management import user_management_bp
-from blueprints.user_management.services.create_user import \
-    bcrypt_hash_password
+from blueprints.user_management.services.create_user import bcrypt_hash_password
 from models.db import User, UserEntity, db
 from services.authz import require_permission
-from services.permission_policy import (
-    Permission,
-    can_manage_role_assignment_for_entity,
-)
+from services.permission_policy import Permission, can_manage_role_assignment_for_entity
 
 
 @user_management_bp.route("/minty/api/users/create", methods=["POST"])
@@ -34,8 +30,9 @@ def create_user():
         "company_uuid",
         "role",
     ]
-    missing = [f for f in required_fields if f not in data or data[f]
-               is None or data[f] == ""]
+    missing = [
+        f for f in required_fields if f not in data or data[f] is None or data[f] == ""
+    ]
     if missing:
         return (
             jsonify(
@@ -127,5 +124,3 @@ def create_user():
         ),
         201,
     )
-
-

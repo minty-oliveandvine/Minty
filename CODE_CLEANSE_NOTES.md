@@ -59,10 +59,13 @@ Note: running tests modifies `tmp_test.sqlite` — always `git checkout` it afte
 
 ---
 
-## Blueprint #1: user_management — WORK DONE (staged, NOT committed)
+## Blueprint #1: user_management — ✅ COMPLETE
 
 Scope decided with owner: apply **dead-import removal + A (superuser gate) + B
-(role-check helpers)**. **Skip C** (generic error-response helper). Formatting deferred.
+(role-check helpers)**. **Skip C** (generic error-response helper).
+
+Final state: all three steps done (dead code, consolidation, formatting).
+Regression check: **OK — no new failures beyond the 79 baseline.**
 
 ### Changes made
 - **New** `blueprints/user_management/services/access_guards.py`
@@ -81,47 +84,50 @@ Scope decided with owner: apply **dead-import removal + A (superuser gate) + B
 
 ruff `--select F` passes on all edited files. Modules import cleanly.
 
-### ⚠️ REGRESSION — 3 tests now fail (this is why we're paused on this file)
-The **A (superuser gate) part is fine.** The **B (role helpers) part broke tests:**
+### ⚠️ THE KEY LESSON — dependency injection is required in this repo
 
-- `test_user_management_membership_roles.py::test_updating_membership_role_...`
-- `test_user_management_membership_roles.py::test_deleting_membership_role_...`
-- `test_entity_selection_flow.py::test_admin_dashboard_passes_membership_summary_map`
-  (verify this one — likely same root cause via admin_dashboard, or an import-time effect)
+The first attempt at the consolidation regressed 3 tests. **This will happen
+again in every remaining blueprint, so read this before consolidating anything.**
 
-**Root cause (confirmed):** these are white-box tests. They call the route's
-unwrapped inner fn directly (`roles_routes.delete_user_role.__wrapped__.__wrapped__(...)`)
-and patch module-level names ON THE ROUTE MODULE:
-`monkeypatch.setattr(roles_routes, "UserEntity", FakeUserEntity)` (lines ~143, ~171).
-Moving the `UserEntity.query` into `services/roles.py` means the monkeypatch no
-longer intercepts it → real query runs with no Flask app context →
-`RuntimeError: current Flask app is not registered with this SQLAlchemy instance`.
+These are **white-box tests**: they call the route's unwrapped inner function
+directly (`roles_routes.delete_user_role.__wrapped__.__wrapped__(...)`) and
+patch module-level names **on the route module**, e.g.:
+```python
+monkeypatch.setattr(roles_routes, "UserEntity", FakeUserEntity)
+monkeypatch.setattr(roles_routes, "db", SimpleNamespace(session=session))
+monkeypatch.setattr(admin_dashboard_routes, "current_user", SimpleNamespace(...))
+monkeypatch.setattr(roles_routes, "can_manage_role_assignment_for_entity", ...)
+```
+If you move that name's usage into `services/`, the patch no longer intercepts
+it → the real object is used → `RuntimeError: The current Flask app is not
+registered with this 'SQLAlchemy' instance`, or an `AttributeError` when the
+patched attribute no longer exists on the route module.
 
-**LESSON for the whole cleanup:** In this repo, extracting DB-touching logic out
-of a route module into `services/` breaks tests that
-`monkeypatch.setattr(<route_module>, "UserEntity"/"db"/"User", ...)`.
-Before consolidating DB access, grep the tests for such patches.
+**THE FIX PATTERN (use this everywhere):** the shared parent takes the dependency
+as a keyword arg defaulting to the real one; the route passes its own
+module-level binding, so tests keep patching the route module.
 
-### Two ways to resolve B (owner to choose)
-1. **Revert B, keep A.** A is a clean win with no test breakage. Drop the role
-   helpers (or keep them unused for later). Lowest risk to finish blueprint #1 now.
-2. **Keep B, make it test-compatible.** Either:
-   a. have helpers take the model/session as params so the route still owns the
-      patched name, e.g. `find_membership_or_error(user_id, entity_id, model=UserEntity)`
-      and call with the route-module `UserEntity`; **or**
-   b. update the 2–3 tests to patch the new location
-      (`services.roles.UserEntity`) — but this changes tests, which is a bigger ask.
+```python
+# services/ — the shared parent
+def find_membership_or_error(user_id, entity_id, *, model=None):
+    membership_model = model if model is not None else UserEntity
+    ...
 
-Recommendation: **option 1 for now** (ship A), revisit B with approach 2a in a
-dedicated pass once the pattern is proven on a smaller helper.
+# routes/ — caller passes its own binding (the name tests patch)
+membership, error = find_membership_or_error(user_id, entity_id, model=UserEntity)
+```
 
----
+Applied to: `model=` (UserEntity), `user=` (current_user), `user_model=` (User),
+`policy=` (can_manage_role_assignment_for_entity).
 
-## Remaining for user_management (after B is resolved)
-- Final formatting pass: `isort` + `black` on `blueprints/user_management/`.
-  (~18 E501 long lines in `routes/roles.py`; awkward import continuation in
-  `routes/create_user.py:8`.)
-- Re-run regression check → expect "no new failures".
+**Before consolidating, always run:**
+```
+grep -rn "monkeypatch.setattr(<route_module_alias>" tests/
+```
+and inject every name the tests patch.
+
+## Next up: blueprint #2 = `invitation` (926 LOC, 8 files)
+Same 3-step recipe. Remember the dependency-injection lesson above.
 
 ## Not yet started
 - Blueprints: `invitation`, `auth`, `xero`, `entity`, `report` — same 3-step recipe.

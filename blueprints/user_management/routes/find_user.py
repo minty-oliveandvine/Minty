@@ -11,7 +11,9 @@ from services.permission_policy import Permission, has_permission
 @login_required
 def find_user():
     form = FindUserForm()
-    memberships = UserEntity.query.filter_by(user_id=current_user.id, approved=True).all()
+    memberships = UserEntity.query.filter_by(
+        user_id=current_user.id, approved=True
+    ).all()
     allowed_entities = []
     for membership in memberships:
         if has_permission(current_user, Permission.USER_VIEW_ALL, membership.entity_id):
