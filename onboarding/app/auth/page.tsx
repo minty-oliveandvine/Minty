@@ -38,7 +38,9 @@ function AuthContent() {
       const res = await fetch(`${FLASK_BASE}/auth/email/request-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        // Send the invite token so the server can reject an OTP request whose
+        // email doesn't match the invited address before a code is sent.
+        body: JSON.stringify(inviteToken ? { email, invite: inviteToken } : { email }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.status === "error") {
