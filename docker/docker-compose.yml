@@ -8,7 +8,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-minty_ref_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minty_ref_pass}
     ports:
-      - "5432:5432"
+      # Host port is configurable so a locally-installed Postgres on 5432 doesn't
+      # clash. Override in .env, e.g. DB_HOST_PORT=5433. The app container always
+      # reaches the db internally on 5432 regardless of this setting.
+      - "${DB_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,6 +26,11 @@ services:
       dockerfile: docker/Dockerfile
     container_name: minty-ref-app
     restart: unless-stopped
+    # Load the project-root .env into the container (app secrets, S3 keys, etc.).
+    # Note: for ${VAR} substitution *inside this file* compose also needs
+    # `--env-file ../.env`; the helper scripts and README use it.
+    env_file:
+      - ../.env
     depends_on:
       db:
         condition: service_healthy
