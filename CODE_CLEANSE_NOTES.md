@@ -126,10 +126,41 @@ grep -rn "monkeypatch.setattr(<route_module_alias>" tests/
 ```
 and inject every name the tests patch.
 
-## Next up: blueprint #2 = `invitation` (926 LOC, 8 files)
-Same 3-step recipe. Remember the dependency-injection lesson above.
+## Blueprint #2: invitation — ✅ COMPLETE
+
+Regression check: **OK — no new failures beyond the 79 baseline.** ruff `F` clean.
+
+### Changes made
+- **Dead code:** `routes/accept.py` imported `accept_invitation` but never called
+  it (only named in prose comments). The real callers — `blueprints/auth/routes/
+  email_auth.py` and `blueprints/xero/routes/routes.py` — import it from the
+  service themselves, so the import was genuinely dead.
+- **Consolidation:** `cancel_invite` and `resend_invite` in `routes/api.py` were
+  near-identical twins (resolve invitation → 404, `has_permission` → 403,
+  `can_manage_role_assignment_for_entity` → 403, each with parallel log lines).
+  Extracted `_load_invitation_for_management(invitation_id, action, role_denied_message)`
+  → returns `(invitation, None)` or `(None, error_response)`.
+  - `action` parametrizes the log prefix; verified the loguru positional
+    template renders **byte-identically** to the originals.
+  - All 4 user-facing messages preserved verbatim; each now appears once, not twice.
+  - Lazy imports kept INSIDE the helper — `accept.py` documents that this is
+    deliberate (a failed module-level import would drop the whole blueprint).
+- **Formatting:** `isort` + `black`.
+
+Like-for-like saving: 343 → 315 lines in `api.py` (28 lines) once formatting is
+held constant. Raw line count rose only because black reflowed long `jsonify` calls.
+
+### Note on validation
+35 of the invitation tests are in the pre-existing red baseline (the
+`Entity(currency_code=...)` fixture drift), so they could NOT validate this
+change. Relied on: "no new failures" + byte-exact message/log preservation.
+These tests use `unittest.mock.patch` with full dotted paths into
+`services.invite`, NOT `monkeypatch.setattr` on route modules — so the
+dependency-injection trap from blueprint #1 did not apply here.
+
+## Next up: blueprint #3 = `auth` (1347 LOC, 21 files)
 
 ## Not yet started
-- Blueprints: `invitation`, `auth`, `xero`, `entity`, `report` — same 3-step recipe.
+- Blueprints: `auth`, `xero`, `entity`, `report` — same 3-step recipe.
 - Optional deeper dead-code sweep: `vulture` is **not installed**; would need
   `pip install vulture` (ask owner before adding to the env).
