@@ -4,11 +4,13 @@ from datetime import datetime
 from flask_login import UserMixin
 from sqlalchemy.dialects.postgresql import UUID
 
+from blueprints.auth.system_roles import SYSTEM_ROLE_DEFAULT as USER_SYSTEM_ROLE_DEFAULT
+from blueprints.auth.system_roles import SYSTEM_ROLE_NORMAL as USER_SYSTEM_ROLE_NORMAL
 from blueprints.auth.system_roles import (
-    SYSTEM_ROLE_DEFAULT as USER_SYSTEM_ROLE_DEFAULT,
-    SYSTEM_ROLE_NORMAL as USER_SYSTEM_ROLE_NORMAL,
     SYSTEM_ROLE_SUPERUSER as USER_SYSTEM_ROLE_SUPERUSER,
-    SYSTEM_ROLE_VALUES as USER_SYSTEM_ROLE_VALUES,
+)
+from blueprints.auth.system_roles import SYSTEM_ROLE_VALUES as USER_SYSTEM_ROLE_VALUES
+from blueprints.auth.system_roles import (
     legacy_role_to_system_role,
     normalize_system_role,
 )

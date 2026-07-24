@@ -158,9 +158,64 @@ These tests use `unittest.mock.patch` with full dotted paths into
 `services.invite`, NOT `monkeypatch.setattr` on route modules — so the
 dependency-injection trap from blueprint #1 did not apply here.
 
-## Next up: blueprint #3 = `auth` (1347 LOC, 21 files)
+## Blueprint #3: auth — ✅ COMPLETE (+ first cross-blueprint helper)
+
+Regression check: **OK — no new failures beyond the 79 baseline.** ruff `F` clean.
+
+Owner decided: **dead code + formatting only** for auth itself — `email_auth.py`
+is long (332 lines) but it is sequential flow, NOT duplication. There was no
+clean parent to extract, and it is auth-critical code. Don't force it.
+
+### Changes in auth
+- `routes/permissions.py`: removed unused `current_user` import.
+- `models/__init__.py`: `EmailOtp` was imported but missing from `__all__`
+  (while `User`/`UserToken` were listed). Added it rather than deleting the
+  import — it was an intended re-export. Verified first that `EmailOtp`'s table
+  registers via `models/db.py` regardless, so nothing depended on this file.
+  (Nothing imports this package at all.)
+- `isort` + `black`.
+
+### Cross-blueprint: `blueprints/shared/entity_display.py` (NEW)
+The entity-acronym computation was duplicated **13×** across 5 blueprints
+(auth, entity, report ×7, invitation, plus `report/services/share.py`).
+
+**⚠️ The variants were NOT equivalent** — `share.py` skipped words not starting
+with a letter, the other 12 did not:
+
+| name | the 12 copies | `share.py` |
+|---|---|---|
+| `Olive and Vine` | `OAV` | `OAV` |
+| `7 Eleven Store` | `7ES` | **`ES`** |
+| `&Co Bakery` | `&B` | **`B`** |
+
+Naively merging them would have silently changed acronyms for entities whose
+names start with a digit or symbol. Resolved (owner's call) with **one parent +
+a flag**, so behavior is unchanged everywhere:
+
+```python
+build_entity_acronym(name)                     # the 12 sites → "7ES"
+build_entity_acronym(name, letters_only=True)  # share.py     → "ES"
+```
+
+All 13 sites migrated; `_build_entity_acronym` deleted from `share.py`.
+Equivalence to both originals verified over edge cases (None, empty, unicode,
+digits, symbols).
+
+**⚠️ LESSON — scripted import insertion:** inserting an import after "the last
+line starting with `from models.`" broke 5 files, because that line was the
+OPENING line of a parenthesized multi-line import. Caught only by a collection
+ERROR. **Always `ast.parse` every file after a scripted edit** — ruff/black
+won't run on a file that doesn't parse.
+
+Note: only `isort` was run on the touched report/entity files, NOT `black` —
+those blueprints have not had their formatting pass yet and reformatting them
+now would bloat this diff. Their `black` pass comes with their own turn.
+
+## Next up: blueprint #4 = `xero` (5348 LOC, 17 files)
 
 ## Not yet started
-- Blueprints: `auth`, `xero`, `entity`, `report` — same 3-step recipe.
+- Blueprints: `xero`, `entity`, `report` — same 3-step recipe.
+- Known pre-existing debt found along the way: `blueprints/entity/routes/settings.py`
+  has **12 dead imports** (F401) already on HEAD — clean up in the entity pass.
 - Optional deeper dead-code sweep: `vulture` is **not installed**; would need
   `pip install vulture` (ask owner before adding to the env).

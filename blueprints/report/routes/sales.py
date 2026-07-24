@@ -11,13 +11,14 @@ from blueprints.report import report_bp
 from blueprints.report.services.history import log_history_draft
 from blueprints.report.services.shared import (
     check_user_has_entities, get_cash_sales_from_detail,
-    header_publishing_status_for, parse_nested_keys,
-    resolve_report_entity_id, safe_float, update_draft_progress,
-    update_report_draft_sales_from_detail)
+    header_publishing_status_for, parse_nested_keys, resolve_report_entity_id,
+    safe_float, update_draft_progress, update_report_draft_sales_from_detail)
+from blueprints.shared.entity_display import build_entity_acronym
 from models.db import (Entity, Report, ReportDraft, ReportSaleDetail, ReportV2,
                        SaleInfo, db, tz)
 from services.authz import permission_denied
-from services.permission_policy import Permission, can_edit_report, has_permission
+from services.permission_policy import (Permission, can_edit_report,
+                                        has_permission)
 
 
 def get_unique_sale_info_for_entity(entity_id):
@@ -85,10 +86,7 @@ def report_sale(id=None):
     )
 
     def get_entity_badge_data(entity):
-        acronym = ""
-        if entity and entity.name:
-            words = entity.name.split()
-            acronym = "".join([word[0].upper() for word in words if word])
+        acronym = build_entity_acronym(entity.name) if entity else ""
 
         badge_date = None
         if entity and entity.created_at:

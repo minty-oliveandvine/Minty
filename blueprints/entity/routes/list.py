@@ -6,22 +6,22 @@ from datetime import datetime
 from flask import flash, redirect, render_template, url_for
 from flask_login import current_user, login_required
 from loguru import logger
-from sqlalchemy import or_, func
+from sqlalchemy import func, or_
 
 from blueprints.entity import entity_bp
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
+from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.integration import get_accounts_from_xero
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, get_entity_account_settings,
     get_missing_xero_settings_fields)
 from models.db import Entity, Report, ReportDraft, User, UserEntity, db, tz
-from services.authz import (permission_denied, require_entity_access,
-                            require_module, require_permission)
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
-from services.permission_policy import (Permission, has_permission,
-                                        is_superuser)
+from services.authz import (permission_denied, require_entity_access,
+                            require_module, require_permission)
+from services.permission_policy import Permission, has_permission, is_superuser
 
 
 @entity_bp.route("/entity")
@@ -260,9 +260,7 @@ def report_dashboard(id):
         .order_by(Report.transaction_date.desc())
         .first()
     )
-    entity_acronym = ""
-    if org and org.name:
-        entity_acronym = "".join([w[0].upper() for w in org.name.split() if w])
+    entity_acronym = build_entity_acronym(org.name) if org else ""
     display_date = None
     if org and org.created_at:
         display_date = (

@@ -16,37 +16,31 @@ from sqlalchemy.exc import IntegrityError
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import billing_settings_app_url
 from blueprints.entity.services.settings import (
-    backfill_lock_dates_if_needed_background,
-    reconcile_account_info_status,
-    sync_chart_of_accounts_if_changed,
-    sync_contacts_if_changed_background,
-    sync_entity_account_xero_active,
-    sync_expense_account_info_from_xero,
-    sync_xero_accounts_to_db_background,
-    sync_xero_coa_pettycash,
-    COA_EXCLUDED_TYPES,
-    COA_INCLUDED_TYPES,
-)
-from blueprints.entity.services.xero_account_mapping_post import (
-    apply_country_currency_selection,
-    process_xero_account_mapping_post,
-)
+    COA_EXCLUDED_TYPES, COA_INCLUDED_TYPES,
+    backfill_lock_dates_if_needed_background, reconcile_account_info_status,
+    sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
+    sync_entity_account_xero_active, sync_expense_account_info_from_xero,
+    sync_xero_accounts_to_db_background, sync_xero_coa_pettycash)
 from blueprints.entity.services.shared import check_user_has_entities
+from blueprints.entity.services.xero_account_mapping_post import (
+    apply_country_currency_selection, process_xero_account_mapping_post)
+from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.settings import (get_account, get_contact,
                                                sync_entity_xero_status)
 from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
                        EntityAccountXero, EntityPettycashSettings, User,
                        UserEntity, XeroContactSync, db)
-from services.authz import (permission_denied, require_entity_access,
-                            require_module, require_permission)
 from services.app_runtime.legacy.xero_service import (
     account_info_to_xero_format, contact_sync_to_xero_format)
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token,
                                          get_xero_token_user_for_entity,
                                          resolve_xero_token)
-from services.permission_policy import Permission, has_entity_membership, has_permission, is_superuser
+from services.authz import (permission_denied, require_entity_access,
+                            require_module, require_permission)
 from services.helpers.xero_bridge import get_xero_data_dynamic
+from services.permission_policy import (Permission, has_entity_membership,
+                                        has_permission, is_superuser)
 
 
 class _PyCountryCountry(Protocol):
@@ -540,10 +534,7 @@ def entity_settings(entity_id=None):
         logger.error(f"Error getting entity settings: {str(e)}")
         return redirect(url_for("entity.entity_list"))
 
-    entity_acronym = ""
-    if org and org.name:
-        words = org.name.split()
-        entity_acronym = "".join([word[0].upper() for word in words if word])
+    entity_acronym = build_entity_acronym(org.name) if org else ""
 
     from blueprints.user_management.services.roles import get_all_roles
 
@@ -1053,9 +1044,8 @@ def entity_settings_entity(org_id):
         can_edit_xero_settings = has_permission(
             current_user, Permission.COA_UPDATE, org_id
         )
-        from blueprints.entity.services.xero_mapping_form_context import (
-            build_xero_mapping_form_context,
-        )
+        from blueprints.entity.services.xero_mapping_form_context import \
+            build_xero_mapping_form_context
 
         _mapping = build_xero_mapping_form_context(org_id, org, token_valid)
 
@@ -1105,18 +1095,12 @@ def entity_settings_entity(org_id):
 def entity_settings_module(org_id):
     """Module settings tab. Shows the entity's module entitlements as cards
     with on/off toggles (PETTY_CASH, BILL)."""
-    from blueprints.entity.services.modules import (
-        get_module_cards,
-        get_subscription_summary,
-    )
+    from blueprints.entity.services.modules import (get_module_cards,
+                                                    get_subscription_summary)
 
     org = Entity.query.get_or_404(org_id)
 
-    entity_acronym = ""
-    if org and org.name:
-        entity_acronym = "".join(
-            word[0].upper() for word in org.name.split() if word
-        )
+    entity_acronym = build_entity_acronym(org.name) if org else ""
 
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
@@ -1184,11 +1168,9 @@ def entity_settings_module_save(org_id):
     module is set to its requested state; returns the full resulting state so
     the client can navigate to the correct shell.
     """
-    from blueprints.entity.services.modules import (
-        MODULE_CODES,
-        _enabled_state,
-        set_entity_module,
-    )
+    from blueprints.entity.services.modules import (MODULE_CODES,
+                                                    _enabled_state,
+                                                    set_entity_module)
 
     payload = request.get_json(silent=True) or {}
     desired = payload.get("modules")

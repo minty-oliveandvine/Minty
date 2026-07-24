@@ -33,12 +33,14 @@ def login():
                     else:
                         return redirect(url_for("auth.index"))
                 else:
-                    flash("That wasn't the right password! Want to try again?", "danger")
+                    flash(
+                        "That wasn't the right password! Want to try again?", "danger"
+                    )
             else:
                 flash("Your account isn't approved just yet — hang tight!", "warning")
         else:
             flash(
-                "Hmm, that username and password don't match anything I have. Want to try again?", "danger"
+                "Hmm, that username and password don't match anything I have. Want to try again?",
+                "danger",
             )
     return render_template("login.html", form=form)
-

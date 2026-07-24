@@ -50,11 +50,11 @@ class RegistrationForm(FlaskForm):
 
 
 class LoginForm(FlaskForm):
-    username:StringField = StringField(
+    username: StringField = StringField(
         "Username", validators=[DataRequired(), Length(min=4, max=150)]
     )
-    password:PasswordField = PasswordField("Password", validators=[DataRequired()])
-    submit:SubmitField = SubmitField("Login")
+    password: PasswordField = PasswordField("Password", validators=[DataRequired()])
+    submit: SubmitField = SubmitField("Login")
 
 
 class RequestResetForm(FlaskForm):

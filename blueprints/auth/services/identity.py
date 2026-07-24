@@ -47,11 +47,9 @@ def resolve_user_by_email(address: str | None) -> User | None:
     normalized = normalize_email(address)
     if normalized is None:
         return None
-    return (
-        User.query.filter(
-            or_(
-                func.lower(User.email) == normalized,
-                func.lower(User.xero_email) == normalized,
-            )
-        ).first()
-    )
+    return User.query.filter(
+        or_(
+            func.lower(User.email) == normalized,
+            func.lower(User.xero_email) == normalized,
+        )
+    ).first()

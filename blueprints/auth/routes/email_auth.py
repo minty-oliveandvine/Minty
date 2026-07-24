@@ -5,6 +5,7 @@ from loguru import logger
 from sqlalchemy import func
 
 from blueprints.auth import auth_bp
+from blueprints.auth.models.email_otp import EmailOtp
 from blueprints.auth.services.email_auth import (
     ERR_LOCKED,
     complete_email_signup,
@@ -12,7 +13,6 @@ from blueprints.auth.services.email_auth import (
     verify_email_otp,
 )
 from models.db import User
-from blueprints.auth.models.email_otp import EmailOtp
 
 _HANDOFF_SALT = "auth-email-handoff"
 
@@ -34,6 +34,8 @@ def _email_is_registered(email: str) -> bool:
     if EmailOtp.query.filter(func.lower(EmailOtp.email) == email).first():
         return True
     return False
+
+
 # Window for the browser to GET the handoff URL after a verify. 60s was too
 # tight — any hiccup between minting and navigation expired the token and
 # silently dropped the user back at the login page. 5 min is still one-shot.
@@ -129,8 +131,13 @@ def email_request_code():
 
     ok, error = request_email_otp(email)
     if not ok:
-        return jsonify({"status": "error", "message": error or "Could not send a code."}), 400
-    return jsonify({"status": "success", "message": "A code has been sent to your email."})
+        return (
+            jsonify({"status": "error", "message": error or "Could not send a code."}),
+            400,
+        )
+    return jsonify(
+        {"status": "success", "message": "A code has been sent to your email."}
+    )
 
 
 @auth_bp.route("/auth/email/verify-code", methods=["POST"])
@@ -169,53 +176,87 @@ def email_verify_code():
         # logging them in. A bogus invite still fails there and gets bounced,
         # so this doesn't let unapproved users in through a fake token.
         if not user.approved and not invite_token:
-            return jsonify({"status": "error", "message": "Your account isn't approved just yet — hang tight!"}), 403
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Your account isn't approved just yet — hang tight!",
+                    }
+                ),
+                403,
+            )
         # Don't login_user here — the cookie wouldn't stick on a cross-origin
         # POST response. Mint a same-origin handoff URL; the browser GETs it,
         # Flask logs the user in there and the cookie is set on a same-origin
         # response that the browser keeps.
         handoff_url = _mint_handoff_url(user.id, invite_token=invite_token)
-        return jsonify({"status": "success", "action": "login", "redirect_url": handoff_url})
+        return jsonify(
+            {"status": "success", "action": "login", "redirect_url": handoff_url}
+        )
     if invite_token:
         if not (first_name and last_name):
-            return jsonify({
-                "status": "error",
-                "message": "Please contact your inviter.",
-            }), 400
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Please contact your inviter.",
+                    }
+                ),
+                400,
+            )
         new_user = _create_passwordless_user(
             email=(data.get("email") or "").strip().lower(),
             first_name=first_name,
             last_name=last_name,
         )
         if new_user is None:
-            return jsonify({
-                "status": "error",
-                "message": "Could not create your account. Please contact your inviter.",
-            }), 400
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Could not create your account. Please contact your inviter.",
+                    }
+                ),
+                400,
+            )
         handoff_url = _mint_handoff_url(new_user.id, invite_token=invite_token)
-        return jsonify({"status": "success", "action": "login", "redirect_url": handoff_url})
+        return jsonify(
+            {"status": "success", "action": "login", "redirect_url": handoff_url}
+        )
 
     # Brand-new email, no invite. Self-serve signup: if the signup page sent a
     # name, create the account directly (same passwordless/approved row as an
     # invitee) and hand off to login. Without a name this was a plain "Log in
     # with OTP" for an address that has no account — guide them to sign up.
     if not (first_name and last_name):
-        return jsonify({
-            "status": "error",
-            "message": "No account found for this email — please sign up.",
-        }), 404
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "No account found for this email — please sign up.",
+                }
+            ),
+            404,
+        )
     new_user = _create_passwordless_user(
         email=(data.get("email") or "").strip().lower(),
         first_name=first_name,
         last_name=last_name,
     )
     if new_user is None:
-        return jsonify({
-            "status": "error",
-            "message": "Could not create your account. Please try again.",
-        }), 400
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Could not create your account. Please try again.",
+                }
+            ),
+            400,
+        )
     handoff_url = _mint_handoff_url(new_user.id)
-    return jsonify({"status": "success", "action": "login", "redirect_url": handoff_url})
+    return jsonify(
+        {"status": "success", "action": "login", "redirect_url": handoff_url}
+    )
 
 
 def _create_passwordless_user(email: str, first_name: str, last_name: str):
@@ -224,9 +265,10 @@ def _create_passwordless_user(email: str, first_name: str, last_name: str):
     paths. The username is set to the email since the User model requires a
     unique non-null username. password is a hashed random string (never used —
     login is OTP-only)."""
-    from werkzeug.security import generate_password_hash
     import secrets
     import uuid
+
+    from werkzeug.security import generate_password_hash
 
     from blueprints.auth.services.identity import resolve_user_by_email
     from models.db import db
@@ -235,7 +277,9 @@ def _create_passwordless_user(email: str, first_name: str, last_name: str):
         # Reuse any row that already owns this address on either identity column
         # (personal email or Xero email) so we never duplicate a person or trip
         # the unique-username constraint.
-        existing = resolve_user_by_email(email) or User.query.filter_by(username=email).first()
+        existing = (
+            resolve_user_by_email(email) or User.query.filter_by(username=email).first()
+        )
         if existing:
             return existing  # race — someone else created it; reuse it.
         user = User(
@@ -244,7 +288,9 @@ def _create_passwordless_user(email: str, first_name: str, last_name: str):
             username=email,
             first_name=first_name,
             last_name=last_name,
-            password=generate_password_hash(secrets.token_urlsafe(32), method="pbkdf2:sha256"),
+            password=generate_password_hash(
+                secrets.token_urlsafe(32), method="pbkdf2:sha256"
+            ),
             system_role=User.SYSTEM_ROLE_DEFAULT,
             approved=True,
         )
@@ -267,9 +313,20 @@ def email_complete_signup():
         last_name=data.get("last_name") or "",
     )
     if error or user is None:
-        return jsonify({"status": "error", "message": error or "Could not complete sign-up."}), 400
+        return (
+            jsonify(
+                {"status": "error", "message": error or "Could not complete sign-up."}
+            ),
+            400,
+        )
     login_user(user)
-    return jsonify({"status": "success", "action": "login", "redirect_url": _post_login_redirect(user)})
+    return jsonify(
+        {
+            "status": "success",
+            "action": "login",
+            "redirect_url": _post_login_redirect(user),
+        }
+    )
 
 
 @auth_bp.route("/auth/email/handoff", methods=["GET"])
@@ -286,7 +343,9 @@ def email_handoff():
         return redirect(url_for("auth.home"))
 
     try:
-        payload = _handoff_serializer().loads(token, salt=_HANDOFF_SALT, max_age=_HANDOFF_MAX_AGE)
+        payload = _handoff_serializer().loads(
+            token, salt=_HANDOFF_SALT, max_age=_HANDOFF_MAX_AGE
+        )
     except SignatureExpired:
         logger.warning(
             f"Handoff: token expired (older than {_HANDOFF_MAX_AGE}s) — redirecting to login."
@@ -299,7 +358,9 @@ def email_handoff():
     user_id = payload.get("user_id") or ""
     user = User.query.get(user_id)
     if not user:
-        logger.warning(f"Handoff: no user found for id {user_id!r} — redirecting to login.")
+        logger.warning(
+            f"Handoff: no user found for id {user_id!r} — redirecting to login."
+        )
         return redirect(url_for("auth.home"))
     invite_token = (payload.get("invite") or "").strip()
     if invite_token:
@@ -308,10 +369,13 @@ def email_handoff():
         # bogus/expired invite returns an error and falls through to the normal
         # approval check below — so it can't be used to bypass approval.
         from blueprints.invitation.services.invite import accept_invitation
+
         entity_id, accept_error, _hint = accept_invitation(invite_token, user.id)
         if not accept_error:
             login_user(user)
-            logger.info(f"Handoff: user {user.id} accepted invite to entity {entity_id}.")
+            logger.info(
+                f"Handoff: user {user.id} accepted invite to entity {entity_id}."
+            )
             return redirect(url_for("entity.report_dashboard", id=entity_id))
         # The invite was already validated at verify-code time, so a failure
         # here is a real problem (race / DB error), NOT an expected mismatch.
@@ -325,7 +389,9 @@ def email_handoff():
         return redirect(url_for("auth.home"))
 
     if not user.approved:
-        logger.warning(f"Handoff: user {user.id} is not approved — redirecting to login.")
+        logger.warning(
+            f"Handoff: user {user.id} is not approved — redirecting to login."
+        )
         return redirect(url_for("auth.home"))
 
     login_user(user)
