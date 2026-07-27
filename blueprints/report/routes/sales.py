@@ -534,6 +534,9 @@ def report_sale(id=None):
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_v2.report_id,
+                            # Catalog link, so the row stays self-describing
+                            # even if this sale_info row is later removed.
+                            sales_method_id=sale.sales_method_id,
                             type=sale.type,
                             amount=amount,
                             create_at=datetime.now(),
@@ -738,6 +741,9 @@ def report_sale(id=None):
                             report_sale_detail = ReportSaleDetail(
                                 sale_id=sale.sale_id,
                                 report_id=report_v2.report_id,
+                                # Catalog link, so the row stays self-describing
+                                # even if this sale_info row is later removed.
+                                sales_method_id=sale.sales_method_id,
                                 type=sale.type,
                                 amount=amount,
                                 create_at=datetime.now(),
@@ -905,6 +911,9 @@ def report_sale(id=None):
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_v2.report_id,
+                            # Catalog link, so the row stays self-describing
+                            # even if this sale_info row is later removed.
+                            sales_method_id=sale.sales_method_id,
                             type=sale.type,
                             amount=amount,
                             create_at=datetime.now(),

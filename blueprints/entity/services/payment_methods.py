@@ -6,7 +6,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from models.db import SaleInfo, UserEntity, db
+from models.db import SaleInfo, SalesMethod, UserEntity, db
 from services.permission_policy import Permission, has_permission_by_user_id
 
 
@@ -151,11 +151,27 @@ def add_payment_method(user_id, entity_id, data):
 
     max_order = int(current_max_order or 0)
     
+    # Resolve the catalog row: by the caller's explicit sales_method_id, else
+    # by the legacy value_name, else mint a per-entity row for a user-invented
+    # method. Without this the new row would carry a NULL catalog link.
+    catalog_row = None
+    if data.get("sales_method_id"):
+        catalog_row = SalesMethod.query.filter_by(id=data["sales_method_id"]).first()
+    if catalog_row is None:
+        catalog_row = SalesMethod.resolve(
+            entity_id, legacy_column=data["value_name"]
+        )
+    if catalog_row is None:
+        catalog_row = SalesMethod.ensure_custom(
+            entity_id, data["name"], method_type
+        )
+
     new_method = SaleInfo(
         entity_id=entity_id,
         sale_name=data["name"],
         value_name=data["value_name"],
         type=method_type,
+        sales_method_id=catalog_row.id if catalog_row else None,
         enabled=data.get("enabled", True),
         display_order=data.get("display_order", max_order + 1),
         create_date=datetime.now(),
@@ -310,12 +326,27 @@ def replace_sales_methods(user_id, entity_id, electronic, delivery):
                 method.display_order = i + 1
                 method.updated_at = now
             else:
+                # Resolve the catalog row by display name, falling back to a
+                # per-entity custom row. Note the derived value_name below
+                # points at a column that does NOT exist for custom methods
+                # (e.g. "Tap & Go" -> 'tap_&_go_sales') — the catalog link is
+                # what makes such a method storable at all, via
+                # report_sale_detail rather than a physical column.
+                catalog_row = SalesMethod.resolve(entity_id, name=name)
+                if catalog_row is None:
+                    catalog_row = SalesMethod.ensure_custom(entity_id, name, mtype)
+
                 db.session.add(
                     SaleInfo(
                         entity_id=entity_id,
                         sale_name=name,
-                        value_name=name.lower().replace(" ", "_") + "_sales",
+                        value_name=(
+                            catalog_row.legacy_column
+                            if catalog_row is not None and catalog_row.legacy_column
+                            else name.lower().replace(" ", "_") + "_sales"
+                        ),
                         type=mtype,
+                        sales_method_id=catalog_row.id if catalog_row else None,
                         enabled=True,
                         display_order=i + 1,
                         create_date=now,

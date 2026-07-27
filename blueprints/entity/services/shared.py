@@ -9,7 +9,7 @@ from loguru import logger
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
 from models.db import (AccountInfo, EntityPettycashSettings, ReportV2,
-                       SaleInfo, UserEntity, db, tz)
+                       SaleInfo, SalesMethod, UserEntity, db, tz)
 
 
 def check_user_has_entities(user_id):
@@ -179,32 +179,51 @@ def create_default_entity_settings(entity_id):
                 "display_order": 3,
             },
         ]
-        for method in electronic_methods:
-            db.session.add(
-                SaleInfo(
-                    entity_id=entity_id,
-                    sale_name=method["sale_name"],
-                    value_name=method["value_name"],
-                    type=method["type"],
-                    display_order=method["display_order"],
-                    enabled=True,
-                    create_date=datetime.now(tz),
-                    updated_at=datetime.now(tz),
-                )
+        # Seed from the SalesMethod catalog when it is populated, so a method
+        # added to the catalog reaches new entities without touching this list.
+        # The hardcoded lists above remain the fallback for a database where
+        # the catalog has not been seeded yet (and as the source of the
+        # per-method display_order).
+        catalog = (
+            SalesMethod.query.filter(
+                SalesMethod.entity_id.is_(None),
+                SalesMethod.is_active.is_(True),
             )
-        for method in delivery_methods:
-            db.session.add(
-                SaleInfo(
-                    entity_id=entity_id,
-                    sale_name=method["sale_name"],
-                    value_name=method["value_name"],
-                    type=method["type"],
-                    display_order=method["display_order"],
-                    enabled=True,
-                    create_date=datetime.now(tz),
-                    updated_at=datetime.now(tz),
+            .order_by(SalesMethod.type.asc(), SalesMethod.display_order.asc())
+            .all()
+        )
+
+        if catalog:
+            for method in catalog:
+                db.session.add(
+                    SaleInfo(
+                        entity_id=entity_id,
+                        sale_name=method.name,
+                        # value_name stays the legacy key until every read has
+                        # moved to sales_method_id.
+                        value_name=method.legacy_column,
+                        type=method.type,
+                        sales_method_id=method.id,
+                        display_order=method.display_order,
+                        enabled=True,
+                        create_date=datetime.now(tz),
+                        updated_at=datetime.now(tz),
+                    )
                 )
-            )
+        else:
+            for method in electronic_methods + delivery_methods:
+                db.session.add(
+                    SaleInfo(
+                        entity_id=entity_id,
+                        sale_name=method["sale_name"],
+                        value_name=method["value_name"],
+                        type=method["type"],
+                        display_order=method["display_order"],
+                        enabled=True,
+                        create_date=datetime.now(tz),
+                        updated_at=datetime.now(tz),
+                    )
+                )
         logger.info(f"Created default settings for entity {entity_id}")
     except Exception as e:
         logger.error(
