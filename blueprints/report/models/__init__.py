@@ -1,4 +1,5 @@
 ﻿from .report import Report
+from .report_cash_count_detail import ReportCashCountDetail
 from .report_cash_count_draft import ReportCashCountDraft
 from .report_cash_detail import ReportCashDetail
 from .report_detail import ReportDetail
@@ -21,6 +22,7 @@ __all__ = [
     "ReportHistory",
     "ReportHistoryDraft",
     "ReportCashCountDraft",
+    "ReportCashCountDetail",
     "ReportV2",
     "ReportDetail",
     "ReportHistoryV2",

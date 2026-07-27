@@ -14,12 +14,15 @@ from blueprints.entity.models.cash_info import CashInfo  # noqa: E402
 from blueprints.entity.models.country_info import CountryInfo  # noqa: E402
 from blueprints.entity.models.currency_info import CurrencyInfo  # noqa: E402
 from blueprints.entity.models.entity import Entity  # noqa: E402
+from blueprints.entity.models.entity_cash_denomination import EntityCashDenomination  # noqa: E402
 from blueprints.entity.models.entity_cash_detail_v2 import EntityCashDetailV2  # noqa: E402
 from blueprints.entity.models.entity_function import EntityFunction, EntityFunctionMap  # noqa: E402  (Django-owned tables; read-only mirror)
 from blueprints.entity.models.entity_pettycash_settings import EntityPettycashSettings  # noqa: E402
 from blueprints.entity.models.sale_info import SaleInfo  # noqa: E402
+from blueprints.entity.models.sales_method import SalesMethod  # noqa: E402
 from blueprints.entity.models.user_entity import UserEntity  # noqa: E402
 from blueprints.report.models.report import Report  # noqa: E402
+from blueprints.report.models.report_cash_count_detail import ReportCashCountDetail  # noqa: E402
 from blueprints.report.models.report_cash_count_draft import ReportCashCountDraft  # noqa: E402
 from blueprints.report.models.report_cash_detail import ReportCashDetail  # noqa: E402
 from blueprints.report.models.report_detail import ReportDetail  # noqa: E402
@@ -53,11 +56,13 @@ __all__ = [
     "CountryInfo",
     "CurrencyInfo",
     "CashInfo",
+    "EntityCashDenomination",
     "EntityCashDetailV2",
     "EntityFunction",
     "EntityFunctionMap",
     "EntityPettycashSettings",
     "SaleInfo",
+    "SalesMethod",
     "Report",
     "ReportDraft",
     "ShopExpense",
@@ -65,6 +70,7 @@ __all__ = [
     "ReportHistory",
     "ReportHistoryDraft",
     "ReportCashCountDraft",
+    "ReportCashCountDetail",
     "ReportV2",
     "ReportDetail",
     "ReportHistoryV2",
