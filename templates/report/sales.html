@@ -253,7 +253,7 @@
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                     </div>
-                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_visa" name="sales[shop_sales][visa]" value="{{ report.visa_sales if report.visa_sales and report.visa_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_visa" name="sales[shop_sales][visa]" value="{{ sales_amounts.get('visa_sales', 0) if sales_amounts.get('visa_sales', 0) and sales_amounts.get('visa_sales', 0) != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                   </div>
                 </div>
                 <div>
@@ -262,7 +262,7 @@
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                     </div>
-                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_master" name="sales[shop_sales][master]" value="{{ report.master_sales if report.master_sales and report.master_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="shop_sales_master" name="sales[shop_sales][master]" value="{{ sales_amounts.get('master_sales', 0) if sales_amounts.get('master_sales', 0) and sales_amounts.get('master_sales', 0) != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                   </div>
                 </div>
               {% endif %}
@@ -318,7 +318,7 @@
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                     </div>
-                    <input type="text" inputmode="decimal" placeholder="0.00" id="delivery_sales_foodpanda" name="sales[delivery_sales][foodpanda]" value="{{ report.foodpanda_sales if report.foodpanda_sales and report.foodpanda_sales != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="delivery_sales_foodpanda" name="sales[delivery_sales][foodpanda]" value="{{ sales_amounts.get('foodpanda_sales', 0) if sales_amounts.get('foodpanda_sales', 0) and sales_amounts.get('foodpanda_sales', 0) != 0 else '' }}" class="w-full pl-12 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} onchange="calculateTotals()" oninput="formatCurrency(this)" onblur="formatWithCommas(this)">
                   </div>
                 </div>
               {% endif %}

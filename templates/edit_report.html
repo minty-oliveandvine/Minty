@@ -219,7 +219,7 @@
               id="shop_sales_visa"
               name="sales[shop_sales][visa]"
               class="cash-sale form-control"
-              value="{{ report.visa_sales or 0 }}"
+              value="{{ sales_amounts.get('visa_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -230,7 +230,7 @@
               id="shop_sales_master"
               name="sales[shop_sales][master]"
               class="cash-sale form-control"
-              value="{{ report.master_sales or 0 }}"
+              value="{{ sales_amounts.get('master_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -241,7 +241,7 @@
               id="shop_sales_unionpay"
               name="sales[shop_sales][unionpay]"
               class="cash-sale form-control"
-              value="{{ report.unionpay_sales or 0 }}"
+              value="{{ sales_amounts.get('unionpay_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -252,7 +252,7 @@
               id="shop_sales_alipay"
               name="sales[shop_sales][alipay]"
               class="cash-sale form-control"
-              value="{{ report.alipay_sales or 0 }}"
+              value="{{ sales_amounts.get('alipay_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -263,7 +263,7 @@
               id="shop_sales_wechat"
               name="sales[shop_sales][wechat]"
               class="cash-sale form-control"
-              value="{{ report.wechat_sales or 0 }}"
+              value="{{ sales_amounts.get('wechat_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -274,7 +274,7 @@
               id="shop_sales_amex"
               name="sales[shop_sales][amex]"
               class="cash-sale form-control"
-              value="{{ report.amex_sales or 0 }}"
+              value="{{ sales_amounts.get('amex_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -285,7 +285,7 @@
               id="shop_sales_octopus"
               name="sales[shop_sales][octopus]"
               class="cash-sale form-control"
-              value="{{ report.octopus_sales or 0 }}"
+              value="{{ sales_amounts.get('octopus_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -301,7 +301,7 @@
               id="delivery_sales_foodpanda"
               name="sales[delivery_sales][foodpanda]"
               class="cash-sale form-control"
-              value="{{ report.foodpanda_sales or 0 }}"
+              value="{{ sales_amounts.get('foodpanda_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -312,7 +312,7 @@
               id="delivery_sales_keeta"
               name="sales[delivery_sales][keeta]"
               class="cash-sale form-control"
-              value="{{ report.keeta_sales or 0 }}"
+              value="{{ sales_amounts.get('keeta_sales', 0) or 0 }}"
               min="0"
             />
           </div>
@@ -323,7 +323,7 @@
               id="delivery_sales_openrice"
               name="sales[delivery_sales][openrice]"
               class="cash-sale form-control"
-              value="{{ report.openrice_sales or 0 }}"
+              value="{{ sales_amounts.get('openrice_sales', 0) or 0 }}"
               min="0"
             />
           </div>

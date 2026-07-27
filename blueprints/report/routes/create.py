@@ -9,7 +9,8 @@ from loguru import logger
 from blueprints.report import report_bp
 from blueprints.report.services.s3_storage import upload_file_to_s3
 from blueprints.report.services.shared import (future_date_error,
-                                               parse_nested_keys, safe_float)
+                                               parse_nested_keys, safe_float,
+                                               write_sales_detail_rows)
 from models.db import Entity, Report, ReportCashCountDraft, ShopExpense, db, tz
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
@@ -150,18 +151,10 @@ def create_report():
                 next_transaction_date=next_transaction_date,
                 opening_balance=opening_balance,
                 cash_addition=cash_addition,
+                # cash_sales stays a column — separate concept from the
+                # catalog-driven methods, with its own totals branch.
                 cash_sales=shop_sales_data.get("cash", 0),
-                visa_sales=shop_sales_data.get("visa", 0),
-                alipay_sales=shop_sales_data.get("alipay", 0),
-                wechat_sales=shop_sales_data.get("wechat", 0),
-                master_sales=shop_sales_data.get("master", 0),
-                unionpay_sales=shop_sales_data.get("unionpay", 0),
-                amex_sales=shop_sales_data.get("amex", 0),
-                octopus_sales=shop_sales_data.get("octopus", 0),
-                deliveroo_sales=0.0,
-                foodpanda_sales=delivery_sales_data.get("foodpanda", 0),
-                keeta_sales=delivery_sales_data.get("keeta", 0),
-                openrice_sales=delivery_sales_data.get("openrice", 0),
+                # Aggregates are cheap caches, read in ~20 places.
                 shop_sales=total_shop_sales,
                 delivery_sales=total_delivery_sales,
                 total_sales=total_sales,
@@ -173,6 +166,18 @@ def create_report():
             )
 
             db.session.add(report)
+            db.session.flush()  # need report.id before writing detail rows
+
+            # Per-method amounts go to report_sale_detail, not to one column
+            # each. The form keys are the entity's sale_info rows, so a method
+            # added to the catalog flows through without touching this code.
+            write_sales_detail_rows(
+                report_id=report.id,
+                entity_id=entity_id,
+                shop_sales_data=shop_sales_data,
+                delivery_sales_data=delivery_sales_data,
+            )
+
             db.session.commit()
 
             expenses = []
@@ -324,6 +329,8 @@ def create_report():
     return render_template(
         "index.html",
         current_user=current_user,
+        # Blank new-report form: no amounts yet, so every method renders empty.
+        sales_amounts={},
         opening_balance=opening_balance,
         report=default_report,
         next_transaction_date=next_transaction_date,
