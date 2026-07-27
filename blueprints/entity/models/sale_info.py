@@ -5,7 +5,7 @@ from models.db import db, tz
 
 
 class SaleInfo(db.Model):
-    __tablename__ = "sale_info"
+    __tablename__ = "entity_sale_setting"
     __table_args__ = {"schema": "pettycashv2"}
     sale_id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(db.String(36), db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"))
@@ -16,9 +16,9 @@ class SaleInfo(db.Model):
     # Nullable during the transition; `value_name` remains the legacy key until
     # every read has moved over. RESTRICT on the DB side: a catalog row in
     # active use must be deactivated (is_active = False), never deleted.
-    sales_method_id = db.Column(
+    sale_info_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.sales_method.id", ondelete="RESTRICT"),
+        db.ForeignKey("pettycashv2.sale_info.id", ondelete="RESTRICT"),
         nullable=True,
     )
     sales_method = db.relationship("SalesMethod", lazy="joined")

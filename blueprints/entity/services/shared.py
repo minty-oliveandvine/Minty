@@ -203,7 +203,7 @@ def create_default_entity_settings(entity_id):
                         # moved to sales_method_id.
                         value_name=method.legacy_column,
                         type=method.type,
-                        sales_method_id=method.id,
+                        sale_info_id=method.id,
                         display_order=method.display_order,
                         enabled=True,
                         create_date=datetime.now(tz),

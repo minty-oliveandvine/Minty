@@ -25,7 +25,7 @@ class SalesMethod(db.Model):
     own column and its own ``type == "Cash"`` branch in the totals code.
     """
 
-    __tablename__ = "sales_method"
+    __tablename__ = "sale_info"
     __table_args__ = {"schema": "pettycashv2"}
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
