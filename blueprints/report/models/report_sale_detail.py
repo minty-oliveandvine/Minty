@@ -7,7 +7,7 @@ class ReportSaleDetail(db.Model):
     __tablename__ = "report_sale_detail"
     __table_args__ = {"schema": "pettycashv2"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
-    sale_id = db.Column(db.String(36), db.ForeignKey("pettycashv2.sale_info.sale_id", ondelete="CASCADE"))
+    sale_id = db.Column(db.String(36), db.ForeignKey("pettycashv2.entity_sale_setting.sale_id", ondelete="CASCADE"))
     report_id = db.Column(
         db.String(36), db.ForeignKey("pettycashv2.report_v2.report_id", ondelete="CASCADE")
     )
@@ -18,7 +18,7 @@ class ReportSaleDetail(db.Model):
     # Carrying the catalog id here keeps every report self-describing.
     sales_method_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.sales_method.id", ondelete="RESTRICT"),
+        db.ForeignKey("pettycashv2.sale_info.id", ondelete="RESTRICT"),
         nullable=True,
     )
     type = db.Column(db.String(50))

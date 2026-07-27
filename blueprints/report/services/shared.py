@@ -648,7 +648,7 @@ def write_sales_detail_rows(
                 ReportSaleDetail(
                     sale_id=sale_row.sale_id,
                     report_id=report_id,
-                    sales_method_id=sale_row.sales_method_id,
+                    sales_method_id=sale_row.sale_info_id,
                     type=sale_row.type or sale_type,
                     amount=value,
                     create_at=datetime.now(tz),

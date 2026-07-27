@@ -171,7 +171,7 @@ def add_payment_method(user_id, entity_id, data):
         sale_name=data["name"],
         value_name=data["value_name"],
         type=method_type,
-        sales_method_id=catalog_row.id if catalog_row else None,
+        sale_info_id=catalog_row.id if catalog_row else None,
         enabled=data.get("enabled", True),
         display_order=data.get("display_order", max_order + 1),
         create_date=datetime.now(),
@@ -346,7 +346,7 @@ def replace_sales_methods(user_id, entity_id, electronic, delivery):
                             else name.lower().replace(" ", "_") + "_sales"
                         ),
                         type=mtype,
-                        sales_method_id=catalog_row.id if catalog_row else None,
+                        sale_info_id=catalog_row.id if catalog_row else None,
                         enabled=True,
                         display_order=i + 1,
                         create_date=now,
