@@ -21,7 +21,9 @@ from blueprints.report.services.shared import (get_cash_sales_from_detail,
                                                get_next_section_for_user,
                                                parse_nested_keys,
                                                resolve_report_entity_id,
-                                               safe_float)
+                                               safe_float,
+                                               sales_amounts_by_short_name,
+                                               write_sales_detail_rows)
 from models.db import (Report, ReportCashCountDraft, ReportDraft,
                        ReportExpenseDetail, ReportHistory, ReportSaleDetail,
                        ReportV2, ShopExpense, ShopExpenseDraft, db)
@@ -75,22 +77,13 @@ def report_detail(id):
             "openrice_sales": "OpenRice",
         }
 
-        shop_sales_data = {
-            "cash": report.cash_sales,
-            "visa": report.visa_sales,
-            "alipay": report.alipay_sales,
-            "wechat": report.wechat_sales,
-            "master": report.master_sales,
-            "unionpay": report.unionpay_sales,
-            "amex": report.amex_sales,
-            "octopus": report.octopus_sales,
-        }
-
-        delivery_sales_data = {
-            "foodpanda": report.foodpanda_sales,
-            "keeta": report.keeta_sales,
-            "openrice": report.openrice_sales,
-        }
+        # Built from report_sale_detail rather than one column per method, so
+        # a method added to the sales_method catalog appears without a change
+        # here. Cash keeps its column and is merged back in.
+        shop_sales_data, delivery_sales_data = sales_amounts_by_short_name(
+            report.id, report.company
+        )
+        shop_sales_data["cash"] = report.cash_sales
 
         total_shop_sales = report.shop_sales or 0.0
         total_delivery_sales = report.delivery_sales or 0.0
@@ -202,49 +195,31 @@ def edit_report(id):
             report.cash_addition = safe_float(request.form.get("cash_addition", 0))
             report.bank_deposit = safe_float(request.form.get("bank_deposit", 0))
 
-            shop_sales_data = parse_nested_keys(
-                request.form,
-                "sales[shop_sales]",
-                existing_values={
-                    "cash": report.cash_sales,
-                    "visa": report.visa_sales,
-                    "alipay": report.alipay_sales,
-                    "wechat": report.wechat_sales,
-                    "master": report.master_sales,
-                    "unionpay": report.unionpay_sales,
-                    "amex": report.amex_sales,
-                    "octopus": report.octopus_sales,
-                },
+            # Existing amounts come from report_sale_detail, so a field the
+            # form omits keeps its stored value exactly as before — the
+            # per-method columns are no longer consulted.
+            existing_shop, existing_delivery = sales_amounts_by_short_name(
+                report.id, report.company
             )
+            existing_shop["cash"] = report.cash_sales
 
+            shop_sales_data = parse_nested_keys(
+                request.form, "sales[shop_sales]", existing_values=existing_shop
+            )
             delivery_sales_data = parse_nested_keys(
                 request.form,
                 "sales[delivery_sales]",
-                existing_values={
-                    "foodpanda": report.foodpanda_sales,
-                    "keeta": report.keeta_sales,
-                    "openrice": report.openrice_sales,
-                },
+                existing_values=existing_delivery,
             )
 
             report.cash_sales = shop_sales_data.get("cash", report.cash_sales)
-            report.visa_sales = shop_sales_data.get("visa", report.visa_sales)
-            report.alipay_sales = shop_sales_data.get("alipay", report.alipay_sales)
-            report.wechat_sales = shop_sales_data.get("wechat", report.wechat_sales)
-            report.master_sales = shop_sales_data.get("master", report.master_sales)
-            report.unionpay_sales = shop_sales_data.get(
-                "unionpay", report.unionpay_sales
-            )
-            report.amex_sales = shop_sales_data.get("amex", report.amex_sales)
-            report.octopus_sales = shop_sales_data.get("octopus", report.octopus_sales)
-
-            report.deliveroo_sales = 0.0
-            report.foodpanda_sales = delivery_sales_data.get(
-                "foodpanda", report.foodpanda_sales
-            )
-            report.keeta_sales = delivery_sales_data.get("keeta", report.keeta_sales)
-            report.openrice_sales = delivery_sales_data.get(
-                "openrice", report.openrice_sales
+            # Per-method amounts are rewritten as detail rows (replace=True
+            # clears this report's rows first, so an edit is idempotent).
+            write_sales_detail_rows(
+                report_id=report.id,
+                entity_id=report.company,
+                shop_sales_data=shop_sales_data,
+                delivery_sales_data=delivery_sales_data,
             )
 
             old_expenses = ShopExpense.query.filter_by(report_id=report.id).all()
@@ -371,10 +346,21 @@ def edit_report(id):
         },
     }
 
+    # Per-method amounts for the form, keyed by the legacy value_name the
+    # template still uses. Sourced from report_sale_detail, so a method added
+    # to the catalog appears here with no template change.
+    _shop, _delivery = sales_amounts_by_short_name(report.id, report.company)
+    sales_amounts = {
+        f"{short}_sales": amount
+        for short, amount in list(_shop.items()) + list(_delivery.items())
+    }
+    sales_amounts["cash_sales"] = report.cash_sales or 0.0
+
     return render_template(
         "edit_report.html",
         report=report,
         sales_data=sales_data,
+        sales_amounts=sales_amounts,
         expenses=report.expenses,
     )
 

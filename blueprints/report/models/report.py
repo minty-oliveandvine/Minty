@@ -16,17 +16,6 @@ class Report(db.Model):
     cash_addition = db.Column(db.Float, nullable=False, default=0.0)
     adjusted_opening_balance = db.Column(db.Float, nullable=True, default=None)
     cash_sales = db.Column(db.Float, nullable=False, default=0.0)
-    visa_sales = db.Column(db.Float, nullable=False, default=0.0)
-    alipay_sales = db.Column(db.Float, nullable=False, default=0.0)
-    wechat_sales = db.Column(db.Float, nullable=False, default=0.0)
-    master_sales = db.Column(db.Float, nullable=False, default=0.0)
-    unionpay_sales = db.Column(db.Float, nullable=False, default=0.0)
-    amex_sales = db.Column(db.Float, nullable=False, default=0.0)
-    octopus_sales = db.Column(db.Float, nullable=False, default=0.0)
-    deliveroo_sales = db.Column(db.Float, nullable=False, default=0.0)
-    foodpanda_sales = db.Column(db.Float, nullable=False, default=0.0)
-    keeta_sales = db.Column(db.Float, nullable=False, default=0.0)
-    openrice_sales = db.Column(db.Float, nullable=False, default=0.0)
     shop_sales = db.Column(db.Float, nullable=False, default=0.0)
     delivery_sales = db.Column(db.Float, nullable=False, default=0.0)
     total_sales = db.Column(db.Float, nullable=False, default=0.0)
@@ -48,6 +37,22 @@ class Report(db.Model):
     discrepancy_reason = db.Column(db.String(300), nullable=True)
     discrepancy_type = db.Column(db.String(20), nullable=True, default="none")
     publishing_status = db.Column(db.String(20), nullable=True, default=None)
+
+    @property
+    def sales_by_method(self):
+        """Per-method amounts for this report, keyed by catalog code.
+
+        The template-facing replacement for reading ``report.visa_sales`` and
+        friends directly: a method added to the ``sales_method`` catalog shows
+        up here with no template or model change.
+
+        Falls back to the entity's sale_info row, then to the detail row's own
+        type, so amounts whose catalog link predates the migration (or whose
+        method has since been deleted) are still returned rather than dropped.
+        """
+        from blueprints.report.services.shared import sales_by_method_for
+
+        return sales_by_method_for(self.id)
 
     @property
     def total_expenses(self):
