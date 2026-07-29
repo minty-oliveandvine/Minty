@@ -21,6 +21,31 @@ from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
 
+def resolve_posted_sale_amount(field, shop_sales_data, delivery_sales_data):
+    """Amount to store on a method's report_sale_detail row for this POST.
+
+    The submitted form is authoritative. The sales form renders an input for
+    every enabled method, so a method missing from the parsed data was cleared
+    by the user — ``parse_nested_keys`` drops empty and "0" inputs — and means
+    zero for this report, not "unchanged".
+
+    Deliberately not an ``or`` chain and deliberately no fallback to the draft's
+    legacy column. An ``or`` chain treats a real 0.0 as absent and resurrects
+    the previous value, writing a detail row that disagrees with the column.
+    Cash is the one method still stored in both places
+    (``report_draft.cash_sales`` and its detail row), and that drift is what
+    desynchronises the cash balance the deposit and cash-count steps compute:
+    the deposit page totals the detail rows while cash count reads the column.
+    """
+    field_base = field.replace("_sales", "")
+
+    if field_base in shop_sales_data:
+        return safe_float(shop_sales_data[field_base])
+    if field_base in delivery_sales_data:
+        return safe_float(delivery_sales_data[field_base])
+    return 0.0
+
+
 def get_unique_sale_info_for_entity(entity_id):
     """
     Get unique payment methods for an entity, preventing duplicates.
@@ -319,8 +344,13 @@ def report_sale(id=None):
                     request.form, "sales[delivery_sales]"
                 )
 
-                # Extract cash sales from shop sales
-                cash_sales = safe_float(shop_sales_data.get("cash", 0))
+                # Extract cash sales from shop sales. Resolved the same way as
+                # the cash detail row written below, so the column and the row
+                # cannot disagree — the deposit step totals the rows while cash
+                # count reads this column.
+                cash_sales = resolve_posted_sale_amount(
+                    "cash_sales", shop_sales_data, delivery_sales_data
+                )
 
                 # Update draft fields from parsed data
                 # cash_sales stays a column; per-method amounts are written as
@@ -451,30 +481,9 @@ def report_sale(id=None):
                     if not field or field == "deliveroo_sales":
                         continue
 
-                    amount = 0
-                    if field not in default_saletypes.values():
-                        # For dynamic fields, extract the base name (e.g.,
-                        # "kakaopay" from "kakaopay_sales")
-                        field_base = field.replace("_sales", "")
-                        amount = (
-                            shop_sales_data.get(field_base)
-                            or delivery_sales_data.get(field_base)
-                            or 0
-                        )
-                        logger.info(
-                            f"Draft update - Dynamic field: {field} (base: {field_base}), amount: {amount}"
-                        )
-                    else:
-                        # For default fields, get amount from
-                        # shop_sales_data/delivery_sales_data first, then
-                        # fallback to report_draft
-                        field_base = field.replace("_sales", "")
-                        amount = (
-                            shop_sales_data.get(field_base)
-                            or delivery_sales_data.get(field_base)
-                            or getattr(report_draft, field, 0)
-                            or 0
-                        )
+                    amount = resolve_posted_sale_amount(
+                        field, shop_sales_data, delivery_sales_data
+                    )
 
                     # Check if ReportSaleDetail exists
                     report_sale_detail = ReportSaleDetail.query.filter_by(
@@ -544,8 +553,11 @@ def report_sale(id=None):
                         request.form, "sales[delivery_sales]"
                     )
 
-                    # Extract cash sales from shop sales
-                    cash_sales = safe_float(shop_sales_data.get("cash", 0))
+                    # Extract cash sales from shop sales. Same resolution as the
+                    # cash detail row written below, so the two agree.
+                    cash_sales = resolve_posted_sale_amount(
+                        "cash_sales", shop_sales_data, delivery_sales_data
+                    )
 
                     # Update draft fields from parsed data
                     # cash_sales stays a column; per-method amounts become
@@ -632,30 +644,9 @@ def report_sale(id=None):
                         if not field or field == "deliveroo_sales":
                             continue
 
-                        amount = 0
-                        if field not in default_saletypes.values():
-                            # For dynamic fields, extract the base name (e.g.,
-                            # "kakaopay" from "kakaopay_sales")
-                            field_base = field.replace("_sales", "")
-                            amount = (
-                                shop_sales_data.get(field_base)
-                                or delivery_sales_data.get(field_base)
-                                or 0
-                            )
-                            logger.info(
-                                f"Draft update - Dynamic field: {field} (base: {field_base}), amount: {amount}"
-                            )
-                        else:
-                            # For default fields, get amount from
-                            # shop_sales_data/delivery_sales_data first, then
-                            # fallback to report_draft
-                            field_base = field.replace("_sales", "")
-                            amount = (
-                                shop_sales_data.get(field_base)
-                                or delivery_sales_data.get(field_base)
-                                or getattr(report_draft, field, 0)
-                                or 0
-                            )
+                        amount = resolve_posted_sale_amount(
+                            field, shop_sales_data, delivery_sales_data
+                        )
 
                         # Check if ReportSaleDetail exists
                         report_sale_detail = ReportSaleDetail.query.filter_by(
@@ -816,34 +807,13 @@ def report_sale(id=None):
                     # Skip deliveroo_sales
                     if field == "deliveroo_sales":
                         continue
-                    amount = 0
                     logger.info(f"Shop sales data: {shop_sales_data}")
                     logger.info(f"Delivery sales data: {delivery_sales_data}")
                     if field not in default_saletypes.values():
                         logger.warning(f"Unknown sale field: {field}, adding to query")
-                        # For dynamic fields, extract the base name (e.g.,
-                        # "kakaopay" from "kakaopay_sales")
-                        field_base = field.replace("_sales", "")
-                        amount = (
-                            shop_sales_data.get(field_base)
-                            or delivery_sales_data.get(field_base)
-                            or 0
-                        )
-                        logger.info(
-                            f"Sale name is: {sale.sale_name} sale value is: {field_base}, amount is {amount}"
-                        )
-                    else:
-                        # Same resolution as the other two write sites: the
-                        # posted form is the source of truth. Reading the draft
-                        # object here used to work because each method had its
-                        # own column; those are gone, so getattr would always
-                        # fall through to 0 and wipe the amount just saved.
-                        field_base = field.replace("_sales", "")
-                        amount = (
-                            shop_sales_data.get(field_base)
-                            or delivery_sales_data.get(field_base)
-                            or 0
-                        )
+                    amount = resolve_posted_sale_amount(
+                        field, shop_sales_data, delivery_sales_data
+                    )
 
                     # Check if a detail already exists for this sale_id and
                     # report_id
