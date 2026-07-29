@@ -237,7 +237,7 @@
                   <div>
                     <label class="block text-sm font-medium text-gray-500 mb-2">{{ display_name }}</label>
                     <div class="relative">
-                      {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (report[sale.value_name] if sale.value_name and report[sale.value_name] is defined and report[sale.value_name] not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
+                      {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (sales_amounts.get(sale.value_name) if sale.value_name and sales_amounts.get(sale.value_name) not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
                       <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                       </div>
@@ -301,7 +301,7 @@
                   <div>
                     <label class="block text-sm font-medium text-gray-500 mb-2">{{ display_name }}</label>
                     <div class="relative">
-                      {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (report[sale.value_name] if sale.value_name and report[sale.value_name] is defined and report[sale.value_name] not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
+                      {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (sales_amounts.get(sale.value_name) if sale.value_name and sales_amounts.get(sale.value_name) not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
                       <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                       </div>
@@ -345,7 +345,7 @@
                {% for sale in cash_sales %}
                  <div class="mb-3">
                    <div class="relative">
-                     {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (report[sale.value_name] if sale.value_name and report[sale.value_name] is defined and report[sale.value_name] not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
+                     {% set sale_value = sale.amount if sale.amount not in [none, 0, 0.0, '0', '0.0', '0.00'] else (sales_amounts.get(sale.value_name) if sale.value_name and sales_amounts.get(sale.value_name) not in [none, 0, 0.0, '0', '0.0', '0.00'] else '') %}
                      <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <span class="text-gray-500 text-sm">{{ currency_symbol }}</span>
                      </div>

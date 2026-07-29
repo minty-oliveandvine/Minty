@@ -71,10 +71,13 @@ BEGIN;
 ALTER TABLE pettycashv2.cash_info
     ADD COLUMN IF NOT EXISTS currency_id uuid;
 
+-- conrelid scopes the check to THIS table — see the note at 1c.
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_cash_info_currency'
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_cash_info_currency'
+          AND conrelid = 'pettycashv2.cash_info'::regclass
     ) THEN
         ALTER TABLE pettycashv2.cash_info
             ADD CONSTRAINT fk_cash_info_currency
@@ -106,11 +109,16 @@ ALTER TABLE pettycashv2.cash_info
 -- v3 proposes UNIQUE (currency_id, cash_value). HKD circulates BOTH a $10
 -- note and a $10 coin, so that constraint admits only one of them —
 -- see docs/cash_denomination_schema_review.md point 1.
+-- conrelid scopes the check to THIS table. Without it the guard matches a
+-- same-named constraint in any other schema (e.g. a clone this script was
+-- already run against), silently skips creating it here, and the ON CONFLICT
+-- below then fails with "no unique or exclusion constraint matching".
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'uq_cash_info_currency_value_type'
+          AND conrelid = 'pettycashv2.cash_info'::regclass
     ) THEN
         ALTER TABLE pettycashv2.cash_info
             ADD CONSTRAINT uq_cash_info_currency_value_type
