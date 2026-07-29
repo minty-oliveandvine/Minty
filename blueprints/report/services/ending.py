@@ -18,7 +18,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
-                       ReportSaleDetail, SaleInfo, ShopExpense,
+                       ReportSaleDetail, EntitySaleSetting, ShopExpense,
                        ShopExpenseDraft, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,
@@ -492,21 +492,21 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         # Query enabled sale settings for the entity
         enabled_sale_info = (
-            SaleInfo.query.filter_by(entity_id=entity_id, enabled=True)
-            .order_by(SaleInfo.display_order)
+            EntitySaleSetting.query.filter_by(entity_id=entity_id, enabled=True)
+            .order_by(EntitySaleSetting.display_order)
             .all()
         )
 
-        # Query ReportSaleDetail with outer join to SaleInfo to include deleted/disabled sale types
-        # This ensures we get all sale details even if SaleInfo was deleted/disabled
+        # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
+        # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
         report_sale_details = (
-            db.session.query(ReportSaleDetail, SaleInfo)
-            .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+            db.session.query(ReportSaleDetail, EntitySaleSetting)
+            .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
             .filter(ReportSaleDetail.report_id == id)
             .all()
         )
 
-        # Create mapping of sale_id to enabled SaleInfo for quick lookup
+        # Create mapping of sale_id to enabled EntitySaleSetting for quick lookup
         enabled_sale_info_dict = {sale.sale_id: sale for sale in enabled_sale_info}
 
         # Create mapping of value_name to amount from ReportSaleDetail
@@ -515,7 +515,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         processed_sale_ids = set()
 
         for sale_detail, sale_info_item in report_sale_details:
-            # If SaleInfo exists (even if disabled), use it
+            # If EntitySaleSetting exists (even if disabled), use it
             if sale_info_item:
                 value_name = sale_info_item.value_name
                 if value_name and value_name != "deliveroo_sales":
@@ -528,13 +528,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         deleted_sale_info_list.append(sale_info_item)
                         processed_sale_ids.add(sale_info_item.sale_id)
             else:
-                # SaleInfo was completely deleted from database, but we have a transaction
+                # EntitySaleSetting was completely deleted from database, but we have a transaction
                 # Try to find it by sale_id (in case it still exists but join failed)
-                deleted_sale_info = SaleInfo.query.filter_by(
+                deleted_sale_info = EntitySaleSetting.query.filter_by(
                     sale_id=sale_detail.sale_id
                 ).first()
                 if deleted_sale_info:
-                    # SaleInfo exists but join failed (shouldn't happen, but handle it)
+                    # EntitySaleSetting exists but join failed (shouldn't happen, but handle it)
                     value_name = deleted_sale_info.value_name
                     if value_name and value_name != "deliveroo_sales":
                         sale_detail_amounts[value_name] = sale_detail.amount or 0
@@ -944,21 +944,21 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     # Query enabled sale settings for the entity
     enabled_sale_info = (
-        SaleInfo.query.filter_by(entity_id=entity_id, enabled=True)
-        .order_by(SaleInfo.display_order)
+        EntitySaleSetting.query.filter_by(entity_id=entity_id, enabled=True)
+        .order_by(EntitySaleSetting.display_order)
         .all()
     )
 
-    # Query ReportSaleDetail with outer join to SaleInfo to include deleted/disabled sale types
-    # This ensures we get all sale details even if SaleInfo was deleted/disabled
+    # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
+    # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
     report_sale_details = (
-        db.session.query(ReportSaleDetail, SaleInfo)
-        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+        db.session.query(ReportSaleDetail, EntitySaleSetting)
+        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
         .filter(ReportSaleDetail.report_id == current_draft.id)
         .all()
     )
 
-    # Create mapping of sale_id to enabled SaleInfo for quick lookup
+    # Create mapping of sale_id to enabled EntitySaleSetting for quick lookup
     enabled_sale_info_dict = {sale.sale_id: sale for sale in enabled_sale_info}
 
     # Create mapping of value_name to amount from ReportSaleDetail
@@ -967,7 +967,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     processed_sale_ids = set()
 
     for sale_detail, sale_info_item in report_sale_details:
-        # If SaleInfo exists (even if disabled), use it
+        # If EntitySaleSetting exists (even if disabled), use it
         if sale_info_item:
             value_name = sale_info_item.value_name
             if value_name and value_name != "deliveroo_sales":
@@ -980,13 +980,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                     deleted_sale_info_list.append(sale_info_item)
                     processed_sale_ids.add(sale_info_item.sale_id)
         else:
-            # SaleInfo was completely deleted from database, but we have a transaction
+            # EntitySaleSetting was completely deleted from database, but we have a transaction
             # Try to find it by sale_id (in case it still exists but join failed)
-            deleted_sale_info = SaleInfo.query.filter_by(
+            deleted_sale_info = EntitySaleSetting.query.filter_by(
                 sale_id=sale_detail.sale_id
             ).first()
             if deleted_sale_info:
-                # SaleInfo exists but join failed (shouldn't happen, but handle it)
+                # EntitySaleSetting exists but join failed (shouldn't happen, but handle it)
                 value_name = deleted_sale_info.value_name
                 if value_name and value_name != "deliveroo_sales":
                     sale_detail_amounts[value_name] = sale_detail.amount or 0

@@ -31,10 +31,10 @@ DECLARE
 BEGIN
     -- (a) the catalog must exist and be seeded
     SELECT count(*) INTO v_catalog_rows
-      FROM pettycashv2.sales_method WHERE entity_id IS NULL;
+      FROM pettycashv2.sale_info WHERE entity_id IS NULL;
     IF v_catalog_rows < 11 THEN
         RAISE EXCEPTION
-          'ABORT: sales_method has % global rows, expected >= 11. Run s1a01_s4a04 first.',
+          'ABORT: sale_info (the catalog) has % global rows, expected >= 11. Run s1a01_s4a04 first.',
           v_catalog_rows;
     END IF;
 
@@ -72,13 +72,13 @@ BEGIN
           v_mismatch;
     END IF;
 
-    -- (c) every sale_info row should be linked, or new writes are landing
+    -- (c) every entity_sale_setting row should be linked, or new writes are landing
     --     without a catalog id (Step 2 code not deployed?)
     SELECT count(*) INTO v_unlinked_si
-      FROM pettycashv2.sale_info WHERE sales_method_id IS NULL;
+      FROM pettycashv2.entity_sale_setting WHERE sale_info_id IS NULL;
     IF v_unlinked_si > 0 THEN
         RAISE WARNING
-          'WARNING: % sale_info row(s) have no sales_method_id. New rows may be created unlinked — verify the Step 2 code is deployed.',
+          'WARNING: % entity_sale_setting row(s) have no sale_info_id. New rows may be created unlinked — verify the Step 2 code is deployed.',
           v_unlinked_si;
     END IF;
 
@@ -144,18 +144,18 @@ COMMIT;
 --  confident nothing needs to map a method back to a physical column.
 --
 --  Held back from the main transaction on purpose:
---    * sale_info.value_name is still the join key in several read paths
---      (get_unique_sale_info_for_entity, the sales_amounts template dicts).
+--    * entity_sale_setting.value_name is still the join key in several read
+--      paths (get_unique_sale_info_for_entity, the sales_amounts dicts).
 --      Dropping it now would break them.
---    * sales_method.legacy_column is what made the backfill possible; keep it
+--    * sale_info.legacy_column is what made the backfill possible; keep it
 --      until you are sure no re-backfill is needed.
 --
 --  Do NOT run this until value_name has been removed from the code.
 -- =====================================================================
 -- BEGIN;
--- ALTER TABLE pettycashv2.sales_method DROP COLUMN IF EXISTS legacy_column;
--- ALTER TABLE pettycashv2.sale_info    DROP COLUMN IF EXISTS value_name;
--- ALTER TABLE pettycashv2.sale_info    DROP COLUMN IF EXISTS type;
+-- ALTER TABLE pettycashv2.sale_info           DROP COLUMN IF EXISTS legacy_column;
+-- ALTER TABLE pettycashv2.entity_sale_setting DROP COLUMN IF EXISTS value_name;
+-- ALTER TABLE pettycashv2.entity_sale_setting DROP COLUMN IF EXISTS type;
 -- COMMIT;
 
 
@@ -173,7 +173,7 @@ WHERE table_schema = 'pettycashv2'
 ORDER BY table_name, column_name;
 
 -- 2. Detail rows still resolve to a method. Expect unlinked = 0.
-SELECT count(*) FILTER (WHERE sales_method_id IS NULL) AS unlinked,
+SELECT count(*) FILTER (WHERE sale_info_id IS NULL) AS unlinked,
        count(*)                                        AS total
 FROM pettycashv2.report_sale_detail;
 

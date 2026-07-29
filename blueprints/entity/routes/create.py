@@ -651,7 +651,7 @@ def onboarding_sales_methods():
     """Token-authenticated petty-cash Sales Setting (onboarding Step 4).
 
     GET  ?entity_id=…  → {"electronic": [...], "delivery": [...]} of enabled names.
-    POST {entity_id, electronic: [...], delivery: [...]} → reconciles SaleInfo.
+    POST {entity_id, electronic: [...], delivery: [...]} → reconciles EntitySaleSetting.
 
     Same JWT/CORS contract as ``onboarding_create_entity``; the underlying
     services enforce SALES_METHOD_* permission for the token's user on the

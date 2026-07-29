@@ -13,10 +13,10 @@ class ReportSaleDetail(db.Model):
     )
     # Catalog link, denormalized on purpose. Resolving the method via
     # sale_id -> sale_info breaks for historical reports: ending.py outer-joins
-    # SaleInfo "to include deleted/disabled sale types", so once an entity
+    # EntitySaleSetting "to include deleted/disabled sale types", so once an entity
     # removes a method the amount survives with no way to tell what it was for.
     # Carrying the catalog id here keeps every report self-describing.
-    sales_method_id = db.Column(
+    sale_info_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.sale_info.id", ondelete="RESTRICT"),
         nullable=True,
@@ -25,6 +25,6 @@ class ReportSaleDetail(db.Model):
     amount = db.Column(db.Float)
     create_at = db.Column(db.DateTime)
     report_v2 = db.relationship("ReportV2", backref="report_sale_detail", lazy=True)
-    sale_info = db.relationship("SaleInfo", backref="report_sale_detail", lazy=True)
-    sales_method = db.relationship("SalesMethod", lazy="joined")
+    entity_sale_setting = db.relationship("EntitySaleSetting", backref="report_sale_detail", lazy=True)
+    sale_info = db.relationship("SaleInfo", lazy="joined")
 
