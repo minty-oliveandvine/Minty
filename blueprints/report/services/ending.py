@@ -294,11 +294,34 @@ def entity_ending(entity_id):
 
 def report_ending(id=None, entity_id=None, skip_auth=False):
     # Lazy imports from app to avoid circular import
+    # Diagnostic: the bounce below is a flash + 302, which logs nothing on its
+    # own. Record what actually arrived so a lost query string, a stripped form
+    # body and an expired session can be told apart from one another.
+    logger.info(
+        "ENTITY-TRACE report_ending entry - method=%s path=%s id=%s passed=%r "
+        "args=%r form=%r referrer=%r xhr=%s auth=%s",
+        request.method,
+        request.path,
+        id,
+        entity_id,
+        request.args.get("entity_id"),
+        request.form.get("entity_id"),
+        request.referrer,
+        request.headers.get("X-Requested-With"),
+        getattr(current_user, "is_authenticated", False),
+    )
     if entity_id is None:
         entity_id = request.args.get("entity_id") or request.form.get("entity_id")
     if not skip_auth and not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not skip_auth and not entity_id:
+        logger.error(
+            "ENTITY-TRACE report_ending BOUNCE - method=%s args=%r form_keys=%r referrer=%r",
+            request.method,
+            dict(request.args),
+            list(request.form.keys()),
+            request.referrer,
+        )
         flash("I need to know which entity we're working with first!", "danger")
         return redirect(url_for("entity.entity_list"))
     if not skip_auth and not has_permission(
@@ -908,7 +931,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             "I don't see a draft for today yet - let's start with the opening entry.",
             "warning",
         )
-        return redirect(url_for("report.report_opening"))
+        # Carry the entity through: report_opening can't resolve one on its
+        # own, so without it this lands on "I need to know which entity we're
+        # working with first!" and a bounce to the entity list instead of the
+        # opening page. Every other redirect on this page passes it too.
+        return redirect(url_for("report.report_opening", entity_id=entity_id))
 
     completed_sections = (
         current_draft.completed_sections if current_draft.completed_sections else []
