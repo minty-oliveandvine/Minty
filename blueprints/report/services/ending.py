@@ -11,6 +11,8 @@ from flask_login import current_user
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
+from blueprints.report.services.cash_denominations import (
+    get_cash_count_details, get_cash_count_total)
 from blueprints.report.services.shared import (check_user_has_entities,
                                                cleanup_partial_submission_data,
                                                future_date_error,
@@ -18,7 +20,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
-                       ReportSaleDetail, SaleInfo, ShopExpense,
+                       ReportSaleDetail, EntitySaleSetting, ShopExpense,
                        ShopExpenseDraft, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,
@@ -377,16 +379,6 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 Report.cash_addition,
                 Report.adjusted_opening_balance,
                 Report.cash_sales,
-                Report.visa_sales,
-                Report.alipay_sales,
-                Report.wechat_sales,
-                Report.master_sales,
-                Report.unionpay_sales,
-                Report.amex_sales,
-                Report.octopus_sales,
-                Report.foodpanda_sales,
-                Report.keeta_sales,
-                Report.openrice_sales,
                 Report.shop_sales,
                 Report.delivery_sales,
                 Report.total_sales,
@@ -450,16 +442,6 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         cash_addition=full_report.cash_addition or 0.0,
                         adjusted_opening_balance=full_report.adjusted_opening_balance,
                         cash_sales=full_report.cash_sales or 0.0,
-                        visa_sales=full_report.visa_sales or 0.0,
-                        alipay_sales=full_report.alipay_sales or 0.0,
-                        wechat_sales=full_report.wechat_sales or 0.0,
-                        master_sales=full_report.master_sales or 0.0,
-                        unionpay_sales=full_report.unionpay_sales or 0.0,
-                        amex_sales=full_report.amex_sales or 0.0,
-                        octopus_sales=full_report.octopus_sales or 0.0,
-                        foodpanda_sales=full_report.foodpanda_sales or 0.0,
-                        keeta_sales=full_report.keeta_sales or 0.0,
-                        openrice_sales=full_report.openrice_sales or 0.0,
                         shop_sales=full_report.shop_sales or 0.0,
                         delivery_sales=full_report.delivery_sales or 0.0,
                         total_sales=full_report.total_sales or 0.0,
@@ -512,21 +494,21 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         # Query enabled sale settings for the entity
         enabled_sale_info = (
-            SaleInfo.query.filter_by(entity_id=entity_id, enabled=True)
-            .order_by(SaleInfo.display_order)
+            EntitySaleSetting.query.filter_by(entity_id=entity_id, enabled=True)
+            .order_by(EntitySaleSetting.display_order)
             .all()
         )
 
-        # Query ReportSaleDetail with outer join to SaleInfo to include deleted/disabled sale types
-        # This ensures we get all sale details even if SaleInfo was deleted/disabled
+        # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
+        # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
         report_sale_details = (
-            db.session.query(ReportSaleDetail, SaleInfo)
-            .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+            db.session.query(ReportSaleDetail, EntitySaleSetting)
+            .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
             .filter(ReportSaleDetail.report_id == id)
             .all()
         )
 
-        # Create mapping of sale_id to enabled SaleInfo for quick lookup
+        # Create mapping of sale_id to enabled EntitySaleSetting for quick lookup
         enabled_sale_info_dict = {sale.sale_id: sale for sale in enabled_sale_info}
 
         # Create mapping of value_name to amount from ReportSaleDetail
@@ -535,7 +517,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         processed_sale_ids = set()
 
         for sale_detail, sale_info_item in report_sale_details:
-            # If SaleInfo exists (even if disabled), use it
+            # If EntitySaleSetting exists (even if disabled), use it
             if sale_info_item:
                 value_name = sale_info_item.value_name
                 if value_name and value_name != "deliveroo_sales":
@@ -548,13 +530,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         deleted_sale_info_list.append(sale_info_item)
                         processed_sale_ids.add(sale_info_item.sale_id)
             else:
-                # SaleInfo was completely deleted from database, but we have a transaction
+                # EntitySaleSetting was completely deleted from database, but we have a transaction
                 # Try to find it by sale_id (in case it still exists but join failed)
-                deleted_sale_info = SaleInfo.query.filter_by(
+                deleted_sale_info = EntitySaleSetting.query.filter_by(
                     sale_id=sale_detail.sale_id
                 ).first()
                 if deleted_sale_info:
-                    # SaleInfo exists but join failed (shouldn't happen, but handle it)
+                    # EntitySaleSetting exists but join failed (shouldn't happen, but handle it)
                     value_name = deleted_sale_info.value_name
                     if value_name and value_name != "deliveroo_sales":
                         sale_detail_amounts[value_name] = sale_detail.amount or 0
@@ -661,17 +643,10 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             ReportCashCountDraft.report_id == report.id
         ).first()
         if cashcount_draft:
-            # Calculate total actual cash count
-            total_actual_cash = (
-                (cashcount_draft.thousand_note or 0) * 1000
-                + (cashcount_draft.fivehundred_note or 0) * 500
-                + (cashcount_draft.onehundred_note or 0) * 100
-                + (cashcount_draft.fifty_note or 0) * 50
-                + (cashcount_draft.twenty_note or 0) * 20
-                + (cashcount_draft.ten_note or 0) * 10
-                + (cashcount_draft.five_coin or 0) * 5
-                + (cashcount_draft.two_coin or 0) * 2
-                + (cashcount_draft.one_coin or 0) * 1
+            # Total from report_cashcount_detail, falling back to the legacy
+            # note/coin columns for reports predating the backfill.
+            total_actual_cash = get_cash_count_total(
+                report.id, fallback_draft=cashcount_draft
             )
             safe_box_balance = cashcount_draft.safe_box_balance or 0
             cash_balance = total_actual_cash + safe_box_balance
@@ -964,21 +939,21 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     # Query enabled sale settings for the entity
     enabled_sale_info = (
-        SaleInfo.query.filter_by(entity_id=entity_id, enabled=True)
-        .order_by(SaleInfo.display_order)
+        EntitySaleSetting.query.filter_by(entity_id=entity_id, enabled=True)
+        .order_by(EntitySaleSetting.display_order)
         .all()
     )
 
-    # Query ReportSaleDetail with outer join to SaleInfo to include deleted/disabled sale types
-    # This ensures we get all sale details even if SaleInfo was deleted/disabled
+    # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
+    # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
     report_sale_details = (
-        db.session.query(ReportSaleDetail, SaleInfo)
-        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+        db.session.query(ReportSaleDetail, EntitySaleSetting)
+        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
         .filter(ReportSaleDetail.report_id == current_draft.id)
         .all()
     )
 
-    # Create mapping of sale_id to enabled SaleInfo for quick lookup
+    # Create mapping of sale_id to enabled EntitySaleSetting for quick lookup
     enabled_sale_info_dict = {sale.sale_id: sale for sale in enabled_sale_info}
 
     # Create mapping of value_name to amount from ReportSaleDetail
@@ -987,7 +962,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     processed_sale_ids = set()
 
     for sale_detail, sale_info_item in report_sale_details:
-        # If SaleInfo exists (even if disabled), use it
+        # If EntitySaleSetting exists (even if disabled), use it
         if sale_info_item:
             value_name = sale_info_item.value_name
             if value_name and value_name != "deliveroo_sales":
@@ -1000,13 +975,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                     deleted_sale_info_list.append(sale_info_item)
                     processed_sale_ids.add(sale_info_item.sale_id)
         else:
-            # SaleInfo was completely deleted from database, but we have a transaction
+            # EntitySaleSetting was completely deleted from database, but we have a transaction
             # Try to find it by sale_id (in case it still exists but join failed)
-            deleted_sale_info = SaleInfo.query.filter_by(
+            deleted_sale_info = EntitySaleSetting.query.filter_by(
                 sale_id=sale_detail.sale_id
             ).first()
             if deleted_sale_info:
-                # SaleInfo exists but join failed (shouldn't happen, but handle it)
+                # EntitySaleSetting exists but join failed (shouldn't happen, but handle it)
                 value_name = deleted_sale_info.value_name
                 if value_name and value_name != "deliveroo_sales":
                     sale_detail_amounts[value_name] = sale_detail.amount or 0
@@ -1141,28 +1116,28 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Calculate actual cash balance from cash count data
     if cashcount_draft:
         logger.info(f"Retrieved cash count data for draft {current_draft.id}:")
-        logger.info(
-            f"  Notes: 1000x{cashcount_draft.thousand_note}, 500x{cashcount_draft.fivehundred_note}, 100x{cashcount_draft.onehundred_note}, 50x{cashcount_draft.fifty_note}, 20x{cashcount_draft.twenty_note}, 10x{cashcount_draft.ten_note}"
-        )
-        logger.info(
-            f"  Coins: 5x{cashcount_draft.five_coin}, 2x{cashcount_draft.two_coin}, 1x{cashcount_draft.one_coin}"
-        )
+        # Enumerate what was actually counted rather than the nine fixed
+        # columns, so custom denominations show up here too.
+        counted = get_cash_count_details(current_draft.id)
+        if counted:
+            logger.info(
+                "  Counted: "
+                + ", ".join(
+                    f"{row.cash_value:g}x{row.count}"
+                    for row in sorted(
+                        counted.values(), key=lambda r: -r.cash_value
+                    )
+                )
+            )
         logger.info(f"  Safe box balance: {cashcount_draft.safe_box_balance}")
         logger.info(
             f"  Stored actual_cash_total: {cashcount_draft.actual_cash_total}"
         )
 
-        # Calculate total actual cash count
-        total_actual_cash = (
-            (cashcount_draft.thousand_note or 0) * 1000
-            + (cashcount_draft.fivehundred_note or 0) * 500
-            + (cashcount_draft.onehundred_note or 0) * 100
-            + (cashcount_draft.fifty_note or 0) * 50
-            + (cashcount_draft.twenty_note or 0) * 20
-            + (cashcount_draft.ten_note or 0) * 10
-            + (cashcount_draft.five_coin or 0) * 5
-            + (cashcount_draft.two_coin or 0) * 2
-            + (cashcount_draft.one_coin or 0) * 1
+        # Total from report_cashcount_detail, falling back to the legacy
+        # note/coin columns for reports predating the backfill.
+        total_actual_cash = get_cash_count_total(
+            current_draft.id, fallback_draft=cashcount_draft
         )
         safe_box_balance = cashcount_draft.safe_box_balance or 0
         cash_balance = total_actual_cash + safe_box_balance
@@ -1275,16 +1250,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         # Validate cash count - allow zero cash count
                         # Cash balance (cash count + safe box) can be <= 0
                         # Discrepancy validation will handle description requirements
-                        total_cash_count = (
-                            (cashcount_draft.thousand_note or 0) * 1000
-                            + (cashcount_draft.fivehundred_note or 0) * 500
-                            + (cashcount_draft.onehundred_note or 0) * 100
-                            + (cashcount_draft.fifty_note or 0) * 50
-                            + (cashcount_draft.twenty_note or 0) * 20
-                            + (cashcount_draft.ten_note or 0) * 10
-                            + (cashcount_draft.five_coin or 0) * 5
-                            + (cashcount_draft.two_coin or 0) * 2
-                            + (cashcount_draft.one_coin or 0) * 1
+                        total_cash_count = get_cash_count_total(
+                            current_draft.id, fallback_draft=cashcount_draft
                         )
                         # No validation needed - allow zero cash count
                         # The discrepancy validation will ensure description is provided when needed
@@ -1397,18 +1364,9 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         opening_balance=current_draft.opening_balance,
                         cash_addition=current_draft.cash_addition,
                         adjusted_opening_balance=current_draft.adjusted_opening_balance,
+                        # Per-method amounts live in report_sale_detail and
+                        # are shared via the id above — not copied per column.
                         cash_sales=current_draft.cash_sales,
-                        visa_sales=current_draft.visa_sales,
-                        alipay_sales=current_draft.alipay_sales,
-                        wechat_sales=current_draft.wechat_sales,
-                        master_sales=current_draft.master_sales,
-                        unionpay_sales=current_draft.unionpay_sales,
-                        amex_sales=current_draft.amex_sales,
-                        octopus_sales=current_draft.octopus_sales,
-                        deliveroo_sales=0.0,
-                        foodpanda_sales=current_draft.foodpanda_sales,
-                        keeta_sales=current_draft.keeta_sales,
-                        openrice_sales=current_draft.openrice_sales,
                         shop_sales=current_draft.shop_sales,
                         delivery_sales=current_draft.delivery_sales,
                         total_sales=current_draft.total_sales,
@@ -1453,16 +1411,6 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         current_draft.adjusted_opening_balance
                     )
                     posted_report.cash_sales = current_draft.cash_sales
-                    posted_report.visa_sales = current_draft.visa_sales
-                    posted_report.alipay_sales = current_draft.alipay_sales
-                    posted_report.wechat_sales = current_draft.wechat_sales
-                    posted_report.master_sales = current_draft.master_sales
-                    posted_report.unionpay_sales = current_draft.unionpay_sales
-                    posted_report.amex_sales = current_draft.amex_sales
-                    posted_report.octopus_sales = current_draft.octopus_sales
-                    posted_report.foodpanda_sales = current_draft.foodpanda_sales
-                    posted_report.keeta_sales = current_draft.keeta_sales
-                    posted_report.openrice_sales = current_draft.openrice_sales
                     posted_report.shop_sales = current_draft.shop_sales
                     posted_report.delivery_sales = current_draft.delivery_sales
                     posted_report.total_sales = current_draft.total_sales

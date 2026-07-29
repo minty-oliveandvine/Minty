@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from models.db import (Report, ReportDraft, ReportSaleDetail, ReportV2,
-                       SaleInfo, ShopExpense, db, tz)
+                       EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 
@@ -351,10 +351,7 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
             opening_balance=amount,
             cash_addition=0.0,
             adjusted_opening_balance=adjusted,
-            cash_sales=0.0, visa_sales=0.0, alipay_sales=0.0, wechat_sales=0.0,
-            master_sales=0.0, unionpay_sales=0.0, amex_sales=0.0,
-            octopus_sales=0.0, deliveroo_sales=0.0, foodpanda_sales=0.0,
-            keeta_sales=0.0, openrice_sales=0.0, shop_sales=0.0,
+            cash_sales=0.0, shop_sales=0.0,
             delivery_sales=0.0, total_sales=0.0, expenses=0.0, bank_deposit=0.0,
             closing_balance=adjusted,
             current_section="opening",  # start the first report at opening
@@ -474,8 +471,8 @@ def get_cash_sales_from_detail(report_id, fallback_value=0.0):
     logger.info(
         f"Getting cash sales from report_sale_detail for report {report_id}")
     report_sale_details = (
-        db.session.query(ReportSaleDetail, SaleInfo)
-        .join(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+        db.session.query(ReportSaleDetail, EntitySaleSetting)
+        .join(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
@@ -505,14 +502,14 @@ def calculate_sales_from_report_sale_detail(report_draft_id):
     )
     sales_data = (
         db.session.query(
-            SaleInfo.value_name,
-            SaleInfo.type,
+            EntitySaleSetting.value_name,
+            EntitySaleSetting.type,
             db.func.sum(ReportSaleDetail.amount).label("total_amount"),
         )
-        .join(ReportSaleDetail, SaleInfo.sale_id == ReportSaleDetail.sale_id)
+        .join(ReportSaleDetail, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id)
         .join(ReportDraft, ReportDraft.id == ReportSaleDetail.report_id)
         .filter(ReportSaleDetail.report_id == report_draft_id)
-        .group_by(SaleInfo.value_name, SaleInfo.type)
+        .group_by(EntitySaleSetting.value_name, EntitySaleSetting.type)
         .all()
     )
     report_draft = ReportDraft.query.get(report_draft_id)
@@ -548,39 +545,218 @@ def calculate_sales_from_report_sale_detail(report_draft_id):
 
 
 def update_report_draft_sales_from_detail(report_draft):
-    """Update report_draft sales fields from report_sale_detail table."""
+    """Refresh a draft's cached aggregates from report_sale_detail.
+
+    report_sale_detail is the source of truth for per-method amounts; only the
+    aggregates are stored on the row. The per-method ``setattr`` loop that used
+    to mirror each amount back into its own column is gone — those columns are
+    being dropped, and writing them would just re-create the dual-store drift
+    this migration exists to remove.
+    """
     logger.info(
         f"Updating sales for draft {report_draft.id} from report_sale_detail")
     sales_data = calculate_sales_from_report_sale_detail(report_draft.id)
-    for value_name, amount in sales_data["sales_totals"].items():
-        if hasattr(report_draft, value_name):
-            setattr(report_draft, value_name, amount)
     report_draft.shop_sales = sales_data["shop_sales"]
     report_draft.delivery_sales = sales_data["delivery_sales"]
     report_draft.total_sales = sales_data["total_sales"]
 
 
+def sum_sales_by_type(report_id):
+    """Sum a report's sale amounts per type from report_sale_detail.
+
+    Returns {"Electronic": x, "Delivery": y, "Cash": z}. Replaces summing a
+    hardcoded list of ``*_sales`` columns, so a method added to the
+    ``sales_method`` catalog is included automatically with no code change.
+
+    Type resolution mirrors the display path in ending.py: prefer the catalog
+    row, fall back to the entity's sale_info row, then to the type stored on
+    the detail row itself. Outer joins throughout — a report whose method has
+    since been deleted must still contribute its amount.
+    """
+    rows = (
+        db.session.query(
+            ReportSaleDetail.amount,
+            ReportSaleDetail.type,
+            EntitySaleSetting.type,
+            SaleInfo.type,
+        )
+        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_info_id == SaleInfo.id)
+        .filter(ReportSaleDetail.report_id == report_id)
+        .all()
+    )
+
+    totals = {"Electronic": 0.0, "Delivery": 0.0, "Cash": 0.0}
+    for amount, detail_type, sale_info_type, method_type in rows:
+        sale_type = method_type or sale_info_type or detail_type
+        if sale_type in totals:
+            totals[sale_type] += amount or 0.0
+    return totals
+
+
+def write_sales_detail_rows(
+    report_id, entity_id, shop_sales_data, delivery_sales_data, *, replace=True
+):
+    """Write a report's per-method amounts as report_sale_detail rows.
+
+    Replaces assigning one ``*_sales`` column per method. Form keys are the
+    short names the sales form posts ('visa', 'foodpanda'); they are matched
+    against the entity's sale_info rows via the legacy ``value_name``
+    ('visa_sales'), which is also what the catalog's ``legacy_column`` holds.
+
+    'cash' is skipped: it stays a column on report/report_draft and has its own
+    branch in the totals code, so writing it here too would double-count.
+
+    ``replace=True`` clears existing rows for this report first, making the
+    call idempotent when a report is edited and re-saved.
+    """
+    if replace:
+        ReportSaleDetail.query.filter_by(report_id=report_id).delete(
+            synchronize_session=False
+        )
+
+    sale_rows = EntitySaleSetting.query.filter(EntitySaleSetting.entity_id == entity_id).all()
+    by_value_name = {}
+    for row in sale_rows:
+        # Duplicate sale_info rows exist (see the max(sale_id) dedup in
+        # payment_methods.py); keep the lowest sale_id so this is deterministic
+        # and matches what the SQL backfill chose.
+        existing = by_value_name.get(row.value_name)
+        if existing is None or (row.sale_id or "") < (existing.sale_id or ""):
+            by_value_name[row.value_name] = row
+
+    written = 0
+    for source, sale_type in (
+        (shop_sales_data or {}, "Electronic"),
+        (delivery_sales_data or {}, "Delivery"),
+    ):
+        for short_name, amount in source.items():
+            if short_name == "cash":
+                continue  # separate concept, keeps its column
+            value = safe_float(amount)
+            if not value:
+                continue
+            sale_row = by_value_name.get(f"{short_name}_sales")
+            if sale_row is None:
+                logger.warning(
+                    "write_sales_detail_rows: no sale_info row for entity=%s "
+                    "method=%s — amount %s not stored",
+                    entity_id, short_name, value,
+                )
+                continue
+            db.session.add(
+                ReportSaleDetail(
+                    sale_id=sale_row.sale_id,
+                    report_id=report_id,
+                    sale_info_id=sale_row.sale_info_id,
+                    type=sale_row.type or sale_type,
+                    amount=value,
+                    create_at=datetime.now(tz),
+                )
+            )
+            written += 1
+
+    logger.info(
+        "write_sales_detail_rows: report=%s entity=%s wrote %s rows",
+        report_id, entity_id, written,
+    )
+    return written
+
+
+def sales_amounts_by_short_name(report_id, entity_id):
+    """Per-method amounts keyed by the form's short name ('visa', 'foodpanda').
+
+    The read-side counterpart to ``write_sales_detail_rows``: routes that used
+    to build ``{"visa": report.visa_sales, ...}`` from columns can build the
+    same dict from report_sale_detail instead, so the shape their templates and
+    JSON consumers already expect is preserved.
+
+    Returns (shop, delivery) — split by the method's type, matching how the
+    sales form posts them. Cash is excluded: it stays a column.
+    """
+    rows = (
+        db.session.query(EntitySaleSetting.value_name, EntitySaleSetting.type, ReportSaleDetail.amount)
+        .join(ReportSaleDetail, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        .filter(
+            ReportSaleDetail.report_id == report_id,
+            EntitySaleSetting.entity_id == entity_id,
+        )
+        .all()
+    )
+
+    shop, delivery = {}, {}
+    for value_name, sale_type, amount in rows:
+        if not value_name or value_name == "cash_sales":
+            continue
+        short = value_name[: -len("_sales")] if value_name.endswith("_sales") else value_name
+        target = delivery if sale_type == "Delivery" else shop
+        target[short] = (target.get(short) or 0.0) + (amount or 0.0)
+    return shop, delivery
+
+
+def sales_by_method_for(report_id):
+    """Per-method amounts for a report, keyed by catalog code.
+
+    Backs the ``sales_by_method`` property on Report / ReportDraft, which is
+    what templates iterate instead of naming each ``*_sales`` column.
+
+    Keys are the ``sales_method.code`` (e.g. 'VISA'); rows whose catalog link
+    is missing fall back to the legacy ``value_name`` so nothing is silently
+    dropped during the transition. Amounts for the same method are summed,
+    which also collapses any duplicate detail rows.
+    """
+    rows = (
+        db.session.query(
+            SaleInfo.code,
+            SaleInfo.name,
+            SaleInfo.display_order,
+            EntitySaleSetting.value_name,
+            EntitySaleSetting.sale_name,
+            ReportSaleDetail.amount,
+        )
+        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_info_id == SaleInfo.id)
+        .filter(ReportSaleDetail.report_id == report_id)
+        .all()
+    )
+
+    out = {}
+    for code, name, order, value_name, sale_name, amount in rows:
+        key = code or value_name
+        if not key:
+            continue
+        entry = out.setdefault(
+            key,
+            {
+                "code": key,
+                "name": name or sale_name or key,
+                "display_order": order if order is not None else 999,
+                "amount": 0.0,
+            },
+        )
+        entry["amount"] += amount or 0.0
+    return dict(
+        sorted(out.items(), key=lambda kv: (kv[1]["display_order"], kv[1]["name"]))
+    )
+
+
 def recalculate_report(report_to_update, *, commit=True):
     """Recalculate derived sales and balances for a report/draft object."""
     try:
-        report_to_update.shop_sales = (
-            (report_to_update.cash_sales or 0.0)
-            + (report_to_update.visa_sales or 0.0)
-            + (report_to_update.alipay_sales or 0.0)
-            + (report_to_update.wechat_sales or 0.0)
-            + (report_to_update.master_sales or 0.0)
-            + (report_to_update.unionpay_sales or 0.0)
-            + (report_to_update.amex_sales or 0.0)
-            + (report_to_update.octopus_sales or 0.0)
-        )
+        # Aggregates are derived from report_sale_detail rather than from the
+        # per-method columns, so they stay correct as the catalog grows.
+        # shop_sales/delivery_sales/total_sales remain stored columns — they
+        # are read in ~20 places and are cheap caches of this sum.
+        totals = sum_sales_by_type(report_to_update.id)
 
-        report_to_update.delivery_sales = (
-            (report_to_update.foodpanda_sales or 0.0)
-            + (report_to_update.keeta_sales or 0.0)
-            + (report_to_update.openrice_sales or 0.0)
-        )
-        report_to_update.total_sales = (report_to_update.shop_sales or 0.0) + (
-            report_to_update.delivery_sales or 0.0
+        # Cash is a separate concept with its own column; it is included in
+        # shop_sales here exactly as the previous hardcoded sum did.
+        cash_component = totals["Cash"] or (report_to_update.cash_sales or 0.0)
+
+        report_to_update.shop_sales = totals["Electronic"] + cash_component
+        report_to_update.delivery_sales = totals["Delivery"]
+        report_to_update.total_sales = (
+            report_to_update.shop_sales + report_to_update.delivery_sales
         )
 
         opening_balance = report_to_update.opening_balance or 0.0

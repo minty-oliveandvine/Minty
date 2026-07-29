@@ -16,17 +16,6 @@ class ReportDraft(db.Model):
     cash_addition = db.Column(db.Float, nullable=True, default=0.0)
     adjusted_opening_balance = db.Column(db.Float, nullable=True, default=None)
     cash_sales = db.Column(db.Float, nullable=True, default=0.0)
-    visa_sales = db.Column(db.Float, nullable=True, default=0.0)
-    alipay_sales = db.Column(db.Float, nullable=True, default=0.0)
-    wechat_sales = db.Column(db.Float, nullable=True, default=0.0)
-    master_sales = db.Column(db.Float, nullable=True, default=0.0)
-    unionpay_sales = db.Column(db.Float, nullable=True, default=0.0)
-    amex_sales = db.Column(db.Float, nullable=True, default=0.0)
-    octopus_sales = db.Column(db.Float, nullable=True, default=0.0)
-    deliveroo_sales = db.Column(db.Float, nullable=True, default=0.0)
-    foodpanda_sales = db.Column(db.Float, nullable=True, default=0.0)
-    keeta_sales = db.Column(db.Float, nullable=True, default=0.0)
-    openrice_sales = db.Column(db.Float, nullable=True, default=0.0)
     shop_sales = db.Column(db.Float, nullable=True, default=0.0)
     delivery_sales = db.Column(db.Float, nullable=True, default=0.0)
     total_sales = db.Column(db.Float, nullable=True, default=0.0)
@@ -63,6 +52,18 @@ class ReportDraft(db.Model):
     discrepancy_amount = db.Column(db.Float, nullable=True, default=0.0)
     discrepancy_reason = db.Column(db.String(300), nullable=True)
     discrepancy_type = db.Column(db.String(20), nullable=True, default="none")
+
+    @property
+    def sales_by_method(self):
+        """Per-method amounts for this draft, keyed by catalog code.
+
+        Same contract as Report.sales_by_method — see that docstring. A draft
+        and its submitted report share an id (ending.py creates the revert
+        draft with ``id=full_report.id``), so both resolve the same detail rows.
+        """
+        from blueprints.report.services.shared import sales_by_method_for
+
+        return sales_by_method_for(self.id)
 
     @property
     def total_expenses(self):

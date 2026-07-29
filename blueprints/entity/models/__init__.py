@@ -2,8 +2,10 @@
 from .country_info import CountryInfo
 from .currency_info import CurrencyInfo
 from .entity import Entity
+from .entity_cash_setting import EntityCashSetting
 from .entity_cash_detail_v2 import EntityCashDetailV2
 from .entity_function import EntityFunction, EntityFunctionMap
+from .entity_sale_setting import EntitySaleSetting
 from .sale_info import SaleInfo
 from .user_entity import UserEntity
 
@@ -13,9 +15,11 @@ __all__ = [
     "CountryInfo",
     "CurrencyInfo",
     "CashInfo",
+    "EntityCashSetting",
     "EntityCashDetailV2",
     "EntityFunction",
     "EntityFunctionMap",
+    "EntitySaleSetting",
     "SaleInfo",
 ]
 

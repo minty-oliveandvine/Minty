@@ -16,7 +16,7 @@ from user_agents import parse
 
 from blueprints.report import report_bp
 from models.db import (Entity, Report, ReportCashCountDraft, ReportSaleDetail,
-                       SaleInfo, ShopExpense, db)
+                       EntitySaleSetting, ShopExpense, db)
 from services.helpers.docx import convert_docx_to_pdf
 from services.permission_policy import can_view_report
 
@@ -68,14 +68,14 @@ def generate_pdf_report(id):
 
         entity_id = report.company
         sale_info_list = (
-            SaleInfo.query.filter_by(entity_id=entity_id, enabled=True)
-            .order_by(SaleInfo.display_order)
+            EntitySaleSetting.query.filter_by(entity_id=entity_id, enabled=True)
+            .order_by(EntitySaleSetting.display_order)
             .all()
         )
 
         report_sale_details = (
-            db.session.query(ReportSaleDetail, SaleInfo)
-            .join(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+            db.session.query(ReportSaleDetail, EntitySaleSetting)
+            .join(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
             .filter(ReportSaleDetail.report_id == id)
             .all()
         )

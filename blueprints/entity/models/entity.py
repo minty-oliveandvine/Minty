@@ -54,7 +54,7 @@ class Entity(db.Model):
         "ReportV2", cascade="all, delete-orphan", backref="entity", lazy=True
     )
     sale_info = db.relationship(
-        "SaleInfo", cascade="all, delete-orphan", backref="entity", lazy=True
+        "EntitySaleSetting", cascade="all, delete-orphan", backref="entity", lazy=True
     )
     entity_cash_detail_v2 = db.relationship(
         "EntityCashDetailV2", cascade="all, delete-orphan", backref="entity", lazy=True
