@@ -833,13 +833,24 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             is_edit_mode=is_edit_mode,
         )
 
-    # Get transaction date from URL parameter if provided, otherwise use today
+    # Get transaction date from the form or the URL — the finish form posts to
+    # an action URL carrying both, so reading only one source per method lost
+    # the date whenever the hidden field submitted empty. That silently fell
+    # back to today below, so the draft lookup asked for the wrong day and
+    # reported "no draft" for a date the user never requested.
     if request.method == "POST":
-        entity_id = request.form.get("entity_id")
-        selected_date = request.form.get("transaction_date")
+        entity_id = (
+            entity_id
+            or request.form.get("entity_id")
+            or request.args.get("entity_id")
+        )
+        selected_date = (
+            request.form.get("transaction_date")
+            or request.args.get("transaction_date")
+        )
     else:
         selected_date = request.args.get("transaction_date")
-        entity_id = request.args.get("entity_id")
+        entity_id = entity_id or request.args.get("entity_id")
 
     if selected_date:
         try:
@@ -855,7 +866,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     else:
         transaction_date = datetime.now().date()
         logger.info(
-            f"Ending form - No date in URL, using today: {transaction_date}"
+            "Ending form - no transaction_date in form or URL, falling back to "
+            f"today: {transaction_date} (method={request.method})"
         )
 
     # Get user entity
