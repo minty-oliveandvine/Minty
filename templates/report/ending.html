@@ -160,7 +160,7 @@ document.addEventListener('submit', function(e){
         <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
           {% if display_date %}
           <span class="px-3 py-1 rounded-full text-xs font-medium text-[#31B6BD] bg-[#CAF1F4]/50">
-            {{ transaction_date.strftime('%d %b').upper() or datenow.strftime('%d %b').upper()}}
+            {{ (transaction_date or datenow).strftime('%d %b').upper() }}
           </span>
           {% endif %}
           <h1 class="text-[#474747] text-lg font-medium">{{ entity_acronym }}</h1>
