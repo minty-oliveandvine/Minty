@@ -695,24 +695,18 @@ document.addEventListener('submit', function(e){
         return 0;
       }
       
-      // Notes calculations
-      const noteInputs = [
-        { id: 'note1000', hiddenId: 'hidden_note1000', value: 1000 },
-        { id: 'note500', hiddenId: 'hidden_note500', value: 500 },
-        { id: 'note100', hiddenId: 'hidden_note100', value: 100 },
-        { id: 'note50', hiddenId: 'hidden_note50', value: 50 },
-        { id: 'note20', hiddenId: 'hidden_note20', value: 20 },
-        { id: 'note10', hiddenId: 'hidden_note10', value: 10 }
-      ];
+      // Total every denomination this entity counts. Notes and coins are
+      // handled identically — the entity's cash_info catalog decides which
+      // exist, so there is no fixed list to fall out of sync with.
+      let totalCashCount = 0;
+      (window.DENOMINATION_FIELDS || []).forEach(field => {
+        const value = (window.DENOMINATION_VALUES || {})[field] || 0;
+        const count = getValue(field, 'hidden_' + field);
+        const total = count * value;
+        totalCashCount += total;
 
-      let totalNotes = 0;
-      noteInputs.forEach(input => {
-        const count = getValue(input.id, input.hiddenId);
-        const total = count * input.value;
-        totalNotes += total;
-        
-        // Update individual totals for all notes
-        const totalElement = document.getElementById(input.id + 'Total');
+        // Update the per-denomination total beside its input
+        const totalElement = document.getElementById(field + 'Total');
         if (totalElement) {
           totalElement.value = total.toLocaleString('en-US', {
             minimumFractionDigits: 2,
@@ -720,42 +714,6 @@ document.addEventListener('submit', function(e){
           });
         }
       });
-
-      // Coins calculations
-      const coinInputs = [
-        { id: '10coins', hiddenId: null, value: 10 }, // Read-only coin (no database table yet)
-        { id: '5coins', hiddenId: 'hidden_5coins', value: 5 },
-        { id: '2coins', hiddenId: 'hidden_2coins', value: 2 },
-        { id: '1coins', hiddenId: 'hidden_1coins', value: 1 }
-      ];
-
-      let totalCoins = 0;
-      coinInputs.forEach(input => {
-        let count = 0;
-        if (input.hiddenId) {
-          count = getValue(input.id, input.hiddenId);
-        } else {
-          // For 10coins, just read from calculator input (it's read-only)
-          const element = document.getElementById(input.id);
-          if (element) {
-            count = parseFloat(element.value) || 0;
-          }
-        }
-        const total = count * input.value;
-        totalCoins += total;
-        
-        // Update individual totals for all coins
-        const totalElement = document.getElementById(input.id + 'Total');
-        if (totalElement) {
-          totalElement.value = total.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          });
-        }
-      });
-
-      // Calculate total cash count (notes + coins)
-      const totalCashCount = totalNotes + totalCoins;
 
       // Update Cash Count Balance (physical cash count only)
       const formattedCashCountBalance = totalCashCount.toLocaleString('en-US', {
@@ -879,47 +837,17 @@ document.addEventListener('submit', function(e){
         // Sum all note and coin inputs with their actual values
         let total = 0;
         
-        // Notes calculations - multiply quantity by denomination
-        const noteInputs = [
-          { name: 'actual_cash[note1000]', value: 1000 },
-          { name: 'actual_cash[note500]', value: 500 },
-          { name: 'actual_cash[note100]', value: 100 },
-          { name: 'actual_cash[note50]', value: 50 },
-          { name: 'actual_cash[note20]', value: 20 },
-          { name: 'actual_cash[note10]', value: 10 }
-        ];
-        
-        noteInputs.forEach(input => {
-          const el = document.getElementsByName(input.name)[0];
+        // Multiply each submitted quantity by its denomination value. Reads
+        // the hidden inputs, so this matches what the server totals on POST.
+        (window.DENOMINATION_FIELDS || []).forEach(field => {
+          const value = (window.DENOMINATION_VALUES || {})[field] || 0;
+          const el = document.getElementsByName('actual_cash[' + field + ']')[0];
           if (el) {
             const quantity = parseFloat(el.value) || 0;
-            total += quantity * input.value;
+            total += quantity * value;
           }
         });
-        
-        // Coins calculations - multiply quantity by denomination
-        const coinInputs = [
-          { id: '10coins', value: 10 }, // Read-only coin (no database table yet)
-          { name: 'actual_cash[5coins]', value: 5 },
-          { name: 'actual_cash[2coins]', value: 2 },
-          { name: 'actual_cash[1coins]', value: 1 }
-        ];
-        
-        coinInputs.forEach(input => {
-          let el;
-          if (input.id) {
-            // For read-only coin (10coins) use getElementById
-            el = document.getElementById(input.id);
-          } else {
-            // For regular coins use getElementsByName
-            el = document.getElementsByName(input.name)[0];
-          }
-          if (el) {
-            const quantity = parseFloat(el.value) || 0;
-            total += quantity * input.value;
-          }
-        });
-        
+
         return total;
       })();
 
@@ -941,39 +869,9 @@ document.addEventListener('submit', function(e){
 
     // Listen for changes on all note, coin, and safe box inputs to update discrepancy amount
     function updateDiscrepancyOnInput() {
-      const noteInputs = [
-        'actual_cash[note1000]',
-        'actual_cash[note500]',
-        'actual_cash[note100]',
-        'actual_cash[note50]',
-        'actual_cash[note20]',
-        'actual_cash[note10]'
-      ];
-      const coinInputs = [
-        '10coins', // Read-only coin (no database table yet)
-        'actual_cash[5coins]',
-        'actual_cash[2coins]',
-        'actual_cash[1coins]'
-      ];
-      // Add event listeners to all note inputs
-      noteInputs.forEach(name => {
-        const el = document.getElementsByName(name)[0];
-        if (el) {
-          el.addEventListener('input', function() {
-            // Recalculate discrepancy and update UI
-            document.getElementById('discrepancyAmount').value = getDiscrepancyAmount();
-            calculateTotals();
-          });
-        }
-      });
-      // Add event listeners to all coin inputs (including read-only 10coins)
-      coinInputs.forEach(idOrName => {
-        let el;
-        if (idOrName === '10coins') {
-          el = document.getElementById(idOrName);
-        } else {
-          el = document.getElementsByName(idOrName)[0];
-        }
+      // Add event listeners to every denomination input this entity counts
+      (window.DENOMINATION_FIELDS || []).forEach(field => {
+        const el = document.getElementsByName('actual_cash[' + field + ']')[0];
         if (el) {
           el.addEventListener('input', function() {
             // Recalculate discrepancy and update UI
@@ -1039,37 +937,15 @@ document.addEventListener('submit', function(e){
 
     // Load saved cash count values on page load
     function loadSavedCashCountValues() {
-      const noteMappings = [
-        { hiddenId: 'hidden_note1000', value: 1000 },
-        { hiddenId: 'hidden_note500', value: 500 },
-        { hiddenId: 'hidden_note100', value: 100 },
-        { hiddenId: 'hidden_note50', value: 50 },
-        { hiddenId: 'hidden_note20', value: 20 },
-        { hiddenId: 'hidden_note10', value: 10 }
-      ];
-      
-      const coinMappings = [
-        { hiddenId: 'hidden_5coins', value: 5 },
-        { hiddenId: 'hidden_2coins', value: 2 },
-        { hiddenId: 'hidden_1coins', value: 1 }
-      ];
-      
       let totalCashCount = 0;
-      
-      // Calculate total from hidden inputs
-      noteMappings.forEach(mapping => {
-        const hiddenInput = document.getElementById(mapping.hiddenId);
+
+      // Calculate total from the hidden inputs for every denomination
+      (window.DENOMINATION_FIELDS || []).forEach(field => {
+        const value = (window.DENOMINATION_VALUES || {})[field] || 0;
+        const hiddenInput = document.getElementById('hidden_' + field);
         if (hiddenInput) {
           const quantity = parseFloat(hiddenInput.value) || 0;
-          totalCashCount += quantity * mapping.value;
-        }
-      });
-      
-      coinMappings.forEach(mapping => {
-        const hiddenInput = document.getElementById(mapping.hiddenId);
-        if (hiddenInput) {
-          const quantity = parseFloat(hiddenInput.value) || 0;
-          totalCashCount += quantity * mapping.value;
+          totalCashCount += quantity * value;
         }
       });
       
@@ -1291,34 +1167,21 @@ document.addEventListener('submit', function(e){
 
      // Function to validate cash count
      function validateCashCount() {
-      // Get all note and coin inputs
-      const noteInputs = [
-        'note1000', 'note500', 'note100', 'note50', 'note20', 'note10'
-      ];
-      const coinInputs = ['10coins', '5coins', '2coins', '1coins'];
-       
+      // Total the counts actually submitted. Reads the hidden inputs (the
+      // calculator writes through to them) and takes each denomination's value
+      // from the catalog rather than parsing it out of an element id, so a
+      // denomination named cash<id> counts the same as note1000.
        let totalCashCount = 0;
-       
-       // Calculate total from notes
-       noteInputs.forEach(noteId => {
-         const input = document.getElementById(noteId);
+
+       (window.DENOMINATION_FIELDS || []).forEach(field => {
+         const value = (window.DENOMINATION_VALUES || {})[field] || 0;
+         const input = document.getElementById('hidden_' + field);
          if (input) {
            const count = parseFloat(input.value) || 0;
-           const denomination = parseInt(noteId.replace('note', '')) || 0;
-           totalCashCount += count * denomination;
+           totalCashCount += count * value;
          }
        });
-       
-       // Calculate total from coins
-       coinInputs.forEach(coinId => {
-         const input = document.getElementById(coinId);
-         if (input) {
-           const count = parseFloat(input.value) || 0;
-           const denomination = parseInt(coinId.replace('coins', '')) || 0;
-           totalCashCount += count * denomination;
-         }
-       });
-       
+
        // Get safe box balance
        const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
 
@@ -1396,27 +1259,15 @@ document.addEventListener('submit', function(e){
 
     // Function to highlight all cash count fields
     function highlightCashCountFields() {
-      const noteInputs = [
-        'note1000', 'note500', 'note100', 'note50', 'note20', 'note10'
-      ];
-      const coinInputs = ['10coins', '5coins', '2coins', '1coins'];
-      
-      const allInputs = [...noteInputs, ...coinInputs];
-      allInputs.forEach(inputId => {
-        highlightFieldError(inputId);
+      (window.DENOMINATION_FIELDS || []).forEach(field => {
+        highlightFieldError(field);
       });
     }
 
     // Function to clear highlighting from all cash count fields
     function clearCashCountFields() {
-      const noteInputs = [
-        'note1000', 'note500', 'note100', 'note50', 'note20', 'note10'
-      ];
-      const coinInputs = ['10coins', '5coins', '2coins', '1coins'];
-      
-      const allInputs = [...noteInputs, ...coinInputs];
-      allInputs.forEach(inputId => {
-        clearFieldError(inputId);
+      (window.DENOMINATION_FIELDS || []).forEach(field => {
+        clearFieldError(field);
       });
     }
 
@@ -1791,23 +1642,12 @@ document.addEventListener('submit', function(e){
       // Load existing values from hidden form inputs into calculator
       // Built from the entity's denominations, not a fixed list. Notes and
       // coins share one list; the loops below treat them identically.
-      const noteMappings = (window.DENOMINATION_FIELDS || []).map(f => ({
+      const mappings = (window.DENOMINATION_FIELDS || []).map(f => ({
         hiddenId: 'hidden_' + f, calcId: f
       }));
-      const coinMappings = [];
-      
-      // Load note values (use empty string for 0 to show placeholder)
-      noteMappings.forEach(mapping => {
-        const hiddenInput = document.getElementById(mapping.hiddenId);
-        const calcInput = document.getElementById(mapping.calcId);
-        if (hiddenInput && calcInput) {
-          const value = parseFloat(hiddenInput.value) || 0;
-          calcInput.value = value > 0 ? value : '';
-        }
-      });
-      
-      // Load coin values (use empty string for 0 to show placeholder)
-      coinMappings.forEach(mapping => {
+
+      // Load saved values (use empty string for 0 to show placeholder)
+      mappings.forEach(mapping => {
         const hiddenInput = document.getElementById(mapping.hiddenId);
         const calcInput = document.getElementById(mapping.calcId);
         if (hiddenInput && calcInput) {
@@ -1834,36 +1674,19 @@ document.addEventListener('submit', function(e){
       const totalDisplay = document.getElementById('cash_count_balance');
       const actualCashBalanceInput = document.getElementById('actualCashBalance');
       
-      // Save individual note and coin values to hidden form inputs
-      // Built from the entity's denominations, not a fixed list. Notes and
-      // coins share one list; the loops below treat them identically.
-      const noteMappings = (window.DENOMINATION_FIELDS || []).map(f => ({
+      // Save each denomination's counted quantity to its hidden form input.
+      // Built from the entity's denominations, not a fixed list.
+      const mappings = (window.DENOMINATION_FIELDS || []).map(f => ({
         hiddenId: 'hidden_' + f, calcId: f
       }));
-      const coinMappings = [];
-      
-      // Save note values to hidden inputs
-      noteMappings.forEach(mapping => {
+
+      mappings.forEach(mapping => {
         const hiddenInput = document.getElementById(mapping.hiddenId);
         const calcInput = document.getElementById(mapping.calcId);
         if (hiddenInput && calcInput) {
           const value = parseFloat(calcInput.value) || 0;
           hiddenInput.value = value;
-          
-          // Trigger change event on hidden input to mark form as changed
-          const changeEvent = new Event('change', { bubbles: true });
-          hiddenInput.dispatchEvent(changeEvent);
-        }
-      });
-      
-      // Save coin values to hidden inputs
-      coinMappings.forEach(mapping => {
-        const hiddenInput = document.getElementById(mapping.hiddenId);
-        const calcInput = document.getElementById(mapping.calcId);
-        if (hiddenInput && calcInput) {
-          const value = parseFloat(calcInput.value) || 0;
-          hiddenInput.value = value;
-          
+
           // Trigger change event on hidden input to mark form as changed
           const changeEvent = new Event('change', { bubbles: true });
           hiddenInput.dispatchEvent(changeEvent);
