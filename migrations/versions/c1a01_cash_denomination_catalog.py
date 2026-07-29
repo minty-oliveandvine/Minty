@@ -93,9 +93,24 @@ def _has_column(bind, table, column):
     ).scalar() is not None
 
 
-def _has_constraint(bind, name):
+def _has_constraint(bind, name, table="cash_info"):
+    """Does this constraint exist ON THIS TABLE?
+
+    conrelid matters: constraint names are unique per table, not per database.
+    Checking conname alone matches a same-named constraint in another schema
+    (e.g. a clone this migration was already run against), so the guard would
+    skip creating it here and a later ON CONFLICT would fail with "no unique
+    or exclusion constraint matching the ON CONFLICT specification".
+    """
     return bind.execute(
-        text("SELECT 1 FROM pg_constraint WHERE conname = :name"), {"name": name}
+        text(
+            """
+            SELECT 1 FROM pg_constraint
+            WHERE conname = :name
+              AND conrelid = CAST(:table AS regclass)
+            """
+        ),
+        {"name": name, "table": f"{SCHEMA}.{table}"},
     ).scalar() is not None
 
 
