@@ -275,6 +275,12 @@ def onboarding_currencies():
     (iso_code carries currency_info.currency_code) so the wizard needs no
     change. Public (reference data only); same CORS contract as the other
     onboarding routes.
+
+    Only is_active rows are offered. currency_info is seeded with the full
+    ISO 4217 list (~170 rows); is_active narrows that to the currencies this
+    deployment actually operates in. No preselect concern here — this is the
+    new-entity wizard, so there is no existing value to preserve (unlike the
+    settings dropdowns, which keep the entity's current row regardless).
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -287,6 +293,7 @@ def onboarding_currencies():
             CurrencyInfo.currency_name,
             CurrencyInfo.currency_code,
         )
+        .filter(CurrencyInfo.is_active.is_(True))
         .order_by(CurrencyInfo.currency_name)
         .all()
     )
@@ -302,11 +309,17 @@ def onboarding_countries():
     """Country registry for the onboarding Step 1 dropdown.
 
     GET → {"countries": [{"country_id", "country_name_en", "country_code"}, ...]}
-    ordered by country_name_en. country_info's PK is the ISO alpha-2
-    country_code now, so ``country_id`` carries that code too — the key is
-    kept so the wizard's submit-the-id contract needs no change (the create /
-    update endpoints resolve codes). Public; same CORS contract as the other
-    onboarding routes.
+    country_info's PK is the ISO alpha-2 country_code now, so ``country_id``
+    carries that code too — the key is kept so the wizard's submit-the-id
+    contract needs no change (the create / update endpoints resolve codes).
+    Public; same CORS contract as the other onboarding routes.
+
+    Only is_active rows are offered. country_info is seeded with the full ISO
+    3166-1 list (~250 rows); is_active narrows that to the countries this
+    deployment operates in. Ordered by display_order then name, so the
+    common countries can be floated above the alphabetical tail by setting a
+    value below the 999 default; ties fall back to alphabetical, which is
+    what every row does while display_order is left at its default.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -318,7 +331,8 @@ def onboarding_countries():
             CountryInfo.country_code,
             CountryInfo.country_name_en,
         )
-        .order_by(CountryInfo.country_name_en)
+        .filter(CountryInfo.is_active.is_(True))
+        .order_by(CountryInfo.display_order, CountryInfo.country_name_en)
         .all()
     )
     resp = jsonify({"countries": [

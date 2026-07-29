@@ -43,6 +43,70 @@ class _PyCountryCountry(Protocol):
     name: str
 
 
+def _country_currency_choices(org):
+    """Build the country / currency dropdown lists and the entity's current
+    selection in each.
+
+    Returns ``(country_code, currencies, selected_country, selected_currency)``.
+    Keys mirror the old pycountry shape so the existing suggestion JS keeps
+    working.
+
+    Only ``is_active`` registry rows are listed: country_info and
+    currency_info are seeded with the full ISO lists (~250 countries, ~170
+    currencies) and the flag narrows them to what this deployment operates in.
+
+    The entity's CURRENT row is always included even when it has since been
+    deactivated. Without that, ``selected_*`` would fall to None and the
+    template renders the hidden country_code / currency_id inputs as
+    ``value=""`` (settings_entity.html:336-337), so the form shows a blank
+    country for an entity that has one. The save path skips empty values
+    (xero_account_mapping_post.py:44) so nothing is overwritten, but a blank
+    field reads as "unset" and invites someone to change it. Deactivating a
+    currency must not silently rewrite the entities already using it.
+
+    Countries order by display_order then name, so common ones can be floated
+    above the alphabetical tail; currency_info has no display_order column.
+    """
+    countries_q = (
+        CountryInfo.query.filter(
+            db.or_(
+                CountryInfo.is_active.is_(True),
+                CountryInfo.country_code == org.country_code,
+            )
+        )
+        .order_by(CountryInfo.display_order, CountryInfo.country_name_en)
+    )
+    country_code = [
+        {
+            "country_code": c.country_code,
+            "country_name": c.country_name_en,
+        }
+        for c in countries_q.all()
+    ]
+
+    currencies_q = (
+        CurrencyInfo.query.filter(
+            db.or_(
+                CurrencyInfo.is_active.is_(True),
+                CurrencyInfo.id == org.currency_id,
+            )
+        )
+        .order_by(CurrencyInfo.currency_name)
+    )
+    currencies = [
+        {"currency_id": c.id, "currency_name": c.currency_name}
+        for c in currencies_q.all()
+    ]
+
+    selected_country = next(
+        (c for c in country_code if c["country_code"] == org.country_code), None
+    )
+    selected_currency = next(
+        (c for c in currencies if c["currency_id"] == org.currency_id), None
+    )
+    return country_code, currencies, selected_country, selected_currency
+
+
 def _redirect_xero_mapping(entity_id: str, _from: str | None, *, return_view: str):
     """Redirect after Xero mapping POST; return_view selects integration vs petty cash page."""
     bills_kw = {"from": _from} if _from == "bills" else {}
@@ -536,26 +600,14 @@ def entity_settings(entity_id=None):
     roles = get_all_roles()
     roles = [role.name for role in roles]
 
-    # Country / currency registries: the dropdowns list these and preselect
-    # via the entity's country_code / currency_id FKs. Keys mirror the old
-    # pycountry shape so the existing suggestion JS keeps working.
-    country_code = [
-        {
-            "country_code": c.country_code,
-            "country_name": c.country_name_en,
-        }
-        for c in CountryInfo.query.order_by(CountryInfo.country_name_en).all()
-    ]
-    currencies = [
-        {"currency_id": c.id, "currency_name": c.currency_name}
-        for c in CurrencyInfo.query.order_by(CurrencyInfo.currency_name).all()
-    ]
-    selected_country = next(
-        (c for c in country_code if c["country_code"] == org.country_code), None
-    )
-    selected_currency = next(
-        (c for c in currencies if c["currency_id"] == org.currency_id), None
-    )
+    # Country / currency registries: the dropdowns list the active rows and
+    # preselect via the entity's country_code / currency_id FKs.
+    (
+        country_code,
+        currencies,
+        selected_country,
+        selected_currency,
+    ) = _country_currency_choices(org)
 
     can_edit_xero_settings = has_permission(
         current_user, Permission.XERO_SETTINGS_UPDATE, entity_id
@@ -952,25 +1004,14 @@ def entity_settings_entity(org_id):
             if org.xero_org_id and (org.period_lock_date is None or org.end_of_year_lock_date is None):
                 backfill_lock_dates_if_needed_background(org.id, current_user.access_token, org.xero_org_id)
 
-        # Country / currency registries: the dropdowns list these and
-        # preselect via the entity's country_code / currency_id FKs.
-        country_code = [
-            {
-                "country_code": c.country_code,
-                "country_name": c.country_name_en,
-            }
-            for c in CountryInfo.query.order_by(CountryInfo.country_name_en).all()
-        ]
-        currencies = [
-            {"currency_id": c.id, "currency_name": c.currency_name}
-            for c in CurrencyInfo.query.order_by(CurrencyInfo.currency_name).all()
-        ]
-        selected_country = next(
-            (c for c in country_code if c["country_code"] == org.country_code), None
-        )
-        selected_currency = next(
-            (c for c in currencies if c["currency_id"] == org.currency_id), None
-        )
+        # Country / currency registries: the dropdowns list the active rows
+        # and preselect via the entity's country_code / currency_id FKs.
+        (
+            country_code,
+            currencies,
+            selected_country,
+            selected_currency,
+        ) = _country_currency_choices(org)
 
         # Petty cash CoA list is sourced from entity_account_xero (joined to
         # account_info) — the single source of truth — instead of a live Xero
