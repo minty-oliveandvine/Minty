@@ -412,7 +412,7 @@ def delete_report(id):
 
             db.session.commit()
 
-            flash("Report deleted.", "success")
+            flash("That report's deleted.", "success")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
         entity_id = report.company
@@ -494,7 +494,7 @@ def delete_report(id):
         db.session.delete(report)
         db.session.commit()
 
-        flash("Report deleted.", "success")
+        flash("That report's deleted.", "success")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
     except IntegrityError:

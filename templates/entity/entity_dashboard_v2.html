@@ -342,7 +342,7 @@
               <div>
                 <p class="font-bold text-[#92400E] text-sm mb-1">Warning</p>
                 <p class="text-[#92400E] text-sm leading-snug">
-                  Report cannot be generated until previous dates have been completed. Please review before proceeding.
+                  Earlier reports need finishing before this one. Want to catch those up first?
                 </p>
               </div>
             </div>
@@ -847,7 +847,7 @@
         
         if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
           // Show toast notification about missing previous report
-          showToast('Please complete previous report before starting today\'s report', 'warning');
+          showToast("The previous report needs finishing before today's. Shall we do that first?", 'warning');
           return; // Stop execution, don't proceed with report creation
         }
       }
@@ -1282,7 +1282,7 @@
       const prevDeposit = window.previousDepositAmount || 0;
       if (amount > prevDeposit) {
         hideDepositModal();
-        showToast('Deposit cannot be higher than previous deposit amount', 'warning');
+        showToast("The deposit can't be higher than the previous one.", 'warning');
         return;
       }
 
@@ -1729,7 +1729,7 @@
           
           if (!hasYesterdayReport && hasStartedReporting && isGapInSequence) {
             // Show toast notification about missing previous report
-            showToast('Please complete previous report before starting today\'s report', 'warning');
+            showToast("The previous report needs finishing before today's. Shall we do that first?", 'warning');
             return; // Stop execution - don't allow starting today's report
           }
         }

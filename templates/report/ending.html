@@ -934,7 +934,7 @@ document.addEventListener('submit', function(e){
        if (reportId && pdfUrl) {
          // Show success notification after a short delay
          setTimeout(() => {
-           showNotification('Report downloaded successfully!', 'success');
+           showNotification('Your report is downloaded!', 'success');
          }, 500);
          // Navigate to PDF generation route
          window.location.href = pdfUrl;
@@ -1309,7 +1309,7 @@ document.addEventListener('submit', function(e){
          const data = await response.json();
 
          if (data.status === 'success') {
-           showNotification('Report converted to draft. Opening for editing...', 'success');
+           showNotification('Back to draft — opening it for you now.', 'success');
            const editUrl = '{{ url_for("report.report_opening") }}?entity_id=' + entityId +
              (data.transaction_date ? '&transaction_date=' + data.transaction_date : '');
            setTimeout(() => { PageTransition.navigateWithFade(editUrl); }, 500);

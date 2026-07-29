@@ -357,7 +357,7 @@
                   <span class="font-bold">Warning:</span>
                 </p>
                 <p class="text-sm text-[#B91C1C] mt-1">
-                  Are you sure you want to delete this report? This action cannot be undone.
+                  Delete this report? I can't undo that afterwards.
                 </p>
               </div>
             </div>
@@ -395,11 +395,11 @@
               <div class="ml-3">
                 <div id="republishDuplicateWarning" class="hidden">
                   <p class="text-sm text-[#B91C1C]">
-                    This report was previously published. This action may create duplicate entries in Xero.
+                    I've already published this report — republishing may create duplicates in Xero.
                   </p>
                 </div>
                 <p class="text-sm text-[#B91C1C] mt-2">
-                  Do you wish to continue?
+                  Still want to go ahead?
                 </p>
               </div>
             </div>
@@ -887,7 +887,7 @@
         this.disabled = false;
         
         // Show success message
-        showNotification('CSV export started successfully!', 'success');
+        showNotification('Your CSV export is on its way!', 'success');
       }, 1000);
     });
 
@@ -1170,7 +1170,7 @@
        
        // Show success toast notification after page loads
        setTimeout(() => {
-         showNotification('Report deleted successfully!', 'success');
+         showNotification('That report is deleted.', 'success');
        }, 500);
      }
 
@@ -1698,7 +1698,7 @@
       if (reportId && pdfUrl) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification('Report downloaded successfully!', 'success');
+          showNotification('Your report is downloaded!', 'success');
         }, 500);
         // Navigate to PDF generation route
         window.location.href = pdfUrl;
@@ -1711,7 +1711,7 @@
       if (reportId && entityId) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification('Report downloaded successfully!', 'success');
+          showNotification('Your report is downloaded!', 'success');
         }, 500);
         // Use CSV download endpoint with report_id parameter
         window.location.href = `/entity/${entityId}/reports/download-csv?report_id=${reportId}`;
@@ -1764,7 +1764,7 @@
 
         if (data.status === 'success') {
           // Show success notification
-          showNotification('Report converted to draft. Opening for editing...', 'success');
+          showNotification('Back to draft — opening it for you now.', 'success');
           
           // Navigate to opening page with the draft (now treated as draft)
           const editUrl = `{{ url_for('report.report_opening') }}?entity_id=${entityId}&transaction_date=${data.transaction_date || transactionDate}`;
