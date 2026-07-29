@@ -27,7 +27,7 @@ from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
 from models.db import (Entity, EntityFunction, EntityFunctionMap,
-                       EntityPettycashSettings, ReportDraft, SaleInfo,
+                       EntityPettycashSettings, ReportDraft, EntitySaleSetting,
                        UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
@@ -172,12 +172,12 @@ def _sales_methods_state(entity_id: str) -> dict:
     translation. Empty lists when nothing has been saved yet.
     """
     methods = (
-        SaleInfo.query.filter(
-            SaleInfo.entity_id == entity_id,
-            SaleInfo.enabled.is_(True),
-            SaleInfo.type.in_(["Electronic", "Delivery"]),
+        EntitySaleSetting.query.filter(
+            EntitySaleSetting.entity_id == entity_id,
+            EntitySaleSetting.enabled.is_(True),
+            EntitySaleSetting.type.in_(["Electronic", "Delivery"]),
         )
-        .order_by(SaleInfo.display_order.asc(), SaleInfo.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
         .all()
     )
     return {

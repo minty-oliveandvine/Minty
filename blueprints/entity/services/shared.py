@@ -9,7 +9,7 @@ from loguru import logger
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
 from models.db import (AccountInfo, EntityPettycashSettings, ReportV2,
-                       SaleInfo, UserEntity, db, tz)
+                       EntitySaleSetting, SaleInfo, UserEntity, db, tz)
 
 
 def check_user_has_entities(user_id):
@@ -115,6 +115,17 @@ def get_settings_redirect_url(entity_id):
 def create_default_entity_settings(entity_id):
     """Create default payment methods and delivery sales types for a new entity."""
     try:
+        # Cash leads the list — it is the most-used method. Its type is 'Cash',
+        # not 'Electronic': get_cash_sales_from_detail keys on that to find the
+        # figure that feeds the closing balance.
+        cash_methods = [
+            {
+                "sale_name": "Cash",
+                "value_name": "cash_sales",
+                "type": "Cash",
+                "display_order": 0,
+            },
+        ]
         electronic_methods = [
             {
                 "sale_name": "Visa",
@@ -179,32 +190,51 @@ def create_default_entity_settings(entity_id):
                 "display_order": 3,
             },
         ]
-        for method in electronic_methods:
-            db.session.add(
-                SaleInfo(
-                    entity_id=entity_id,
-                    sale_name=method["sale_name"],
-                    value_name=method["value_name"],
-                    type=method["type"],
-                    display_order=method["display_order"],
-                    enabled=True,
-                    create_date=datetime.now(tz),
-                    updated_at=datetime.now(tz),
-                )
+        # Seed from the SaleInfo catalog when it is populated, so a method
+        # added to the catalog reaches new entities without touching this list.
+        # The hardcoded lists above remain the fallback for a database where
+        # the catalog has not been seeded yet (and as the source of the
+        # per-method display_order).
+        catalog = (
+            SaleInfo.query.filter(
+                SaleInfo.entity_id.is_(None),
+                SaleInfo.is_active.is_(True),
             )
-        for method in delivery_methods:
-            db.session.add(
-                SaleInfo(
-                    entity_id=entity_id,
-                    sale_name=method["sale_name"],
-                    value_name=method["value_name"],
-                    type=method["type"],
-                    display_order=method["display_order"],
-                    enabled=True,
-                    create_date=datetime.now(tz),
-                    updated_at=datetime.now(tz),
+            .order_by(SaleInfo.type.asc(), SaleInfo.display_order.asc())
+            .all()
+        )
+
+        if catalog:
+            for method in catalog:
+                db.session.add(
+                    EntitySaleSetting(
+                        entity_id=entity_id,
+                        sale_name=method.name,
+                        # value_name stays the legacy key until every read has
+                        # moved to sale_info_id.
+                        value_name=method.legacy_column,
+                        type=method.type,
+                        sale_info_id=method.id,
+                        display_order=method.display_order,
+                        enabled=True,
+                        create_date=datetime.now(tz),
+                        updated_at=datetime.now(tz),
+                    )
                 )
-            )
+        else:
+            for method in cash_methods + electronic_methods + delivery_methods:
+                db.session.add(
+                    EntitySaleSetting(
+                        entity_id=entity_id,
+                        sale_name=method["sale_name"],
+                        value_name=method["value_name"],
+                        type=method["type"],
+                        display_order=method["display_order"],
+                        enabled=True,
+                        create_date=datetime.now(tz),
+                        updated_at=datetime.now(tz),
+                    )
+                )
         logger.info(f"Created default settings for entity {entity_id}")
     except Exception as e:
         logger.error(

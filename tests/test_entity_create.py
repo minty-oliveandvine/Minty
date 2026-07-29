@@ -60,7 +60,7 @@ def _make_user(db):
 
 
 def test_normal_user_can_create_entity_and_becomes_entity_admin(app, client, db_session):
-    from models.db import Entity, SaleInfo, User, UserEntity
+    from models.db import Entity, EntitySaleSetting, User, UserEntity
 
     with app.app_context():
         creator = _make_user(db_session)
@@ -94,4 +94,4 @@ def test_normal_user_can_create_entity_and_becomes_entity_admin(app, client, db_
         assert membership.role == "admin"
         assert refreshed_creator is not None
         assert not hasattr(refreshed_creator, "company")
-        assert SaleInfo.query.filter_by(entity_id=created_entity.id).count() > 0
+        assert EntitySaleSetting.query.filter_by(entity_id=created_entity.id).count() > 0

@@ -15,7 +15,7 @@ from blueprints.report.services.shared import (
     safe_float, update_draft_progress, update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportDraft, ReportSaleDetail, ReportV2,
-                       SaleInfo, db, tz)
+                       EntitySaleSetting, db, tz)
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -23,29 +23,29 @@ from services.permission_policy import Permission, has_permission
 def get_unique_sale_info_for_entity(entity_id):
     """
     Get unique payment methods for an entity, preventing duplicates.
-    Returns: list of SaleInfo objects ordered by display_order (matches Settings page).
+    Returns: list of EntitySaleSetting objects ordered by display_order (matches Settings page).
     """
     payment_methods_subquery = (
         db.session.query(
-            SaleInfo.value_name,
-            db.func.max(SaleInfo.sale_id).label('max_sale_id')
+            EntitySaleSetting.value_name,
+            db.func.max(EntitySaleSetting.sale_id).label('max_sale_id')
         )
         .filter(
-            SaleInfo.entity_id == entity_id,
-            SaleInfo.value_name != "deliveroo_sales",
-            SaleInfo.enabled == True
+            EntitySaleSetting.entity_id == entity_id,
+            EntitySaleSetting.value_name != "deliveroo_sales",
+            EntitySaleSetting.enabled == True
         )
-        .group_by(SaleInfo.value_name)
+        .group_by(EntitySaleSetting.value_name)
         .subquery()
     )
     
     payment_methods = (
-        db.session.query(SaleInfo)
+        db.session.query(EntitySaleSetting)
         .join(
             payment_methods_subquery,
-            SaleInfo.sale_id == payment_methods_subquery.c.max_sale_id
+            EntitySaleSetting.sale_id == payment_methods_subquery.c.max_sale_id
         )
-        .order_by(SaleInfo.display_order.asc(), SaleInfo.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
         .all()
     )
     
@@ -100,16 +100,6 @@ def report_sale(id=None):
                 Report.cash_addition,
                 Report.adjusted_opening_balance,
                 Report.cash_sales,
-                Report.visa_sales,
-                Report.alipay_sales,
-                Report.wechat_sales,
-                Report.master_sales,
-                Report.unionpay_sales,
-                Report.amex_sales,
-                Report.octopus_sales,
-                Report.foodpanda_sales,
-                Report.keeta_sales,
-                Report.openrice_sales,
                 Report.shop_sales,
                 Report.delivery_sales,
                 Report.total_sales,
@@ -162,6 +152,12 @@ def report_sale(id=None):
         return render_template(
             "report/sales.html",
             datenow=datetime.now(),
+            # Per-method amounts keyed by legacy value_name, sourced from
+            # report_sale_detail via the sale_info rows attached above.
+            sales_amounts={
+                s.value_name: (s.amount or 0)
+                for s in sale_info if s.value_name
+            },
             org=entity,
             current_draft=report,
             header_publishing_status=header_publishing_status_for(report_id=(report.id if report else None)),
@@ -192,16 +188,6 @@ def report_sale(id=None):
                 Report.cash_addition,
                 Report.adjusted_opening_balance,
                 Report.cash_sales,
-                Report.visa_sales,
-                Report.alipay_sales,
-                Report.wechat_sales,
-                Report.master_sales,
-                Report.unionpay_sales,
-                Report.amex_sales,
-                Report.octopus_sales,
-                Report.foodpanda_sales,
-                Report.keeta_sales,
-                Report.openrice_sales,
                 Report.shop_sales,
                 Report.delivery_sales,
                 Report.total_sales,
@@ -235,6 +221,12 @@ def report_sale(id=None):
         return render_template(
             "report/sales.html",
             datenow=datetime.now(),
+            # Per-method amounts keyed by legacy value_name, sourced from
+            # report_sale_detail via the sale_info rows attached above.
+            sales_amounts={
+                s.value_name: (s.amount or 0)
+                for s in sale_info if s.value_name
+            },
             org=entity,
             current_draft=report,
             header_publishing_status=header_publishing_status_for(report_id=(report.id if report else None)),
@@ -340,29 +332,10 @@ def report_sale(id=None):
                 cash_sales = safe_float(shop_sales_data.get("cash", 0))
 
                 # Update draft fields from parsed data
+                # cash_sales stays a column; per-method amounts are written as
+                # report_sale_detail rows below, so a method added to the
+                # sales_method catalog needs no change here.
                 report_draft.cash_sales = cash_sales
-                report_draft.visa_sales = safe_float(shop_sales_data.get("visa", 0))
-                report_draft.master_sales = safe_float(shop_sales_data.get("master", 0))
-                report_draft.unionpay_sales = safe_float(
-                    shop_sales_data.get("unionpay", 0)
-                )
-                report_draft.alipay_sales = safe_float(shop_sales_data.get("alipay", 0))
-                report_draft.wechat_sales = safe_float(shop_sales_data.get("wechat", 0))
-                report_draft.amex_sales = safe_float(shop_sales_data.get("amex", 0))
-                report_draft.octopus_sales = safe_float(
-                    shop_sales_data.get("octopus", 0)
-                )
-
-                report_draft.deliveroo_sales = 0.0
-                report_draft.foodpanda_sales = safe_float(
-                    delivery_sales_data.get("foodpanda", 0)
-                )
-                report_draft.keeta_sales = safe_float(
-                    delivery_sales_data.get("keeta", 0)
-                )
-                report_draft.openrice_sales = safe_float(
-                    delivery_sales_data.get("openrice", 0)
-                )
 
                 # Calculate aggregates from form data (will be recalculated
                 # from report_sale_detail after records are created)
@@ -412,17 +385,12 @@ def report_sale(id=None):
                         logger.info(
                             f"Edit mode - updating Report {existing_report.id} with sales data"
                         )
+                        # Per-method amounts are NOT copied: the draft and the
+                        # report share an id (ending.py creates the revert draft
+                        # with id=full_report.id), so both already resolve the
+                        # same report_sale_detail rows. Only cash and the
+                        # aggregate caches are stored per-row.
                         existing_report.cash_sales = report_draft.cash_sales
-                        existing_report.visa_sales = report_draft.visa_sales
-                        existing_report.master_sales = report_draft.master_sales
-                        existing_report.unionpay_sales = report_draft.unionpay_sales
-                        existing_report.alipay_sales = report_draft.alipay_sales
-                        existing_report.wechat_sales = report_draft.wechat_sales
-                        existing_report.amex_sales = report_draft.amex_sales
-                        existing_report.octopus_sales = report_draft.octopus_sales
-                        existing_report.foodpanda_sales = report_draft.foodpanda_sales
-                        existing_report.keeta_sales = report_draft.keeta_sales
-                        existing_report.openrice_sales = report_draft.openrice_sales
                         existing_report.shop_sales = report_draft.shop_sales
                         existing_report.delivery_sales = report_draft.delivery_sales
                         existing_report.total_sales = report_draft.total_sales
@@ -534,6 +502,9 @@ def report_sale(id=None):
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_v2.report_id,
+                            # Catalog link, so the row stays self-describing
+                            # even if this sale_info row is later removed.
+                            sale_info_id=sale.sale_info_id,
                             type=sale.type,
                             amount=amount,
                             create_at=datetime.now(),
@@ -586,35 +557,9 @@ def report_sale(id=None):
                     cash_sales = safe_float(shop_sales_data.get("cash", 0))
 
                     # Update draft fields from parsed data
+                    # cash_sales stays a column; per-method amounts become
+                    # report_sale_detail rows below.
                     report_draft.cash_sales = cash_sales
-                    report_draft.visa_sales = safe_float(shop_sales_data.get("visa", 0))
-                    report_draft.master_sales = safe_float(
-                        shop_sales_data.get("master", 0)
-                    )
-                    report_draft.unionpay_sales = safe_float(
-                        shop_sales_data.get("unionpay", 0)
-                    )
-                    report_draft.alipay_sales = safe_float(
-                        shop_sales_data.get("alipay", 0)
-                    )
-                    report_draft.wechat_sales = safe_float(
-                        shop_sales_data.get("wechat", 0)
-                    )
-                    report_draft.amex_sales = safe_float(shop_sales_data.get("amex", 0))
-                    report_draft.octopus_sales = safe_float(
-                        shop_sales_data.get("octopus", 0)
-                    )
-
-                    report_draft.deliveroo_sales = 0.0
-                    report_draft.foodpanda_sales = safe_float(
-                        delivery_sales_data.get("foodpanda", 0)
-                    )
-                    report_draft.keeta_sales = safe_float(
-                        delivery_sales_data.get("keeta", 0)
-                    )
-                    report_draft.openrice_sales = safe_float(
-                        delivery_sales_data.get("openrice", 0)
-                    )
 
                     # Calculate aggregates from form data (will be recalculated
                     # from report_sale_detail after records are created)
@@ -738,6 +683,9 @@ def report_sale(id=None):
                             report_sale_detail = ReportSaleDetail(
                                 sale_id=sale.sale_id,
                                 report_id=report_v2.report_id,
+                                # Catalog link, so the row stays self-describing
+                                # even if this sale_info row is later removed.
+                                sale_info_id=sale.sale_info_id,
                                 type=sale.type,
                                 amount=amount,
                                 create_at=datetime.now(),
@@ -905,6 +853,9 @@ def report_sale(id=None):
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_v2.report_id,
+                            # Catalog link, so the row stays self-describing
+                            # even if this sale_info row is later removed.
+                            sale_info_id=sale.sale_info_id,
                             type=sale.type,
                             amount=amount,
                             create_at=datetime.now(),
@@ -1061,31 +1012,30 @@ def report_sale(id=None):
             }
 
             # Create draft report data for template
-            draft_report = {
-                "cash_sales": existing_draft.cash_sales or 0.0,
-                "visa_sales": existing_draft.visa_sales or 0.0,
-                "master_sales": existing_draft.master_sales or 0.0,
-                "unionpay_sales": existing_draft.unionpay_sales or 0.0,
-                "alipay_sales": existing_draft.alipay_sales or 0.0,
-                "wechat_sales": existing_draft.wechat_sales or 0.0,
-                "amex_sales": existing_draft.amex_sales or 0.0,
-                "octopus_sales": existing_draft.octopus_sales or 0.0,
-                "deliveroo_sales": 0.0,
-                "foodpanda_sales": existing_draft.foodpanda_sales or 0.0,
-                "keeta_sales": existing_draft.keeta_sales or 0.0,
-                "openrice_sales": existing_draft.openrice_sales or 0.0,
-            }
+            # Per-method amounts come from report_sale_detail, keyed by the
+            # legacy value_name so the template contract is unchanged. Adding a
+            # method to the catalog surfaces it here automatically.
+            draft_report = {"cash_sales": existing_draft.cash_sales or 0.0}
+            for _sale in get_unique_sale_info_for_entity(entity_id):
+                if not _sale.value_name or _sale.value_name == "cash_sales":
+                    continue
+                _detail = ReportSaleDetail.query.filter_by(
+                    report_id=existing_draft.id, sale_id=_sale.sale_id
+                ).first()
+                draft_report[_sale.value_name] = (
+                    _detail.amount if _detail and _detail.amount else 0.0
+                )
 
             report_sale_detail = (
                 db.session.query(
                     ReportSaleDetail.sale_id,
                     ReportSaleDetail.amount,
                     ReportSaleDetail.type,
-                    SaleInfo.sale_name,
-                    SaleInfo.value_name,
+                    EntitySaleSetting.sale_name,
+                    EntitySaleSetting.value_name,
                 )
                 .join(
-                    SaleInfo, SaleInfo.sale_id == ReportSaleDetail.sale_id, isouter=True
+                    EntitySaleSetting, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id, isouter=True
                 )
                 .filter(ReportSaleDetail.report_id == existing_draft.id)
                 .order_by(ReportSaleDetail.create_at.desc())
@@ -1171,6 +1121,7 @@ def report_sale(id=None):
 
         return render_template(
             "report/sales.html",
+            sales_amounts=draft_report,
             org=org,
             is_draft=is_draft,
             draft_id=draft_id,
