@@ -317,7 +317,12 @@ def report_expense(id=None):
             # Get the current draft for this user instead of production report
             # We should get the transaction_date from the current session or
             # use today
-            selected_date = request.form.get("transaction_date")
+            # Read the URL too, not just the form: the step forms post to an
+            # action URL carrying transaction_date, so a blank hidden field
+            # silently fell back to today and the draft lookup below then
+            # missed the day the user was actually working on.
+            selected_date = request.form.get(
+                "transaction_date") or request.args.get("transaction_date")
             if selected_date:
                 try:
                     transaction_date = datetime.strptime(
@@ -334,7 +339,8 @@ def report_expense(id=None):
             else:
                 transaction_date = datetime.now().date()
                 logger.info(
-                    f"Expenses form - No transaction date in form, using today: {transaction_date}"
+                    "Expenses form - no transaction_date in form or URL, "
+                    f"falling back to today: {transaction_date}"
                 )
 
             current_draft = (
