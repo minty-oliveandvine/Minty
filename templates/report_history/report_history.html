@@ -1080,7 +1080,7 @@
             if (entityId && reportDate) {
               const resumeUrl = `/report/resume?entity_id=${entityId}&transaction_date=${reportDate}`;
               console.log('Resuming draft report at:', resumeUrl);
-              showNotification(`Resuming draft report from ${reportDate}...`, 'success');
+              showNotification(`Picking your ${reportDate} draft back up...`, 'success');
               PageTransition.navigateWithFade(resumeUrl);
             } else {
               console.error('Missing resume values:', { entityId: !!entityId, reportDate: !!reportDate });
@@ -1096,7 +1096,7 @@
           if (reportId && entityId) {
             const url = `/entity/${entityId}/ending/${reportId}`;
             console.log('Navigating to:', url);
-            showNotification(`Opening report ${index + 1} details...`, 'success');
+            showNotification('Opening that report for you...', 'success');
             PageTransition.navigateWithFade(url);
           } else {
             console.error('Missing values:', { reportId: !!reportId, entityId: !!entityId });
@@ -1788,7 +1788,7 @@
       if (reportId) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification(`Report ${index + 1} download started successfully!`, 'success');
+          showNotification('Your report is on its way!', 'success');
         }, 500);
         window.location.href = `/report/download/${reportId}`;
       } else {
