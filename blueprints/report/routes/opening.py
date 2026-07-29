@@ -79,6 +79,18 @@ def report_opening(id=None, entity_id=None):
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:
+        # Diagnostic: pairs with the ENTITY-TRACE lines in ending.py. The
+        # referrer tells us which page redirected here without an entity.
+        logger.error(
+            "ENTITY-TRACE report_opening BOUNCE - method=%s path=%s id=%s "
+            "args=%r form_keys=%r referrer=%r",
+            request.method,
+            request.path,
+            id,
+            dict(request.args),
+            list(request.form.keys()),
+            request.referrer,
+        )
         flash("I need to know which entity we're working with first!", "danger")
         return redirect(url_for("entity.entity_list"))
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
