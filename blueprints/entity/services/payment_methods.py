@@ -6,7 +6,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from models.db import SaleInfo, SalesMethod, UserEntity, db
+from models.db import EntitySaleSetting, SaleInfo, UserEntity, db
 from services.permission_policy import Permission, has_permission_by_user_id
 
 
@@ -39,25 +39,25 @@ def list_payment_methods(user_id, entity_id):
     # Keep the most recently created one if duplicates exist
     payment_methods_subquery = (
         db.session.query(
-            SaleInfo.value_name,
-            db.func.max(SaleInfo.sale_id).label('max_sale_id')
+            EntitySaleSetting.value_name,
+            db.func.max(EntitySaleSetting.sale_id).label('max_sale_id')
         )
         .filter(
-            SaleInfo.entity_id == entity_id,
-            SaleInfo.value_name != "deliveroo_sales",
-            SaleInfo.enabled == True
+            EntitySaleSetting.entity_id == entity_id,
+            EntitySaleSetting.value_name != "deliveroo_sales",
+            EntitySaleSetting.enabled == True
         )
-        .group_by(SaleInfo.value_name)
+        .group_by(EntitySaleSetting.value_name)
         .subquery()
     )
     
     payment_methods = (
-        db.session.query(SaleInfo)
+        db.session.query(EntitySaleSetting)
         .join(
             payment_methods_subquery,
-            SaleInfo.sale_id == payment_methods_subquery.c.max_sale_id
+            EntitySaleSetting.sale_id == payment_methods_subquery.c.max_sale_id
         )
-        .order_by(SaleInfo.display_order.asc(), SaleInfo.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
         .all()
     )
 
@@ -95,7 +95,7 @@ def add_payment_method(user_id, entity_id, data):
     )
 
     # Check if there's already an enabled payment method with same value_name
-    existing_enabled = SaleInfo.query.filter_by(
+    existing_enabled = EntitySaleSetting.query.filter_by(
         entity_id=entity_id,
         value_name=data["value_name"],
         enabled=True
@@ -119,7 +119,7 @@ def add_payment_method(user_id, entity_id, data):
         }, 200
 
     # Check for disabled record to re-enable
-    existing_disabled = SaleInfo.query.filter_by(
+    existing_disabled = EntitySaleSetting.query.filter_by(
         entity_id=entity_id,
         value_name=data["value_name"],
         enabled=False
@@ -144,29 +144,29 @@ def add_payment_method(user_id, entity_id, data):
 
     # Create new method only if no existing record found
     current_max_order = (
-        db.session.query(db.func.max(SaleInfo.display_order))
+        db.session.query(db.func.max(EntitySaleSetting.display_order))
         .filter_by(entity_id=entity_id)
         .scalar()
     )
 
     max_order = int(current_max_order or 0)
     
-    # Resolve the catalog row: by the caller's explicit sales_method_id, else
+    # Resolve the catalog row: by the caller's explicit sale_info_id, else
     # by the legacy value_name, else mint a per-entity row for a user-invented
     # method. Without this the new row would carry a NULL catalog link.
     catalog_row = None
-    if data.get("sales_method_id"):
-        catalog_row = SalesMethod.query.filter_by(id=data["sales_method_id"]).first()
+    if data.get("sale_info_id"):
+        catalog_row = SaleInfo.query.filter_by(id=data["sale_info_id"]).first()
     if catalog_row is None:
-        catalog_row = SalesMethod.resolve(
+        catalog_row = SaleInfo.resolve(
             entity_id, legacy_column=data["value_name"]
         )
     if catalog_row is None:
-        catalog_row = SalesMethod.ensure_custom(
+        catalog_row = SaleInfo.ensure_custom(
             entity_id, data["name"], method_type
         )
 
-    new_method = SaleInfo(
+    new_method = EntitySaleSetting(
         entity_id=entity_id,
         sale_name=data["name"],
         value_name=data["value_name"],
@@ -197,7 +197,7 @@ def update_payment_method(user_id, entity_id, method_id, data):
     if not data:
         return {"error": "No data provided"}, 400
 
-    payment_method = SaleInfo.query.filter_by(
+    payment_method = EntitySaleSetting.query.filter_by(
         sale_id=method_id, entity_id=entity_id
     ).first()
     if not payment_method:
@@ -230,7 +230,7 @@ def delete_payment_method(user_id, entity_id, method_id):
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_DELETE, entity_id):
         return {"error": "Access denied"}, 403
 
-    payment_method = SaleInfo.query.filter_by(
+    payment_method = EntitySaleSetting.query.filter_by(
         sale_id=method_id, entity_id=entity_id
     ).first()
     if not payment_method:
@@ -262,12 +262,12 @@ def list_sales_methods_grouped(user_id, entity_id):
         return {"error": "Access denied"}, 403
 
     methods = (
-        SaleInfo.query.filter(
-            SaleInfo.entity_id == entity_id,
-            SaleInfo.enabled.is_(True),
-            SaleInfo.type.in_(["Electronic", "Delivery"]),
+        EntitySaleSetting.query.filter(
+            EntitySaleSetting.entity_id == entity_id,
+            EntitySaleSetting.enabled.is_(True),
+            EntitySaleSetting.type.in_(["Electronic", "Delivery"]),
         )
-        .order_by(SaleInfo.display_order.asc(), SaleInfo.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
         .all()
     )
 
@@ -305,9 +305,9 @@ def replace_sales_methods(user_id, entity_id, electronic, delivery):
 
     desired = {"Electronic": _clean(electronic), "Delivery": _clean(delivery)}
 
-    existing = SaleInfo.query.filter(
-        SaleInfo.entity_id == entity_id,
-        SaleInfo.type.in_(["Electronic", "Delivery"]),
+    existing = EntitySaleSetting.query.filter(
+        EntitySaleSetting.entity_id == entity_id,
+        EntitySaleSetting.type.in_(["Electronic", "Delivery"]),
     ).all()
     by_type_name = {
         (m.type, (m.sale_name or "").strip().lower()): m for m in existing
@@ -332,12 +332,12 @@ def replace_sales_methods(user_id, entity_id, electronic, delivery):
                 # (e.g. "Tap & Go" -> 'tap_&_go_sales') — the catalog link is
                 # what makes such a method storable at all, via
                 # report_sale_detail rather than a physical column.
-                catalog_row = SalesMethod.resolve(entity_id, name=name)
+                catalog_row = SaleInfo.resolve(entity_id, name=name)
                 if catalog_row is None:
-                    catalog_row = SalesMethod.ensure_custom(entity_id, name, mtype)
+                    catalog_row = SaleInfo.ensure_custom(entity_id, name, mtype)
 
                 db.session.add(
-                    SaleInfo(
+                    EntitySaleSetting(
                         entity_id=entity_id,
                         sale_name=name,
                         value_name=(
@@ -374,7 +374,7 @@ def reorder_payment_methods(user_id, entity_id, method_ids):
         return {"error": "method_ids array is required"}, 400
 
     for index, method_id in enumerate(method_ids):
-        payment_method = SaleInfo.query.filter_by(
+        payment_method = EntitySaleSetting.query.filter_by(
             sale_id=method_id, entity_id=entity_id
         ).first()
         if payment_method:

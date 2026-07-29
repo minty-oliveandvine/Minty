@@ -17,8 +17,8 @@ from blueprints.entity.models.entity import Entity  # noqa: E402
 from blueprints.entity.models.entity_cash_detail_v2 import EntityCashDetailV2  # noqa: E402
 from blueprints.entity.models.entity_function import EntityFunction, EntityFunctionMap  # noqa: E402  (Django-owned tables; read-only mirror)
 from blueprints.entity.models.entity_pettycash_settings import EntityPettycashSettings  # noqa: E402
+from blueprints.entity.models.entity_sale_setting import EntitySaleSetting  # noqa: E402
 from blueprints.entity.models.sale_info import SaleInfo  # noqa: E402
-from blueprints.entity.models.sales_method import SalesMethod  # noqa: E402
 from blueprints.entity.models.user_entity import UserEntity  # noqa: E402
 from blueprints.report.models.report import Report  # noqa: E402
 from blueprints.report.models.report_cash_count_draft import ReportCashCountDraft  # noqa: E402
@@ -58,8 +58,8 @@ __all__ = [
     "EntityFunction",
     "EntityFunctionMap",
     "EntityPettycashSettings",
+    "EntitySaleSetting",
     "SaleInfo",
-    "SalesMethod",
     "Report",
     "ReportDraft",
     "ShopExpense",

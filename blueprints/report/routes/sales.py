@@ -15,7 +15,7 @@ from blueprints.report.services.shared import (
     safe_float, update_draft_progress, update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportDraft, ReportSaleDetail, ReportV2,
-                       SaleInfo, db, tz)
+                       EntitySaleSetting, db, tz)
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -23,29 +23,29 @@ from services.permission_policy import Permission, has_permission
 def get_unique_sale_info_for_entity(entity_id):
     """
     Get unique payment methods for an entity, preventing duplicates.
-    Returns: list of SaleInfo objects ordered by display_order (matches Settings page).
+    Returns: list of EntitySaleSetting objects ordered by display_order (matches Settings page).
     """
     payment_methods_subquery = (
         db.session.query(
-            SaleInfo.value_name,
-            db.func.max(SaleInfo.sale_id).label('max_sale_id')
+            EntitySaleSetting.value_name,
+            db.func.max(EntitySaleSetting.sale_id).label('max_sale_id')
         )
         .filter(
-            SaleInfo.entity_id == entity_id,
-            SaleInfo.value_name != "deliveroo_sales",
-            SaleInfo.enabled == True
+            EntitySaleSetting.entity_id == entity_id,
+            EntitySaleSetting.value_name != "deliveroo_sales",
+            EntitySaleSetting.enabled == True
         )
-        .group_by(SaleInfo.value_name)
+        .group_by(EntitySaleSetting.value_name)
         .subquery()
     )
     
     payment_methods = (
-        db.session.query(SaleInfo)
+        db.session.query(EntitySaleSetting)
         .join(
             payment_methods_subquery,
-            SaleInfo.sale_id == payment_methods_subquery.c.max_sale_id
+            EntitySaleSetting.sale_id == payment_methods_subquery.c.max_sale_id
         )
-        .order_by(SaleInfo.display_order.asc(), SaleInfo.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
         .all()
     )
     
@@ -504,7 +504,7 @@ def report_sale(id=None):
                             report_id=report_v2.report_id,
                             # Catalog link, so the row stays self-describing
                             # even if this sale_info row is later removed.
-                            sales_method_id=sale.sale_info_id,
+                            sale_info_id=sale.sale_info_id,
                             type=sale.type,
                             amount=amount,
                             create_at=datetime.now(),
@@ -685,7 +685,7 @@ def report_sale(id=None):
                                 report_id=report_v2.report_id,
                                 # Catalog link, so the row stays self-describing
                                 # even if this sale_info row is later removed.
-                                sales_method_id=sale.sale_info_id,
+                                sale_info_id=sale.sale_info_id,
                                 type=sale.type,
                                 amount=amount,
                                 create_at=datetime.now(),
@@ -855,7 +855,7 @@ def report_sale(id=None):
                             report_id=report_v2.report_id,
                             # Catalog link, so the row stays self-describing
                             # even if this sale_info row is later removed.
-                            sales_method_id=sale.sale_info_id,
+                            sale_info_id=sale.sale_info_id,
                             type=sale.type,
                             amount=amount,
                             create_at=datetime.now(),
@@ -1031,11 +1031,11 @@ def report_sale(id=None):
                     ReportSaleDetail.sale_id,
                     ReportSaleDetail.amount,
                     ReportSaleDetail.type,
-                    SaleInfo.sale_name,
-                    SaleInfo.value_name,
+                    EntitySaleSetting.sale_name,
+                    EntitySaleSetting.value_name,
                 )
                 .join(
-                    SaleInfo, SaleInfo.sale_id == ReportSaleDetail.sale_id, isouter=True
+                    EntitySaleSetting, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id, isouter=True
                 )
                 .filter(ReportSaleDetail.report_id == existing_draft.id)
                 .order_by(ReportSaleDetail.create_at.desc())

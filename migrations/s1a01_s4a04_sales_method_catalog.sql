@@ -7,9 +7,15 @@
 --    entity_sale_setting  per-entity selection   (PK `sale_id`, has `sale_name`)
 --    report_sale_detail   per-report amounts     (unchanged)
 --
---  Matching Python classes — note the names do NOT track the tables:
---    SalesMethod -> sale_info
---    SaleInfo    -> entity_sale_setting
+--  Matching Python classes (class, file and table all agree):
+--    SaleInfo           -> sale_info            (blueprints/entity/models/sale_info.py)
+--    EntitySaleSetting  -> entity_sale_setting  (blueprints/entity/models/entity_sale_setting.py)
+--    ReportSaleDetail   -> report_sale_detail
+--
+--  FK columns, both named after the table they point at:
+--    entity_sale_setting.sale_info_id -> sale_info.id
+--    report_sale_detail.sale_info_id  -> sale_info.id
+--    report_sale_detail.sale_id       -> entity_sale_setting.sale_id
 --
 --  Run this INSTEAD of s6a06_rename_sale_tables.sql. That file exists only
 --  for pettycashv2_clone, which was migrated under the old names and renamed
@@ -219,30 +225,30 @@ WHERE sm.entity_id = si.entity_id
 -- ---------------------------------------------------------------------
 
 ALTER TABLE pettycashv2.report_sale_detail
-    ADD COLUMN IF NOT EXISTS sales_method_id varchar(36);
+    ADD COLUMN IF NOT EXISTS sale_info_id varchar(36);
 
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_report_sale_detail_sales_method'
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_report_sale_detail_sale_info'
     ) THEN
         ALTER TABLE pettycashv2.report_sale_detail
-            ADD CONSTRAINT fk_report_sale_detail_sales_method
-            FOREIGN KEY (sales_method_id)
+            ADD CONSTRAINT fk_report_sale_detail_sale_info
+            FOREIGN KEY (sale_info_id)
             REFERENCES pettycashv2.sale_info(id)
             ON DELETE RESTRICT;
     END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS ix_report_sale_detail_sales_method_id
-    ON pettycashv2.report_sale_detail (sales_method_id);
+CREATE INDEX IF NOT EXISTS ix_report_sale_detail_sale_info_id
+    ON pettycashv2.report_sale_detail (sale_info_id);
 
 UPDATE pettycashv2.report_sale_detail rsd
-SET sales_method_id = si.sale_info_id
+SET sale_info_id = si.sale_info_id
 FROM pettycashv2.entity_sale_setting si
 WHERE si.sale_id = rsd.sale_id
   AND si.sale_info_id IS NOT NULL
-  AND rsd.sales_method_id IS NULL;
+  AND rsd.sale_info_id IS NULL;
 
 
 -- ---------------------------------------------------------------------
@@ -258,7 +264,7 @@ WHERE si.sale_id = rsd.sale_id
 -- Excluded: cash_sales (separate concept, keeps its column) and
 -- shop_sales / delivery_sales / total_sales (aggregates, not methods).
 --
--- sale_id may be NULL on inserted rows: sales_method_id is the authoritative
+-- sale_id may be NULL on inserted rows: sale_info_id is the authoritative
 -- pointer, sale_id is filled opportunistically where a sale_info row still
 -- exists. MIN(sale_id) makes duplicate sale_info rows resolve deterministically
 -- so they cannot multiply inserted rows.
@@ -286,7 +292,7 @@ WITH src AS (
       )
 )
 INSERT INTO pettycashv2.report_sale_detail
-    (id, sale_id, report_id, sales_method_id, type, amount, create_at)
+    (id, sale_id, report_id, sale_info_id, type, amount, create_at)
 SELECT
     gen_random_uuid()::text,
     (SELECT MIN(si.sale_id) FROM pettycashv2.entity_sale_setting si
@@ -319,7 +325,7 @@ WITH src AS (
       )
 )
 INSERT INTO pettycashv2.report_sale_detail
-    (id, sale_id, report_id, sales_method_id, type, amount, create_at)
+    (id, sale_id, report_id, sale_info_id, type, amount, create_at)
 SELECT
     gen_random_uuid()::text,
     (SELECT MIN(si.sale_id) FROM pettycashv2.entity_sale_setting si
@@ -342,12 +348,12 @@ FROM pettycashv2.sale_info GROUP BY 1 ORDER BY 2 DESC;
 
 -- B. Any sale_info row left unlinked? Expect 0.
 SELECT count(*) AS unlinked_entity_sale_setting
-FROM pettycashv2.entity_sale_setting WHERE sales_method_id IS NULL;
+FROM pettycashv2.entity_sale_setting WHERE sale_info_id IS NULL;
 
 -- C. Any detail row left unlinked? Non-zero here means its sale_info row was
 --    hard-deleted before this ran — pre-existing loss, not caused by this.
 SELECT count(*) AS unlinked_detail
-FROM pettycashv2.report_sale_detail WHERE sales_method_id IS NULL;
+FROM pettycashv2.report_sale_detail WHERE sale_info_id IS NULL;
 
 -- D. *** THE GATE FOR STEP 5 ***
 --     Columns vs detail rows must agree to the cent. MUST RETURN ZERO ROWS
@@ -376,8 +382,8 @@ ORDER BY abs(c.s - d.s) DESC;
 -- =====================================================================
 -- BEGIN;
 -- DELETE FROM pettycashv2.report_sale_detail
---  WHERE sales_method_id IS NOT NULL AND sale_id IS NULL;  -- backfill artefacts only
--- ALTER TABLE pettycashv2.report_sale_detail DROP COLUMN IF EXISTS sales_method_id;
--- ALTER TABLE pettycashv2.entity_sale_setting          DROP COLUMN IF EXISTS sales_method_id;
+--  WHERE sale_info_id IS NOT NULL AND sale_id IS NULL;  -- backfill artefacts only
+-- ALTER TABLE pettycashv2.report_sale_detail DROP COLUMN IF EXISTS sale_info_id;
+-- ALTER TABLE pettycashv2.entity_sale_setting  DROP COLUMN IF EXISTS sale_info_id;
 -- DROP TABLE IF EXISTS pettycashv2.sale_info;
 -- COMMIT;

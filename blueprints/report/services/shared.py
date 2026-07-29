@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from models.db import (Report, ReportDraft, ReportSaleDetail, ReportV2,
-                       SaleInfo, SalesMethod, ShopExpense, db, tz)
+                       EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 
@@ -471,8 +471,8 @@ def get_cash_sales_from_detail(report_id, fallback_value=0.0):
     logger.info(
         f"Getting cash sales from report_sale_detail for report {report_id}")
     report_sale_details = (
-        db.session.query(ReportSaleDetail, SaleInfo)
-        .join(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+        db.session.query(ReportSaleDetail, EntitySaleSetting)
+        .join(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
@@ -502,14 +502,14 @@ def calculate_sales_from_report_sale_detail(report_draft_id):
     )
     sales_data = (
         db.session.query(
-            SaleInfo.value_name,
-            SaleInfo.type,
+            EntitySaleSetting.value_name,
+            EntitySaleSetting.type,
             db.func.sum(ReportSaleDetail.amount).label("total_amount"),
         )
-        .join(ReportSaleDetail, SaleInfo.sale_id == ReportSaleDetail.sale_id)
+        .join(ReportSaleDetail, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id)
         .join(ReportDraft, ReportDraft.id == ReportSaleDetail.report_id)
         .filter(ReportSaleDetail.report_id == report_draft_id)
-        .group_by(SaleInfo.value_name, SaleInfo.type)
+        .group_by(EntitySaleSetting.value_name, EntitySaleSetting.type)
         .all()
     )
     report_draft = ReportDraft.query.get(report_draft_id)
@@ -577,11 +577,11 @@ def sum_sales_by_type(report_id):
         db.session.query(
             ReportSaleDetail.amount,
             ReportSaleDetail.type,
+            EntitySaleSetting.type,
             SaleInfo.type,
-            SalesMethod.type,
         )
-        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
-        .outerjoin(SalesMethod, ReportSaleDetail.sales_method_id == SalesMethod.id)
+        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_info_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
@@ -615,7 +615,7 @@ def write_sales_detail_rows(
             synchronize_session=False
         )
 
-    sale_rows = SaleInfo.query.filter(SaleInfo.entity_id == entity_id).all()
+    sale_rows = EntitySaleSetting.query.filter(EntitySaleSetting.entity_id == entity_id).all()
     by_value_name = {}
     for row in sale_rows:
         # Duplicate sale_info rows exist (see the max(sale_id) dedup in
@@ -648,7 +648,7 @@ def write_sales_detail_rows(
                 ReportSaleDetail(
                     sale_id=sale_row.sale_id,
                     report_id=report_id,
-                    sales_method_id=sale_row.sale_info_id,
+                    sale_info_id=sale_row.sale_info_id,
                     type=sale_row.type or sale_type,
                     amount=value,
                     create_at=datetime.now(tz),
@@ -675,11 +675,11 @@ def sales_amounts_by_short_name(report_id, entity_id):
     sales form posts them. Cash is excluded: it stays a column.
     """
     rows = (
-        db.session.query(SaleInfo.value_name, SaleInfo.type, ReportSaleDetail.amount)
-        .join(ReportSaleDetail, ReportSaleDetail.sale_id == SaleInfo.sale_id)
+        db.session.query(EntitySaleSetting.value_name, EntitySaleSetting.type, ReportSaleDetail.amount)
+        .join(ReportSaleDetail, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
         .filter(
             ReportSaleDetail.report_id == report_id,
-            SaleInfo.entity_id == entity_id,
+            EntitySaleSetting.entity_id == entity_id,
         )
         .all()
     )
@@ -707,15 +707,15 @@ def sales_by_method_for(report_id):
     """
     rows = (
         db.session.query(
-            SalesMethod.code,
-            SalesMethod.name,
-            SalesMethod.display_order,
-            SaleInfo.value_name,
-            SaleInfo.sale_name,
+            SaleInfo.code,
+            SaleInfo.name,
+            SaleInfo.display_order,
+            EntitySaleSetting.value_name,
+            EntitySaleSetting.sale_name,
             ReportSaleDetail.amount,
         )
-        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.sale_id)
-        .outerjoin(SalesMethod, ReportSaleDetail.sales_method_id == SalesMethod.id)
+        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_info_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
