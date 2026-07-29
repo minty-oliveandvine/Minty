@@ -511,7 +511,7 @@
           if (data && data.status === 'success') {
             withdrawalSourceDirty = false;
             const successMessage = document.getElementById('successMessage');
-            if (successMessage) successMessage.textContent = 'Withdrawal source saved successfully';
+            if (successMessage) successMessage.textContent = 'Your withdrawal source is saved.';
             showNotification('success');
           } else {
             const errorTitle = document.getElementById('errorTitle');
@@ -668,7 +668,7 @@
           if (bankTransferId) {
             const successMessage = document.getElementById('successMessage');
             if (successMessage) {
-              successMessage.textContent = `Bank Transfer Created Successfully (ID: ${bankTransferId})`;
+              successMessage.textContent = `Your bank transfer is created!`;
             }
           }
           showNotification('success');

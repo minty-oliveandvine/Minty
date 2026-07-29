@@ -377,7 +377,7 @@
     if (!toggles.some(function (t) { return t.checked; })) {
       changedBox.checked = true;
       if (typeof showWarningToast === 'function') {
-        showWarningToast('At least one module should be active.');
+        showWarningToast("You'll need at least one module switched on.");
       } else {
         showFlashMessages('Keep at least one module active.', 'error');
       }
