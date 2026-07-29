@@ -320,7 +320,7 @@ def delete_entity(id):
         return redirect(url_for("entity.entity_list"))
     org.status = "deleted"
     db.session.commit()
-    flash("Entity deleted successfully.", "success")
+    flash("That entity's deleted.", "success")
     return redirect(url_for("entity.entity_list"))
 
 

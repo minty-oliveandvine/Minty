@@ -66,7 +66,7 @@ def test_entity_list_renders_and_drains_stale_flash():
         html = _render_index(app)
 
         # Rendered: the stale message is shown on the list (not silently dropped).
-        assert "Hmm, I looked everywhere but couldn't find that one." in html
+        assert "Hmm, I looked everywhere but couldn\\u0027t find that one." in html
         # Drained from the session (the cross-request leak vector) so it can't
         # resurface on the dashboard next render.
         assert session.get("_flashes", []) == []
@@ -76,9 +76,10 @@ def test_entity_list_renders_success_flash():
     """A legitimate list-bound flash (e.g. delete_entity success) is visible."""
     app = _build_app()
     with app.test_request_context("/entity"):
-        session["_flashes"] = [("success", "Entity deleted successfully.")]
+        session["_flashes"] = [("success", "That entity's deleted.")]
 
         html = _render_index(app)
 
-        assert "Entity deleted successfully." in html
+        # Emitted through `|tojson` into a JS call, so `'` arrives escaped.
+        assert "That entity\\u0027s deleted." in html
         assert session.get("_flashes", []) == []

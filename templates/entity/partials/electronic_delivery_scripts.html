@@ -865,7 +865,7 @@
       loadElectronicMethods();
       
       // Show success toast notification
-      showSuccessToast(`${name} Added Successfully`);
+      showSuccessToast(`${name} is added!`);
       
       console.log('Added electronic method (pending save):', newMethod);
     }
@@ -904,7 +904,7 @@
       loadDeliveryMethods();
       
       // Show success toast notification
-      showSuccessToast(`${name} Added Successfully`);
+      showSuccessToast(`${name} is added!`);
       
       console.log('Added delivery method (pending save):', newMethod);
     }
@@ -957,7 +957,7 @@
         updateMoveButtonStates('electronic');
         
         // Show success toast notification
-        showSuccessToast(`${methodName} Deleted Successfully`);
+        showSuccessToast(`${methodName} is deleted.`);
         
         // Clear pending delete
         window.pendingElectronicDelete = null;
@@ -1014,7 +1014,7 @@
         updateMoveButtonStates('delivery');
         
         // Show success toast notification
-        showSuccessToast(`${methodName} Deleted Successfully`);
+        showSuccessToast(`${methodName} is deleted.`);
         
         // Clear pending delete
         window.pendingDeliveryDelete = null;
@@ -1576,7 +1576,7 @@
       }
     }
 
-    function showSuccessToast(message = 'Entity settings updated successfully') {
+    function showSuccessToast(message = 'Your entity settings are saved!') {
       const notification = document.getElementById('settingsNotification');
       // Bills-UI pages have no classic toast elements; delegate to the
       // new-design slide-in toast (components/flash_messages.html).

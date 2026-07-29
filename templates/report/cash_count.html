@@ -1533,7 +1533,7 @@ document.addEventListener('submit', function(e){
           if (data && data.status === 'success') {
             // Reset the baseline so navigating away no longer flags this as unsaved.
             initialFormValues[textarea.name || textarea.id] = textarea.value || '';
-            showNotification('Saved', 'Discrepancy reason updated successfully.', 'success');
+            showNotification('Saved', 'Your discrepancy reason is saved.', 'success');
           } else {
             showNotification('Error', (data && data.message) || 'Failed to save discrepancy reason.');
           }
