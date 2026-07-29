@@ -12,7 +12,8 @@ from blueprints.report.services.history import log_history_draft
 from blueprints.report.services.shared import (
     check_user_has_entities, get_cash_sales_from_detail,
     header_publishing_status_for, parse_nested_keys, resolve_report_entity_id,
-    safe_float, update_draft_progress, update_report_draft_sales_from_detail)
+    safe_float, sum_sales_by_type, update_draft_progress,
+    update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportDraft, ReportSaleDetail, ReportV2,
                        EntitySaleSetting, db, tz)
@@ -301,16 +302,6 @@ def report_sale(id=None):
             logger.info(
                 f"Sales form - All drafts for user {current_user.username}: {[(d.id, d.transaction_date, d.status) for d in all_user_drafts]}"
             )
-
-            nocashsale_fields = [
-                "visa_sales",
-                "master_sales",
-                "alipay_sales",
-                "wechat_sales",
-                "unionpay_sales",
-                "amex_sales",
-                "octopus_sales",
-            ]
 
             report_draft: ReportDraft | None = existing_draft
 
@@ -710,10 +701,12 @@ def report_sale(id=None):
 
             assert report_draft is not None
 
-            nocashsale_total = 0
-            for field in nocashsale_fields:
-                value = getattr(report_draft, field, 0)
-                nocashsale_total += value if value else 0
+            # Non-cash sales = everything except Cash, summed from
+            # report_sale_detail. The old loop added up the per-method columns,
+            # which the model no longer declares — so it summed to 0 every
+            # time and report_v2.nocashsale_total was always zero.
+            _totals = sum_sales_by_type(report_draft.id)
+            nocashsale_total = _totals["Electronic"] + _totals["Delivery"]
 
             # Update progress tracking
             try:
@@ -760,8 +753,12 @@ def report_sale(id=None):
             )
 
             # Update report_v2
+            # Keyed on the draft id, matching the other two write sites and
+            # the read in the GET path — report_v2.report_id IS the draft id.
+            # Looking it up by (entity, date) could resolve a different row,
+            # leaving detail rows under an id the form never queries.
             report_v2 = ReportV2.query.filter_by(
-                entity_id=entity_id, report_date=transaction_date
+                report_id=report_draft.id
             ).first()
 
             # Check if the report is posted or draft status
@@ -836,8 +833,17 @@ def report_sale(id=None):
                             f"Sale name is: {sale.sale_name} sale value is: {field_base}, amount is {amount}"
                         )
                     else:
-                        # For default fields, get amount from report_draft
-                        amount = getattr(report_draft, field, 0) or 0
+                        # Same resolution as the other two write sites: the
+                        # posted form is the source of truth. Reading the draft
+                        # object here used to work because each method had its
+                        # own column; those are gone, so getattr would always
+                        # fall through to 0 and wipe the amount just saved.
+                        field_base = field.replace("_sales", "")
+                        amount = (
+                            shop_sales_data.get(field_base)
+                            or delivery_sales_data.get(field_base)
+                            or 0
+                        )
 
                     # Check if a detail already exists for this sale_id and
                     # report_id
