@@ -939,8 +939,21 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             return redirect(url_for("entity.report_dashboard", id=entity_id))
 
     if not current_draft and not is_edit_mode:
+        # Name the date actually queried. This said "today" regardless of which
+        # date was looked up, so a miss on a back-dated report read as "no
+        # draft for today" while a perfectly good draft for today existed.
+        logger.warning(
+            "Ending page - no draft found: entity=%s transaction_date=%s "
+            "(id=%s, method=%s)",
+            entity_id,
+            transaction_date,
+            id,
+            request.method,
+        )
         flash(
-            "I don't see a draft for today yet - let's start with the opening entry.",
+            "I don't see a draft for "
+            f"{transaction_date.strftime('%d %b %Y')} yet - "
+            "let's start with the opening entry.",
             "warning",
         )
         # Carry the entity through: report_opening can't resolve one on its
@@ -1159,15 +1172,22 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         # columns, so custom denominations show up here too.
         counted = get_cash_count_details(current_draft.id)
         if counted:
-            logger.info(
-                "  Counted: "
-                + ", ".join(
-                    f"{row.cash_value:g}x{row.count}"
-                    for row in sorted(
-                        counted.values(), key=lambda r: -r.cash_value
+            # Diagnostic only - never let it break the page. cash_value is
+            # Numeric, so float() it before formatting, and the row's count
+            # field is `quantity` (`.count` is SQLAlchemy's own attribute).
+            try:
+                logger.info(
+                    "  Counted: "
+                    + ", ".join(
+                        f"{float(row.cash_value):g}x{row.quantity}"
+                        for row in sorted(
+                            counted.values(),
+                            key=lambda r: -float(r.cash_value),
+                        )
                     )
                 )
-            )
+            except Exception:
+                logger.exception("  Counted: failed to format cash count rows")
         logger.info(f"  Safe box balance: {cashcount_draft.safe_box_balance}")
         logger.info(
             f"  Stored actual_cash_total: {cashcount_draft.actual_cash_total}"

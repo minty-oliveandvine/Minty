@@ -303,7 +303,7 @@ def report_cash_count(id=None):
             logger.info(
                 "  Counted: "
                 + ", ".join(
-                    f"{d.cash_value:g}x{counts_by_cash_id[d.cash_id]}"
+                    f"{float(d.cash_value or 0):g}x{counts_by_cash_id[d.cash_id]}"
                     for d in denominations
                 )
             )
