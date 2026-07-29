@@ -115,6 +115,17 @@ def get_settings_redirect_url(entity_id):
 def create_default_entity_settings(entity_id):
     """Create default payment methods and delivery sales types for a new entity."""
     try:
+        # Cash leads the list — it is the most-used method. Its type is 'Cash',
+        # not 'Electronic': get_cash_sales_from_detail keys on that to find the
+        # figure that feeds the closing balance.
+        cash_methods = [
+            {
+                "sale_name": "Cash",
+                "value_name": "cash_sales",
+                "type": "Cash",
+                "display_order": 0,
+            },
+        ]
         electronic_methods = [
             {
                 "sale_name": "Visa",
@@ -211,7 +222,7 @@ def create_default_entity_settings(entity_id):
                     )
                 )
         else:
-            for method in electronic_methods + delivery_methods:
+            for method in cash_methods + electronic_methods + delivery_methods:
                 db.session.add(
                     EntitySaleSetting(
                         entity_id=entity_id,
