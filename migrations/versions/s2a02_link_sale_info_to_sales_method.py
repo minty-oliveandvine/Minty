@@ -1,15 +1,15 @@
-"""Step 2: link sale_info to the sales_method catalog.
+"""Step 2: link entity_sale_setting to the sale_info catalog.
 
-Adds ``sale_info.sales_method_id`` and backfills it — the sales equivalent of
+Adds ``entity_sale_setting.sale_info_id`` and backfills it — the sales equivalent of
 ``entity_function_map.entity_function_id``.
 
 What is deliberately NOT touched:
-  * ``sale_id``   — this is sale_info's PRIMARY KEY, not a method reference.
+  * ``sale_id``   — this is entity_sale_setting's PRIMARY KEY, not a method ref.
     report_sale_detail.sale_id is a FK pointing at it. Renaming or repurposing
     it would break that FK plus every filter_by(sale_id=...) in the codebase.
   * ``sale_name`` — entities can rename a method for themselves via
     replace_sales_methods (payment_methods.py:309). The catalog holds the
-    canonical name; sale_info holds this entity's label for it. Same reason
+    canonical name; entity_sale_setting holds this entity's label. Same reason
     entity_function_map does not duplicate entity_function.function_name.
   * ``value_name`` / ``type`` — these move to the catalog conceptually, but are
     kept until Step 5 so this migration changes no behaviour and can be rolled
@@ -19,9 +19,9 @@ Custom methods: replace_sales_methods derives value_name as
 ``name.lower().replace(" ", "_") + "_sales"``, so an entity that typed
 "Tap & Go" has value_name 'tap_&_go_sales' — matching no catalog row and no
 physical column. Those get a per-entity catalog row minted here
-(entity_id set, legacy_column NULL) so no sale_info row is left with a NULL FK.
+(entity_id set, legacy_column NULL) so no row is left with a NULL FK.
 
-Duplicate sale_info rows exist in production (hence the max(sale_id) dedup at
+Duplicate entity_sale_setting rows exist in production (hence max(sale_id) at
 payment_methods.py:38-50). The backfill is a plain UPDATE keyed on
 value_name → legacy_column, so duplicates each resolve to the same catalog row
 — no row multiplication.
@@ -51,15 +51,15 @@ SCHEMA = "pettycashv2"
 
 def upgrade():
     op.add_column(
-        "sale_info",
-        sa.Column("sales_method_id", sa.String(36), nullable=True),
+        "entity_sale_setting",
+        sa.Column("sale_info_id", sa.String(36), nullable=True),
         schema=SCHEMA,
     )
     op.create_foreign_key(
-        "fk_sale_info_sales_method",
+        "fk_entity_sale_setting_sale_info",
+        "entity_sale_setting",
         "sale_info",
-        "sales_method",
-        ["sales_method_id"],
+        ["sale_info_id"],
         ["id"],
         source_schema=SCHEMA,
         referent_schema=SCHEMA,
@@ -69,9 +69,9 @@ def upgrade():
         ondelete="RESTRICT",
     )
     op.create_index(
-        "ix_sale_info_sales_method_id",
-        "sale_info",
-        ["sales_method_id"],
+        "ix_entity_sale_setting_sale_info_id",
+        "entity_sale_setting",
+        ["sale_info_id"],
         schema=SCHEMA,
     )
 
@@ -81,12 +81,12 @@ def upgrade():
     bind.execute(
         text(
             f"""
-            UPDATE {SCHEMA}.sale_info si
-            SET sales_method_id = sm.id
-            FROM {SCHEMA}.sales_method sm
+            UPDATE {SCHEMA}.entity_sale_setting si
+            SET sale_info_id = sm.id
+            FROM {SCHEMA}.sale_info sm
             WHERE sm.entity_id IS NULL
               AND sm.legacy_column = si.value_name
-              AND si.sales_method_id IS NULL
+              AND si.sale_info_id IS NULL
             """
         )
     )
@@ -101,8 +101,8 @@ def upgrade():
             f"""
             SELECT DISTINCT entity_id, value_name, type,
                    MIN(sale_name) AS sale_name
-            FROM {SCHEMA}.sale_info
-            WHERE sales_method_id IS NULL
+            FROM {SCHEMA}.entity_sale_setting
+            WHERE sale_info_id IS NULL
               AND entity_id IS NOT NULL
               AND value_name IS NOT NULL
             GROUP BY entity_id, value_name, type
@@ -112,7 +112,7 @@ def upgrade():
 
     insert_custom = text(
         f"""
-        INSERT INTO {SCHEMA}.sales_method
+        INSERT INTO {SCHEMA}.sale_info
             (id, entity_id, code, name, type, legacy_column,
              is_active, display_order, created_at, updated_at)
         VALUES
@@ -122,14 +122,14 @@ def upgrade():
     )
     link_custom = text(
         f"""
-        UPDATE {SCHEMA}.sale_info si
-        SET sales_method_id = sm.id
-        FROM {SCHEMA}.sales_method sm
+        UPDATE {SCHEMA}.entity_sale_setting si
+        SET sale_info_id = sm.id
+        FROM {SCHEMA}.sale_info sm
         WHERE sm.entity_id = :entity_id
           AND sm.code      = :code
           AND si.entity_id = :entity_id
           AND si.value_name = :value_name
-          AND si.sales_method_id IS NULL
+          AND si.sale_info_id IS NULL
         """
     )
 
@@ -145,7 +145,7 @@ def upgrade():
                 "entity_id": entity_id,
                 "code": code,
                 "name": sale_name or base or "Custom",
-                # type is NOT NULL on the catalog; sale_info.type is nullable,
+                # type is NOT NULL on the catalog; the per-entity type is not,
                 # so fall back to Electronic rather than failing the insert.
                 "type": mtype or "Electronic",
             },
@@ -160,8 +160,8 @@ def downgrade():
     # Custom catalog rows minted above are left in place — they are referenced
     # by nothing once the column is gone, and dropping them would lose the only
     # record of an entity's invented method names.
-    op.drop_index("ix_sale_info_sales_method_id", "sale_info", schema=SCHEMA)
+    op.drop_index("ix_entity_sale_setting_sale_info_id", "entity_sale_setting", schema=SCHEMA)
     op.drop_constraint(
-        "fk_sale_info_sales_method", "sale_info", schema=SCHEMA, type_="foreignkey"
+        "fk_entity_sale_setting_sale_info", "entity_sale_setting", schema=SCHEMA, type_="foreignkey"
     )
-    op.drop_column("sale_info", "sales_method_id", schema=SCHEMA)
+    op.drop_column("entity_sale_setting", "sale_info_id", schema=SCHEMA)

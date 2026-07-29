@@ -11,6 +11,8 @@ from flask_login import current_user
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
+from blueprints.report.services.cash_denominations import (
+    get_cash_count_details, get_cash_count_total)
 from blueprints.report.services.shared import (check_user_has_entities,
                                                cleanup_partial_submission_data,
                                                future_date_error,
@@ -641,17 +643,10 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             ReportCashCountDraft.report_id == report.id
         ).first()
         if cashcount_draft:
-            # Calculate total actual cash count
-            total_actual_cash = (
-                (cashcount_draft.thousand_note or 0) * 1000
-                + (cashcount_draft.fivehundred_note or 0) * 500
-                + (cashcount_draft.onehundred_note or 0) * 100
-                + (cashcount_draft.fifty_note or 0) * 50
-                + (cashcount_draft.twenty_note or 0) * 20
-                + (cashcount_draft.ten_note or 0) * 10
-                + (cashcount_draft.five_coin or 0) * 5
-                + (cashcount_draft.two_coin or 0) * 2
-                + (cashcount_draft.one_coin or 0) * 1
+            # Total from report_cashcount_detail, falling back to the legacy
+            # note/coin columns for reports predating the backfill.
+            total_actual_cash = get_cash_count_total(
+                report.id, fallback_draft=cashcount_draft
             )
             safe_box_balance = cashcount_draft.safe_box_balance or 0
             cash_balance = total_actual_cash + safe_box_balance
@@ -1121,28 +1116,28 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Calculate actual cash balance from cash count data
     if cashcount_draft:
         logger.info(f"Retrieved cash count data for draft {current_draft.id}:")
-        logger.info(
-            f"  Notes: 1000x{cashcount_draft.thousand_note}, 500x{cashcount_draft.fivehundred_note}, 100x{cashcount_draft.onehundred_note}, 50x{cashcount_draft.fifty_note}, 20x{cashcount_draft.twenty_note}, 10x{cashcount_draft.ten_note}"
-        )
-        logger.info(
-            f"  Coins: 5x{cashcount_draft.five_coin}, 2x{cashcount_draft.two_coin}, 1x{cashcount_draft.one_coin}"
-        )
+        # Enumerate what was actually counted rather than the nine fixed
+        # columns, so custom denominations show up here too.
+        counted = get_cash_count_details(current_draft.id)
+        if counted:
+            logger.info(
+                "  Counted: "
+                + ", ".join(
+                    f"{row.cash_value:g}x{row.count}"
+                    for row in sorted(
+                        counted.values(), key=lambda r: -r.cash_value
+                    )
+                )
+            )
         logger.info(f"  Safe box balance: {cashcount_draft.safe_box_balance}")
         logger.info(
             f"  Stored actual_cash_total: {cashcount_draft.actual_cash_total}"
         )
 
-        # Calculate total actual cash count
-        total_actual_cash = (
-            (cashcount_draft.thousand_note or 0) * 1000
-            + (cashcount_draft.fivehundred_note or 0) * 500
-            + (cashcount_draft.onehundred_note or 0) * 100
-            + (cashcount_draft.fifty_note or 0) * 50
-            + (cashcount_draft.twenty_note or 0) * 20
-            + (cashcount_draft.ten_note or 0) * 10
-            + (cashcount_draft.five_coin or 0) * 5
-            + (cashcount_draft.two_coin or 0) * 2
-            + (cashcount_draft.one_coin or 0) * 1
+        # Total from report_cashcount_detail, falling back to the legacy
+        # note/coin columns for reports predating the backfill.
+        total_actual_cash = get_cash_count_total(
+            current_draft.id, fallback_draft=cashcount_draft
         )
         safe_box_balance = cashcount_draft.safe_box_balance or 0
         cash_balance = total_actual_cash + safe_box_balance
@@ -1255,16 +1250,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         # Validate cash count - allow zero cash count
                         # Cash balance (cash count + safe box) can be <= 0
                         # Discrepancy validation will handle description requirements
-                        total_cash_count = (
-                            (cashcount_draft.thousand_note or 0) * 1000
-                            + (cashcount_draft.fivehundred_note or 0) * 500
-                            + (cashcount_draft.onehundred_note or 0) * 100
-                            + (cashcount_draft.fifty_note or 0) * 50
-                            + (cashcount_draft.twenty_note or 0) * 20
-                            + (cashcount_draft.ten_note or 0) * 10
-                            + (cashcount_draft.five_coin or 0) * 5
-                            + (cashcount_draft.two_coin or 0) * 2
-                            + (cashcount_draft.one_coin or 0) * 1
+                        total_cash_count = get_cash_count_total(
+                            current_draft.id, fallback_draft=cashcount_draft
                         )
                         # No validation needed - allow zero cash count
                         # The discrepancy validation will ensure description is provided when needed

@@ -1,4 +1,4 @@
-"""Step 1: create the sales_method catalog and seed the 11 canonical methods.
+"""Step 1: create the sale_info catalog and seed the 11 canonical methods.
 
 The catalog that ``sale_info`` will point at — the sales equivalent of
 ``entity_function``. Adding a new sales method after this lands should be a
@@ -67,8 +67,43 @@ CANONICAL_METHODS = [
 
 
 def upgrade():
+    # STEP 0 — free the `sale_info` name for the catalog.
+    #
+    # The existing per-entity table is called `sale_info`; the catalog created
+    # below TAKES OVER that name, so the incumbent is renamed first:
+    #
+    #     sale_info (per-entity selection)  ->  entity_sale_setting
+    #     [new catalog]                     ->  sale_info
+    #
+    # Postgres tracks tables by OID, so report_sale_detail's FK to
+    # sale_info.sale_id follows the rename automatically — no data moves.
+    #
+    # The two tables are told apart by primary key: the per-entity table has
+    # `sale_id`, the catalog has `id`. That check makes this a no-op when the
+    # rename has already happened (e.g. a database migrated via the raw-SQL
+    # script), so the migration stays re-runnable either way.
+    bind = op.get_bind()
+    already_renamed = bind.execute(
+        text(f"SELECT to_regclass('{SCHEMA}.entity_sale_setting')")
+    ).scalar()
+    if not already_renamed:
+        incumbent_is_per_entity = bind.execute(
+            text(
+                f"""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = '{SCHEMA}'
+                  AND table_name = 'sale_info'
+                  AND column_name = 'sale_id'
+                """
+            )
+        ).scalar()
+        if incumbent_is_per_entity:
+            op.rename_table(
+                "sale_info", "entity_sale_setting", schema=SCHEMA
+            )
+
     op.create_table(
-        "sales_method",
+        "sale_info",
         sa.Column("id", sa.String(36), primary_key=True),
         # NULL = global catalog row; set = custom method for that entity.
         sa.Column(
@@ -99,16 +134,16 @@ def upgrade():
     # constraint would not protect the global catalog at all.
     op.execute(
         f"""
-        ALTER TABLE {SCHEMA}.sales_method
-        ADD CONSTRAINT uq_sales_method_entity_code
+        ALTER TABLE {SCHEMA}.sale_info
+        ADD CONSTRAINT uq_sale_info_entity_code
         UNIQUE NULLS NOT DISTINCT (entity_id, code)
         """
     )
 
     # Backfill lookups hit legacy_column; reads filter on is_active.
     op.create_index(
-        "ix_sales_method_legacy_column",
-        "sales_method",
+        "ix_sale_info_legacy_column",
+        "sale_info",
         ["legacy_column"],
         schema=SCHEMA,
     )
@@ -116,7 +151,7 @@ def upgrade():
     bind = op.get_bind()
     insert_method = text(
         f"""
-        INSERT INTO {SCHEMA}.sales_method
+        INSERT INTO {SCHEMA}.sale_info
             (id, entity_id, code, name, type, legacy_column,
              is_active, display_order, created_at, updated_at)
         VALUES
@@ -147,5 +182,15 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index("ix_sales_method_legacy_column", "sales_method", schema=SCHEMA)
-    op.drop_table("sales_method", schema=SCHEMA)
+    op.drop_index("ix_sale_info_legacy_column", "sale_info", schema=SCHEMA)
+    op.drop_table("sale_info", schema=SCHEMA)
+
+    # Reverse Step 0: the per-entity table reclaims its original name, but only
+    # once the catalog above has been dropped — otherwise both would want to be
+    # called `sale_info`.
+    bind = op.get_bind()
+    renamed = bind.execute(
+        text(f"SELECT to_regclass('{SCHEMA}.entity_sale_setting')")
+    ).scalar()
+    if renamed:
+        op.rename_table("entity_sale_setting", "sale_info", schema=SCHEMA)

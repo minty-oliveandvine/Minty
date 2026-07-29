@@ -6,6 +6,9 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
+from blueprints.report.services.cash_denominations import (
+    build_denomination_rows, counts_to_legacy_columns, form_field_for,
+    resolve_denominations_for_entity, save_cash_count_details)
 from blueprints.report.services.history import log_history_draft
 from blueprints.report.services.shared import (check_user_has_entities,
                                                header_publishing_status_for,
@@ -142,6 +145,11 @@ def report_cash_count(id=None):
             entity_acronym=entity_acronym,
             display_date=display_date,
             is_edit_mode=is_edit_mode,
+            denomination_rows=build_denomination_rows(
+                entity_id,
+                report_id=report.id,
+                fallback_draft=cashcount_draft,
+            ),
         )
 
     # Get transaction date from URL parameter or form data if provided,
@@ -215,6 +223,10 @@ def report_cash_count(id=None):
     else:
         cashcount_draft = None
 
+    # Denominations this entity logs, in display order. Drives both the form
+    # and the POST parsing, so the two can never drift apart.
+    denominations = resolve_denominations_for_entity(entity_id)
+
     if request.method == "POST":
         # Check if current_draft exists
         if not current_draft:
@@ -249,67 +261,48 @@ def report_cash_count(id=None):
                 request.form.get("discrepancy_amount", 0))
             discrepancy_type = request.form.get("discrepancy_type", "none")
             discrepancy_reason = request.form.get("discrepancy_reason", "")
-            actual_cash_1000 = safe_float(
-                request.form.get(
-                    "actual_cash[note1000]", 0))
-            actual_cash_500 = safe_float(
-                request.form.get(
-                    "actual_cash[note500]", 0))
-            actual_cash_200 = safe_float(
-                request.form.get(
-                    "actual_cash[note200]", 0))
-            actual_cash_100 = safe_float(
-                request.form.get(
-                    "actual_cash[note100]", 0))
-            actual_cash_50 = safe_float(
-                request.form.get(
-                    "actual_cash[note50]", 0))
-            actual_cash_20 = safe_float(
-                request.form.get(
-                    "actual_cash[note20]", 0))
-            actual_cash_10 = safe_float(
-                request.form.get(
-                    "actual_cash[note10]", 0))
-            actual_cash_5coins = safe_float(
-                request.form.get("actual_cash[5coins]", 0))
-            actual_cash_2coins = safe_float(
-                request.form.get("actual_cash[2coins]", 0))
-            actual_cash_1coins = safe_float(
-                request.form.get("actual_cash[1coins]", 0))
+
+            # Read one quantity per denomination the entity logs. Face values
+            # come from cash_info, so adding a denomination is an INSERT
+            # there — no change here.
+            if not denominations:
+                logger.error(
+                    f"No cash denominations resolved for entity {entity_id} "
+                    "— cannot record a cash count"
+                )
+                flash(
+                    "I don't have any cash denominations set up for this entity yet. "
+                    "Please check the entity's country settings.",
+                    "danger",
+                )
+                return redirect(
+                    url_for(
+                        "report.report_cash_count",
+                        entity_id=entity_id,
+                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
+                    )
+                )
+
+            counts_by_cash_id = {}
+            total_cash_count = 0.0
+            for denomination in denominations:
+                quantity = safe_float(
+                    request.form.get(
+                        f"actual_cash[{form_field_for(denomination)}]", 0
+                    )
+                )
+                counts_by_cash_id[denomination.cash_id] = int(quantity or 0)
+                total_cash_count += (denomination.cash_value or 0) * quantity
 
             # Log cash count data for debugging
             logger.info(f"Cash count data for draft {current_draft.id}:")
             logger.info(f"  Safe box balance: {safe_box_balance}")
             logger.info(
-                f"  Notes: 1000x{actual_cash_1000}, 500x{actual_cash_500}, 100x{actual_cash_100}, 50x{actual_cash_50}, 20x{actual_cash_20}, 10x{actual_cash_10}"
-            )
-            logger.info(
-                f"  Coins: 5x{actual_cash_5coins}, 2x{actual_cash_2coins}, 1x{actual_cash_1coins}"
-            )
-
-            total_1000 = 1000 * actual_cash_1000
-            total_500 = 500 * actual_cash_500
-            total_200 = 200 * actual_cash_200
-            total_100 = 100 * actual_cash_100
-            total_50 = 50 * actual_cash_50
-            total_20 = 20 * actual_cash_20
-            total_10 = 10 * actual_cash_10
-            total_5coins = 5 * actual_cash_5coins
-            total_2coins = 2 * actual_cash_2coins
-            total_1coins = 1 * actual_cash_1coins
-
-            # Calculate total cash count (sum of all cash types)
-            total_cash_count = (
-                total_1000
-                + total_500
-                + total_200
-                + total_100
-                + total_50
-                + total_20
-                + total_10
-                + total_5coins
-                + total_2coins
-                + total_1coins
+                "  Counted: "
+                + ", ".join(
+                    f"{d.cash_value:g}x{counts_by_cash_id[d.cash_id]}"
+                    for d in denominations
+                )
             )
 
             # Calculate expected cash count balance: opening_balance +
@@ -353,24 +346,24 @@ def report_cash_count(id=None):
             # Track last editor
             current_draft.uploaded_by = current_user.username
 
+            # The nine note/coin columns still have five readers (ending.py,
+            # export_screenshot.py, deposit.py, the template, and the
+            # next-day opening balance), so keep them in sync with the detail
+            # rows until those are converted. Denominations without a legacy
+            # column — the HK$200 note, and anything an entity adds — live
+            # only in report_cashcount_detail.
+            legacy_columns = counts_to_legacy_columns(counts_by_cash_id)
+
             if not cashcount_draft:
                 cashcount_draft = ReportCashCountDraft(
                     id=str(uuid.uuid4()),
                     report_id=current_draft.id,
-                    thousand_note=actual_cash_1000,
-                    fivehundred_note=actual_cash_500,
-                    onehundred_note=actual_cash_100,
-                    fifty_note=actual_cash_50,
-                    twenty_note=actual_cash_20,
-                    ten_note=actual_cash_10,
-                    five_coin=actual_cash_5coins,
-                    two_coin=actual_cash_2coins,
-                    one_coin=actual_cash_1coins,
                     safe_box_balance=safe_box_balance,
                     discrepancy_amount=discrepancy_amount,
                     discrepancy_type=discrepancy_type,
                     discrepancy_reason=discrepancy_reason,
                     actual_cash_total=total_cash_count,
+                    **legacy_columns,
                 )
 
                 # Update current_draft with discrepancy information
@@ -406,16 +399,8 @@ def report_cash_count(id=None):
                 )
                 db.session.add(report_detail)
             else:
-                cashcount_draft.thousand_note = actual_cash_1000
-                cashcount_draft.fivehundred_note = actual_cash_500
-                cashcount_draft.onehundred_note = actual_cash_100
-                cashcount_draft.fifty_note = actual_cash_50
-                cashcount_draft.twenty_note = actual_cash_20
-                cashcount_draft.ten_note = actual_cash_10
-
-                cashcount_draft.five_coin = actual_cash_5coins
-                cashcount_draft.two_coin = actual_cash_2coins
-                cashcount_draft.one_coin = actual_cash_1coins
+                for column, count in legacy_columns.items():
+                    setattr(cashcount_draft, column, count)
                 cashcount_draft.safe_box_balance = safe_box_balance
                 cashcount_draft.discrepancy_amount = discrepancy_amount
                 cashcount_draft.discrepancy_type = discrepancy_type
@@ -461,6 +446,11 @@ def report_cash_count(id=None):
                 report_detail.discrepancy_amount = discrepancy_amount
                 report_detail.discrepancy_description = discrepancy_reason
                 cashcount_draft.actual_cash_total = actual_cash_total
+
+            # Per-denomination counts — the source of truth. Written in the
+            # same transaction as the discrepancy it drives, so the two can
+            # never be committed out of step.
+            save_cash_count_details(current_draft.id, counts_by_cash_id)
 
             db.session.commit()
 
@@ -589,4 +579,9 @@ def report_cash_count(id=None):
         entity_acronym=entity_acronym,
         display_date=display_date,
         is_edit_mode=is_edit_mode,
+        denomination_rows=build_denomination_rows(
+            entity_id,
+            report_id=current_draft.id if current_draft else None,
+            fallback_draft=cashcount_draft,
+        ),
     )

@@ -24,9 +24,9 @@ Aggregates are excluded. shop_sales / delivery_sales / total_sales are sums,
 not methods; they keep their columns and are recomputed in Step 4.
 
 sale_id is nullable on the inserted rows. The detail row's authoritative method
-pointer is sales_method_id (Step 3); sale_id is filled opportunistically where
-a matching sale_info row still exists, so legacy joins keep working. Reports for
-entities that have since deleted a method get a detail row with sales_method_id
+pointer is sale_info_id (Step 3); sale_id is filled opportunistically where
+a matching entity_sale_setting row exists, so legacy joins keep working. Reports
+entities that have since deleted a method get a detail row with sale_info_id
 set and sale_id NULL — which is precisely the historical-accuracy case Step 3
 was added for.
 
@@ -96,7 +96,7 @@ def upgrade():
             text(
                 f"""
                 SELECT legacy_column, id
-                FROM {SCHEMA}.sales_method
+                FROM {SCHEMA}.sale_info
                 WHERE entity_id IS NULL AND legacy_column IS NOT NULL
                 """
             )
@@ -106,7 +106,7 @@ def upgrade():
     missing = [c for c in BACKFILL_COLUMNS if c not in catalog]
     if missing:
         raise RuntimeError(
-            f"sales_method catalog is missing legacy_column rows for {missing}. "
+            f"sale_info catalog is missing legacy_column rows for {missing}. "
             "Run s1a01_sales_method first."
         )
 
@@ -118,7 +118,7 @@ def upgrade():
             # to reports that have no detail rows whatsoever.
             #
             # sale_id resolution picks the LOWEST sale_id among matching
-            # sale_info rows so duplicates (payment_methods.py:38-50) resolve
+            # entity_sale_setting rows so duplicates (payment_methods.py:38-50) resolve
             # deterministically and cannot multiply the inserted rows.
             rows = bind.execute(
                 text(
@@ -126,14 +126,14 @@ def upgrade():
                     SELECT r.id AS report_id,
                            r.{column} AS amount,
                            (SELECT MIN(si.sale_id)
-                              FROM {SCHEMA}.sale_info si
+                              FROM {SCHEMA}.entity_sale_setting si
                              WHERE si.entity_id = r.company
-                               AND si.sales_method_id = :method_id
+                               AND si.sale_info_id = :method_id
                            ) AS sale_id,
                            sm.type AS method_type
                     FROM {SCHEMA}.{table} r
                     CROSS JOIN (
-                        SELECT type FROM {SCHEMA}.sales_method WHERE id = :method_id
+                        SELECT type FROM {SCHEMA}.sale_info WHERE id = :method_id
                     ) sm
                     WHERE r.{column} IS NOT NULL
                       AND r.{column} <> 0
@@ -152,9 +152,9 @@ def upgrade():
             insert_detail = text(
                 f"""
                 INSERT INTO {SCHEMA}.report_sale_detail
-                    (id, sale_id, report_id, sales_method_id, type, amount, create_at)
+                    (id, sale_id, report_id, sale_info_id, type, amount, create_at)
                 VALUES
-                    (:id, :sale_id, :report_id, :sales_method_id, :type, :amount, NOW())
+                    (:id, :sale_id, :report_id, :sale_info_id, :type, :amount, NOW())
                 """
             )
             for report_id, amount, sale_id, method_type in rows:
@@ -164,7 +164,7 @@ def upgrade():
                         "id": str(uuid.uuid4()),
                         "sale_id": sale_id,  # may be NULL — see module docstring
                         "report_id": report_id,
-                        "sales_method_id": method_id,
+                        "sale_info_id": method_id,
                         "type": method_type,
                         "amount": float(amount),
                     },
@@ -173,7 +173,7 @@ def upgrade():
 
 def downgrade():
     # Remove only rows this migration could have created: those carrying a
-    # sales_method_id but no sale_id are unambiguously backfill artefacts.
+    # sale_info_id but no sale_id are unambiguously backfill artefacts.
     # Rows written by the application always resolve a sale_id first, so this
     # cannot delete live data.
     #
@@ -185,7 +185,7 @@ def downgrade():
         text(
             f"""
             DELETE FROM {SCHEMA}.report_sale_detail
-            WHERE sales_method_id IS NOT NULL
+            WHERE sale_info_id IS NOT NULL
               AND sale_id IS NULL
             """
         )
