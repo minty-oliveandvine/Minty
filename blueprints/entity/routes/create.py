@@ -113,20 +113,52 @@ def _cors(resp):
 def _resolve_country_code(value: str) -> str:
     """Payload value → country_info.country_code (ISO alpha-2 PK).
 
-    The wizard sends the code directly; English names are accepted as a
-    fallback so older callers keep working. Returns "" when nothing matches
-    (never an unvalidated value — entities.country_code is an FK).
+    The wizard sends the code directly; alpha-3 codes and English names are
+    accepted as fallbacks so older callers keep working. Mirrors the tolerance
+    of ``_resolve_currency_id`` — the two are submitted by the same dropdowns,
+    so a payload form that resolves for one must resolve for the other.
+
+    The registry name is the authoritative long form ("Hong Kong SAR China"),
+    which a caller sending a display label ("Hong Kong") would otherwise miss,
+    so the name match also accepts a unique prefix. Ambiguous prefixes resolve
+    to "" rather than guessing between countries.
+
+    Returns "" when nothing matches (never an unvalidated value —
+    entities.country_code is an FK). Callers treat "" for a non-empty input as
+    an error; they must not silently skip the assignment.
     """
     from models.db import CountryInfo
 
     v = (value or "").strip()
     if not v:
         return ""
-    row = CountryInfo.query.get(v.upper()) if len(v) == 2 else None
+
+    # ``ilike`` treats % and _ as wildcards, so a user-supplied one would widen
+    # both name matches below ("%" otherwise matches every row). Escape once.
+    esc = v.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    row = CountryInfo.query.get(v.upper())
+    if row is None and len(v) == 3:
+        row = CountryInfo.query.filter(
+            CountryInfo.alpha3_code == v.upper()
+        ).first()
     if row is None:
         row = CountryInfo.query.filter(
-            CountryInfo.country_name_en.ilike(v)
+            CountryInfo.country_name_en.ilike(esc, escape="\\")
         ).first()
+    if row is None:
+        # Unique-prefix fallback: only when exactly one country starts with the
+        # value, so an ambiguous label resolves to "" instead of guessing.
+        matches = (
+            CountryInfo.query.filter(
+                CountryInfo.country_name_en.ilike(f"{esc}%", escape="\\")
+            )
+            .limit(2)
+            .all()
+        )
+        if len(matches) == 1:
+            row = matches[0]
+
     return row.country_code if row else ""
 
 
@@ -383,12 +415,26 @@ def onboarding_create_entity():
 
     data = request.get_json(silent=True) or {}
     entity_name = data.get("entity_name") or data.get("name") or ""
-    country_code = _resolve_country_code(
+    country_in = (
         data.get("country_id") or data.get("country") or data.get("country_code") or ""
     )
-    currency_id = _resolve_currency_id(
+    country_code = _resolve_country_code(country_in)
+    # A country that was supplied but doesn't resolve is a client error, not a
+    # reason to create the entity with a NULL country: failing here surfaces the
+    # mismatch instead of silently dropping the selection.
+    if country_in and not country_code:
+        resp = jsonify({"error": f"Unknown country: {country_in}"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    currency_in = (
         data.get("currency_id") or data.get("currency") or data.get("currency_code") or ""
     )
+    currency_id = _resolve_currency_id(currency_in)
+    if currency_in and not currency_id:
+        resp = jsonify({"error": f"Unknown currency: {currency_in}"})
+        resp.status_code = 400
+        return _cors(resp)
 
     entity, error = create_entity_for_user(user_id, entity_name, country_code, currency_id)
     if error:
@@ -493,17 +539,31 @@ def onboarding_update_entity(entity_id):
     # The wizard submits the country code and the currency_info uuid (the
     # dropdowns show names but carry those values). An explicit currency wins;
     # when only the country is supplied, its registry currency is derived.
-    country_code = _resolve_country_code(
+    country_in = (
         payload.get("country_id") or payload.get("country")
         or payload.get("country_code") or ""
     )
+    country_code = _resolve_country_code(country_in)
+    # A supplied-but-unresolvable country is a client error. Skipping the
+    # assignment here used to leave country_code NULL while the currency (whose
+    # resolver accepts names) still saved — the two silently diverged and the
+    # 200 gave the wizard no way to notice.
+    if country_in and not country_code:
+        resp = jsonify({"error": f"Unknown country: {country_in}"})
+        resp.status_code = 400
+        return _cors(resp)
     if country_code:
         entity.country_code = country_code
 
-    currency_id = _resolve_currency_id(
+    currency_in = (
         payload.get("currency_id") or payload.get("currency")
         or payload.get("currency_code") or ""
     )
+    currency_id = _resolve_currency_id(currency_in)
+    if currency_in and not currency_id:
+        resp = jsonify({"error": f"Unknown currency: {currency_in}"})
+        resp.status_code = 400
+        return _cors(resp)
     if not currency_id and country_code:
         country_info = CountryInfo.query.get(country_code)
         if country_info and country_info.currency_id:
