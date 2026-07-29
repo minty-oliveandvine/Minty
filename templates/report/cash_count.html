@@ -233,16 +233,18 @@ document.addEventListener('submit', function(e){
           {% if draft_id %}
           <input type="hidden" name="draft_id" value="{{ draft_id }}">
           {% endif %}
-          <!-- Hidden inputs for actual cash values (notes and coins) -->
-          <input type="hidden" name="actual_cash[note1000]" id="hidden_note1000" value="{{ cashcount_draft.thousand_note if cashcount_draft and cashcount_draft.thousand_note is not none else '0' }}">
-          <input type="hidden" name="actual_cash[note500]" id="hidden_note500" value="{{ cashcount_draft.fivehundred_note if cashcount_draft and cashcount_draft.fivehundred_note is not none else '0' }}">
-          <input type="hidden" name="actual_cash[note100]" id="hidden_note100" value="{{ cashcount_draft.onehundred_note if cashcount_draft and cashcount_draft.onehundred_note is not none else '0' }}">
-          <input type="hidden" name="actual_cash[note50]" id="hidden_note50" value="{{ cashcount_draft.fifty_note if cashcount_draft and cashcount_draft.fifty_note is not none else '0' }}">
-          <input type="hidden" name="actual_cash[note20]" id="hidden_note20" value="{{ cashcount_draft.twenty_note if cashcount_draft and cashcount_draft.twenty_note is not none else '0' }}">
-          <input type="hidden" name="actual_cash[note10]" id="hidden_note10" value="{{ cashcount_draft.ten_note if cashcount_draft and cashcount_draft.ten_note is not none else '0' }}">
-          <input type="hidden" name="actual_cash[5coins]" id="hidden_5coins" value="{{ cashcount_draft.five_coin if cashcount_draft and cashcount_draft.five_coin is not none else '0' }}">
-          <input type="hidden" name="actual_cash[2coins]" id="hidden_2coins" value="{{ cashcount_draft.two_coin if cashcount_draft and cashcount_draft.two_coin is not none else '0' }}">
-          <input type="hidden" name="actual_cash[1coins]" id="hidden_1coins" value="{{ cashcount_draft.one_coin if cashcount_draft and cashcount_draft.one_coin is not none else '0' }}">
+          <!-- Quantity per denomination, driven by the entity's cash_info
+               catalog rather than a fixed list of nine. `field` is the form
+               name (note1000, 5coins, or cash<id> for anything new) and
+               `count` is the saved quantity from report_cash_count. -->
+          <script>
+            window.DENOMINATION_FIELDS = [{% for row in denomination_rows %}'{{ row.field }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+            window.DENOMINATION_VALUES = { {% for row in denomination_rows %}'{{ row.field }}': {{ row.value }}{% if not loop.last %}, {% endif %}{% endfor %} };
+          </script>
+          {% for row in denomination_rows %}
+          <input type="hidden" name="actual_cash[{{ row.field }}]" id="hidden_{{ row.field }}" value="{{ row.count or 0 }}">
+          {% endfor %}
+
           <!-- Single Form Container -->
           <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
             <!-- Notes Section -->
@@ -268,7 +270,7 @@ document.addEventListener('submit', function(e){
               <div class="mb-4">
                 <h3 class="text-sm mb-2 font-semibold text-gray-700">Safebox Cash Balance</h3>
                 <div class="flex items-center gap-2">
-                  <input type="text" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ cashcount_draft.safe_box_balance if cashcount_draft and cashcount_draft.safe_box_balance is not none and cashcount_draft.safe_box_balance > 0 else '' }}" placeholder="Please enter Balance of the safebox" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); calculateTotals();" onblur="formatWithCommas(this); calculateTotals();">
+                  <input type="text" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ cashcount_draft.safe_box_balance if cashcount_draft and cashcount_draft.safe_box_balance is not none else '' }}" placeholder="Please enter Balance of the safebox" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); calculateTotals();" onblur="formatWithCommas(this); calculateTotals();">
 
                 </div>
               </div>
@@ -1740,121 +1742,28 @@ document.addEventListener('submit', function(e){
           </button>
         </div>
 
-        <!-- Notes Section -->
-        <!-- $1000 Notes -->
+        <!-- One row per denomination the entity counts. Replaces nine
+             hardcoded blocks, so the HK$200 note (and anything added to
+             cash_info later) appears without a markup change. -->
+        {% for row in denomination_rows %}
         <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}1000</label>
+          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}{{ row.value | int }}</label>
           <div class="relative flex-1">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note1000" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
+            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1"
+                   id="{{ row.field }}" data-denomination="{{ row.value }}"
+                   value="{{ row.count if row.count else '' }}"
+                   {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %}
+                   class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent"
+                   onchange="calculateTotals()">
           </div>
           <div class="relative w-24 sm:w-32">
             <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="note1000Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
+            <input type="text" id="{{ row.field }}Total" readonly
+                   class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-right text-gray-700 focus:outline-none">
           </div>
         </div>
-        <!-- $500 Notes -->
-        <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}500</label>
-          <div class="relative flex-1">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note500" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-          </div>
-          <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="note500Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-          </div>
-        </div>
-        <!-- $100 Notes -->
-        <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}100</label>
-          <div class="relative flex-1">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note100" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-          </div>
-          <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="note100Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-          </div>
-        </div>
-        <!-- $50 Notes -->
-        <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}50</label>
-          <div class="relative flex-1">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note50" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-          </div>
-          <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="note50Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-          </div>
-        </div>
-        <!-- $20 Notes -->
-        <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}20</label>
-          <div class="relative flex-1">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note20" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-          </div>
-          <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="note20Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-          </div>
-        </div>
-        <!-- $10 Notes -->
-        <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}10</label>
-          <div class="relative flex-1">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1" id="note10" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-          </div>
-          <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="note10Total" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-          </div>
-        </div>
-
-        <!-- Coins Section -->
-        <div class="mb-6">
-          <div class="mb-8">
-            <!-- $5 Coins -->
-            <div class="flex items-center gap-3 mb-4">
-              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}5</label>
-              <div class="relative flex-1">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-                <input type="number" inputmode="numeric" id="5coins" placeholder="0" min="0" step="1" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-              </div>
-              <div class="relative w-24 sm:w-32">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-                <input type="text" id="5coinsTotal" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-              </div>
-            </div>
-            <!-- $2 Coins -->
-            <div class="flex items-center gap-3 mb-4">
-              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}2</label>
-              <div class="relative flex-1">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-                <input type="number" inputmode="numeric" id="2coins" placeholder="0" min="0" step="1" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-              </div>
-              <div class="relative w-24 sm:w-32">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-                <input type="text" id="2coinsTotal" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-              </div>
-            </div>
-            <!-- $1 Coins -->
-            <div class="flex items-center gap-3 mb-4">
-              <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}1</label>
-              <div class="relative flex-1">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-                <input type="number" inputmode="numeric" id="1coins" placeholder="0" min="0" step="1" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent" onchange="calculateTotals()">
-              </div>
-              <div class="relative w-24 sm:w-32">
-                <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-                <input type="text" id="1coinsTotal" readonly class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-[#6B7280]/60 text-right font-medium border-0" value="0">
-              </div>
-            </div>
-          </div>
-        </div>
+        {% endfor %}
 
         <!-- Total Cash Till Balance Display -->
         <div class="flex items-center justify-between rounded-2xl mb-4">
@@ -1880,20 +1789,12 @@ document.addEventListener('submit', function(e){
       modal.classList.add('flex');
       
       // Load existing values from hidden form inputs into calculator
-      const noteMappings = [
-        { hiddenId: 'hidden_note1000', calcId: 'note1000' },
-        { hiddenId: 'hidden_note500', calcId: 'note500' },
-        { hiddenId: 'hidden_note100', calcId: 'note100' },
-        { hiddenId: 'hidden_note50', calcId: 'note50' },
-        { hiddenId: 'hidden_note20', calcId: 'note20' },
-        { hiddenId: 'hidden_note10', calcId: 'note10' }
-      ];
-      
-      const coinMappings = [
-        { hiddenId: 'hidden_5coins', calcId: '5coins' },
-        { hiddenId: 'hidden_2coins', calcId: '2coins' },
-        { hiddenId: 'hidden_1coins', calcId: '1coins' }
-      ];
+      // Built from the entity's denominations, not a fixed list. Notes and
+      // coins share one list; the loops below treat them identically.
+      const noteMappings = (window.DENOMINATION_FIELDS || []).map(f => ({
+        hiddenId: 'hidden_' + f, calcId: f
+      }));
+      const coinMappings = [];
       
       // Load note values (use empty string for 0 to show placeholder)
       noteMappings.forEach(mapping => {
@@ -1934,20 +1835,12 @@ document.addEventListener('submit', function(e){
       const actualCashBalanceInput = document.getElementById('actualCashBalance');
       
       // Save individual note and coin values to hidden form inputs
-      const noteMappings = [
-        { hiddenId: 'hidden_note1000', calcId: 'note1000' },
-        { hiddenId: 'hidden_note500', calcId: 'note500' },
-        { hiddenId: 'hidden_note100', calcId: 'note100' },
-        { hiddenId: 'hidden_note50', calcId: 'note50' },
-        { hiddenId: 'hidden_note20', calcId: 'note20' },
-        { hiddenId: 'hidden_note10', calcId: 'note10' }
-      ];
-      
-      const coinMappings = [
-        { hiddenId: 'hidden_5coins', calcId: '5coins' },
-        { hiddenId: 'hidden_2coins', calcId: '2coins' },
-        { hiddenId: 'hidden_1coins', calcId: '1coins' }
-      ];
+      // Built from the entity's denominations, not a fixed list. Notes and
+      // coins share one list; the loops below treat them identically.
+      const noteMappings = (window.DENOMINATION_FIELDS || []).map(f => ({
+        hiddenId: 'hidden_' + f, calcId: f
+      }));
+      const coinMappings = [];
       
       // Save note values to hidden inputs
       noteMappings.forEach(mapping => {
