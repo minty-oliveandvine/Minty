@@ -429,7 +429,7 @@
       .then(data => {
         if (data.status === "success") {
           if (window.sendLogToDataDog) { window.sendLogToDataDog('info', 'Invitation sent'); }
-          showSuccessToast(data.message || 'Invitation sent successfully!');
+          showSuccessToast(data.message || 'That invitation is on its way!');
           closeAddUserModal();
           loadPendingInvitations();
         } else {
@@ -766,7 +766,7 @@
        .then(r => r.json())
        .then(data => {
          if (data.status === 'success') {
-           showSuccessToast(data.message || 'User updated successfully.');
+           showSuccessToast(data.message || 'That user is updated.');
            closeEditUserModal();
            setTimeout(() => location.reload(), 600);
          } else {
@@ -813,7 +813,7 @@
        .then(r => r.json())
        .then(data => {
          if (data.status === 'success') {
-           showSuccessToast(data.message || 'User removed successfully.');
+           showSuccessToast(data.message || 'That user is removed.');
            closeDeleteUserModal();
            setTimeout(() => location.reload(), 600);
          } else {
@@ -974,7 +974,7 @@
        .then(data => {
          if (data.status === 'success') {
            if (window.sendLogToDataDog) { window.sendLogToDataDog('info', 'Invitation cancelled', { invitation_id: invitationId }); }
-           showSuccessToast('Invitation cancelled.');
+           showSuccessToast('That invitation is cancelled.');
            loadPendingInvitations();
          } else {
            if (window.sendLogToDataDog) { window.sendLogToDataDog('error', 'Failed to cancel invitation', { invitation_id: invitationId, message: data.message }); }
@@ -1002,7 +1002,7 @@
        .then(data => {
          if (data.status === 'success') {
            if (window.sendLogToDataDog) { window.sendLogToDataDog('info', 'Invitation resent', { invitation_id: invitationId }); }
-           showSuccessToast('Invitation resent. The previous link is no longer valid.');
+           showSuccessToast('Invitation resent — the old link no longer works.');
            loadPendingInvitations();
          } else {
            // Start the local countdown immediately when rate-limited so the

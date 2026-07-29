@@ -20,7 +20,7 @@ def approve_user(user_id):
     user = User.query.get_or_404(user_id)
     user.approved = True
     db.session.commit()
-    flash(f"User {user.username} approved successfully.", "success")
+    flash(f"I've approved {user.username}.", "success")
     return redirect(url_for("user_management.admin_dashboard"))
 
 
@@ -35,5 +35,5 @@ def reject_user(user_id):
     user = User.query.get_or_404(user_id)
     user.approved = False
     db.session.commit()
-    flash(f"User {user.username} rejected and deactivated.", "warning")
+    flash(f"I've rejected {user.username} and deactivated the account.", "warning")
     return redirect(url_for("user_management.admin_dashboard"))

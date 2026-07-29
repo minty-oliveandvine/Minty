@@ -181,7 +181,7 @@
             <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
             <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
               <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-              <p id="successToastMessage" class="font-[400] break-words w-full" style="color: #92c6b9;">Entity settings updated successfully</p>
+              <p id="successToastMessage" class="font-[400] break-words w-full" style="color: #92c6b9;">Your entity settings are saved!</p>
             </div>
             <button class="toast-close shrink-0" onclick="hideSettingsNotification()">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
@@ -337,7 +337,7 @@
             </div>
             <div class="min-w-0">
               <h3 class="text-lg font-semibold text-gray-800">Unsaved changes</h3>
-              <p class="text-sm text-gray-600 mt-1">You have unsaved changes that will be lost if you leave this page. Do you want to continue without saving?</p>
+              <p class="text-sm text-gray-600 mt-1">You've got unsaved changes, and I'll lose them if you leave. Head off without saving?</p>
             </div>
           </div>
           <div class="flex gap-3">
@@ -715,7 +715,7 @@
      }
      
      // Function to show success toast
-     function showSuccessToast(message = 'Entity settings updated successfully') {
+     function showSuccessToast(message = 'Your entity settings are saved!') {
        const notification = document.getElementById('settingsNotification');
        const errorToast = document.getElementById('errorToast');
        const successToast = document.getElementById('successToast');
@@ -2734,7 +2734,7 @@
           }
           
           // Show success message
-          showSuccessToast('Contact created successfully!');
+          showSuccessToast("That contact's added!");
         } else {
           // Hide loading overlay on failure and restore original text
           if (loadingOverlay) {
@@ -3572,7 +3572,7 @@
           }
           
           // Show success message
-          showSuccessToast('Contact created successfully!');
+          showSuccessToast("That contact's added!");
         } else {
           // Hide loading overlay on failure and restore original text
           if (loadingOverlay) {
@@ -4701,7 +4701,7 @@
           }
           
           // Show success message
-          showSuccessToast('Contact created successfully!');
+          showSuccessToast("That contact's added!");
         } else {
           // Hide loading overlay on failure and restore original text
           if (loadingOverlay) {
@@ -4789,7 +4789,7 @@
                         </svg>
                       </div>
                       <div class="flex-1">
-                        <p class="text-sm font-medium text-green-900">${data.message || 'Sync completed successfully'}</p>
+                        <p class="text-sm font-medium text-green-900">${data.message || 'Sync is all done!'}</p>
                       </div>
                       <button onclick="this.closest('#xero-sync-status').remove(); if (checkInterval) clearInterval(checkInterval); checkInterval = null;" class="text-green-400 hover:text-green-600">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -1069,7 +1069,7 @@ def xero_callback():
             logger.info(
                 "Newly created petty cash entity status set to cancelled")
             logger.error(f"Error in xero auth {error}")
-            flash("New Petty Cash Entity has been created", "success")
+            flash("Your new petty cash entity is ready!", "success")
             return redirect(url_for("entity.entity_list"))
     elif base_state == "entity_reconnect":
         entity_id = (
