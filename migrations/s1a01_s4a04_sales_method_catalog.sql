@@ -100,7 +100,14 @@ CREATE TABLE IF NOT EXISTS pettycashv2.sale_info (
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'uq_sale_info_entity_code'
+        -- conrelid scopes this to THIS table. Without it the guard matches a
+        -- same-named constraint in any other schema (e.g. a clone this script
+        -- was already run against), skips creating it here, and the
+        -- ON CONFLICT (entity_id, code) below then fails with "no unique or
+        -- exclusion constraint matching the ON CONFLICT specification".
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'uq_sale_info_entity_code'
+          AND conrelid = 'pettycashv2.sale_info'::regclass
     ) THEN
         ALTER TABLE pettycashv2.sale_info
             ADD CONSTRAINT uq_sale_info_entity_code
@@ -152,7 +159,9 @@ ALTER TABLE pettycashv2.entity_sale_setting
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_entity_sale_setting_sale_info'
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_entity_sale_setting_sale_info'
+          AND conrelid = 'pettycashv2.entity_sale_setting'::regclass
     ) THEN
         ALTER TABLE pettycashv2.entity_sale_setting
             ADD CONSTRAINT fk_entity_sale_setting_sale_info
@@ -230,7 +239,9 @@ ALTER TABLE pettycashv2.report_sale_detail
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'fk_report_sale_detail_sale_info'
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_report_sale_detail_sale_info'
+          AND conrelid = 'pettycashv2.report_sale_detail'::regclass
     ) THEN
         ALTER TABLE pettycashv2.report_sale_detail
             ADD CONSTRAINT fk_report_sale_detail_sale_info
