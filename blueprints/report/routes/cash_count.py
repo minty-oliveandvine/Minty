@@ -292,7 +292,10 @@ def report_cash_count(id=None):
                     )
                 )
                 counts_by_cash_id[denomination.cash_id] = int(quantity or 0)
-                total_cash_count += (denomination.cash_value or 0) * quantity
+                # cash_value is Numeric, so it arrives as Decimal; quantity is
+                # a float. Decimal * float raises TypeError, so coerce here —
+                # the same float() the read path already applies.
+                total_cash_count += float(denomination.cash_value or 0) * quantity
 
             # Log cash count data for debugging
             logger.info(f"Cash count data for draft {current_draft.id}:")
@@ -526,7 +529,7 @@ def report_cash_count(id=None):
                 )
         except Exception as e:
             db.session.rollback()
-            print(f"Error updating cash count: {str(e)}")
+            logger.exception(f"Error updating cash count: {e}")
             flash(
                 "Something went wrong saving your cash count. Mind trying again?",
                 "danger")
