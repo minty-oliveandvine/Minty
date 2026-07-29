@@ -383,3 +383,60 @@ def reorder_payment_methods(user_id, entity_id, method_ids):
 
     db.session.commit()
     return {"message": "Payment methods reordered successfully"}, 200
+
+
+def list_available_methods(user_id, entity_id):
+    """Catalog methods this entity has NOT added yet, grouped by type.
+
+    Backs the "add a payment method" dropdowns in Entity Settings, which
+    previously offered only a free-text box — so a user typing "Viza" minted a
+    second catalog row instead of linking to the existing VISA one.
+
+    Offered rows are the active catalog entries (global, plus this entity's own
+    custom ones) minus whatever the entity already has enabled. Disabled rows
+    are deliberately NOT filtered out: re-adding a method the entity turned off
+    should re-enable the existing row, and replace_sales_methods/
+    add_payment_method already handle that by matching on name.
+
+    Returns {"electronic": [...], "delivery": [...]} where each item carries
+    the catalog id, code and name — the id lets the caller pass
+    ``sales_method_id`` so the new row links to the right catalog entry rather
+    than guessing from the display name.
+    """
+    if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_VIEW, entity_id):
+        return {"error": "Access denied"}, 403
+
+    taken = {
+        (row.sale_name or "").strip().lower()
+        for row in EntitySaleSetting.query.filter_by(
+            entity_id=entity_id, enabled=True
+        ).all()
+    }
+
+    catalog = (
+        SaleInfo.query.filter(
+            db.or_(SaleInfo.entity_id == entity_id, SaleInfo.entity_id.is_(None)),
+            SaleInfo.is_active.is_(True),
+        )
+        .order_by(SaleInfo.display_order.asc(), SaleInfo.name.asc())
+        .all()
+    )
+
+    grouped = {"electronic": [], "delivery": []}
+    for row in catalog:
+        # Cash is managed on its own section of the report, not as an
+        # add-able payment method here.
+        bucket = (row.type or "").strip().lower()
+        if bucket not in grouped:
+            continue
+        if (row.name or "").strip().lower() in taken:
+            continue
+        grouped[bucket].append(
+            {"id": row.id, "code": row.code, "name": row.name, "type": row.type}
+        )
+
+    logger.info(
+        "list_available_methods: entity=%s electronic=%s delivery=%s",
+        entity_id, len(grouped["electronic"]), len(grouped["delivery"]),
+    )
+    return grouped, 200
