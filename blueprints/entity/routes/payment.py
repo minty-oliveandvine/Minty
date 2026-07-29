@@ -8,7 +8,8 @@ from blueprints.entity.services.payment_methods import \
     add_payment_method as add_payment_method_service
 from blueprints.entity.services.payment_methods import \
     delete_payment_method as delete_payment_method_service
-from blueprints.entity.services.payment_methods import list_payment_methods
+from blueprints.entity.services.payment_methods import (list_available_methods,
+                                                        list_payment_methods)
 from blueprints.entity.services.payment_methods import \
     reorder_payment_methods as reorder_payment_methods_service
 from blueprints.entity.services.payment_methods import \
@@ -19,6 +20,21 @@ from blueprints.entity.services.payment_methods import \
 @login_required
 def get_payment_methods(entity_id):
     response, status = list_payment_methods(current_user.id, entity_id)
+    return jsonify(response), status
+
+
+@entity_bp.route(
+    "/api/entities/<string:entity_id>/payment-methods/available", methods=["GET"]
+)
+@login_required
+def get_available_payment_methods(entity_id):
+    """Catalog methods this entity has not added yet, grouped by type.
+
+    Feeds the Electronic and Delivery dropdowns in Entity Settings so a user
+    picks an existing method instead of retyping its name (and accidentally
+    minting a near-duplicate catalog row).
+    """
+    response, status = list_available_methods(current_user.id, entity_id)
     return jsonify(response), status
 
 
