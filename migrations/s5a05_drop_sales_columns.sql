@@ -40,6 +40,15 @@ BEGIN
 
     -- (b) CHECK D — columns and detail rows must agree to the cent,
     --     for reports AND drafts.
+    --
+    --     Cash is EXCLUDED from the detail side. The column side sums the 11
+    --     per-method columns, which never included cash_sales (it survives the
+    --     drop below, see the KEPT list). But s7a07 later seeded Cash rows into
+    --     report_sale_detail, so an unfiltered SUM(amount) counts a 12th method
+    --     the column side structurally cannot hold — every report with cash
+    --     sales then reports a spurious negative diff and aborts the drop.
+    --     Filter on type = 'Cash', the same marker get_cash_sales_from_detail
+    --     uses to find those rows.
     SELECT count(*) INTO v_mismatch FROM (
         WITH col AS (
             SELECT id, COALESCE(visa_sales,0)+COALESCE(alipay_sales,0)+COALESCE(wechat_sales,0)
@@ -49,7 +58,9 @@ BEGIN
             FROM pettycashv2.report
         ), det AS (
             SELECT report_id, SUM(amount) AS s
-            FROM pettycashv2.report_sale_detail GROUP BY report_id
+            FROM pettycashv2.report_sale_detail
+            WHERE COALESCE(type,'') <> 'Cash'
+            GROUP BY report_id
         )
         SELECT c.id FROM col c JOIN det d ON d.report_id = c.id
         WHERE abs(c.s - d.s) > 0.01
@@ -62,7 +73,9 @@ BEGIN
             FROM pettycashv2.report_draft
         ) c JOIN (
             SELECT report_id, SUM(amount) AS s
-            FROM pettycashv2.report_sale_detail GROUP BY report_id
+            FROM pettycashv2.report_sale_detail
+            WHERE COALESCE(type,'') <> 'Cash'
+            GROUP BY report_id
         ) d ON d.report_id = c.id
         WHERE abs(c.s - d.s) > 0.01
     ) x;
@@ -82,14 +95,33 @@ BEGIN
           v_unlinked_si;
     END IF;
 
-    -- (d) reports holding column amounts but NO detail rows would lose data
-    SELECT count(*) INTO v_orphan_amounts FROM pettycashv2.report r
-     WHERE (COALESCE(r.visa_sales,0)+COALESCE(r.alipay_sales,0)+COALESCE(r.wechat_sales,0)
-           +COALESCE(r.master_sales,0)+COALESCE(r.unionpay_sales,0)+COALESCE(r.amex_sales,0)
-           +COALESCE(r.octopus_sales,0)+COALESCE(r.foodpanda_sales,0)+COALESCE(r.keeta_sales,0)
-           +COALESCE(r.openrice_sales,0)+COALESCE(r.deliveroo_sales,0)) <> 0
-       AND NOT EXISTS (SELECT 1 FROM pettycashv2.report_sale_detail d
-                        WHERE d.report_id = r.id);
+    -- (d) rows holding column amounts but NO non-cash detail rows would lose
+    --     data. Two refinements over the obvious form:
+    --       * exclude Cash from the NOT EXISTS — since s7a07, a report whose
+    --         only detail row is Cash still has nothing backing its 11 columns,
+    --         so a bare "has any detail row" test would wave it through.
+    --       * cover report_draft too. Drafts carry the same columns and are
+    --         dropped in the same transaction below, so checking only `report`
+    --         left the draft side unguarded.
+    SELECT count(*) INTO v_orphan_amounts FROM (
+        SELECT r.id FROM pettycashv2.report r
+         WHERE (COALESCE(r.visa_sales,0)+COALESCE(r.alipay_sales,0)+COALESCE(r.wechat_sales,0)
+               +COALESCE(r.master_sales,0)+COALESCE(r.unionpay_sales,0)+COALESCE(r.amex_sales,0)
+               +COALESCE(r.octopus_sales,0)+COALESCE(r.foodpanda_sales,0)+COALESCE(r.keeta_sales,0)
+               +COALESCE(r.openrice_sales,0)+COALESCE(r.deliveroo_sales,0)) <> 0
+           AND NOT EXISTS (SELECT 1 FROM pettycashv2.report_sale_detail d
+                            WHERE d.report_id = r.id
+                              AND COALESCE(d.type,'') <> 'Cash')
+        UNION ALL
+        SELECT rd.id FROM pettycashv2.report_draft rd
+         WHERE (COALESCE(rd.visa_sales,0)+COALESCE(rd.alipay_sales,0)+COALESCE(rd.wechat_sales,0)
+               +COALESCE(rd.master_sales,0)+COALESCE(rd.unionpay_sales,0)+COALESCE(rd.amex_sales,0)
+               +COALESCE(rd.octopus_sales,0)+COALESCE(rd.foodpanda_sales,0)+COALESCE(rd.keeta_sales,0)
+               +COALESCE(rd.openrice_sales,0)+COALESCE(rd.deliveroo_sales,0)) <> 0
+           AND NOT EXISTS (SELECT 1 FROM pettycashv2.report_sale_detail d
+                            WHERE d.report_id = rd.id
+                              AND COALESCE(d.type,'') <> 'Cash')
+    ) y;
     IF v_orphan_amounts > 0 THEN
         RAISE EXCEPTION
           'ABORT: % report(s) have column amounts but NO detail rows — dropping would DESTROY that data. Re-run the s4a04 backfill.',
@@ -179,6 +211,12 @@ FROM pettycashv2.report_sale_detail;
 
 -- 3. Aggregates still reconcile against the detail rows they now derive from.
 --    Expect zero rows.
+--
+--    total_sales includes cash; the detail side must therefore include the
+--    Cash rows too. The previous form subtracted cash_sales from the column
+--    side while leaving Cash in SUM(amount), so cash was removed twice and
+--    every cash report looked mismatched. Compare like with like instead:
+--    total_sales against ALL detail rows.
 WITH det AS (
     SELECT report_id, SUM(amount) AS s
     FROM pettycashv2.report_sale_detail GROUP BY report_id
@@ -187,6 +225,6 @@ SELECT r.id, r.total_sales, d.s AS detail_total,
        round((COALESCE(r.total_sales,0) - COALESCE(d.s,0))::numeric, 2) AS difference
 FROM pettycashv2.report r
 JOIN det d ON d.report_id = r.id
-WHERE abs(COALESCE(r.total_sales,0) - COALESCE(r.cash_sales,0) - COALESCE(d.s,0)) > 0.01
+WHERE abs(COALESCE(r.total_sales,0) - COALESCE(d.s,0)) > 0.01
 ORDER BY 4 DESC
 LIMIT 50;
