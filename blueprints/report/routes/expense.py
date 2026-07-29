@@ -16,6 +16,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                normalize_expense_files,
                                                resolve_report_entity_id,
                                                safe_float,
+                                               sum_sales_by_type,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
@@ -500,19 +501,13 @@ def report_expense(id=None):
                 report_v2 = ReportV2.query.filter_by(
                     report_id=current_draft.id).first()
 
-                nocashsale_fields = [
-                    "visa_sales",
-                    "master_sales",
-                    "alipay_sales",
-                    "wechat_sales",
-                    "unionpay_sales",
-                    "amex_sales",
-                    "octopus_sales",
-                ]
-                nocashsale_total = 0
-                for field in nocashsale_fields:
-                    value = getattr(current_draft, field, 0)
-                    nocashsale_total += value if value else 0
+                # Non-cash sales from report_sale_detail rather than a
+                # hardcoded column list — those columns are no longer on the
+                # model, so the old loop always produced 0. Summing the detail
+                # rows also means a method added to the catalog is counted
+                # without touching this code.
+                _totals = sum_sales_by_type(current_draft.id)
+                nocashsale_total = _totals["Electronic"] + _totals["Delivery"]
 
                 if report_v2:
                     # Update existing report_v2 with new expense_total

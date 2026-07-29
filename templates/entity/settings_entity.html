@@ -376,10 +376,26 @@
               <div class="space-y-4">
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-2">Method</label>
-                  <!-- Populated from /payment-methods/available (Electronic only).
-                       Picking a listed method links the new row to that catalog
-                       entry; "Other" reveals the free-text box below. -->
-                  <select id="methodCatalogSelect" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer mb-3">
+                  <!-- Searchable picker matching the Xero contact dropdowns:
+                       styled input + rotating chevron + filterable suggestion
+                       list. Options come from /payment-methods/available
+                       (Electronic only). Picking a listed method links the new
+                       row to that catalog entry; "Other" reveals the Name box. -->
+                  <div class="relative mb-3">
+                    <input type="text" id="methodCatalogInput" placeholder="Select a payment method" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
+                    <!-- Dropdown Icon -->
+                    <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                      <svg id="methodCatalogDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
+                        <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
+                      </svg>
+                    </div>
+                    <!-- Method Suggestions Dropdown -->
+                    <div id="methodCatalogSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
+                      <!-- Suggestions will be populated here -->
+                    </div>
+                  </div>
+                  <!-- Hidden select holds the picked catalog id (or __other__). -->
+                  <select id="methodCatalogSelect" class="hidden">
                     <option value="">Select a payment method…</option>
                     <option value="__other__">Other (type a new name)</option>
                   </select>
@@ -433,8 +449,23 @@
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-2">Method</label>
                   <!-- Delivery-only options, so the two sections never offer
-                       each other's methods. -->
-                  <select id="deliveryCatalogSelect" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer mb-3">
+                       each other's methods. Same searchable picker as the
+                       Electronic section and the Xero contact dropdowns. -->
+                  <div class="relative mb-3">
+                    <input type="text" id="deliveryCatalogInput" placeholder="Select a delivery method" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
+                    <!-- Dropdown Icon -->
+                    <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                      <svg id="deliveryCatalogDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
+                        <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
+                      </svg>
+                    </div>
+                    <!-- Method Suggestions Dropdown -->
+                    <div id="deliveryCatalogSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
+                      <!-- Suggestions will be populated here -->
+                    </div>
+                  </div>
+                  <!-- Hidden select holds the picked catalog id (or __other__). -->
+                  <select id="deliveryCatalogSelect" class="hidden">
                     <option value="">Select a delivery method…</option>
                     <option value="__other__">Other (type a new name)</option>
                   </select>
@@ -715,13 +746,17 @@
       const cancelMethodBtn = document.getElementById('cancelMethodBtn');
       const saveMethodBtn = document.getElementById('saveMethodBtn');
       const methodNameInput = document.getElementById('methodName');
+      const methodCatalogInput = document.getElementById('methodCatalogInput');
 
       // Show add method form
       if (addMethodBtn) {
         addMethodBtn.addEventListener('click', function() {
           addMethodForm.classList.remove('hidden');
           addMethodBtn.classList.add('hidden');
-          methodNameInput.focus();
+          // Focus the searchable picker; the free-text box only appears
+          // once "Other" is chosen.
+          if (methodCatalogInput) methodCatalogInput.focus();
+          else methodNameInput.focus();
         });
       }
 
@@ -1053,13 +1088,17 @@
       const cancelMethodBtn = document.getElementById('cancelDeliveryMethodBtn');
       const saveMethodBtn = document.getElementById('saveDeliveryMethodBtn');
       const methodNameInput = document.getElementById('deliveryMethodName');
+      const deliveryCatalogInput = document.getElementById('deliveryCatalogInput');
 
       // Show add method form
       if (addMethodBtn) {
         addMethodBtn.addEventListener('click', function() {
           addMethodForm.classList.remove('hidden');
           addMethodBtn.classList.add('hidden');
-          methodNameInput.focus();
+          // Focus the searchable picker; the free-text box only appears
+          // once "Other" is chosen.
+          if (deliveryCatalogInput) deliveryCatalogInput.focus();
+          else methodNameInput.focus();
         });
       }
 
@@ -1728,7 +1767,9 @@
         addMethodBtn.addEventListener('click', function() {
           addMethodForm.classList.remove('hidden');
           addMethodBtn.classList.add('hidden');
-          if (methodNameInput) methodNameInput.focus();
+          const catalogInput = document.getElementById('methodCatalogInput');
+          if (catalogInput) catalogInput.focus();
+          else if (methodNameInput) methodNameInput.focus();
         });
       }
 
@@ -1765,7 +1806,9 @@
         addDeliveryMethodBtn.addEventListener('click', function() {
           addDeliveryMethodForm.classList.remove('hidden');
           addDeliveryMethodBtn.classList.add('hidden');
-          if (deliveryMethodNameInput) deliveryMethodNameInput.focus();
+          const catalogInput = document.getElementById('deliveryCatalogInput');
+          if (catalogInput) catalogInput.focus();
+          else if (deliveryMethodNameInput) deliveryMethodNameInput.focus();
         });
       }
 
@@ -1774,6 +1817,7 @@
           addDeliveryMethodForm.classList.add('hidden');
           addDeliveryMethodBtn.classList.remove('hidden');
           if (deliveryMethodNameInput) deliveryMethodNameInput.value = '';
+          resetMethodPicker('deliveryCatalogSelect', 'deliveryMethodNameWrapper');
         });
       }
 
@@ -1785,6 +1829,7 @@
             addDeliveryMethodForm.classList.add('hidden');
             addDeliveryMethodBtn.classList.remove('hidden');
             deliveryMethodNameInput.value = '';
+            resetMethodPicker('deliveryCatalogSelect', 'deliveryMethodNameWrapper');
           }
         });
       }
@@ -1895,6 +1940,14 @@
       const wrapper = document.getElementById(wrapperId);
       if (select) select.value = '';
       if (wrapper) wrapper.classList.add('hidden');
+      // Clear the visible searchable input and close its suggestion panel.
+      const searchId = selectId.replace('Select', 'Input');
+      const search = document.getElementById(searchId);
+      if (search) search.value = '';
+      const suggestions = document.getElementById(selectId.replace('Select', 'Suggestions'));
+      if (suggestions) suggestions.classList.add('hidden');
+      const icon = document.getElementById(selectId.replace('Select', 'DropdownIcon'));
+      if (icon) icon.classList.remove('rotate-180');
       if (window.refreshAvailablePaymentMethods) {
         window.refreshAvailablePaymentMethods();
       }
@@ -1910,29 +1963,168 @@
       const orgId = '{{org.id}}';
       if (!orgId) return;
 
-      const wire = (selectId, wrapperId, inputId) => {
+      // Searchable dropdown built the same way as the Xero contact pickers:
+      // the visible input filters the catalog, the suggestion panel opens on
+      // focus, the chevron rotates while open, and the hidden select still
+      // holds the chosen value so nothing downstream changes.
+      const wire = (selectId, wrapperId, inputId, searchInputId, suggestionsId, iconId, noun) => {
         const select = document.getElementById(selectId);
         const wrapper = document.getElementById(wrapperId);
         const input = document.getElementById(inputId);
-        if (!select || !wrapper || !input) return null;
-        select.addEventListener('change', function () {
-          const isOther = select.value === '__other__';
+        const search = document.getElementById(searchInputId);
+        const suggestions = document.getElementById(suggestionsId);
+        const icon = document.getElementById(iconId);
+        if (!select || !wrapper || !input || !search || !suggestions) return null;
+
+        let highlighted = -1;
+
+        // Picking "Other" reveals the Name box and lets the user type a brand
+        // new method; picking a catalog entry mirrors its name into the hidden
+        // input the existing save handlers already read.
+        const applyChoice = (value, name) => {
+          select.value = value || '';
+          const isOther = value === '__other__';
           wrapper.classList.toggle('hidden', !isOther);
           if (isOther) {
+            search.value = 'Other';
             input.value = '';
             input.focus();
           } else {
-            // Mirror the picked name into the input the existing save
-            // handlers already read, so they need no changes.
-            const opt = select.options[select.selectedIndex];
-            input.value = select.value ? (opt.dataset.name || opt.textContent.trim()) : '';
+            search.value = name || '';
+            input.value = value ? name : '';
+          }
+        };
+
+        const catalogOptions = () =>
+          Array.from(select.querySelectorAll('option[data-catalog="1"]'))
+            .map(o => ({ value: o.value, name: o.dataset.name || o.textContent.trim() }));
+
+        const hide = () => {
+          suggestions.classList.add('hidden');
+          if (icon) icon.classList.remove('rotate-180');
+          highlighted = -1;
+        };
+
+        const highlight = (index) => {
+          const items = suggestions.querySelectorAll('[data-index]');
+          items.forEach((item, i) => {
+            if (i === index) {
+              item.classList.add('bg-gray-100');
+              item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            } else {
+              item.classList.remove('bg-gray-100');
+            }
+          });
+        };
+
+        const show = (query) => {
+          const q = (query || '').trim();
+          const lower = q.toLowerCase();
+          const options = catalogOptions();
+          const matches = options.filter(o => !lower || o.name.toLowerCase().includes(lower));
+          suggestions.innerHTML = '';
+          highlighted = -1;
+
+          matches.forEach((option, index) => {
+            const item = document.createElement('div');
+            item.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100';
+            item.setAttribute('data-index', index);
+            item.setAttribute('data-value', option.value);
+            item.setAttribute('data-name', option.name);
+            item.innerHTML = `<div class="text-sm font-medium text-gray-900">${option.name}</div>`;
+            item.addEventListener('mousedown', function (e) {
+              e.preventDefault();
+              applyChoice(option.value, option.name);
+              hide();
+            });
+            suggestions.appendChild(item);
+          });
+
+          if (matches.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'px-4 py-2 text-gray-600 border-b border-gray-100';
+            empty.innerHTML = `<div class="text-sm">No matching ${noun} found</div>`;
+            suggestions.appendChild(empty);
+          }
+
+          // "Other" always stays reachable, matching the old select entry —
+          // choosing it reveals the Name box to type a brand new method.
+          const other = document.createElement('div');
+          other.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-t border-gray-200';
+          other.setAttribute('data-index', matches.length);
+          other.setAttribute('data-value', '__other__');
+          other.setAttribute('data-name', 'Other');
+          other.innerHTML = '<div class="text-gray-600 hover:text-gray-800">+ Other (type a new name)</div>';
+          other.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            applyChoice('__other__', 'Other');
+            hide();
+          });
+          suggestions.appendChild(other);
+
+          suggestions.classList.remove('hidden');
+          if (icon) icon.classList.add('rotate-180');
+        };
+
+        search.addEventListener('focus', function () { show(search.value); });
+        search.addEventListener('input', function () {
+          // Typing filters the list; nothing is chosen until a row is picked.
+          select.value = '';
+          input.value = '';
+          wrapper.classList.add('hidden');
+          show(search.value);
+        });
+
+        search.addEventListener('keydown', function (e) {
+          if (suggestions.classList.contains('hidden')) return;
+          const items = suggestions.querySelectorAll('[data-index]');
+
+          switch (e.key) {
+            case 'ArrowDown':
+              if (!items.length) return;
+              e.preventDefault();
+              highlighted = (highlighted + 1) % items.length;
+              highlight(highlighted);
+              break;
+            case 'ArrowUp':
+              if (!items.length) return;
+              e.preventDefault();
+              highlighted = highlighted <= 0 ? items.length - 1 : highlighted - 1;
+              highlight(highlighted);
+              break;
+            case 'Enter': {
+              // Only consume Enter when a suggestion is highlighted; otherwise
+              // let it fall through so the Add button's handler still fires.
+              if (highlighted < 0 || !items[highlighted]) { hide(); return; }
+              e.preventDefault();
+              const selected = items[highlighted];
+              applyChoice(selected.getAttribute('data-value'), selected.getAttribute('data-name'));
+              hide();
+              break;
+            }
+            case 'Escape':
+              hide();
+              break;
           }
         });
+
+        document.addEventListener('click', function (event) {
+          if (!search.contains(event.target) && !suggestions.contains(event.target)) hide();
+        });
+
         return select;
       };
 
-      const electronicSelect = wire('methodCatalogSelect', 'methodNameWrapper', 'methodName');
-      const deliverySelect = wire('deliveryCatalogSelect', 'deliveryMethodNameWrapper', 'deliveryMethodName');
+      const electronicSelect = wire(
+        'methodCatalogSelect', 'methodNameWrapper', 'methodName',
+        'methodCatalogInput', 'methodCatalogSuggestions', 'methodCatalogDropdownIcon',
+        'payment method'
+      );
+      const deliverySelect = wire(
+        'deliveryCatalogSelect', 'deliveryMethodNameWrapper', 'deliveryMethodName',
+        'deliveryCatalogInput', 'deliveryCatalogSuggestions', 'deliveryCatalogDropdownIcon',
+        'delivery method'
+      );
 
       const fill = (select, items) => {
         if (!select) return;
