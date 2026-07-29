@@ -11,6 +11,7 @@ tz = pytz.timezone("Asia/Hong_Kong")
 from blueprints.auth.models.user import User  # noqa: E402
 from blueprints.auth.models.user_token import UserToken  # noqa: E402
 from blueprints.entity.models.cash_info import CashInfo  # noqa: E402
+from blueprints.entity.models.entity_cash_setting import EntityCashSetting  # noqa: E402
 from blueprints.entity.models.country_info import CountryInfo  # noqa: E402
 from blueprints.entity.models.currency_info import CurrencyInfo  # noqa: E402
 from blueprints.entity.models.entity import Entity  # noqa: E402
@@ -23,6 +24,7 @@ from blueprints.entity.models.user_entity import UserEntity  # noqa: E402
 from blueprints.report.models.report import Report  # noqa: E402
 from blueprints.report.models.report_cash_count_draft import ReportCashCountDraft  # noqa: E402
 from blueprints.report.models.report_cash_detail import ReportCashDetail  # noqa: E402
+from blueprints.report.models.report_cash_count import ReportCashCount  # noqa: E402
 from blueprints.report.models.report_detail import ReportDetail  # noqa: E402
 from blueprints.report.models.report_draft import ReportDraft  # noqa: E402
 from blueprints.report.models.report_expense_detail import ReportExpenseDetail  # noqa: E402
@@ -54,6 +56,7 @@ __all__ = [
     "CountryInfo",
     "CurrencyInfo",
     "CashInfo",
+    "EntityCashSetting",
     "EntityCashDetailV2",
     "EntityFunction",
     "EntityFunctionMap",
@@ -74,6 +77,7 @@ __all__ = [
     "ReportSaleDetail",
     "ShareLink",
     "ReportCashDetail",
+    "ReportCashCount",
     "AccountInfo",
     "EntityAccountXero",
     "XeroContactSync",
