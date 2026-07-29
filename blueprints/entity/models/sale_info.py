@@ -21,8 +21,13 @@ class SaleInfo(db.Model):
     is dropped once those columns go — a NEW method must never need one, or
     adding a method would again require a schema change.
 
-    Cash is deliberately absent: ``cash_sales`` is a separate concept with its
-    own column and its own ``type == "Cash"`` branch in the totals code.
+    Cash IS in the catalog (code 'CASH', type 'Cash'), seeded by s7a07 — it is
+    a payment method like any other and belongs in the list users see. What
+    stays special is everything downstream: ``cash_sales`` keeps its physical
+    column when the other 11 are dropped, it is the only sales figure in the
+    closing-balance formula, and it publishes to Xero against
+    ``cash_sale_account_id``. Its ``legacy_column`` therefore survives Step 5,
+    unlike every other row's.
     """
 
     __tablename__ = "sale_info"
