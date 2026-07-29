@@ -393,7 +393,7 @@ def report_cash_count(id=None):
                     entity_id=entity_id,
                     opening_balance=opening_balance,
                     adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                    nocashsale_total=current_draft.total_sales -
+                    nocashsale_total=(current_draft.total_sales or 0) -
                     cash_sales,
                     cashsale_total=cash_sales,
                     expense_total=expenses,
@@ -438,7 +438,7 @@ def report_cash_count(id=None):
                         entity_id=entity_id,
                         opening_balance=opening_balance,
                         adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                        nocashsale_total=current_draft.total_sales -
+                        nocashsale_total=(current_draft.total_sales or 0) -
                         cash_sales,
                         cashsale_total=cash_sales,
                         expense_total=expenses,
