@@ -1124,7 +1124,7 @@ def entity_settings_entity(org_id):
 @login_required
 @require_entity_access(entity_arg="org_id")
 @require_permission(
-    Permission.USER_VIEW_ALL,
+    Permission.MODULE_VIEW,
     entity_arg="org_id",
     message="You do not have permission to view module settings for this entity.",
 )
