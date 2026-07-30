@@ -150,9 +150,11 @@
      .flatpickr-day:hover { background: #f1fbfc; }
      .flatpickr-months .flatpickr-month { color: #374151; }
      .flatpickr-current-month { font-weight: 600; }
-     /* Day-column alignment is left to Flatpickr's own layout: the default
-        `justify-content: space-around` with 39px-capped cells makes each day's
-        centre land exactly under its weekday header. */
+     /* Day-column alignment: at Flatpickr's native width its default
+        `justify-content: space-around` with 39px-capped cells happens to put
+        each day's centre under its weekday header. That breaks the moment the
+        grid is widened (see the desktop block below), so the cells are pinned
+        to an explicit 1/7 there instead of relying on the cap. */
 
      /* In two-month mode Flatpickr tags the leading/trailing adjacent-month
         cells with class "hidden" and relies on `visibility: hidden` to keep
@@ -183,6 +185,41 @@
        transition: background 0.15s ease, color 0.15s ease;
      }
      .fp-clear-btn:hover { background: #f3f4f6; color: #374151; }
+
+     /* ---- Desktop: stretch the two-month calendar across both date fields ----
+        Flatpickr hardcodes 307.875px per month, so the popup would otherwise
+        stop well short of the End Date field. The container width itself is set
+        in JS (sizeCalendarToFields) because the popup is appended to <body>, not
+        to the field row; these rules let the inner grid follow that width.
+
+        Cells MUST be pinned to an explicit 1/7 here. Flatpickr's own rule is
+        `flex-basis: 14.2857143%` with `max-width: 39px` — once the row is wider
+        than 7x39px the cap wins, so more than seven 39px cells fit on a line
+        and the weeks run together instead of wrapping every 7 days. Dropping
+        the cap and packing from the start keeps one week per row with each
+        column centred under its weekday header. */
+     @media (min-width: 640px) {
+       /* rContainer is an inline-block that shrink-wraps by default, so it has
+          to stretch first or the 100% below resolves against the old width. */
+       .flatpickr-calendar .flatpickr-innerContainer,
+       .flatpickr-calendar .flatpickr-rContainer,
+       .flatpickr-calendar .flatpickr-days { width: 100% !important; }
+       .flatpickr-calendar .dayContainer {
+         flex: 1 1 0;
+         width: auto !important;
+         min-width: 0 !important;
+         max-width: none !important;
+         justify-content: flex-start !important;
+       }
+       .flatpickr-calendar .flatpickr-day {
+         width: 14.2857143% !important;
+         max-width: 14.2857143% !important;
+         flex-basis: 14.2857143% !important;
+         margin: 0 !important;
+         border-radius: 10px;
+       }
+       .flatpickr-calendar .flatpickr-weekday { flex: 1; }
+     }
 
      /* ---- Mobile: make the single-month calendar fill the screen nicely ---- */
      @media (max-width: 639px) {
@@ -718,6 +755,20 @@
        // One month on phones, two side-by-side once there's room
        function monthsForViewport() { return window.innerWidth >= 640 ? 2 : 1; }
 
+       // Match the popup to the Start/End field row. Flatpickr sizes itself from
+       // its own per-month constant and appends the popup to <body>, so neither
+       // its inline width nor a CSS `width: 100%` can track the row — it has to
+       // be measured. On phones we drop the inline width so the mobile rules
+       // (viewport-width calendar) take over again.
+       function sizeCalendarToFields(instance) {
+         const container = instance && instance.calendarContainer;
+         if (!container) return;
+         if (window.innerWidth < 640) { container.style.width = ''; return; }
+         const row = document.getElementById('dateRange');
+         if (!row) return;
+         container.style.width = row.getBoundingClientRect().width + 'px';
+       }
+
        // Two-month side-by-side range calendar, anchored under the fields
        const fp = flatpickr('#dateRangePicker', {
          mode: 'range',
@@ -728,6 +779,11 @@
          positionElement: document.getElementById('dateRange'),
          defaultDate: defaultRange.length ? defaultRange : null,
          onChange: function(selectedDates) { syncRange(selectedDates); },
+         // Fires before Flatpickr positions the popup, so the widened calendar
+         // is what gets aligned against #dateRange rather than the default size.
+         onOpen: function(selectedDates, dateStr, instance) {
+           sizeCalendarToFields(instance);
+         },
          onReady: function(selectedDates, dateStr, instance) {
            syncRange(selectedDates);
 
@@ -759,6 +815,8 @@
            footer.appendChild(clearBtn);
            footer.appendChild(searchFpBtn);
            instance.calendarContainer.appendChild(footer);
+
+           sizeCalendarToFields(instance);
          }
        });
 
@@ -777,6 +835,10 @@
              fp.set('showMonths', wanted);
              fp.redraw();
            }
+           // The field row is fluid, so re-measure on every resize — not just
+           // when the month count changes — and re-anchor while it's open.
+           sizeCalendarToFields(fp);
+           if (fp.isOpen) fp._positionCalendar && fp._positionCalendar();
          }, 150);
        });
 
