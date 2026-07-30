@@ -36,6 +36,7 @@ class Permission(str, Enum):
     ENTITY_UPDATE = "entity_update"
     ENTITY_RENAME = "entity_rename"
     ENTITY_DELETE = "entity_delete"
+    MODULE_VIEW = "module_view"
     MODULE_MANAGE = "module_manage"
     SALES_METHOD_VIEW = "sales_method_view"
     SALES_METHOD_CREATE = "sales_method_create"
@@ -96,7 +97,9 @@ PERMISSION_RULES: dict[Permission, PermissionRule] = {
     Permission.ENTITY_UPDATE: PermissionRule(Role.ACCOUNTANT),
     Permission.ENTITY_RENAME: PermissionRule(Role.ADMIN),
     Permission.ENTITY_DELETE: PermissionRule(Role.ADMIN),
-    # Changing an entity's active modules is admin-only.
+    # Seeing which modules an entity subscribes to is read-only information
+    # every entity member needs; changing them is admin-only.
+    Permission.MODULE_VIEW: PermissionRule(Role.CASHIER),
     Permission.MODULE_MANAGE: PermissionRule(Role.ADMIN),
     Permission.SALES_METHOD_VIEW: PermissionRule(Role.CASHIER),
     Permission.SALES_METHOD_CREATE: PermissionRule(Role.ACCOUNTANT),
@@ -157,6 +160,7 @@ def is_superuser(user: Any) -> bool:
 READONLY_ALLOWED_PERMISSIONS: frozenset["Permission"] = frozenset({
     Permission.USER_VIEW_ALL,
     Permission.ENTITY_VIEW,
+    Permission.MODULE_VIEW,
     Permission.SALES_METHOD_VIEW,
     Permission.COA_VIEW,
     Permission.XERO_SETTINGS_VIEW,
