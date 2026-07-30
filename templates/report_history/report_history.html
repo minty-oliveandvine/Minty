@@ -275,7 +275,7 @@
             {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
             <a href="{{ bills_app_profile_url(entity_id) }}" rel="noopener noreferrer"
               class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
-              aria-label="Open profile in Bills"
+              aria-label="Open profile in Payments"
               title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
               <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
             </a>

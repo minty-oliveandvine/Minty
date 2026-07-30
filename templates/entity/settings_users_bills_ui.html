@@ -82,7 +82,7 @@
         <div class="flex min-w-0 flex-1 flex-nowrap items-center gap-2 sm:gap-3">
           <a href="{{ bill_settings_url }}" class="inline-flex shrink-0 items-center gap-0.5 text-sm font-medium text-[#656565] transition-colors hover:text-[#54d3da] sm:text-base">
             <span class="material-symbols-outlined leading-none" style="font-size:22px" aria-hidden="true">chevron_left</span>
-            Bills
+            Payments
           </a>
           <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <span class="min-w-0 cursor-default truncate text-base font-semibold text-black sm:text-lg">Settings</span>
@@ -102,7 +102,7 @@
         {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
         <a href="{{ bills_app_profile_url(org.id) }}"
            class="relative inline-flex shrink-0 cursor-pointer items-center pl-0.5 sm:pl-2 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54d3da]"
-           aria-label="Open profile in Bills"
+           aria-label="Open profile in Payments"
            title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
           <span class="inline-flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
         </a>
@@ -143,7 +143,7 @@
         {% if is_billing_enabled(org.id) %}
         <a href="{{ bill_settings_url }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
-          Bill Settings
+          Payment Settings
         </a>
         {% endif %}
 
