@@ -64,7 +64,7 @@ MODULE_DISPLAY: dict[str, dict] = {
         "image": "img/payment-icon.png",
         "price": "280 HKD per Month",
         "price_amount": 280,
-        "summary_label": "Bill module",
+        "summary_label": "Payment module",
         "learn_more": "https://youtu.be/v7G6gaGO0V0?si=P7-aWHPa9p4jDlHS",
     },
 }
