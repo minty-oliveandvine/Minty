@@ -112,7 +112,7 @@
           {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
           <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
              class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
-             aria-label="Open profile in Bills"
+             aria-label="Open profile in Payments"
              title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
             <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
           </a>
@@ -144,7 +144,7 @@
           {% endif %}
           {% if is_billing_enabled(org.id) %}
           <a data-nav-guard href="{{ bill_settings_url }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center shrink-0" rel="noopener noreferrer">
-            Bill Settings
+            Payment Settings
           </a>
           {% endif %}
           <!-- Module & Subscription pill -->

@@ -169,7 +169,7 @@ def go_to_bills(entity_id):
             return redirect(url_for("entity.entity_list"))
 
     if not _is_module_enabled(entity_id, "BILL"):
-        flash("The Bill module isn't switched on for this entity yet - an admin can turn it on in the entity's module settings.", "warning")
+        flash("The Payment module isn't switched on for this entity yet - an admin can turn it on in the entity's module settings.", "warning")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
     return redirect(billing_app_home_url(entity_id, org, current_user.id))

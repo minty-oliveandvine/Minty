@@ -43,7 +43,7 @@ def get_bill_code_options(user_id, entity_id):
         return {"error": "Entity not found"}, 404
     if not entity.xero_org_id:
         return {
-            "error": "Connect to Xero first to load bill account codes.",
+            "error": "Connect to Xero first to load payment account codes.",
             "connected": False,
         }, 409
 
@@ -104,7 +104,7 @@ def save_bill_codes(user_id, entity_id, selected_codes):
         return {"error": "Entity not found"}, 404
     if not entity.xero_org_id:
         return {
-            "error": "Connect to Xero first to save bill account codes.",
+            "error": "Connect to Xero first to save payment account codes.",
             "connected": False,
         }, 409
 
@@ -134,4 +134,4 @@ def save_bill_codes(user_id, entity_id, selected_codes):
     except Exception as exc:  # noqa: BLE001
         db.session.rollback()
         logger.error("save_bill_codes failed entity=%s: %s", entity_id, exc)
-        return {"error": "Failed to save bill account codes. Please try again."}, 500
+        return {"error": "Failed to save payment account codes. Please try again."}, 500
