@@ -20,7 +20,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
-                       ReportDraft, ReportExpenseDetail, ReportV2, ShopExpense,
+                       ReportDraft, ReportExpenseDetail, ShopExpense,
                        ShopExpenseDraft, XeroContactSync, db)
 from services.authz import permission_denied
 from services.helpers.xero_bridge import (account_info_to_xero_format,
@@ -100,9 +100,10 @@ def report_expense(id=None):
             entity_id=entity_id,
         )
     if id:
+        # The ReportDraft fallback that used to sit here is gone: since Stage 4a
+        # every draft has a paired `report` row with the same id, so the first
+        # lookup already covers drafts. Kept as one query, not two.
         report_for_access = Report.query.filter_by(id=id).first()
-        if not report_for_access:
-            report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
@@ -502,54 +503,16 @@ def report_expense(id=None):
                 current_draft.uploaded_by = current_user.username
                 current_draft.expenses = total_expenses
 
-                # Check if there is an existing report_v2 based on report_id
-                # (draft_id)
-                report_v2 = ReportV2.query.filter_by(
-                    report_id=current_draft.id).first()
-
-                # Non-cash sales from report_sale_detail rather than a
-                # hardcoded column list — those columns are no longer on the
-                # model, so the old loop always produced 0. Summing the detail
-                # rows also means a method added to the catalog is counted
-                # without touching this code.
-                _totals = sum_sales_by_type(current_draft.id)
-                nocashsale_total = _totals["Electronic"] + _totals["Delivery"]
-
-                if report_v2:
-                    # Update existing report_v2 with new expense_total
-                    report_v2.nocashsale_total = nocashsale_total
-                    report_v2.expense_total = total_expenses
-                    logger.info(
-                        f"Updated existing ReportV2 {report_v2.report_id} with expense_total: {total_expenses}"
-                    )
-                else:
-                    # Create new report_v2 if it doesn't exist
-                    report_v2 = ReportV2(
-                        report_id=current_draft.id,
-                        entity_id=entity_id,
-                        report_date=current_draft.transaction_date,
-                        status=current_draft.status or "draft",
-                        starting_balance=current_draft.opening_balance,
-                        opening_balance=current_draft.opening_balance,
-                        adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                        add_cash_amount=current_draft.cash_addition,
-                        cash_from_type="shop",
-                        add_cash_bank_account_id=current_draft.withdrawal_bank_account,
-                        xero_organiztion_id=current_user.xero_entity_id,
-                        cashsale_total=current_draft.cash_sales or 0,
-                        nocashsale_total=nocashsale_total or 0,
-                        expense_total=total_expenses,
-                    )
-                    db.session.add(report_v2)
-                    logger.info(
-                        f"Created new ReportV2 {report_v2.report_id} with expense_total: {total_expenses}"
-                    )
+                # The ReportV2 row formerly created/updated here existed only so
+                # report_expense_detail's FK resolved; r2a02 dropped that FK and
+                # nothing read its columns back. Detail rows below keep using
+                # current_draft.id, the same value report_v2.report_id held.
 
                 # Insert report_expense_detail records for each expense
                 for expense in expenses:
                     report_expense_detail = ReportExpenseDetail(
                         expense_id=expense.id,
-                        report_id=report_v2.report_id,
+                        report_id=current_draft.id,
                         account_id=getattr(expense, "account_id", None),
                         amount=expense.amount,
                         info_filepath=getattr(expense, "files", None),
@@ -701,16 +664,19 @@ def report_expense(id=None):
     # Check for existing draft: by id when in URL, else by (entity,
     # transaction_date)
     if id:
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.id == id,
-            ReportDraft.company == entity_id,
-            ReportDraft.status == "draft",
+        # GET-path read, migrated to `report`: the draft->report mirror keeps the
+        # paired row current, and status == "draft" preserves draft-only
+        # semantics. This value is only read, never written through.
+        current_draft = Report.query.filter(
+            Report.id == id,
+            Report.company == entity_id,
+            Report.status == "draft",
         ).first()
     else:
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == transaction_date,
-            ReportDraft.status == "draft",
+        current_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == transaction_date,
+            Report.status == "draft",
         ).first()
 
     logger.info("Expenses form - Looking for existing draft:")

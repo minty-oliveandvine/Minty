@@ -449,8 +449,14 @@ def create_bank_transaction(
                     else:
                         # Otherwise, we're working with draft reports (ShopExpenseDraft)
                         # Get user email from report_draft (since current_user may not be available in background thread)
+                        # NOTE: no company filter here — this matches on date
+                        # ALONE, so it can already return another entity's
+                        # draft today. Narrowed to drafts at least; the missing
+                        # entity predicate is a separate pre-existing bug and is
+                        # left visible rather than silently patched.
                         report_draft = ReportDraft.query.filter(
-                            ReportDraft.transaction_date == date
+                            ReportDraft.transaction_date == date,
+                            ReportDraft.status == "draft",
                         ).first()
                         email = report_draft.uploaded_by if report_draft else None
 
@@ -470,6 +476,7 @@ def create_bank_transaction(
                             ReportDraft.query.filter(
                                 ReportDraft.transaction_date == date,
                                 ReportDraft.uploaded_by == email,
+                                ReportDraft.status == "draft",
                             )
                             .first()
                             .id
@@ -814,9 +821,14 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
             # Handle draft report
             withdrawal_type = report_draft.withdrawal_type
             if withdrawal_type == "personal":
+                # Draft-only: .cash_addition below has no None guard, and the
+                # caller already resolved report_draft for this same
+                # (entity, date) — an unfiltered re-query could pick the posted
+                # report instead once the tables merge.
                 draft_report = ReportDraft.query.filter(
                     ReportDraft.company == entity_id,
                     ReportDraft.transaction_date == date,
+                    ReportDraft.status == "draft",
                 ).first()
                 amount = draft_report.cash_addition
                 director_contact = get_entity_contact_settings(
@@ -1430,8 +1442,14 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             modules[module_key] = {"status": "error" if failed else "success"}
 
         # Check if we have a draft report first
+        # Draft-only: this drives the whole publish run and its .cash_addition
+        # is dereferenced below with no None guard. Once drafts live in
+        # `report`, an unfiltered match would return the POSTED report for the
+        # same (entity, date) and publish against the wrong row.
         report_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id, ReportDraft.transaction_date == date
+            ReportDraft.company == entity_id,
+            ReportDraft.transaction_date == date,
+            ReportDraft.status == "draft",
         ).first()
 
         # A rejected token (HTTP 401) is an account-wide condition, not a

@@ -10,13 +10,105 @@ from datetime import datetime, timedelta
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
-from models.db import (Report, ReportDraft, ReportSaleDetail, ReportV2,
-                       EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
+from models.db import (Report, ReportDraft, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 
 safe_float = _safe_float
 parse_nested_keys = _parse_nested_keys
+
+
+# Fields a draft-shaped Report row mirrors from its ReportDraft. Deliberately
+# not every column: this is the identity//balance core needed for the row to be
+# a valid FK parent and to render, not a full copy. The submit path still owns
+# the authoritative field-by-field copy (ending.py:1418).
+_DRAFT_MIRROR_FIELDS = (
+    "transaction_date",
+    "next_transaction_date",
+    "opening_balance",
+    "cash_addition",
+    "adjusted_opening_balance",
+    "cash_sales",
+    "shop_sales",
+    "delivery_sales",
+    "total_sales",
+    "expenses",
+    "bank_deposit",
+    "closing_balance",
+    "uploaded_by",
+    "company",
+    "status",
+    "current_section",
+    "completed_sections",
+    "withdrawal_type",
+    "withdrawal_bank_account",
+)
+
+
+def ensure_report_row_for_draft(draft, commit=False):
+    """Create the paired ``report`` row for ``draft`` if it does not exist yet.
+
+    A draft and its report share one id (ending.py:387 joins on exactly that),
+    so this is an existence check on the primary key, not a search.
+
+    Why this exists: report_sale_detail and report_expense_detail rows are
+    written all through data entry, keyed on the draft id, but until now a
+    ``report`` row only appeared at submit (ending.py:1418). That left every
+    in-progress draft's detail rows pointing at an id with no parent — which is
+    why Stage 2a had to drop those FKs, and why Stage 3 cannot put them back
+    until a report row exists from creation onward. This closes that gap.
+
+    The row is created with ``status='draft'``. It is NOT a submitted report and
+    nothing should treat it as one: every reader that means "submitted" filters
+    on status, and the ones that do not are being migrated in a later substage.
+    ``expenses`` and ``closing_balance`` are copied as-is, NULL included, which
+    r3a03 made possible by relaxing those two NOT NULLs.
+
+    Idempotent and non-fatal: returns the existing row if there is one, and
+    never raises into the caller's request — a failure here must not block the
+    draft write that prompted it.
+    """
+    if draft is None or not getattr(draft, "id", None):
+        return None
+    try:
+        existing = Report.query.get(draft.id)
+        if existing is not None:
+            return existing
+
+        values = {f: getattr(draft, f, None) for f in _DRAFT_MIRROR_FIELDS}
+        # `company` and `transaction_date` stay NOT NULL on report (they are
+        # always known at draft creation); bail rather than raise if a caller
+        # somehow has neither.
+        if not values.get("company") or not values.get("transaction_date"):
+            logger.warning(
+                f"ensure_report_row_for_draft: draft {draft.id} lacks company/"
+                "transaction_date; skipping report row"
+            )
+            return None
+        # opening_balance is NOT NULL on report but nullable on the draft.
+        if values.get("opening_balance") is None:
+            values["opening_balance"] = 0.0
+        values.setdefault("status", "draft")
+        if not values.get("status"):
+            values["status"] = "draft"
+
+        report = Report(id=draft.id, **values)
+        db.session.add(report)
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+        logger.info(
+            f"Created draft-shaped report row {report.id} "
+            f"(status={values['status']}) alongside its draft"
+        )
+        return report
+    except Exception as exc:
+        logger.error(
+            f"ensure_report_row_for_draft failed for draft "
+            f"{getattr(draft, 'id', '?')}: {exc}"
+        )
+        return None
 
 
 def header_publishing_status_for(
@@ -363,6 +455,11 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
         db.session.add(draft)
         created = True
 
+    # Pair every draft with a report row so detail rows written during entry
+    # always have a valid parent id (r3a03 / Stage 4a).
+    db.session.flush()
+    ensure_report_row_for_draft(draft)
+
     db.session.commit()
     logger.info(
         "seed_opening_draft: entity=%s date=%s opening_balance=%s created=%s draft=%s",
@@ -418,6 +515,8 @@ def resolve_report_entity_id(report_id: str | None) -> str | None:
     if report and report.company:
         return str(report.company)
 
+    # ReportDraft fallback kept: this resolves an entity from an arbitrary id
+    # and must still work for pre-Stage-4a drafts that never got a paired row.
     draft = ReportDraft.query.filter_by(id=report_id).first()
     if draft and draft.company:
         return str(draft.company)
@@ -441,19 +540,20 @@ def get_next_section_for_user(
             transaction_date = datetime.now().date()
 
     if draft_id:
-        existing_draft = ReportDraft.query.filter(
-            ReportDraft.id == draft_id,
-            ReportDraft.company == company,
-            ReportDraft.status == "draft",
+        # Read-only: only current_section/id are returned. Migrated to `report`.
+        existing_draft = Report.query.filter(
+            Report.id == draft_id,
+            Report.company == company,
+            Report.status == "draft",
         ).first()
     else:
         existing_draft = (
-            ReportDraft.query.filter(
-                ReportDraft.company == company,
-                ReportDraft.transaction_date == transaction_date,
-                ReportDraft.status == "draft",
+            Report.query.filter(
+                Report.company == company,
+                Report.transaction_date == transaction_date,
+                Report.status == "draft",
             )
-            .order_by(ReportDraft.date.desc())
+            .order_by(Report.date.desc())
             .first()
         )
 
@@ -833,12 +933,9 @@ def update_report_after_deposit_change(report_to_update, new_bank_deposit):
         db.session.rollback()
         return None
 
-    report_v2 = ReportV2.query.filter_by(report_id=report_to_update.id).first()
-    if report_v2:
-        report_v2.cash_deposit = new_bank_deposit
-        report_v2.starting_balance = report_to_update.opening_balance
-        report_v2.opening_balance = report_to_update.opening_balance
-        report_v2.adjusted_opening_balance = report_to_update.adjusted_opening_balance
+    # The ReportV2 mirror that used to be updated here was write-only; it went
+    # with the rest of the ReportV2 writes in r2a02. report_to_update is the
+    # canonical row and has already been updated above.
 
     sync_same_day_draft_after_deposit_change(report_to_update, new_bank_deposit)
     propagate_opening_balance_to_next_day_draft(report_to_update)

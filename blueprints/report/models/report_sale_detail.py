@@ -8,8 +8,13 @@ class ReportSaleDetail(db.Model):
     __table_args__ = {"schema": "pettycashv2"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
     sale_id = db.Column(db.String(36), db.ForeignKey("pettycashv2.entity_sale_setting.sale_id", ondelete="CASCADE"))
+    # Re-pointed at report.id in r4a04 (Stage 3). Formerly FK'd
+    # report_v2.report_id; the value never changed, only the parent it is
+    # checked against. A draft-shaped report row now exists from draft
+    # creation (ensure_report_row_for_draft), so this resolves during entry
+    # and not just after submit.
     report_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.report_v2.report_id", ondelete="CASCADE")
+        db.String(36), db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE")
     )
     # Catalog link, denormalized on purpose. Resolving the method via
     # sale_id -> sale_info breaks for historical reports: ending.py outer-joins
@@ -24,7 +29,6 @@ class ReportSaleDetail(db.Model):
     type = db.Column(db.String(50))
     amount = db.Column(db.Float)
     create_at = db.Column(db.DateTime)
-    report_v2 = db.relationship("ReportV2", backref="report_sale_detail", lazy=True)
     entity_sale_setting = db.relationship("EntitySaleSetting", backref="report_sale_detail", lazy=True)
     sale_info = db.relationship("SaleInfo", lazy="joined")
 

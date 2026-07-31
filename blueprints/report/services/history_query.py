@@ -182,9 +182,14 @@ def get_entity_report_history(
         .order_by(Report.transaction_date.desc())
         .first()
     )
+    # Draft-only: this is compared against latest_report_obj to decide which
+    # of the two is newer, so it must not itself return a posted report.
     latest_draft_obj = (
-        ReportDraft.query.filter(ReportDraft.company == entity_id)
-        .order_by(ReportDraft.transaction_date.desc())
+        Report.query.filter(
+            Report.company == entity_id,
+            Report.status == "draft",
+        )
+        .order_by(Report.transaction_date.desc())
         .first()
     )
 
