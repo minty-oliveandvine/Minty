@@ -192,8 +192,15 @@ def report_dashboard(id):
         if _lr_user and _lr_user.first_name:
             latest_report_submitter_first_name = _lr_user.first_name.strip()
 
+    # PUBLISHED means submitted. Since Stage 4a `report` also holds
+    # draft-shaped rows (status='draft'), so without this filter the dashboard
+    # counts an in-progress draft as a finished report — published_dates below
+    # drives today_has_report and the "already done" state.
     published_reports = (
-        Report.query.filter(Report.company == str(id))
+        Report.query.filter(
+            Report.company == str(id),
+            Report.status != "draft",
+        )
         .with_entities(
             Report.transaction_date,
             Report.id,

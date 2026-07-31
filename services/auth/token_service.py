@@ -70,7 +70,15 @@ def refresh_access_token_for_user(user, application=None):
             "Content-Type": "application/x-www-form-urlencoded",
         }
 
-        response = requests.post(url, data=payload, headers=headers)
+        # A timeout is mandatory here. requests waits forever by default, and
+        # this runs from an after_request hook (pettycash/core/hooks.py:383) —
+        # so a slow or unreachable identity.xero.com hangs the worker until
+        # gunicorn kills it, losing a request whose response was ALREADY
+        # rendered. (connect, read) in seconds; the except below turns a
+        # timeout into a normal "refresh failed" and the caller carries on.
+        response = requests.post(
+            url, data=payload, headers=headers, timeout=(5, 10)
+        )
         if response.status_code == 200:
             token_data = response.json()
             return token_data
