@@ -14,7 +14,8 @@ from werkzeug.utils import secure_filename
 
 from blueprints.report import report_bp
 from blueprints.report.services.file_downsize import downsize_bytes
-from blueprints.report.services.history import log_history_draft
+from blueprints.report.services.history import log_history
+from blueprints.report.services.expense_draft_mirror import ensure_shop_expense_for_draft
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
 from blueprints.report.services.share import create_share_link_for_report
 from blueprints.report.services.shared import get_cash_sales_from_detail
@@ -409,6 +410,11 @@ def report_expense_submit_all():
         # Add all expenses to database
         for expense in expenses:
             db.session.add(expense)
+            # Pair with a shop_expense row so expense reads can move off
+            # the draft table (Stage 4b). flush() first: expense.id is
+            # only assigned once the INSERT is staged.
+            db.session.flush()
+            ensure_shop_expense_for_draft(expense)
         db.session.flush()  # Flush to ensure expense IDs are generated
 
         # Update draft expenses total (replace, don't add)
@@ -469,8 +475,8 @@ def report_expense_submit_all():
 
         # Log the expense addition to draft history (non-blocking)
         try:
-            log_history_draft(
-                report_draft_id=current_draft.id,
+            log_history(
+                report_id=current_draft.id,
                 company=entity_id,
                 user_id=current_user.id,
                 action="added",
@@ -692,6 +698,9 @@ def report_expense_add():
             item_code=item_code,
         )
         db.session.add(expense)
+        # Pair with a shop_expense row (Stage 4b) — see the note above.
+        db.session.flush()
+        ensure_shop_expense_for_draft(expense)
         db.session.flush()  # Generate expense.id
 
         # Recompute the draft expense total from all DB rows (idempotent).
@@ -730,8 +739,8 @@ def report_expense_add():
 
         # Log to draft history (non-blocking).
         try:
-            log_history_draft(
-                report_draft_id=current_draft.id,
+            log_history(
+                report_id=current_draft.id,
                 company=entity_id,
                 user_id=current_user.id,
                 action="added",
@@ -927,8 +936,8 @@ def report_expense_update(expense_id):
         db.session.commit()
 
         try:
-            log_history_draft(
-                report_draft_id=draft.id,
+            log_history(
+                report_id=draft.id,
                 company=draft.company,
                 user_id=current_user.id,
                 action="updated",
@@ -1360,8 +1369,8 @@ def report_expense_delete(expense_id):
         logger.info("New closing balance: %s", draft.closing_balance)
         db.session.commit()
 
-        log_history_draft(
-            report_draft_id=draft.id,
+        log_history(
+            report_id=draft.id,
             company=draft.company,
             user_id=current_user.id,
             action="deleted",
@@ -1750,6 +1759,11 @@ def expense_upload_files():
                 item_code=None,
             )
             db.session.add(expense_draft)
+            # Pair with a shop_expense row so expense reads can move off
+            # the draft table (Stage 4b). flush() first: expense_draft.id is
+            # only assigned once the INSERT is staged.
+            db.session.flush()
+            ensure_shop_expense_for_draft(expense_draft)
             db.session.flush()  # get the generated id before commit
 
             # Build a short-lived (15-min) presigned URL for preview

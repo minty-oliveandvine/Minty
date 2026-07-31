@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report import report_bp
-from blueprints.report.services.history import log_history_draft
+from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
                                                ensure_report_row_for_draft,
                                                future_date_error,
@@ -845,8 +845,8 @@ def report_opening(id=None, entity_id=None):
                 f"DEBUG: Session new objects: {[obj for obj in db.session.new]}")
 
             # Log the opening entry to draft history
-            log_history_draft(
-                report_draft_id=report_draft.id,
+            log_history(
+                report_id=report_draft.id,
                 company=entity_id,
                 user_id=current_user.id,
                 action="created" if not existing_draft else "updated",
