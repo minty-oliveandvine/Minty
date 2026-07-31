@@ -183,7 +183,7 @@ def report_deposit(id=None):
         existing_report = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == transaction_date,
-            Report.status != "draft",
+            db.or_(Report.status.is_(None), Report.status != "draft"),
         ).first()
         if existing_report:
             # Redirect to deposit page with report id

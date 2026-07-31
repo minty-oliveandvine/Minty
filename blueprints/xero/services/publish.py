@@ -1577,7 +1577,7 @@ def update_after_deposit_change(entity_id, date, amount):
         report_to_update = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == report_date,
-            Report.status != "draft",
+            db.or_(Report.status.is_(None), Report.status != "draft"),
         ).first()
         if not report_to_update:
             logger.info(

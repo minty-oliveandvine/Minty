@@ -1509,7 +1509,7 @@ def update_bank_transaction(entity_id):
     report = Report.query.filter(
         Report.company == entity_id,
         Report.transaction_date == date,
-        Report.status != "draft",
+        db.or_(Report.status.is_(None), Report.status != "draft"),
     ).first()
     if report:
         previous_deposit = report.bank_deposit or 0.0
