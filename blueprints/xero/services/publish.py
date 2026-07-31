@@ -449,14 +449,16 @@ def create_bank_transaction(
                     else:
                         # Otherwise, we're working with draft reports (ShopExpenseDraft)
                         # Get user email from report_draft (since current_user may not be available in background thread)
-                        # NOTE: no company filter here — this matches on date
-                        # ALONE, so it can already return another entity's
-                        # draft today. Narrowed to drafts at least; the missing
-                        # entity predicate is a separate pre-existing bug and is
-                        # left visible rather than silently patched.
+                        # NOTE: no company filter — this matches on date ALONE,
+                        # so it can return another entity's row. Pre-existing
+                        # cross-tenant bug, left visible rather than silently
+                        # patched; it needs its own fix and test.
+                        #
+                        # No status filter: by publish time the row is
+                        # status='posted', so filtering on "draft" returned
+                        # None and broke the email lookup.
                         report_draft = ReportDraft.query.filter(
                             ReportDraft.transaction_date == date,
-                            ReportDraft.status == "draft",
                         ).first()
                         email = report_draft.uploaded_by if report_draft else None
 
@@ -472,15 +474,23 @@ def create_bank_transaction(
                                 logger.warning("Could not determine user email for expense file upload")
                                 return True  # Transaction was created, return success
 
-                        report_draft_id = (
+                        # No status filter (see above). `.id` is dereferenced
+                        # with no None guard, so an over-narrow filter here
+                        # raises AttributeError mid-publish.
+                        _draft_row = (
                             ReportDraft.query.filter(
                                 ReportDraft.transaction_date == date,
                                 ReportDraft.uploaded_by == email,
-                                ReportDraft.status == "draft",
                             )
                             .first()
-                            .id
                         )
+                        if not _draft_row:
+                            logger.warning(
+                                "No report row for date=%s uploaded_by=%s; "
+                                "skipping expense file upload", date, email
+                            )
+                            return True
+                        report_draft_id = _draft_row.id
                         expense = ShopExpenseDraft.query.filter(
                             ShopExpenseDraft.report_draft_id == report_draft_id,
                             ShopExpenseDraft.amount == first_unit_amount,
@@ -531,8 +541,14 @@ def create_bank_transaction(
         _record_module_error(pfr, module_label, "could not reach Xero, please try again", error_meta)
         return False
     except Exception as e:
+        # NOT a Xero rejection: Xero's own 4xx is handled in the else-branch
+        # above. Reaching here means our code raised before/around the call, so
+        # naming Xero as the culprit sends people to look in the wrong place.
         logger.error(f"Error creating bank transaction: {str(e)}", exc_info=True)
-        _record_module_error(pfr, module_label, "Xero rejected this entry", error_meta)
+        _record_module_error(
+            pfr, module_label, f"could not be prepared for Xero ({type(e).__name__}: {e})",
+            error_meta,
+        )
         return False
 
 
@@ -624,8 +640,12 @@ def create_bank_transfer(
             )
             return False
     except Exception as e:
-        logger.error(f"Error creating bank transfer: {str(e)}")
-        _record_module_error(pfr, module_label, "Xero rejected this entry", error_meta)
+        # Local exception, not a Xero rejection -- see create_bank_transaction.
+        logger.error(f"Error creating bank transfer: {str(e)}", exc_info=True)
+        _record_module_error(
+            pfr, module_label, f"could not be prepared for Xero ({type(e).__name__}: {e})",
+            error_meta,
+        )
         return False
 
 
@@ -702,8 +722,12 @@ def create_invoice(
                 )
             return False
     except Exception as e:
-        logger.error(f"Error in create_invoice: {str(e)}")
-        _record_module_error(pfr, module_label, "Xero rejected this entry", error_meta)
+        # Local exception, not a Xero rejection -- see create_bank_transaction.
+        logger.error(f"Error in create_invoice: {str(e)}", exc_info=True)
+        _record_module_error(
+            pfr, module_label, f"could not be prepared for Xero ({type(e).__name__}: {e})",
+            error_meta,
+        )
         return False
 
 
@@ -821,15 +845,13 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
             # Handle draft report
             withdrawal_type = report_draft.withdrawal_type
             if withdrawal_type == "personal":
-                # Draft-only: .cash_addition below has no None guard, and the
-                # caller already resolved report_draft for this same
-                # (entity, date) — an unfiltered re-query could pick the posted
-                # report instead once the tables merge.
-                draft_report = ReportDraft.query.filter(
-                    ReportDraft.company == entity_id,
-                    ReportDraft.transaction_date == date,
-                    ReportDraft.status == "draft",
-                ).first()
+                # Not draft-only — see the note in publish_report_to_xero.
+                # At publish time this row is status='posted'; cash_addition
+                # lives on `report` since r1a01.
+                draft_report = Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date == date,
+                ).order_by(Report.transaction_date.desc()).first()
                 amount = draft_report.cash_addition
                 director_contact = get_entity_contact_settings(
                     entity_id, "director_contact"
@@ -1104,8 +1126,10 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
                         except Exception as e:
                             expenses_submitted.append(False)
                             failed_expenses.append(f"Expense {index}: {expense.item} (${expense.amount}) - {str(e)}")
+                            # Local exception, not a Xero rejection.
                             _record_module_error(
-                                pfr, f"Expense '{expense.item}'", "Xero rejected this entry",
+                                pfr, f"Expense '{expense.item}'",
+                                f"could not be prepared for Xero ({type(e).__name__}: {e})",
                                 {
                                     "scope": "expense",
                                     "expense_id": expense.id,
@@ -1154,8 +1178,12 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
             logger.info("No expenses amount in report")
             return (0, 0)
     except Exception as e:
+        # Local exception, not a Xero rejection -- see create_bank_transaction.
         logger.error(f"Error in xero_expenses: {str(e)}", exc_info=True)
-        _record_module_error(pfr, "Expenses", "Xero rejected this entry")
+        _record_module_error(
+            pfr, "Expenses",
+            f"could not be prepared for Xero ({type(e).__name__}: {e})",
+        )
         return (0, 1)
 
 
@@ -1441,16 +1469,18 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             total_failed += failed
             modules[module_key] = {"status": "error" if failed else "success"}
 
-        # Check if we have a draft report first
-        # Draft-only: this drives the whole publish run and its .cash_addition
-        # is dereferenced below with no None guard. Once drafts live in
-        # `report`, an unfiltered match would return the POSTED report for the
-        # same (entity, date) and publish against the wrong row.
-        report_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == date,
-            ReportDraft.status == "draft",
-        ).first()
+        # NOT draft-only, deliberately. Publishing runs AFTER submit, so the
+        # row is status='posted' by the time we get here — filtering on
+        # status == "draft" returned None and broke every publish at the
+        # .cash_addition dereference below.
+        #
+        # Only withdrawal_type and cash_addition are read from this, and both
+        # live on `report` since r1a01. Reading `report` directly also removes
+        # the dependence on report_draft ahead of Stage 5.
+        report_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == date,
+        ).order_by(Report.transaction_date.desc()).first()
 
         # A rejected token (HTTP 401) is an account-wide condition, not a
         # per-module one.  As soon as any module reports it, stop the run and
@@ -1461,7 +1491,10 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             return pfr.has_auth_expired()
 
         #Cash addition/withdrawal from start
-        if report_draft.cash_addition and report_draft.cash_addition > 0:
+        # Guarded: this used to dereference report_draft unconditionally, so a
+        # lookup that returned None took the whole publish down with an
+        # AttributeError rather than reporting a failed module.
+        if report_draft and report_draft.cash_addition and report_draft.cash_addition > 0:
             if _should_run("withdrawal_from"):
                 _record("withdrawal_from", xero_withdrawal_from(
                     report_draft, entity_id, date, access_token=access_token, pfr=pfr))
