@@ -106,6 +106,11 @@ def report_dashboard(id):
             )
         )
 
+    # Deliberately INCLUDES drafts: this drives the "latest report" summary
+    # (transaction_date / closing_balance / latest_deposit), and a draft
+    # genuinely is the most recent report for those purposes. Anything that
+    # means "last SUBMITTED report" must filter status separately — see the
+    # date-sequence guards in opening.py and create.py.
     latest_report = (
         Report.query.filter(Report.company == str(id))
         .order_by(Report.transaction_date.desc())
@@ -178,7 +183,19 @@ def report_dashboard(id):
         if current_draft and current_draft.completed_sections
         else 0
     )
-    org.draft_date = current_draft.transaction_date if current_draft else None
+    # The calendar uses draft_date as its onboarding FLOOR (the earliest date a
+    # first report may use), so it must be the EARLIEST draft — the onboarding
+    # seed — not the newest. With .desc() above, an entity holding drafts for
+    # both 29 and 30 July got a floor of the 30th, which made the 29th
+    # unclickable even though that was its own opening date.
+    earliest_draft_date = (
+        db.session.query(db.func.min(Report.transaction_date))
+        .filter(Report.company == str(id), Report.status == "draft")
+        .scalar()
+    )
+    org.draft_date = earliest_draft_date or (
+        current_draft.transaction_date if current_draft else None
+    )
     org.draft_last_edit_seconds = (
         int((datetime.now() - current_draft.date).total_seconds())
         if current_draft
@@ -199,7 +216,7 @@ def report_dashboard(id):
     published_reports = (
         Report.query.filter(
             Report.company == str(id),
-            Report.status != "draft",
+            db.or_(Report.status.is_(None), Report.status != "draft"),
         )
         .with_entities(
             Report.transaction_date,

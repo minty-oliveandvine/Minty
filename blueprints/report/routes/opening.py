@@ -178,7 +178,15 @@ def report_opening(id=None, entity_id=None):
 
                 # Fetch the last submitted report to validate date
                 last_report = (
-                    Report.query.filter_by(company=entity_id)
+                    # SUBMITTED only. The error this drives says "the day after your
+                    # last submitted report" — but since Stage 4a a draft also lives
+                    # in `report`, so unfiltered this treats the user's OWN
+                    # in-progress draft as the last submitted report and demands the
+                    # next day, bouncing them off their own report.
+                    Report.query.filter(
+                        Report.company == entity_id,
+                        db.or_(Report.status.is_(None), Report.status != "draft"),
+                    )
                     .order_by(Report.transaction_date.desc())
                     .first()
                 )
@@ -312,7 +320,7 @@ def report_opening(id=None, entity_id=None):
         existing_report = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == selected_date,
-            Report.status != "draft",
+            db.or_(Report.status.is_(None), Report.status != "draft"),
         ).first()
         if existing_report:
             # Redirect to opening page with report id
@@ -527,7 +535,7 @@ def report_opening(id=None, entity_id=None):
             existing_report = Report.query.filter(
                 Report.company == entity_id,
                 Report.transaction_date == transaction_date,
-                Report.status != "draft",
+                db.or_(Report.status.is_(None), Report.status != "draft"),
             ).first()
 
             if existing_report and not is_edit_mode:
@@ -631,7 +639,7 @@ def report_opening(id=None, entity_id=None):
                 any_report_for_date = Report.query.filter(
                     Report.company == entity_id,
                     Report.transaction_date == transaction_date,
-                    Report.status != "draft",
+                    db.or_(Report.status.is_(None), Report.status != "draft"),
                 ).first()
                 if any_report_for_date:
                     logger.warning(
@@ -671,7 +679,15 @@ def report_opening(id=None, entity_id=None):
                     )
                     # Fetch the last report to determine next transaction date
                     last_report = (
-                        Report.query.filter_by(company=entity_id)
+                        # SUBMITTED only. The error this drives says "the day after your
+                        # last submitted report" — but since Stage 4a a draft also lives
+                        # in `report`, so unfiltered this treats the user's OWN
+                        # in-progress draft as the last submitted report and demands the
+                        # next day, bouncing them off their own report.
+                        Report.query.filter(
+                            Report.company == entity_id,
+                            db.or_(Report.status.is_(None), Report.status != "draft"),
+                        )
                         .order_by(Report.transaction_date.desc())
                         .first()
                     )
@@ -1029,7 +1045,7 @@ def report_opening(id=None, entity_id=None):
                 Report.query.filter(
                     Report.company == entity_id,
                     Report.transaction_date < selected_date,
-                    Report.status != "draft") .order_by(
+                    db.or_(Report.status.is_(None), Report.status != "draft")) .order_by(
                     Report.transaction_date.desc()) .first())
 
             # Draft-only: the paired `last_report` query above is already the
