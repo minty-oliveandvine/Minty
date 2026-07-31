@@ -1048,6 +1048,23 @@ def report_opening(id=None, entity_id=None):
                     db.or_(Report.status.is_(None), Report.status != "draft")) .order_by(
                     Report.transaction_date.desc()) .first())
 
+            # The opening balance chains off the PREVIOUS report whatever its
+            # status: a draft's closing balance is exactly what the next report
+            # should open from. last_report above is submitted-only on purpose
+            # (it is paired with last_draft_report for the deposit adjustment,
+            # and both being unfiltered would zero one row's bank_deposit
+            # twice) — so it must NOT be reused here. Doing so made the opening
+            # balance fall through to 0 whenever only drafts preceded the date,
+            # which is what deleting a draft exposed.
+            prev_report_any_status = (
+                Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date < selected_date,
+                )
+                .order_by(Report.transaction_date.desc())
+                .first()
+            )
+
             # Draft-only: the paired `last_report` query above is already the
             # Report side of this pair, so leaving it unfiltered would make the
             # two resolve to the same row once the tables merge, and the
@@ -1075,29 +1092,39 @@ def report_opening(id=None, entity_id=None):
             # Get opening balance from previous day's closing balance (calculated value)
             # Fallback to cash count balance for backward compatibility with
             # old data
-            if last_report:
+            if prev_report_any_status:
                 # Prioritize closing_balance (calculated value) over
                 # actual_cash_total (physical count)
-                if last_report.closing_balance is not None:
-                    opening_balance = last_report.closing_balance
+                if prev_report_any_status.closing_balance is not None:
+                    opening_balance = prev_report_any_status.closing_balance
                     logger.info(
-                        f"Using previous day's closing balance as opening balance: {opening_balance} (from report {last_report.id})"
+                        f"Using previous day's closing balance as opening balance: {opening_balance} (from report {prev_report_any_status.id})"
                     )
                 else:
-                    # Fallback to cash count for backward compatibility with
-                    # old data
-                    last_cashcount = ReportCashCountDraft.query.filter(
-                        ReportCashCountDraft.report_id == last_report.id
-                    ).first()
-                    if last_cashcount and last_cashcount.actual_cash_total is not None:
-                        opening_balance = last_cashcount.actual_cash_total
+                    # Fallback: actual_cash_total lives on `report` itself since
+                    # r1a01 hoisted it; report_cashcount_draft is the older
+                    # source for rows predating that.
+                    fallback_total = getattr(
+                        prev_report_any_status, "actual_cash_total", None
+                    )
+                    if fallback_total is None:
+                        last_cashcount = ReportCashCountDraft.query.filter(
+                            ReportCashCountDraft.report_id == prev_report_any_status.id
+                        ).first()
+                        fallback_total = (
+                            last_cashcount.actual_cash_total
+                            if last_cashcount
+                            else None
+                        )
+                    if fallback_total is not None:
+                        opening_balance = fallback_total
                         logger.info(
-                            f"Using previous day's cash count balance as opening balance (fallback): {opening_balance} (from report {last_report.id})"
+                            f"Using previous day's cash count balance as opening balance (fallback): {opening_balance}"
                         )
                     else:
                         opening_balance = 0
                         logger.info(
-                            f"No closing balance or cash count data found, defaulting opening balance to 0 (from report {last_report.id})"
+                            "No closing balance or cash count data found, defaulting opening balance to 0"
                         )
             else:
                 opening_balance = 0
