@@ -86,20 +86,3 @@ __all__ = [
     "Invitation",
 ]
 
-# --- report_draft -> report mirror (TEMPORARY, Stage 4b) --------------------
-# Keeps the paired `report` row current while the wizard still writes to
-# report_draft, so reads can be migrated to `report` a module at a time.
-# Registered here because this module is the single point every entry path
-# imports. Deleted in Stage 5 along with report_draft itself.
-from blueprints.report.services.draft_report_mirror import (  # noqa: E402
-    register_draft_report_mirror)
-
-register_draft_report_mirror()
-
-# --- shop_expense_draft -> shop_expense mirror (TEMPORARY, Stage 4b) --------
-# Same pattern, for the expense tables. Deleted in Stage 5 with
-# shop_expense_draft itself.
-from blueprints.report.services.expense_draft_mirror import (  # noqa: E402
-    register_expense_draft_mirror)
-
-register_expense_draft_mirror()

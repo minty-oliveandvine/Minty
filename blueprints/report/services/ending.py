@@ -121,55 +121,26 @@ def revert_report_to_draft(report_id):
             400,
         )
 
-    report_draft = ReportDraft.query.filter(ReportDraft.id == report_id).first()
-    if not report_draft:
-        # A Report with no draft is a real, reachable state: create.py:149 mints
-        # one directly. Refusing to revert those was a hard 404 for reports that
-        # are otherwise perfectly revertible — the draft is a carrier for the
-        # workflow fields, not a precondition. Build it from the Report, which
-        # is the same thing ending.py:459 does when the ending page hits this.
-        logger.info(
-            f"No ReportDraft for report {report_id}; creating one so the "
-            "revert can proceed"
-        )
-        report_draft = ReportDraft(
-            id=report.id,
-            transaction_date=report.transaction_date,
-            next_transaction_date=report.next_transaction_date,
-            opening_balance=report.opening_balance,
-            cash_addition=report.cash_addition,
-            adjusted_opening_balance=report.adjusted_opening_balance,
-            cash_sales=report.cash_sales,
-            shop_sales=report.shop_sales,
-            delivery_sales=report.delivery_sales,
-            total_sales=report.total_sales,
-            expenses=report.expenses,
-            bank_deposit=report.bank_deposit,
-            closing_balance=report.closing_balance,
-            receipt_files=report.receipt_files,
-            uploaded_by=report.uploaded_by,
-            company=report.company,
-            safe_box_balance=report.safe_box_balance,
-            discrepancy_amount=report.discrepancy_amount,
-            discrepancy_reason=report.discrepancy_reason,
-            discrepancy_type=report.discrepancy_type,
-        )
-        db.session.add(report_draft)
-        db.session.flush()
-
+    # WRITE FLIP (Step 2): `report` IS the row. Reverting is a status change
+    # on it, not a delete-and-recreate — which also removes the old hazard
+    # where a Report with no draft could not be reverted at all.
+    #
+    # ShopExpense rows are still deleted: those belong to the submitted
+    # report, and re-submitting rebuilds them from the draft expenses.
     was_published = bool(report.xero_integrated_yes)
     prior_publishing_status = report.publishing_status
 
     try:
-        # ShopExpense.report_id is non-nullable, so these go before the Report.
         ShopExpense.query.filter(ShopExpense.report_id == report_id).delete()
-        db.session.delete(report)
 
-        report_draft.status = "draft"
-        report_draft.current_section = "opening"
-        report_draft.completed_sections = []
-        report_draft.xero_integrated_yes = was_published
-        report_draft.publishing_status = prior_publishing_status
+        report.status = "draft"
+        report.current_section = "opening"
+        report.completed_sections = []
+        # Preserve the Xero publish markers: publishing stores no Xero object
+        # ids, so a re-publish would duplicate every transaction. These are
+        # what let the publish flow warn about that.
+        report.xero_integrated_yes = was_published
+        report.publishing_status = prior_publishing_status
 
         db.session.commit()
     except Exception:
@@ -180,7 +151,9 @@ def revert_report_to_draft(report_id):
         f"Report {report_id} reverted to draft "
         f"(was_published={was_published}, publishing_status={prior_publishing_status})"
     )
-    return report_draft
+    # `report` is the reverted row; the caller reads .id / .transaction_date
+    # off it, both unchanged by the revert.
+    return report
 
 
 def convert_report_to_draft(report_id):
@@ -487,63 +460,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity_report_history", entity_id=entity_id))
 
-        # Check if ReportDraft exists, create it if missing
-        report_draft = ReportDraft.query.filter(ReportDraft.id == id).first()
-        if not report_draft:
-            logger.info(f"ReportDraft missing for report {id}, creating it now")
-            try:
-                # Get full Report object to access all fields
-                full_report = Report.query.filter(Report.id == id).first()
-                if not full_report:
-                    logger.error(
-                        f"Full Report not found for {id}, cannot create ReportDraft"
-                    )
-                else:
-                    report_draft = ReportDraft(
-                        id=full_report.id,
-                        transaction_date=full_report.transaction_date,
-                        next_transaction_date=full_report.next_transaction_date,
-                        date=full_report.date,
-                        opening_balance=full_report.opening_balance,
-                        cash_addition=full_report.cash_addition or 0.0,
-                        adjusted_opening_balance=full_report.adjusted_opening_balance,
-                        cash_sales=full_report.cash_sales or 0.0,
-                        shop_sales=full_report.shop_sales or 0.0,
-                        delivery_sales=full_report.delivery_sales or 0.0,
-                        total_sales=full_report.total_sales or 0.0,
-                        expenses=full_report.expenses or 0.0,
-                        bank_deposit=full_report.bank_deposit or 0.0,
-                        closing_balance=full_report.closing_balance or 0.0,
-                        receipt_files=full_report.receipt_files,
-                        uploaded_by=full_report.uploaded_by,
-                        company=full_report.company,
-                        completed_sections=[],
-                        current_section=None,
-                        status="posted",  # Set to 'posted' since Report already exists
-                        xero_integrated_yes=getattr(
-                            full_report, "xero_integrated_yes", False
-                        )
-                        or False,
-                        safe_box_balance=getattr(full_report, "safe_box_balance", None),
-                        discrepancy_amount=getattr(
-                            full_report, "discrepancy_amount", None
-                        ),
-                        discrepancy_type=getattr(full_report, "discrepancy_type", None),
-                        discrepancy_reason=getattr(
-                            full_report, "discrepancy_reason", None
-                        ),
-                    )
-                    db.session.add(report_draft)
-                    db.session.commit()
-                    logger.info(
-                        f"Successfully created ReportDraft for report {id} with status 'posted'"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Failed to create ReportDraft for report {id}: {str(e)}"
-                )
-                db.session.rollback()
-                # Continue anyway - we'll handle missing draft fields gracefully
+        # WRITE FLIP (Step 2): the self-heal block that used to sit here
+        # created a ReportDraft when a Report had none. That state is no
+        # longer reachable — the Report IS the draft — so the ~50 lines of
+        # reconstruction went with it.
+        report_draft = report
 
         # Ensure report has status attribute
         if not hasattr(report, "status") or not report.status:
@@ -947,17 +868,20 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             )
 
     # Check for existing draft: by id when in URL, else by (entity, transaction_date)
+    # WRITE FLIP (Step 2): current_draft drives the submit path. Reading
+    # Report means submit flips the real row's status rather than copying a
+    # draft across.
     if id:
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.id == id,
-            ReportDraft.company == entity_id,
-            ReportDraft.status == "draft",
+        current_draft = Report.query.filter(
+            Report.id == id,
+            Report.company == entity_id,
+            Report.status == "draft",
         ).first()
     else:
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == transaction_date,
-            ReportDraft.status == "draft",
+        current_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == transaction_date,
+            Report.status == "draft",
         ).first()
 
     cashcount_draft = None
@@ -1430,130 +1354,29 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
             if "submitted" not in completed_sections:
                 # Check if report already exists
-                existing_report = Report.query.filter(
-                    Report.id == current_draft.id
-                ).first()
-                logger.info("=== REPORT CREATION PHASE ===")
-                logger.info(f"Existing report found: {existing_report is not None}")
-
-                if not existing_report:
-                    logger.info(
-                        f"Creating new Report record for draft {current_draft.id}"
-                    )
-                    logger.info(
-                        f"Report data - Opening Balance: {current_draft.opening_balance}"
-                    )
-                    logger.info(
-                        f"Report data - Cash Addition: {current_draft.cash_addition}"
-                    )
-                    logger.info(
-                        f"Report data - Total Sales: {current_draft.total_sales}"
-                    )
-                    logger.info(f"Report data - Expenses: {current_draft.expenses}")
-                    logger.info(
-                        f"Report data - Bank Deposit: {current_draft.bank_deposit}"
-                    )
-                    logger.info(
-                        f"Report data - Closing Balance: {current_draft.closing_balance}"
-                    )
-
-                    # Calculate closing balance with discrepancy (discrepancy_amount is already signed)
-                    # Get cash sales from ReportSaleDetail with fallback to current_draft.cash_sales
-                    cash_sales = get_cash_sales_from_detail(
-                        current_draft.id, fallback_value=current_draft.cash_sales or 0.0
-                    )
-                    base_closing_balance = (
-                        (current_draft.opening_balance or 0)
-                        + (current_draft.cash_addition or 0)
-                        + cash_sales
-                        - (current_draft.expenses or 0)
-                        - (current_draft.bank_deposit or 0)
-                    )
-                    final_closing_balance = base_closing_balance + (
-                        current_draft.discrepancy_amount or 0
-                    )
-
-                    posted_report = Report(
-                        id=current_draft.id,
-                        transaction_date=current_draft.transaction_date,
-                        next_transaction_date=current_draft.next_transaction_date,
-                        date=datetime.now(tz),
-                        opening_balance=current_draft.opening_balance,
-                        cash_addition=current_draft.cash_addition,
-                        adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                        # Per-method amounts live in report_sale_detail and
-                        # are shared via the id above — not copied per column.
-                        cash_sales=current_draft.cash_sales,
-                        shop_sales=current_draft.shop_sales,
-                        delivery_sales=current_draft.delivery_sales,
-                        total_sales=current_draft.total_sales,
-                        expenses=current_draft.expenses,
-                        bank_deposit=current_draft.bank_deposit,
-                        closing_balance=final_closing_balance,
-                        receipt_files=current_draft.receipt_files,
-                        uploaded_by=current_user.username,
-                        company=current_draft.company,
-                        safe_box_balance=current_draft.safe_box_balance,
-                        discrepancy_amount=current_draft.discrepancy_amount,
-                        discrepancy_type=current_draft.discrepancy_type,
-                        discrepancy_reason=current_draft.discrepancy_reason,
-                        # Restore the Xero publish markers carried on the draft by
-                        # revert_report_to_draft. Publishing stores no Xero object
-                        # IDs, so a re-publish duplicates every transaction; these
-                        # are what let the publish flow warn about that. Normal
-                        # first-time drafts carry None/False and are unaffected.
-                        publishing_status=current_draft.publishing_status,
-                        xero_integrated_yes=bool(current_draft.xero_integrated_yes),
-                    )
-                    db.session.add(posted_report)
-                    logger.info(
-                        f"Added new Report record to session for draft {current_draft.id}"
-                    )
-                else:
-                    # If report already exists, use the existing one
-                    posted_report = existing_report
-                    logger.info(
-                        f"Using existing Report record for draft {current_draft.id}"
-                    )
-                    # Last submitter is the name shown
-                    posted_report.uploaded_by = current_user.username
-
-                    # Update all fields from draft when in edit mode
-                    posted_report.date = datetime.now(
-                        tz
-                    )  # Update date to current timestamp
-                    posted_report.opening_balance = current_draft.opening_balance
-                    posted_report.cash_addition = current_draft.cash_addition
-                    posted_report.adjusted_opening_balance = (
-                        current_draft.adjusted_opening_balance
-                    )
-                    posted_report.cash_sales = current_draft.cash_sales
-                    posted_report.shop_sales = current_draft.shop_sales
-                    posted_report.delivery_sales = current_draft.delivery_sales
-                    posted_report.total_sales = current_draft.total_sales
-                    posted_report.expenses = current_draft.expenses
-                    posted_report.bank_deposit = current_draft.bank_deposit
-                    posted_report.safe_box_balance = current_draft.safe_box_balance
-
-                    # Recalculate closing balance with discrepancy (discrepancy_amount is already signed)
-                    # Get cash sales from ReportSaleDetail with fallback to current_draft.cash_sales
-                    cash_sales = get_cash_sales_from_detail(
-                        current_draft.id, fallback_value=current_draft.cash_sales or 0.0
-                    )
-                    base_closing_balance = (
-                        (current_draft.opening_balance or 0)
-                        + (current_draft.cash_addition or 0)
-                        + cash_sales
-                        - (current_draft.expenses or 0)
-                        - (current_draft.bank_deposit or 0)
-                    )
-                    posted_report.closing_balance = base_closing_balance + (
-                        current_draft.discrepancy_amount or 0
-                    )
-                    posted_report.discrepancy_amount = current_draft.discrepancy_amount
-                    posted_report.discrepancy_type = current_draft.discrepancy_type
-                    posted_report.discrepancy_reason = current_draft.discrepancy_reason
-
+                # WRITE FLIP (Step 2): current_draft IS the report row, so the
+                # 21-field draft->report copy that used to live here was
+                # self-assignment. Submitting is a status change; only the three
+                # values below genuinely differ once the row is posted.
+                posted_report = current_draft
+                
+                cash_sales = get_cash_sales_from_detail(
+                    current_draft.id, fallback_value=current_draft.cash_sales or 0.0
+                )
+                base_closing_balance = (
+                    (current_draft.opening_balance or 0)
+                    + (current_draft.cash_addition or 0)
+                    + cash_sales
+                    - (current_draft.expenses or 0)
+                    - (current_draft.bank_deposit or 0)
+                )
+                posted_report.closing_balance = base_closing_balance + (
+                    current_draft.discrepancy_amount or 0
+                )
+                posted_report.date = datetime.now(tz)
+                posted_report.uploaded_by = current_user.username
+                logger.info(f"Submitting report {current_draft.id}")
+                
                 # Process expense drafts with rollback protection
                 try:
                     logger.info("=== EXPENSE PROCESSING PHASE ===")
