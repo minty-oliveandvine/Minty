@@ -23,14 +23,12 @@ from blueprints.entity.models.sale_info import SaleInfo  # noqa: E402
 from blueprints.entity.models.user_entity import UserEntity  # noqa: E402
 from blueprints.report.models.report import Report  # noqa: E402
 from blueprints.report.models.report_cash_count_draft import ReportCashCountDraft  # noqa: E402
-from blueprints.report.models.report_cash_detail import ReportCashDetail  # noqa: E402
 from blueprints.report.models.report_cash_count import ReportCashCount  # noqa: E402
 from blueprints.report.models.report_detail import ReportDetail  # noqa: E402
 from blueprints.report.models.report_draft import ReportDraft  # noqa: E402
 from blueprints.report.models.report_expense_detail import ReportExpenseDetail  # noqa: E402
 from blueprints.report.models.report_history import ReportHistory  # noqa: E402
 from blueprints.report.models.report_history_draft import ReportHistoryDraft  # noqa: E402
-from blueprints.report.models.report_history_v2 import ReportHistoryV2  # noqa: E402
 from blueprints.report.models.report_sale_detail import ReportSaleDetail  # noqa: E402
 from blueprints.report.models.report_v2 import ReportV2  # noqa: E402
 from blueprints.report.models.share_link import ShareLink  # noqa: E402
@@ -72,11 +70,9 @@ __all__ = [
     "ReportCashCountDraft",
     "ReportV2",
     "ReportDetail",
-    "ReportHistoryV2",
     "ReportExpenseDetail",
     "ReportSaleDetail",
     "ShareLink",
-    "ReportCashDetail",
     "ReportCashCount",
     "AccountInfo",
     "EntityAccountXero",
@@ -89,3 +85,13 @@ __all__ = [
     "RolePermissions",
     "Invitation",
 ]
+
+# --- report_draft -> report mirror (TEMPORARY, Stage 4b) --------------------
+# Keeps the paired `report` row current while the wizard still writes to
+# report_draft, so reads can be migrated to `report` a module at a time.
+# Registered here because this module is the single point every entry path
+# imports. Deleted in Stage 5 along with report_draft itself.
+from blueprints.report.services.draft_report_mirror import (  # noqa: E402
+    register_draft_report_mirror)
+
+register_draft_report_mirror()

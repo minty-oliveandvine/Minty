@@ -157,12 +157,14 @@ def report_dashboard(id):
         org.deposit_correction_missing_settings = []
         org.can_correct_latest_deposit = True
 
+    # Dashboard "Continue Report" card — read-only. Migrated to `report`; the
+    # draft->report mirror keeps current_section/completed_sections current.
     current_draft = (
-        ReportDraft.query.filter(
-            ReportDraft.company == str(id),
-            ReportDraft.status == "draft",
+        Report.query.filter(
+            Report.company == str(id),
+            Report.status == "draft",
         )
-        .order_by(ReportDraft.transaction_date.desc())
+        .order_by(Report.transaction_date.desc())
         .first()
     )
     org.has_existing_draft = current_draft is not None

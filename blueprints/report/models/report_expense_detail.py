@@ -9,13 +9,13 @@ class ReportExpenseDetail(db.Model):
     expense_id = db.Column(
         db.String(36), primary_key=True, default=lambda: str(uuid4())
     )
+    # Re-pointed at report.id in r4a04 (Stage 3) — see report_sale_detail.
     report_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.report_v2.report_id", ondelete="CASCADE")
+        db.String(36), db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE")
     )
     account_id = db.Column(db.String(36), nullable=False)
     amount = db.Column(db.Float)
     info_filepath = db.Column(db.Text)
     description = db.Column(db.Text)
     create_at = db.Column(db.DateTime)
-    report_v2 = db.relationship("ReportV2", backref="report_expense_detail", lazy=True)
 

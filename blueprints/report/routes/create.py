@@ -108,8 +108,14 @@ def create_report():
                 # after today; the onboarding date is the lower bound when one
                 # exists.
                 from models.db import ReportDraft
+                # Draft-only, same reasoning as _onboarding_floor_date in
+                # opening.py: unfiltered, this resolves to the oldest SUBMITTED
+                # report once drafts move into `report`, moving the floor date.
                 opening_draft = (
-                    ReportDraft.query.filter_by(company=entity_id)
+                    ReportDraft.query.filter(
+                        ReportDraft.company == entity_id,
+                        ReportDraft.status == "draft",
+                    )
                     .order_by(ReportDraft.transaction_date.asc())
                     .first()
                 )
