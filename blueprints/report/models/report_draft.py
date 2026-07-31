@@ -6,6 +6,11 @@ from models.db import db, tz
 
 
 class ReportDraft(db.Model):
+    # The shop_expense_drafts / report_history_drafts / cashcount_draft
+    # relationships were removed in r6a06: those children now FK report.id,
+    # so there is no join condition back to this table. Callers use the
+    # child-side `report_draft` relationship (which yields a Report) or
+    # query by id, which is the same value.
     __tablename__ = "report_draft"
     __table_args__ = {"schema": "pettycashv2"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -29,17 +34,6 @@ class ReportDraft(db.Model):
         db.String(150), db.ForeignKey("pettycashv2.user.username"), nullable=True
     )
     company = db.Column(db.String(150), nullable=False)
-    shop_expense_drafts = db.relationship(
-        "ShopExpenseDraft", back_populates="report_draft", cascade="all, delete-orphan"
-    )
-    report_history_drafts = db.relationship(
-        "ReportHistoryDraft",
-        back_populates="report_draft",
-        cascade="all, delete-orphan",
-    )
-    cashcount_draft = db.relationship(
-        "ReportCashCountDraft", back_populates="report_draft"
-    )
     status = db.Column(db.String(20), nullable=True, default="draft")
     withdrawal_type = db.Column(db.String(20), nullable=True)
     withdrawal_bank_account = db.Column(db.String(36), nullable=True)

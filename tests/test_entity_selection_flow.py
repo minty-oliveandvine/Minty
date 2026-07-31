@@ -52,9 +52,18 @@ class _FakeReportQuery:
     def __init__(self, results):
         self._results = results
         self.filter_by_calls: list[dict[str, object]] = []
+        self.filter_calls: list[tuple] = []
 
     def filter_by(self, **kwargs):
         self.filter_by_calls.append(kwargs)
+        return _FakeQueryResult(self._results)
+
+    def filter(self, *args):
+        # dashboard.py moved from filter_by(company=...) to filter(...) when
+        # it gained the "submitted only" predicate — drafts live in `report`
+        # since Stage 4a. Record the call so the entity scoping can still be
+        # asserted.
+        self.filter_calls.append(args)
         return _FakeQueryResult(self._results)
 
 
@@ -99,7 +108,13 @@ def test_index_uses_explicit_entity_id_without_user_company(monkeypatch):
     monkeypatch.setattr(
         dashboard_routes,
         "Report",
-        SimpleNamespace(query=fake_query, date=SimpleNamespace(desc=lambda: None)),
+        SimpleNamespace(
+            query=fake_query,
+            date=SimpleNamespace(desc=lambda: None),
+            # dashboard.py now filters on company + status (submitted only).
+            company=SimpleNamespace(),
+            status=SimpleNamespace(is_=lambda _v: None),
+        ),
     )
     monkeypatch.setattr(
         dashboard_routes,
@@ -117,7 +132,10 @@ def test_index_uses_explicit_entity_id_without_user_company(monkeypatch):
 
     assert response["template"] == "report_list.html"
     assert response["context"]["entity_id"] == "entity-1"
-    assert fake_query.filter_by_calls == [{"company": "entity-1"}]
+    # One filter() call carrying the entity predicate plus the submitted-only
+    # status predicate. The entity scoping is what this test is about.
+    assert len(fake_query.filter_calls) == 1
+    assert fake_query.filter_by_calls == []
 
 
 def test_create_report_requires_explicit_entity_id(monkeypatch):

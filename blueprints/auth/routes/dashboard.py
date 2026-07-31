@@ -3,7 +3,7 @@ from flask_login import current_user, login_required
 
 from blueprints.auth import auth_bp
 from blueprints.report.services.shared import get_cash_sales_from_detail
-from models.db import Report
+from models.db import Report, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -21,8 +21,15 @@ def index():
             entity_id=entity_id,
         )
 
+    # Submitted only: this lists finished reports, and drafts live in
+    # `report` since Stage 4a.
     reports = (
-        Report.query.filter_by(company=entity_id).order_by(Report.date.desc()).all()
+        Report.query.filter(
+            Report.company == entity_id,
+            db.or_(Report.status.is_(None), Report.status != "draft"),
+        )
+        .order_by(Report.date.desc())
+        .all()
     )
 
     cumulative_shop_sales = 0.0

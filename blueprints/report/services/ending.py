@@ -252,6 +252,8 @@ def entity_ending(entity_id):
             report_date = datetime.strptime(
                 token_transaction_date, "%Y-%m-%d").date()
             specific_report = Report.query.filter(
+                # Share-link target: SUBMITTED reports only, never a draft.
+                db.or_(Report.status.is_(None), Report.status != "draft"),
                 Report.company == str(entity_id),
                 Report.transaction_date == report_date).first()
 
@@ -306,6 +308,8 @@ def entity_ending(entity_id):
 
     # Find the report for the transaction_date
     specific_report = Report.query.filter(
+        # Share-link target: SUBMITTED reports only, never a draft.
+        db.or_(Report.status.is_(None), Report.status != "draft"),
         Report.company == str(entity_id),
         Report.transaction_date == report_date).first()
 
@@ -924,7 +928,10 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     # If edit mode is enabled and no id provided, try to load any existing report for this date
     if is_edit_mode and not id:
+        # Edit mode targets a SUBMITTED report; a draft is edited through the
+        # wizard, not here.
         existing_report = Report.query.filter(
+            db.or_(Report.status.is_(None), Report.status != "draft"),
             Report.company == entity_id,
             Report.transaction_date == transaction_date,
         ).first()
@@ -966,7 +973,9 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     # If edit mode is enabled and no draft exists, try to load any existing report for this date
     if is_edit_mode and not current_draft:
+        # Submitted only — see the note above.
         existing_report = Report.query.filter(
+            db.or_(Report.status.is_(None), Report.status != "draft"),
             Report.company == entity_id,
             Report.transaction_date == transaction_date,
         ).first()
@@ -1996,6 +2005,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Surface the posted report's Xero publish state so the header badge can
     # show "Partially Published" (set on Report, not on the ReportDraft above).
     posted_report_row = Report.query.filter(
+        db.or_(Report.status.is_(None), Report.status != "draft"),
         Report.company == entity_id,
         Report.transaction_date == transaction_date,
     ).first()
