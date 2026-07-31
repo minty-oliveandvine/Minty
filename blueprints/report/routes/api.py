@@ -15,7 +15,6 @@ from werkzeug.utils import secure_filename
 from blueprints.report import report_bp
 from blueprints.report.services.file_downsize import downsize_bytes
 from blueprints.report.services.history import log_history
-from blueprints.report.services.expense_draft_mirror import ensure_shop_expense_for_draft
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
 from blueprints.report.services.share import create_share_link_for_report
 from blueprints.report.services.shared import get_cash_sales_from_detail
@@ -227,10 +226,11 @@ def report_expense_submit_all():
 
         # Get the current draft for this user with the specific
         # transaction_date
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == transaction_date,
-            ReportDraft.status == "draft",
+        # WRITE FLIP (Step 2): mutated below.
+        current_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == transaction_date,
+            Report.status == "draft",
         ).first()
 
         if not current_draft:
@@ -395,8 +395,9 @@ def report_expense_submit_all():
                     # Continue without item_code - it's optional
 
             # Create expense object
-            expense = ShopExpenseDraft(
-                report_draft_id=current_draft.id,
+            # WRITE FLIP (Step 3): creates the shop_expense row directly.
+            expense = ShopExpense(
+                report_id=current_draft.id,
                 item=item,
                 amount=amount,
                 remarks=remarks,
@@ -416,8 +417,6 @@ def report_expense_submit_all():
             # Pair with a shop_expense row so expense reads can move off
             # the draft table (Stage 4b). flush() first: expense.id is
             # only assigned once the INSERT is staged.
-            db.session.flush()
-            ensure_shop_expense_for_draft(expense)
         db.session.flush()  # Flush to ensure expense IDs are generated
 
         # Update draft expenses total (replace, don't add)
@@ -600,10 +599,11 @@ def report_expense_add():
         else:
             transaction_date = datetime.now().date()
 
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == transaction_date,
-            ReportDraft.status == "draft",
+        # WRITE FLIP (Step 2): mutated below.
+        current_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == transaction_date,
+            Report.status == "draft",
         ).first()
 
         if not current_draft:
@@ -688,8 +688,9 @@ def report_expense_add():
                 )
                 # Continue without them - they're optional.
 
-        expense = ShopExpenseDraft(
-            report_draft_id=current_draft.id,
+        # WRITE FLIP (Step 3).
+        expense = ShopExpense(
+            report_id=current_draft.id,
             item=item,
             amount=amount,
             remarks=remarks,
@@ -702,8 +703,6 @@ def report_expense_add():
         )
         db.session.add(expense)
         # Pair with a shop_expense row (Stage 4b) — see the note above.
-        db.session.flush()
-        ensure_shop_expense_for_draft(expense)
         db.session.flush()  # Generate expense.id
 
         # Recompute the draft expense total from all DB rows (idempotent).
@@ -823,7 +822,7 @@ def report_expense_update(expense_id):
     from services.helpers.xero_bridge import resolve_contact_name
 
     try:
-        expense = ShopExpenseDraft.query.get(expense_id)
+        expense = ShopExpense.query.get(expense_id)
         if not expense:
             return jsonify(
                 {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
@@ -1170,19 +1169,8 @@ def report_edit_discrepancy_reason(id):
         if cashcount_draft:
             cashcount_draft.discrepancy_reason = reason
 
-        draft = ReportDraft.query.filter_by(id=report.id).first()
-        if not draft:
-            # Draft-only. The id lookup above is exact; this (company, date)
-            # fallback is not, and duplicates per date do occur — unfiltered it
-            # could resolve to a different, submitted report once the tables
-            # merge and write the reason onto the wrong row.
-            draft = ReportDraft.query.filter(
-                ReportDraft.company == entity_id,
-                ReportDraft.transaction_date == report.transaction_date,
-                ReportDraft.status == "draft",
-            ).first()
-        if draft:
-            draft.discrepancy_reason = reason
+        # The draft-side write that used to sit here was redundant: `report`
+        # is the same row and already took the reason above (line ~1161).
         report_detail = ReportDetail.query.filter(
             ReportDetail.report_id == report.id
         ).first()
@@ -1258,30 +1246,12 @@ def report_edit_withdrawal(id):
 
         # The submitted Report and its ReportDraft share the same id; fall back
         # to the company+date match Xero uses if the id link is ever missing.
-        draft = ReportDraft.query.filter_by(id=report.id).first()
-        if not draft:
-            # Draft-only. The id lookup above is exact; this (company, date)
-            # fallback is not, and duplicates per date do occur — unfiltered it
-            # could resolve to a different, submitted report once the tables
-            # merge and write the reason onto the wrong row.
-            draft = ReportDraft.query.filter(
-                ReportDraft.company == entity_id,
-                ReportDraft.transaction_date == report.transaction_date,
-                ReportDraft.status == "draft",
-            ).first()
         resolved_bank_account = bank_account if withdrawal_type == "company" else ""
 
-        # `report` is authoritative since r1a01 put these two columns on it, so
-        # a missing draft is no longer a reason to refuse the edit — this used
-        # to 404 for every report created via create.py:149, which never has
-        # one. The draft is still updated when present, so the pre-collapse
-        # readers (publish.py:815) keep seeing the same value.
+        # `report` is the row — the draft-side write that used to mirror this
+        # was redundant once the two became one.
         report.withdrawal_type = withdrawal_type
         report.withdrawal_bank_account = resolved_bank_account
-
-        if draft:
-            draft.withdrawal_type = withdrawal_type
-            draft.withdrawal_bank_account = resolved_bank_account
 
         # Editing diverges the report from Xero — revert it to "Submitted" while
         # keeping publishing_status as the "was previously published" marker.
@@ -1320,7 +1290,7 @@ def report_expense_delete(expense_id):
     try:
         logger.info("Delete expense request for ID: %s", expense_id)
 
-        expense = ShopExpenseDraft.query.get(expense_id)
+        expense = ShopExpense.query.get(expense_id)
         if not expense:
             logger.warning("Expense not found: %s", expense_id)
             return jsonify(
@@ -1758,8 +1728,9 @@ def expense_upload_files():
                 {"original_filename": original_filename, "mime_type": out_mime or file.mimetype}
             )
 
-            expense_draft = ShopExpenseDraft(
-                report_draft_id=report_draft_id,
+            # WRITE FLIP (Step 3).
+            expense_draft = ShopExpense(
+                report_id=report_draft_id,
                 # Required DB NOT NULL field — use a placeholder until filled in
                 item="",
                 amount=0.0,
@@ -1777,8 +1748,6 @@ def expense_upload_files():
             # Pair with a shop_expense row so expense reads can move off
             # the draft table (Stage 4b). flush() first: expense_draft.id is
             # only assigned once the INSERT is staged.
-            db.session.flush()
-            ensure_shop_expense_for_draft(expense_draft)
             db.session.flush()  # get the generated id before commit
 
             # Build a short-lived (15-min) presigned URL for preview
@@ -1824,7 +1793,7 @@ def expense_upload_files():
 @login_required
 def expense_draft_get(draft_id):
     """Return the detail fields of one ShopExpenseDraft record."""
-    expense = ShopExpenseDraft.query.get(draft_id)
+    expense = ShopExpense.query.get(draft_id)
     if not expense:
         return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
@@ -1912,7 +1881,7 @@ def expense_draft_patch(draft_id):
       amount, item, remarks, contact_id, contact_name, account_id,
       account_code, item_code  (all optional — only provided keys are updated)
     """
-    expense = ShopExpenseDraft.query.get(draft_id)
+    expense = ShopExpense.query.get(draft_id)
     if not expense:
         return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 

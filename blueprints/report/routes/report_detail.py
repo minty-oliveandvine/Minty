@@ -392,7 +392,7 @@ def delete_report(id):
                 )
             entity_id = report_draft.company
 
-            ShopExpenseDraft.query.filter_by(report_draft_id=report_draft.id).delete()
+            ShopExpense.query.filter_by(report_id=report_draft.id).delete()
             ReportCashCountDraft.query.filter_by(report_id=report_draft.id).delete()
             _delete_report_v2_cascade(report_draft.id)
             # Since Stage 4a a draft has a paired `report` row with the same id.
@@ -417,7 +417,7 @@ def delete_report(id):
                 ).all()
             )
             for draft in other_drafts:
-                ShopExpenseDraft.query.filter_by(report_draft_id=draft.id).delete()
+                ShopExpense.query.filter_by(report_id=draft.id).delete()
                 ReportCashCountDraft.query.filter_by(report_id=draft.id).delete()
                 _delete_report_v2_cascade(draft.id)
                 paired_sibling = Report.query.filter_by(id=draft.id).first()
@@ -491,7 +491,7 @@ def delete_report(id):
 
         report_draft = ReportDraft.query.filter_by(id=report.id).first()
         if report_draft:
-            ShopExpenseDraft.query.filter_by(report_draft_id=report_draft.id).delete()
+            ShopExpense.query.filter_by(report_id=report_draft.id).delete()
             ReportCashCountDraft.query.filter_by(report_id=report_draft.id).delete()
             db.session.delete(report_draft)
 
@@ -507,7 +507,7 @@ def delete_report(id):
         )
 
         for draft in other_drafts:
-            ShopExpenseDraft.query.filter_by(report_draft_id=draft.id).delete()
+            ShopExpense.query.filter_by(report_id=draft.id).delete()
             ReportCashCountDraft.query.filter_by(report_id=draft.id).delete()
             _delete_report_v2_cascade(draft.id)
             # Sibling drafts have paired `report` rows too (Stage 4a) — delete

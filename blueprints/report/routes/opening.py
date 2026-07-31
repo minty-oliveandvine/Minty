@@ -40,11 +40,11 @@ def _onboarding_floor_date(entity_id):
     # Unfiltered, once drafts live in `report`, "earliest row for the entity"
     # would resolve to the oldest SUBMITTED report and move the floor date.
     opening_draft = (
-        ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.status == "draft",
+        Report.query.filter(
+            Report.company == entity_id,
+            Report.status == "draft",
         )
-        .order_by(ReportDraft.transaction_date.asc())
+        .order_by(Report.transaction_date.asc())
         .first()
     )
     return opening_draft.transaction_date if opening_draft else None
@@ -376,10 +376,8 @@ def report_opening(id=None, entity_id=None):
                     db.func.max(
                         db.func.coalesce(
                             Report.transaction_date,
-                            ReportDraft.transaction_date))) .filter(
-                    db.or_(
-                        Report.company == entity_id,
-                        ReportDraft.company == entity_id),
+                            Report.transaction_date))) .filter(
+                    Report.company == entity_id,
                 ) .scalar())
 
             is_latest_report = report.transaction_date == latest_report_date
@@ -560,11 +558,15 @@ def report_opening(id=None, entity_id=None):
                 existing_report.date = datetime.now(tz)
 
                 # Update or create draft
-                report_draft = ReportDraft.query.filter(
-                    ReportDraft.id == existing_report.id
+                # WRITE FLIP: existing_report IS the row we want to update.
+                report_draft = Report.query.filter(
+                    Report.id == existing_report.id
                 ).first()
                 if not report_draft:
-                    report_draft = ReportDraft(
+                    # Edit mode: the Report already exists, so this branch now
+                    # only runs when something is badly out of sync. Keep it as
+                    # a Report so the shapes match.
+                    report_draft = Report(
                         id=existing_report.id,
                         transaction_date=existing_report.transaction_date,
                         next_transaction_date=existing_report.next_transaction_date,
@@ -601,17 +603,19 @@ def report_opening(id=None, entity_id=None):
                 # When id is provided (e.g. from URL), load that specific
                 # draft; else find any draft for (entity, date)
                 draft_id_param = id or request.form.get("draft_id")
+                # WRITE FLIP: these feed report_draft below, which is then
+                # mutated — so they must read the same table the writes land on.
                 if draft_id_param:
-                    existing_draft = ReportDraft.query.filter(
-                        ReportDraft.id == draft_id_param,
-                        ReportDraft.company == entity_id,
-                        ReportDraft.status == "draft",
+                    existing_draft = Report.query.filter(
+                        Report.id == draft_id_param,
+                        Report.company == entity_id,
+                        Report.status == "draft",
                     ).first()
                 else:
-                    existing_draft = ReportDraft.query.filter(
-                        ReportDraft.company == entity_id,
-                        ReportDraft.transaction_date == transaction_date,
-                        ReportDraft.status == "draft",
+                    existing_draft = Report.query.filter(
+                        Report.company == entity_id,
+                        Report.transaction_date == transaction_date,
+                        Report.status == "draft",
                     ).first()
 
             if existing_draft and not (is_edit_mode and existing_report):
@@ -648,10 +652,11 @@ def report_opening(id=None, entity_id=None):
                     raise ValueError(
                         f"A report for {transaction_date} already exists."
                     )
-                any_draft_for_date = ReportDraft.query.filter(
-                    ReportDraft.company == entity_id,
-                    ReportDraft.transaction_date == transaction_date,
-                    ReportDraft.status == "draft",
+                # WRITE FLIP: aliased to report_draft below and mutated.
+                any_draft_for_date = Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date == transaction_date,
+                    Report.status == "draft",
                 ).first()
                 if any_draft_for_date:
                     report_draft = any_draft_for_date
@@ -768,8 +773,9 @@ def report_opening(id=None, entity_id=None):
                     # Calculate adjusted opening balance
                     adjusted_opening_balance = opening_balance + cash_addition
 
-                    # Create new draft
-                    report_draft = ReportDraft(
+                    # WRITE FLIP (Step 2): creates a `report` row directly.
+                    # The row IS the draft — status='draft' distinguishes it.
+                    report_draft = Report(
                         transaction_date=transaction_date,
                         next_transaction_date=next_transaction_date,
                         opening_balance=opening_balance,
@@ -793,12 +799,10 @@ def report_opening(id=None, entity_id=None):
                         status="draft",
                     )
                 db.session.add(report_draft)
-                # Pair the draft with a report row (Stage 4a) so the sales and
-                # expense steps write detail rows under an id that already
-                # exists in `report`. flush() first: the draft on the new-draft
-                # branch has no id until then.
+                # flush() to assign the id before anything downstream uses it.
+                # ensure_report_row_for_draft is gone: report_draft IS a Report
+                # now, so there is no second row to create.
                 db.session.flush()
-                ensure_report_row_for_draft(report_draft)
                 logger.info(
                     f"Creating new draft {report_draft.id} with opening data and all sections initialized to 0.0"
                 )
@@ -1069,13 +1073,17 @@ def report_opening(id=None, entity_id=None):
             # Report side of this pair, so leaving it unfiltered would make the
             # two resolve to the same row once the tables merge, and the
             # bank_deposit adjustment below would be applied twice.
+            # WRITE FLIP: mutated below (bank_deposit zeroed under "no
+            # change"), so it must read the table the write lands on. Still
+            # draft-only — last_report above is the submitted-only half of the
+            # pair, and both being unfiltered would zero one row twice.
             last_draft_report = (
-                ReportDraft.query.filter(
-                    ReportDraft.company == entity_id,
-                    ReportDraft.transaction_date < selected_date,
-                    ReportDraft.status == "draft",
+                Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date < selected_date,
+                    Report.status == "draft",
                 )
-                .order_by(ReportDraft.transaction_date.desc())
+                .order_by(Report.transaction_date.desc())
                 .first()
             )
 

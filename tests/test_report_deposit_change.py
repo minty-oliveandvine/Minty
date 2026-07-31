@@ -102,10 +102,14 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
             "sum_sales_by_type",
             lambda _report_id: {"Cash": 0.0, "Electronic": 0.0, "Delivery": 0.0},
         )
+        # Patch Report, not ReportDraft: the write flip pointed both
+        # propagation helpers at `report`. The same-day lookup now returns
+        # None by construction — a submitted report and a same-day draft were
+        # two rows before and are one row now, so it cannot be both.
         monkeypatch.setattr(
-            shared.ReportDraft,
+            shared.Report,
             "query",
-            _FakeFilterSequenceQuery([same_day_draft, next_day_draft]),
+            _FakeFilterSequenceQuery([None, next_day_draft]),
         )
         monkeypatch.setattr(
             shared.db.session,
@@ -126,8 +130,9 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
     assert updated_report is previous_day_report
     assert previous_day_report.bank_deposit == 3000.0
     assert previous_day_report.closing_balance == 17000.0
-    assert same_day_draft.bank_deposit == 3000.0
-    assert same_day_draft.closing_balance == 17000.0
+    # same_day_draft is deliberately NOT asserted: post write-flip the
+    # same-day lookup returns None (one row cannot be both posted and draft),
+    # and the correction is applied to previous_day_report directly above.
     assert next_day_draft.opening_balance == 17000.0
     assert next_day_draft.adjusted_opening_balance == 17000.0
     assert next_day_draft.closing_balance == 17000.0
