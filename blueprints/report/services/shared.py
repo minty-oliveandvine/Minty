@@ -403,25 +403,31 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
     # After the first Report is posted, onboarding is over: fall back to keying
     # on the exact (entity, date) so we can only ever touch a draft for the
     # requested date and never disturb an unrelated day's in-progress draft.
+    # WRITE FLIP (Step 2): reads AND writes `report` directly. The paired
+    # report row has existed since Stage 4a, so there is nothing left for
+    # report_draft to hold that this function needs.
     entity_has_posted_report = (
         db.session.query(Report.id)
-        .filter(Report.company == entity_id)
+        .filter(
+            Report.company == entity_id,
+            db.or_(Report.status.is_(None), Report.status != "draft"),
+        )
         .first()
         is not None
     )
     if entity_has_posted_report:
-        draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == tx_date,
-            ReportDraft.status == "draft",
+        draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == tx_date,
+            Report.status == "draft",
         ).first()
     else:
         draft = (
-            ReportDraft.query.filter(
-                ReportDraft.company == entity_id,
-                ReportDraft.status == "draft",
+            Report.query.filter(
+                Report.company == entity_id,
+                Report.status == "draft",
             )
-            .order_by(ReportDraft.transaction_date.asc())
+            .order_by(Report.transaction_date.asc())
             .first()
         )
 
@@ -442,7 +448,9 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
         # we don't pre-mark the opening section complete.
         created = False
     else:
-        draft = ReportDraft(
+        # Creates a `report` row directly — no report_draft. The row IS the
+        # draft, distinguished by status='draft'.
+        draft = Report(
             transaction_date=tx_date,
             next_transaction_date=tx_date + timedelta(days=1),
             opening_balance=amount,
@@ -460,11 +468,7 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
         db.session.add(draft)
         created = True
 
-    # Pair every draft with a report row so detail rows written during entry
-    # always have a valid parent id (r3a03 / Stage 4a).
     db.session.flush()
-    ensure_report_row_for_draft(draft)
-
     db.session.commit()
     logger.info(
         "seed_opening_draft: entity=%s date=%s opening_balance=%s created=%s draft=%s",
@@ -890,13 +894,16 @@ def propagate_opening_balance_to_next_day_draft(previous_report):
         return None
 
     next_day = previous_report.transaction_date + timedelta(days=1)
+    # WRITE FLIP (Step 2): mutated below, so it reads the table the writes
+    # land on. Still draft-only — this only propagates into a report that has
+    # not been submitted; a posted one keeps the balance it was submitted with.
     next_day_draft = (
-        ReportDraft.query.filter(
-            ReportDraft.company == previous_report.company,
-            ReportDraft.transaction_date == next_day,
-            ReportDraft.status == "draft",
+        Report.query.filter(
+            Report.company == previous_report.company,
+            Report.transaction_date == next_day,
+            Report.status == "draft",
         )
-        .order_by(ReportDraft.date.desc())
+        .order_by(Report.date.desc())
         .first()
     )
 
@@ -913,13 +920,20 @@ def propagate_opening_balance_to_next_day_draft(previous_report):
 
 def sync_same_day_draft_after_deposit_change(report_to_update, new_bank_deposit):
     """Keep a same-day draft aligned when a posted report deposit is corrected."""
+    # WRITE FLIP (Step 2). NOTE: post-flip this can only ever return None —
+    # a submitted report and a same-day draft were two rows before, and are
+    # one row now, which cannot be both 'posted' and 'draft'. The deposit
+    # correction already updates that row directly in
+    # update_report_after_deposit_change. Kept as a guarded no-op rather than
+    # deleted, so the caller's shape is unchanged; remove it in Stage 5.
     same_day_draft = (
-        ReportDraft.query.filter(
-            ReportDraft.company == report_to_update.company,
-            ReportDraft.transaction_date == report_to_update.transaction_date,
-            ReportDraft.status == "draft",
+        Report.query.filter(
+            Report.company == report_to_update.company,
+            Report.transaction_date == report_to_update.transaction_date,
+            Report.status == "draft",
+            Report.id != report_to_update.id,
         )
-        .order_by(ReportDraft.date.desc())
+        .order_by(Report.date.desc())
         .first()
     )
 

@@ -242,10 +242,12 @@ class TestDeleteReportCleansSiblingDrafts:
         )
 
     def test_other_drafts_expenses_are_deleted(self):
-        """ShopExpenseDraft records for sibling drafts must be deleted."""
+        """Sibling drafts' expense rows must be deleted."""
         source = self._get_delete_function_source()
-        assert source.count("ShopExpenseDraft.query.filter_by(report_draft_id=draft.id).delete()") >= 2, (
-            "ShopExpenseDraft must be deleted for each sibling draft in both paths"
+        # Step 3 pointed expense writes at shop_expense; ShopExpenseDraft is
+        # no longer written or deleted. Same assertion, new table.
+        assert source.count("ShopExpense.query.filter_by(report_id=draft.id).delete()") >= 2, (
+            "ShopExpense must be deleted for each sibling draft in both paths"
         )
 
     def test_exception_handler_rolls_back(self):

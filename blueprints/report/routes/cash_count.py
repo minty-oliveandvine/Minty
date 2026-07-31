@@ -202,16 +202,18 @@ def report_cash_count(id=None):
     # Check for existing draft: by id when in URL, else by (entity,
     # transaction_date)
     if id:
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.id == id,
-            ReportDraft.company == entity_id,
-            ReportDraft.status == "draft",
+        # WRITE FLIP (Step 2): current_draft is mutated below, so it must
+        # read the table the writes land on.
+        current_draft = Report.query.filter(
+            Report.id == id,
+            Report.company == entity_id,
+            Report.status == "draft",
         ).first()
     else:
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == transaction_date,
-            ReportDraft.status == "draft",
+        current_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == transaction_date,
+            Report.status == "draft",
         ).first()
 
     logger.info("Cash count form - Looking for existing draft:")
