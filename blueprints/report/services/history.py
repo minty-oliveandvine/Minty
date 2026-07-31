@@ -19,12 +19,32 @@ def log_history(
     new_value=None,
 ):
     try:
+        # Resolve user_id whether the caller passed a username or an id. This
+        # was previously only in log_history_draft, which is why callers are
+        # inconsistent: deposit.py:286 passes current_draft.uploaded_by (a
+        # username) while the rest pass current_user.id. Folding it in here
+        # lets the log_history_draft callers redirect to this function without
+        # silently dropping their history rows.
+        resolved_user_id = user_id
+        if user_id is not None:
+            user = (
+                User.query.filter_by(username=user_id).first()
+                or User.query.filter_by(id=user_id).first()
+            )
+            if user:
+                resolved_user_id = user.id
+            else:
+                logger.warning(
+                    f"User {user_id} not found; logging history without a user"
+                )
+                resolved_user_id = None
+
         old_value_str = str(old_value) if old_value is not None else None
         new_value_str = str(new_value) if new_value is not None else None
         history = ReportHistory(
             report_id=report_id,
             company=company,
-            user_id=user_id,
+            user_id=resolved_user_id,
             action=action,
             field_changed=field_changed,
             old_value=old_value_str,

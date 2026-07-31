@@ -8,7 +8,7 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
-from blueprints.report.services.history import log_history_draft
+from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (
     check_user_has_entities, get_cash_sales_from_detail,
     header_publishing_status_for, parse_nested_keys, resolve_report_entity_id,
@@ -636,8 +636,8 @@ def report_sale(id=None):
             )
 
             # Log the sales entry to draft history
-            log_history_draft(
-                report_draft_id=report_draft.id,
+            log_history(
+                report_id=report_draft.id,
                 company=entity_id,
                 user_id=current_user.id,
                 action="created" if not existing_draft else "updated",

@@ -95,3 +95,11 @@ from blueprints.report.services.draft_report_mirror import (  # noqa: E402
     register_draft_report_mirror)
 
 register_draft_report_mirror()
+
+# --- shop_expense_draft -> shop_expense mirror (TEMPORARY, Stage 4b) --------
+# Same pattern, for the expense tables. Deleted in Stage 5 with
+# shop_expense_draft itself.
+from blueprints.report.services.expense_draft_mirror import (  # noqa: E402
+    register_expense_draft_mirror)
+
+register_expense_draft_mirror()
