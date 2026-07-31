@@ -1504,9 +1504,12 @@ def update_bank_transaction(entity_id):
     date = datetime.strptime(date_str, "%Y-%m-%d").date()
     redirect_date = date + timedelta(days=1)
 
+    # Submitted only — this compares against the deposit previously sent to
+    # Xero, which a draft has never done.
     report = Report.query.filter(
         Report.company == entity_id,
         Report.transaction_date == date,
+        Report.status != "draft",
     ).first()
     if report:
         previous_deposit = report.bank_deposit or 0.0

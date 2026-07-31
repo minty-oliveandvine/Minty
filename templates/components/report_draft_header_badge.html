@@ -41,11 +41,14 @@
 {% set _opening_before_first_save = current_section is defined and current_section == 'opening' and (draft_id is not defined or not draft_id) %}
 {% set _is_draft = _has_draft_row or _opening_before_first_save %}
 
-{% set _cn = current_draft.__class__.__name__ if current_draft else '' %}
+{# Was a class-name sniff (current_draft.__class__.__name__ in 'Report'/'Row').
+   That is no longer a reliable signal: since Stage 4a the wizard reads
+   `report` rows for drafts too, so the class says nothing about whether the
+   report was submitted. `status` is on both models now, so ask it directly. #}
+{% set _status = current_draft.status if (current_draft and current_draft.status is defined) else none %}
 {% set _show_submitted = (not _xo) and (not _is_draft) and (
-  (draft_id is defined and draft_id)
-  or (_cn == 'Report')
-  or (_cn == 'Row')
+  _status == 'posted'
+  or (draft_id is defined and draft_id)
 ) %}
 
 {% if _xo %}
