@@ -401,7 +401,7 @@ def report_opening(id=None, entity_id=None):
                 "report": default_report,
                 "next_transaction_date": report.next_transaction_date,
                 "is_first_report": False,
-wh                "is_draft": False,
+                "is_draft": False,
                 "draft_id": report_draft.id,
                 # For new reports, start with opening as current and no
                 # completed sections
