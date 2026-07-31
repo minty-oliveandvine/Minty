@@ -66,18 +66,6 @@
         background-position: 200% 0;
       }
     }
-
-    /* Scroll snap for entity list */
-    .snap-scroll-y {
-      scroll-snap-type: y proximity;
-      scroll-behavior: smooth;
-      scroll-padding-top: 16px;
-    }
-
-    .snap-scroll-y .snap-item {
-      scroll-snap-align: start;
-      scroll-margin-top: 16px;
-    }
   </style>
 </head>
 <body class="min-h-screen font-inter antialiased">
@@ -115,7 +103,7 @@
         </div>
       </div>
       <!-- Content -->
-      <div class="bg-gray-50 main-content snap-scroll-y flex-1 p-6 pb-40 overflow-y-auto">
+      <div class="bg-gray-50 main-content flex-1 p-6 pb-40 overflow-y-auto">
         <div class="flex flex-col gap-4">
           <div class="mb-4 w-80 min-h-[160px] sm:w-60 sm:min-h-[120px] mx-auto block relative">
             <div class="image-skeleton w-40 h-40 sm:w-[120px] sm:h-[120px] rounded-full bg-gray-200 absolute top-0 left-1/2 transform -translate-x-1/2"></div>
@@ -132,7 +120,7 @@
             </div>
           </div>
           {% for org in organizations %}
-            <a class="entity-item snap-item bg-white w-full h-[48px] py-[16px] px-[8px] flex justify-between items-center border border-[#f6f6f8] rounded-[12px] text-[#1f2937] font-[600] hover:bg-gray-50 transition-colors shadow-md hover-lift" data-name="{{ org.name }}" href="{{ url_for('entity.module_selector', entity_id=org.id) if org.id else url_for('entity.entity_list') }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+            <a class="entity-item bg-white w-full h-[48px] py-[16px] px-[8px] flex justify-between items-center border border-[#f6f6f8] rounded-[12px] text-[#1f2937] font-[600] hover:bg-gray-50 transition-colors shadow-md hover-lift" data-name="{{ org.name }}" href="{{ url_for('entity.module_selector', entity_id=org.id) if org.id else url_for('entity.entity_list') }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
               <div class="flex items-center gap-2 min-w-0">
                 <span class="truncate">{{ org.name }}</span>
                 {% if org.status == 'onboarding' %}
