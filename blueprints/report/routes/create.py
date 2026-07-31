@@ -288,6 +288,9 @@ def create_report():
             return jsonify(
                 {"status": "error", "message": "Something went wrong on my end. Mind trying again?"}), 500
 
+    # Balance chaining: includes drafts on purpose, since the next report
+    # opens from the previous one's closing balance whatever its status. The
+    # date-SEQUENCE guard earlier in this file is submitted-only instead.
     last_report = (
         Report.query.filter_by(company=entity_id)
         .order_by(Report.transaction_date.desc())

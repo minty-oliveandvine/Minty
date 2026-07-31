@@ -73,6 +73,8 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
         report_date = datetime.strptime(
             token_transaction_date, "%Y-%m-%d").date()
         specific_report = Report.query.filter(
+            # Share-link target: SUBMITTED reports only, never a draft.
+            db.or_(Report.status.is_(None), Report.status != "draft"),
             Report.company == str(token_entity_id),
             Report.transaction_date == report_date,
         ).first()
@@ -136,6 +138,8 @@ def minty_report_ending(entity_and_date: str) -> ResponseReturnValue:
         report_date = datetime.strptime(
             token_transaction_date, "%Y-%m-%d").date()
         specific_report = Report.query.filter(
+            # Share-link target: SUBMITTED reports only.
+            db.or_(Report.status.is_(None), Report.status != "draft"),
             Report.company == str(token_entity_id),
             Report.transaction_date == report_date,
         ).first()
