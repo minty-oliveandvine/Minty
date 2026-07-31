@@ -15,7 +15,7 @@ from blueprints.report.services.shared import (
     safe_float, sum_sales_by_type, update_draft_progress,
     update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportDraft, ReportSaleDetail, ReportV2,
+from models.db import (Entity, Report, ReportDraft, ReportSaleDetail,
                        EntitySaleSetting, db, tz)
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
@@ -94,9 +94,10 @@ def report_sale(id=None):
             entity_id=entity_id,
         )
     if id:
+        # The ReportDraft fallback that used to sit here is gone: since Stage 4a
+        # every draft has a paired `report` row with the same id, so the first
+        # lookup already covers drafts. Kept as one query, not two.
         report_for_access = Report.query.filter_by(id=id).first()
-        if not report_for_access:
-            report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
@@ -115,8 +116,12 @@ def report_sale(id=None):
 
     if id:
         report = (
-            Report.query.join(ReportDraft, ReportDraft.id == Report.id, full=True)
-            .filter(Report.id == id, ReportDraft.id == id)
+            # Was a full outer join to ReportDraft that filtered BOTH ids to
+            # `id`, collapsing it back to an inner join: `report` came back None
+            # whenever either side was missing. completed_sections /
+            # current_section live on `report` since r1a01.
+            Report.query
+            .filter(Report.id == id)
             .with_entities(
                 Report.id,
                 Report.transaction_date,
@@ -136,8 +141,8 @@ def report_sale(id=None):
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
-                ReportDraft.completed_sections,
-                ReportDraft.current_section,
+                Report.completed_sections,
+                Report.current_section,
             )
             .first()
         )
@@ -201,72 +206,10 @@ def report_sale(id=None):
             is_edit_mode=is_edit_mode,
         )
 
-    if id:
-        report = (
-            Report.query.join(ReportDraft, ReportDraft.id == Report.id, full=True)
-            .filter(Report.id == id, ReportDraft.id == id)
-            .with_entities(
-                Report.id,
-                Report.transaction_date,
-                Report.next_transaction_date,
-                Report.date,
-                Report.opening_balance,
-                Report.cash_addition,
-                Report.adjusted_opening_balance,
-                Report.cash_sales,
-                Report.shop_sales,
-                Report.delivery_sales,
-                Report.total_sales,
-                Report.expenses,
-                Report.bank_deposit,
-                Report.closing_balance,
-                Report.receipt_files,
-                Report.uploaded_by,
-                Report.company,
-                Report.xero_integrated_yes,
-                ReportDraft.completed_sections,
-                ReportDraft.current_section,
-            )
-            .first()
-        )
-        entity = Entity.query.get_or_404(entity_id)
-        entity_acronym, display_date = entity_badge_data(entity)
+    # NOTE: a second, byte-identical `if id:` block used to sit here. It was
+    # unreachable — the block above ends in `return render_template(...)` — so
+    # it was deleted rather than migrated off the ReportDraft join.
 
-        # Get sale_info for the entity (unique, no duplicates, proper order)
-        sale_info_list = get_unique_sale_info_for_entity(entity_id)
-        
-        # Attach amounts from ReportSaleDetail for this report
-        sale_info = []
-        for sale_obj in sale_info_list:
-            sale_detail = ReportSaleDetail.query.filter_by(
-                report_id=report.id,
-                sale_id=sale_obj.sale_id
-            ).first()
-            sale_obj.amount = sale_detail.amount if sale_detail else None
-            sale_info.append(sale_obj)
-        return render_template(
-            "report/sales.html",
-            datenow=datetime.now(),
-            # Per-method amounts keyed by legacy value_name, sourced from
-            # report_sale_detail via the sale_info rows attached above.
-            sales_amounts={
-                s.value_name: (s.amount or 0)
-                for s in sale_info if s.value_name
-            },
-            org=entity,
-            current_draft=report,
-            header_publishing_status=header_publishing_status_for(report_id=(report.id if report else None)),
-            report=report,
-            current_section="sales",
-            completed_sections=report.completed_sections if report else ["opening"],
-            is_draft=True,
-            draft_id=report.id if report else None,
-            current_user=current_user,
-            sale_info=sale_info,
-            entity_acronym=entity_acronym,
-            display_date=display_date,
-            is_edit_mode=is_edit_mode,
-        )
     if request.method == "POST":
         try:
             # Get action type from form
@@ -319,7 +262,8 @@ def report_sale(id=None):
                 f"Sales form - Found existing draft: {existing_draft.id if existing_draft else 'None'}"
             )
 
-            # Also check what drafts exist for this user
+            # Debug logging only — deliberately unfiltered so the log shows
+            # every row and its status. Nothing branches on this result.
             all_user_drafts = ReportDraft.query.filter(
                 ReportDraft.company == entity_id,
                 ReportDraft.uploaded_by == current_user.username,
@@ -435,29 +379,9 @@ def report_sale(id=None):
                 db.session.commit()
                 logger.info(f"Updated existing draft {report_draft.id} with sales data")
 
-                # Update ReportSaleDetail for drafts so amounts are preserved
-                # Ensure ReportV2 exists for this draft
-                report_v2 = ReportV2.query.filter_by(report_id=report_draft.id).first()
-                if not report_v2:
-                    # Create ReportV2 if it doesn't exist
-                    report_v2 = ReportV2(
-                        report_id=report_draft.id,
-                        entity_id=entity_id,
-                        report_date=report_draft.transaction_date,
-                        status="draft",
-                        starting_balance=report_draft.opening_balance or 0,
-                        opening_balance=report_draft.opening_balance or 0,
-                        adjusted_opening_balance=report_draft.adjusted_opening_balance
-                        or report_draft.opening_balance
-                        or 0,
-                        add_cash_amount=report_draft.cash_addition or 0,
-                        cash_from_type="shop",
-                        cashsale_total=report_draft.cash_sales or 0,
-                        expense_total=report_draft.expenses or 0,
-                        cash_deposit=report_draft.bank_deposit or 0,
-                    )
-                    db.session.add(report_v2)
-                    db.session.commit()
+                # Update ReportSaleDetail for drafts so amounts are preserved.
+                # The ReportV2 row that used to be manufactured here existed
+                # only to satisfy report_sale_detail's FK, dropped in r2a02.
 
                 # Get all sale_info for this entity (only enabled ones, no duplicates, proper order)
                 sale_info = get_unique_sale_info_for_entity(entity_id)
@@ -487,7 +411,7 @@ def report_sale(id=None):
 
                     # Check if ReportSaleDetail exists
                     report_sale_detail = ReportSaleDetail.query.filter_by(
-                        sale_id=sale.sale_id, report_id=report_v2.report_id
+                        sale_id=sale.sale_id, report_id=report_draft.id
                     ).first()
 
                     if report_sale_detail:
@@ -501,7 +425,7 @@ def report_sale(id=None):
                         # Create new record
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
-                            report_id=report_v2.report_id,
+                            report_id=report_draft.id,
                             # Catalog link, so the row stays self-describing
                             # even if this sale_info row is later removed.
                             sale_info_id=sale.sale_info_id,
@@ -517,9 +441,10 @@ def report_sale(id=None):
                 db.session.commit()
 
             else:
-                # No existing draft found - this should not happen if user came from opening form
-                # Try to find any draft for this user and date, regardless of
-                # status
+                # No existing draft found - this should not happen if user came
+                # from opening form. Deliberately status-AGNOSTIC: the recovery
+                # path forces status="draft" below, so it must be able to find a
+                # row the "draft" filter would have excluded.
                 any_draft = ReportDraft.query.filter(
                     ReportDraft.company == entity_id,
                     ReportDraft.transaction_date == transaction_date,
@@ -596,31 +521,9 @@ def report_sale(id=None):
                         f"Updated existing draft {report_draft.id} with sales data"
                     )
 
-                    # Update ReportSaleDetail for drafts so amounts are preserved
-                    # Ensure ReportV2 exists for this draft
-                    report_v2 = ReportV2.query.filter_by(
-                        report_id=report_draft.id
-                    ).first()
-                    if not report_v2:
-                        # Create ReportV2 if it doesn't exist
-                        report_v2 = ReportV2(
-                            report_id=report_draft.id,
-                            entity_id=entity_id,
-                            report_date=report_draft.transaction_date,
-                            status="draft",
-                            starting_balance=report_draft.opening_balance or 0,
-                            opening_balance=report_draft.opening_balance or 0,
-                            adjusted_opening_balance=report_draft.adjusted_opening_balance
-                            or report_draft.opening_balance
-                            or 0,
-                            add_cash_amount=report_draft.cash_addition or 0,
-                            cash_from_type="shop",
-                            cashsale_total=report_draft.cash_sales or 0,
-                            expense_total=report_draft.expenses or 0,
-                            cash_deposit=report_draft.bank_deposit or 0,
-                        )
-                        db.session.add(report_v2)
-                        db.session.commit()
+                    # Update ReportSaleDetail for drafts so amounts are
+                    # preserved. See the note above: the ReportV2 row formerly
+                    # created here was FK scaffolding only (r2a02).
 
                     # Get all sale_info for this entity (only enabled ones, no duplicates, proper order)
                     sale_info = get_unique_sale_info_for_entity(entity_id)
@@ -650,7 +553,7 @@ def report_sale(id=None):
 
                         # Check if ReportSaleDetail exists
                         report_sale_detail = ReportSaleDetail.query.filter_by(
-                            sale_id=sale.sale_id, report_id=report_v2.report_id
+                            sale_id=sale.sale_id, report_id=report_draft.id
                         ).first()
 
                         if report_sale_detail:
@@ -664,7 +567,7 @@ def report_sale(id=None):
                             # Create new record
                             report_sale_detail = ReportSaleDetail(
                                 sale_id=sale.sale_id,
-                                report_id=report_v2.report_id,
+                                report_id=report_draft.id,
                                 # Catalog link, so the row stays self-describing
                                 # even if this sale_info row is later removed.
                                 sale_info_id=sale.sale_info_id,
@@ -692,12 +595,8 @@ def report_sale(id=None):
 
             assert report_draft is not None
 
-            # Non-cash sales = everything except Cash, summed from
-            # report_sale_detail. The old loop added up the per-method columns,
-            # which the model no longer declares — so it summed to 0 every
-            # time and report_v2.nocashsale_total was always zero.
-            _totals = sum_sales_by_type(report_draft.id)
-            nocashsale_total = _totals["Electronic"] + _totals["Delivery"]
+            # The non-cash total computed here fed report_v2.nocashsale_total
+            # and nothing else; both went with the ReportV2 write (r2a02).
 
             # Update progress tracking
             try:
@@ -743,41 +642,9 @@ def report_sale(id=None):
                 new_value=f"Sales: Shop={total_shop_sales}, Delivery={total_delivery_sales}, Total={total_sales}, Closing Balance={report_draft.closing_balance}",
             )
 
-            # Update report_v2
-            # Keyed on the draft id, matching the other two write sites and
-            # the read in the GET path — report_v2.report_id IS the draft id.
-            # Looking it up by (entity, date) could resolve a different row,
-            # leaving detail rows under an id the form never queries.
-            report_v2 = ReportV2.query.filter_by(
-                report_id=report_draft.id
-            ).first()
-
-            # Check if the report is posted or draft status
-            report_status = getattr(report_draft, "status", "draft")
-
-            status = "draft" if report_status == "draft" else "posted"
-            if report_v2:
-                report_v2.cashsale_total = report_draft.cash_sales
-                report_v2.nocashsale_total = nocashsale_total
-                report_v2.expense_total = report_draft.expenses
-            else:
-                report_v2 = ReportV2(
-                    report_id=report_draft.id,
-                    entity_id=entity_id,
-                    report_date=transaction_date,
-                    status=status,
-                    starting_balance=report_draft.opening_balance,
-                    opening_balance=report_draft.opening_balance,
-                    adjusted_opening_balance=report_draft.opening_balance,
-                    add_cash_amount=report_draft.cash_addition,
-                    cash_from_type="shop",
-                    xero_organiztion_id=current_user.xero_entity_id,
-                    cashsale_total=report_draft.cash_sales,
-                    nocashsale_total=nocashsale_total,
-                    cash_deposit=report_draft.bank_deposit,
-                    expense_total=report_draft.expenses,
-                )
-                db.session.add(report_v2)
+            # report_v2 used to be created/updated here, keyed on the draft id,
+            # purely so report_sale_detail's FK resolved. r2a02 dropped that FK
+            # and nothing ever read the columns back, so the whole block went.
             db.session.commit()
 
             # Insert to report_sale_detail (only enabled sale types, no duplicates, proper order)
@@ -818,7 +685,7 @@ def report_sale(id=None):
                     # Check if a detail already exists for this sale_id and
                     # report_id
                     report_sale_detail = ReportSaleDetail.query.filter_by(
-                        sale_id=sale.sale_id, report_id=report_v2.report_id
+                        sale_id=sale.sale_id, report_id=report_draft.id
                     ).first()
                     if report_sale_detail:
                         # Update the amount and update timestamp
@@ -828,7 +695,7 @@ def report_sale(id=None):
                         # Insert new detail
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
-                            report_id=report_v2.report_id,
+                            report_id=report_draft.id,
                             # Catalog link, so the row stays self-describing
                             # even if this sale_info row is later removed.
                             sale_info_id=sale.sale_info_id,
@@ -838,7 +705,7 @@ def report_sale(id=None):
                         )
                         db.session.add(report_sale_detail)
                         logger.info(
-                            f"New sale detail record created: sale_id={sale.sale_id}, report_id={report_v2.report_id}, type={sale.type}, amount={amount}"
+                            f"New sale detail record created: sale_id={sale.sale_id}, report_id={report_draft.id}, type={sale.type}, amount={amount}"
                         )
 
             logger.info(f"Committing {len(sale_info)} sale detail records to database")
@@ -953,16 +820,18 @@ def report_sale(id=None):
         # Check for existing draft: by id when in URL, else by (entity,
         # transaction_date)
         if id:
-            existing_draft = ReportDraft.query.filter(
-                ReportDraft.id == id,
-                ReportDraft.company == entity_id,
-                ReportDraft.status == "draft",
+            # GET-path read, migrated to `report` (mirror keeps it current).
+            # Read-only: nothing writes through existing_draft on this path.
+            existing_draft = Report.query.filter(
+                Report.id == id,
+                Report.company == entity_id,
+                Report.status == "draft",
             ).first()
         else:
-            existing_draft = ReportDraft.query.filter(
-                ReportDraft.company == entity_id,
-                ReportDraft.transaction_date == transaction_date,
-                ReportDraft.status == "draft",
+            existing_draft = Report.query.filter(
+                Report.company == entity_id,
+                Report.transaction_date == transaction_date,
+                Report.status == "draft",
             ).first()
 
         if existing_draft:

@@ -10,6 +10,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history_draft
 from blueprints.report.services.shared import (check_user_has_entities,
+                                               ensure_report_row_for_draft,
                                                future_date_error,
                                                header_publishing_status_for,
                                                recalculate_report,
@@ -35,8 +36,14 @@ def _onboarding_floor_date(entity_id):
     first report (replaces the legacy "within 7 days from today" window).
     Returns a date, or None if no onboarding draft exists.
     """
+    # Draft-only: this is the onboarding seed draft (seed_opening_draft).
+    # Unfiltered, once drafts live in `report`, "earliest row for the entity"
+    # would resolve to the oldest SUBMITTED report and move the floor date.
     opening_draft = (
-        ReportDraft.query.filter_by(company=entity_id)
+        ReportDraft.query.filter(
+            ReportDraft.company == entity_id,
+            ReportDraft.status == "draft",
+        )
         .order_by(ReportDraft.transaction_date.asc())
         .first()
     )
@@ -99,9 +106,10 @@ def report_opening(id=None, entity_id=None):
             entity_id=entity_id,
         )
     if id:
+        # The ReportDraft fallback that used to sit here is gone: since Stage 4a
+        # every draft has a paired `report` row with the same id, so the first
+        # lookup already covers drafts. Kept as one query, not two.
         report_for_access = Report.query.filter_by(id=id).first()
-        if not report_for_access:
-            report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
@@ -317,44 +325,38 @@ def report_opening(id=None, entity_id=None):
     # When a specific report/draft id is provided, load that draft by id first
     existing_draft = None
     if id:
-        draft_by_id = ReportDraft.query.filter(
-            ReportDraft.id == id,
-            ReportDraft.company == entity_id,
-            ReportDraft.status == "draft",
+        # Reads `report` rather than report_draft: the draft->report mirror
+        # keeps the paired row current, and every field consumed below
+        # (opening_balance, withdrawal_*, completed_sections) lives on both.
+        # status == "draft" is what still makes this a DRAFT lookup.
+        draft_by_id = Report.query.filter(
+            Report.id == id,
+            Report.company == entity_id,
+            Report.status == "draft",
         ).first()
         if draft_by_id:
             existing_draft = draft_by_id
     if existing_draft is None and selected_date:
         # No id or no draft for that id: find any draft for (entity,
         # transaction_date)
-        existing_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.transaction_date == selected_date,
-            ReportDraft.status == "draft",
+        existing_draft = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date == selected_date,
+            Report.status == "draft",
         ).first()
 
     if id and not existing_draft:
-        join_result = (
-            db.session.query(Report, ReportDraft)
-            .join(ReportDraft, ReportDraft.id == Report.id, full=True)
-            .filter(Report.id == id, ReportDraft.id == id)
-            .first()
-        )
-        if join_result:
-            report, report_draft = join_result
+        # Was a two-entity full outer join filtering BOTH ids to `id`, which
+        # collapsed to an inner join and returned nothing whenever either row
+        # was missing. withdrawal_type and withdrawal_bank_account live on
+        # `report` since r1a01, so one table answers the whole question.
+        report = Report.query.filter(Report.id == id).first()
+        if report:
             default_report = {
                 "adjusted_opening_balance": report.opening_balance,
                 "cash_addition": 0,
-                "withdrawal": (
-                    report_draft.withdrawal_type
-                    if report_draft.withdrawal_type
-                    else "personal"
-                ),
-                "bank_account": (
-                    report_draft.withdrawal_bank_account
-                    if report_draft.withdrawal_bank_account
-                    else ""
-                ),
+                "withdrawal": report.withdrawal_type or "personal",
+                "bank_account": report.withdrawal_bank_account or "",
             }
             # Determine if this is the latest report (most recent
             # transaction_date) or old report
@@ -763,6 +765,12 @@ def report_opening(id=None, entity_id=None):
                         status="draft",
                     )
                 db.session.add(report_draft)
+                # Pair the draft with a report row (Stage 4a) so the sales and
+                # expense steps write detail rows under an id that already
+                # exists in `report`. flush() first: the draft on the new-draft
+                # branch has no id until then.
+                db.session.flush()
+                ensure_report_row_for_draft(report_draft)
                 logger.info(
                     f"Creating new draft {report_draft.id} with opening data and all sections initialized to 0.0"
                 )
@@ -914,14 +922,15 @@ def report_opening(id=None, entity_id=None):
             # Try to find an existing draft for this entity (any user) in the
             # last 7 days
             existing_draft = (
-                ReportDraft.query.filter(
-                    ReportDraft.company == entity_id,
-                    ReportDraft.transaction_date
+                # GET-path read, migrated to `report` (mirror keeps it current).
+                Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date
                     # Look back 7 days for recent drafts
                     >= today - timedelta(days=7),
-                    ReportDraft.status == "draft",
+                    Report.status == "draft",
                 )
-                .order_by(ReportDraft.transaction_date.desc())
+                .order_by(Report.transaction_date.desc())
                 .first()
             )
     if existing_draft:
@@ -1005,10 +1014,15 @@ def report_opening(id=None, entity_id=None):
                     Report.transaction_date < selected_date) .order_by(
                     Report.transaction_date.desc()) .first())
 
+            # Draft-only: the paired `last_report` query above is already the
+            # Report side of this pair, so leaving it unfiltered would make the
+            # two resolve to the same row once the tables merge, and the
+            # bank_deposit adjustment below would be applied twice.
             last_draft_report = (
                 ReportDraft.query.filter(
                     ReportDraft.company == entity_id,
                     ReportDraft.transaction_date < selected_date,
+                    ReportDraft.status == "draft",
                 )
                 .order_by(ReportDraft.transaction_date.desc())
                 .first()

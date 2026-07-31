@@ -27,8 +27,8 @@ from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
 from models.db import (Entity, EntityFunction, EntityFunctionMap,
-                       EntityPettycashSettings, ReportDraft, EntitySaleSetting,
-                       UserEntity, db)
+                       EntityPettycashSettings, Report, ReportDraft,
+                       EntitySaleSetting, UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
@@ -194,12 +194,13 @@ def _opening_balance_state(entity_id: str) -> dict | None:
     ``opening_balance`` (with ``cash_addition`` 0); both are returned so the
     frontend can bind to either. ``None`` when no opening draft exists yet.
     """
+    # Read-only: only the balance fields are consumed. Migrated to `report`.
     draft = (
-        ReportDraft.query.filter(
-            ReportDraft.company == entity_id,
-            ReportDraft.status == "draft",
+        Report.query.filter(
+            Report.company == entity_id,
+            Report.status == "draft",
         )
-        .order_by(ReportDraft.transaction_date.asc())
+        .order_by(Report.transaction_date.asc())
         .first()
     )
     if draft is None:

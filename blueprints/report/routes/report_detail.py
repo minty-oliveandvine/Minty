@@ -397,11 +397,16 @@ def delete_report(id):
             _delete_report_v2_cascade(report_draft.id)
             db.session.delete(report_draft)
 
+            # status filter is load-bearing: this deletes SIBLING rows matched
+            # on (company, transaction_date), and duplicates per date do occur.
+            # Without it, once drafts live in `report`, this would delete
+            # submitted reports for the same entity and date.
             other_drafts = (
                 ReportDraft.query.filter(
                     ReportDraft.company == report_draft.company,
                     ReportDraft.transaction_date == report_draft.transaction_date,
                     ReportDraft.id != report_draft.id,
+                    ReportDraft.status == "draft",
                 ).all()
             )
             for draft in other_drafts:
@@ -477,11 +482,14 @@ def delete_report(id):
             ReportCashCountDraft.query.filter_by(report_id=report_draft.id).delete()
             db.session.delete(report_draft)
 
+        # See the note on the draft-only branch: status keeps this from
+        # deleting submitted reports once drafts move into `report`.
         other_drafts = (
             ReportDraft.query.filter(
                 ReportDraft.company == report.company,
                 ReportDraft.transaction_date == report.transaction_date,
                 ReportDraft.id != report.id,
+                ReportDraft.status == "draft",
             ).all()
         )
 

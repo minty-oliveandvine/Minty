@@ -270,7 +270,7 @@ def report_expense_submit_all():
         from blueprints.report.services.s3_storage import upload_file_to_s3
         from blueprints.report.services.shared import (safe_float,
                                                        update_draft_progress)
-        from models.db import ReportExpenseDetail, ReportV2, db
+        from models.db import ReportExpenseDetail, db
         from services.helpers.xero_bridge import (get_xero_data_dynamic,
                                                   resolve_contact_name)
 
@@ -431,37 +431,17 @@ def report_expense_submit_all():
             - (current_draft.bank_deposit or 0)
         )
 
-        # Update report expense total
-        report_v2 = ReportV2.query.filter_by(
-            entity_id=current_draft.company, report_date=transaction_date
-        ).first()
-
-        if report_v2:
-            report_v2.expense_total = total_expenses
-        elif not report_v2:
-            report_v2 = ReportV2(
-                report_id=current_draft.id,
-                entity_id=entity_id,
-                report_date=transaction_date,
-                status=current_draft.status,
-                starting_balance=current_draft.opening_balance,
-                opening_balance=current_draft.opening_balance,
-                adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                add_cash_amount=current_draft.cash_addition,
-                cash_from_type="shop",
-                add_cash_bank_account_id=current_draft.withdrawal_bank_account,
-                xero_organiztion_id=current_user.xero_entity_id,
-                cashsale_total=current_draft.cash_sales,
-                nocashsale_total=current_draft.delivery_sales,
-                expense_total=total_expenses,
-            )
-            db.session.add(report_v2)
-            db.session.flush()  # Flush to get the generated report_i
+        # ReportV2 was created here only to satisfy report_expense_detail's FK
+        # (dropped in r2a02). Removing it also removes a latent bug: the lookup
+        # keyed on (entity_id, report_date) while the insert keyed on
+        # current_draft.id, so on a re-submit it could find a different row than
+        # the one it then wrote detail rows under — the exact hazard the note at
+        # sales.py:706 warned about.
 
         for expense in expenses:
             report_expense_detail = ReportExpenseDetail(
                 expense_id=expense.id,
-                report_id=report_v2.report_id,
+                report_id=current_draft.id,
                 account_id=getattr(expense, "account_id", None),
                 amount=expense.amount,
                 info_filepath=getattr(expense, "files", None),
@@ -572,7 +552,7 @@ def report_expense_add():
     from blueprints.report.services.s3_storage import upload_file_to_s3
     from blueprints.report.services.shared import (normalize_expense_files,
                                                    safe_float)
-    from models.db import ReportExpenseDetail, ReportV2, db
+    from models.db import ReportExpenseDetail, db
     from services.helpers.xero_bridge import (get_xero_data_dynamic,
                                               resolve_contact_name)
 
@@ -732,36 +712,12 @@ def report_expense_add():
             - (current_draft.bank_deposit or 0)
         )
 
-        # Mirror the expense total on ReportV2 and add a detail row.
-        report_v2 = ReportV2.query.filter_by(
-            entity_id=current_draft.company, report_date=transaction_date
-        ).first()
-
-        if report_v2:
-            report_v2.expense_total = total_expenses
-        else:
-            report_v2 = ReportV2(
-                report_id=current_draft.id,
-                entity_id=entity_id,
-                report_date=transaction_date,
-                status=current_draft.status,
-                starting_balance=current_draft.opening_balance,
-                opening_balance=current_draft.opening_balance,
-                adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                add_cash_amount=current_draft.cash_addition,
-                cash_from_type="shop",
-                add_cash_bank_account_id=current_draft.withdrawal_bank_account,
-                xero_organiztion_id=current_user.xero_entity_id,
-                cashsale_total=current_draft.cash_sales,
-                nocashsale_total=current_draft.delivery_sales,
-                expense_total=total_expenses,
-            )
-            db.session.add(report_v2)
-            db.session.flush()  # Generate report_v2.report_id
+        # ReportV2 mirroring removed with its FK (r2a02) — see the note on the
+        # bulk expense path above, including the lookup/insert key mismatch.
 
         report_expense_detail = ReportExpenseDetail(
             expense_id=expense.id,
-            report_id=report_v2.report_id,
+            report_id=current_draft.id,
             account_id=account_id,
             amount=expense.amount,
             info_filepath=expense.files,
@@ -1198,9 +1154,14 @@ def report_edit_discrepancy_reason(id):
 
         draft = ReportDraft.query.filter_by(id=report.id).first()
         if not draft:
+            # Draft-only. The id lookup above is exact; this (company, date)
+            # fallback is not, and duplicates per date do occur — unfiltered it
+            # could resolve to a different, submitted report once the tables
+            # merge and write the reason onto the wrong row.
             draft = ReportDraft.query.filter(
                 ReportDraft.company == entity_id,
                 ReportDraft.transaction_date == report.transaction_date,
+                ReportDraft.status == "draft",
             ).first()
         if draft:
             draft.discrepancy_reason = reason
@@ -1281,23 +1242,28 @@ def report_edit_withdrawal(id):
         # to the company+date match Xero uses if the id link is ever missing.
         draft = ReportDraft.query.filter_by(id=report.id).first()
         if not draft:
+            # Draft-only. The id lookup above is exact; this (company, date)
+            # fallback is not, and duplicates per date do occur — unfiltered it
+            # could resolve to a different, submitted report once the tables
+            # merge and write the reason onto the wrong row.
             draft = ReportDraft.query.filter(
                 ReportDraft.company == entity_id,
                 ReportDraft.transaction_date == report.transaction_date,
+                ReportDraft.status == "draft",
             ).first()
-        if not draft:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "I couldn't find the draft behind this report, so I can't change the withdrawal source.",
-                    }
-                ),
-                404,
-            )
+        resolved_bank_account = bank_account if withdrawal_type == "company" else ""
 
-        draft.withdrawal_type = withdrawal_type
-        draft.withdrawal_bank_account = bank_account if withdrawal_type == "company" else ""
+        # `report` is authoritative since r1a01 put these two columns on it, so
+        # a missing draft is no longer a reason to refuse the edit — this used
+        # to 404 for every report created via create.py:149, which never has
+        # one. The draft is still updated when present, so the pre-collapse
+        # readers (publish.py:815) keep seeing the same value.
+        report.withdrawal_type = withdrawal_type
+        report.withdrawal_bank_account = resolved_bank_account
+
+        if draft:
+            draft.withdrawal_type = withdrawal_type
+            draft.withdrawal_bank_account = resolved_bank_account
 
         # Editing diverges the report from Xero — revert it to "Submitted" while
         # keeping publishing_status as the "was previously published" marker.
@@ -1308,8 +1274,8 @@ def report_edit_withdrawal(id):
             {
                 "status": "success",
                 "message": "Withdrawal source updated successfully.",
-                "withdrawal_type": draft.withdrawal_type,
-                "withdrawal_bank_account": draft.withdrawal_bank_account or "",
+                "withdrawal_type": report.withdrawal_type,
+                "withdrawal_bank_account": report.withdrawal_bank_account or "",
             }
         )
     except Exception as e:
@@ -1464,10 +1430,11 @@ def get_draft_totals():
                 ),
                 403,
             )
-        current_draft = ReportDraft.query.filter(
-            ReportDraft.company == entity_id_param,
-            ReportDraft.transaction_date == transaction_date,
-            ReportDraft.status == "draft",
+        # get_draft_totals: read-only, migrated to `report`.
+        current_draft = Report.query.filter(
+            Report.company == entity_id_param,
+            Report.transaction_date == transaction_date,
+            Report.status == "draft",
         ).first()
 
         if not current_draft:

@@ -123,7 +123,39 @@ def revert_report_to_draft(report_id):
 
     report_draft = ReportDraft.query.filter(ReportDraft.id == report_id).first()
     if not report_draft:
-        raise RevertError("Report draft not found", 404)
+        # A Report with no draft is a real, reachable state: create.py:149 mints
+        # one directly. Refusing to revert those was a hard 404 for reports that
+        # are otherwise perfectly revertible — the draft is a carrier for the
+        # workflow fields, not a precondition. Build it from the Report, which
+        # is the same thing ending.py:459 does when the ending page hits this.
+        logger.info(
+            f"No ReportDraft for report {report_id}; creating one so the "
+            "revert can proceed"
+        )
+        report_draft = ReportDraft(
+            id=report.id,
+            transaction_date=report.transaction_date,
+            next_transaction_date=report.next_transaction_date,
+            opening_balance=report.opening_balance,
+            cash_addition=report.cash_addition,
+            adjusted_opening_balance=report.adjusted_opening_balance,
+            cash_sales=report.cash_sales,
+            shop_sales=report.shop_sales,
+            delivery_sales=report.delivery_sales,
+            total_sales=report.total_sales,
+            expenses=report.expenses,
+            bank_deposit=report.bank_deposit,
+            closing_balance=report.closing_balance,
+            receipt_files=report.receipt_files,
+            uploaded_by=report.uploaded_by,
+            company=report.company,
+            safe_box_balance=report.safe_box_balance,
+            discrepancy_amount=report.discrepancy_amount,
+            discrepancy_reason=report.discrepancy_reason,
+            discrepancy_type=report.discrepancy_type,
+        )
+        db.session.add(report_draft)
+        db.session.flush()
 
     was_published = bool(report.xero_integrated_yes)
     prior_publishing_status = report.publishing_status
@@ -330,9 +362,9 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         flash("It looks like you don't have permission to view this entity's reports.", "danger")
         return redirect(url_for("entity.entity_list"))
     if not skip_auth and id:
+        # ReportDraft fallback removed: since Stage 4a every draft has a paired
+        # `report` row with the same id, so one lookup covers both.
         report_for_access = Report.query.filter_by(id=id).first()
-        if not report_for_access:
-            report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
@@ -1578,6 +1610,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                                     amount=shop_expense_draft.amount,
                                     remarks=shop_expense_draft.remarks,
                                     files=shop_expense_draft.files,
+                                    # s3_key was omitted here, so a receipt
+                                    # uploaded via the multi-file path lost its
+                                    # object key on submit and the download
+                                    # link 404'd.
+                                    s3_key=shop_expense_draft.s3_key,
                                     account_code=shop_expense_draft.account_code,
                                     item_code=shop_expense_draft.item_code,
                                     account_id=shop_expense_draft.account_id,
@@ -1594,6 +1631,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                             existing_expense.amount = shop_expense_draft.amount
                             existing_expense.remarks = shop_expense_draft.remarks
                             existing_expense.files = shop_expense_draft.files
+                            existing_expense.s3_key = shop_expense_draft.s3_key
                             existing_expense.account_code = (
                                 shop_expense_draft.account_code
                             )
@@ -1766,6 +1804,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             # Check and restore draft state after rollback
             try:
                 logger.info("Checking draft state after rollback...")
+                # Stays on ReportDraft: the point is to confirm the DRAFT row
+                # survived the rollback, not its mirror.
                 draft_check = ReportDraft.query.filter_by(id=current_draft.id).first()
                 if not draft_check:
                     logger.error(

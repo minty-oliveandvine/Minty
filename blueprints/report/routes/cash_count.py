@@ -38,9 +38,10 @@ def report_cash_count(id=None):
             entity_id=entity_id,
         )
     if id:
+        # The ReportDraft fallback that used to sit here is gone: since Stage 4a
+        # every draft has a paired `report` row with the same id, so the first
+        # lookup already covers drafts. Kept as one query, not two.
         report_for_access = Report.query.filter_by(id=id).first()
-        if not report_for_access:
-            report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
@@ -57,18 +58,21 @@ def report_cash_count(id=None):
 
     if id:
         report = (
-            Report.query.join(
-                ReportDraft,
-                ReportDraft.id == Report.id,
-                full=True) .join(
+            # The ReportDraft join is gone: it filtered BOTH ids to `id`, which
+            # collapsed the "full outer" join back to an inner one, so `report`
+            # was None whenever either side was missing and report.company below
+            # raised. Its two columns live on `report` since r1a01.
+            #
+            # The cash-count join stays — those denominations have no home on
+            # `report` — but it now hangs off Report.id (the same value it used
+            # via ReportDraft.id) and is a real outerjoin, so a report with no
+            # cash count yet still returns a row with NULL denominations.
+            Report.query.outerjoin(
                 ReportCashCountDraft,
-                ReportCashCountDraft.report_id == ReportDraft.id,
-                full=True,
+                ReportCashCountDraft.report_id == Report.id,
             ) .filter(
                 Report.id == id,
-                ReportDraft.id == id,
                 Report.company == entity_id,
-                ReportDraft.company == entity_id,
             ) .with_entities(
                 Report.id,
                 Report.transaction_date,
@@ -88,8 +92,8 @@ def report_cash_count(id=None):
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
-                ReportDraft.completed_sections,
-                ReportDraft.current_section,
+                Report.completed_sections,
+                Report.current_section,
                 ReportCashCountDraft.thousand_note,
                 ReportCashCountDraft.fivehundred_note,
                 ReportCashCountDraft.onehundred_note,
@@ -461,6 +465,9 @@ def report_cash_count(id=None):
             logger.info(
                 f"  Verifying saved discrepancy data for draft {current_draft.id}"
             )
+            # Stays on ReportDraft deliberately: this verifies the DRAFT row
+            # itself persisted, so reading the mirrored `report` row would
+            # defeat the check.
             saved_draft = ReportDraft.query.filter(
                 ReportDraft.id == current_draft.id
             ).first()
