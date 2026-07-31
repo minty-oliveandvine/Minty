@@ -65,7 +65,7 @@ def create_report():
             existing_report = Report.query.filter(
                 Report.company == entity_id,
                 Report.transaction_date == transaction_date,
-                Report.status != "draft",
+                db.or_(Report.status.is_(None), Report.status != "draft"),
             ).first()
 
             if existing_report and not hasattr(
@@ -78,7 +78,15 @@ def create_report():
                 )
 
             last_report = (
-                Report.query.filter_by(company=entity_id)
+                # SUBMITTED only. The error this drives says "the day after your
+                # last submitted report" — but since Stage 4a a draft also lives
+                # in `report`, so unfiltered this treats the user's OWN
+                # in-progress draft as the last submitted report and demands the
+                # next day, bouncing them off their own report.
+                Report.query.filter(
+                    Report.company == entity_id,
+                    db.or_(Report.status.is_(None), Report.status != "draft"),
+                )
                 .order_by(Report.transaction_date.desc())
                 .first()
             )

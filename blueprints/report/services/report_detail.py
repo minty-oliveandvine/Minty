@@ -84,7 +84,7 @@ def download_statements():
             # Exports cover SUBMITTED reports. Since Stage 4a `report` also
             # holds draft-shaped rows (status='draft'), so without this an
             # in-progress draft lands in the downloaded file.
-            query = Report.query.filter(Report.status != "draft")
+            query = Report.query.filter(db.or_(Report.status.is_(None), Report.status != "draft"))
             if company:
                 query = query.filter(Report.company == company)
             query = query.filter(Report.transaction_date >= start_date)
@@ -215,7 +215,7 @@ def download_attachments():
         query = Report.query.filter(
             Report.transaction_date >= start_date,
             Report.transaction_date <= end_date,
-            Report.status != "draft",
+            db.or_(Report.status.is_(None), Report.status != "draft"),
         )
         if company:
             query = query.filter(Report.company == company)
