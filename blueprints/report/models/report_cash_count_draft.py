@@ -9,7 +9,7 @@ class ReportCashCountDraft(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
     report_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.report_draft.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE"),
         nullable=False,
     )
     thousand_note = db.Column(db.Integer)
@@ -26,4 +26,5 @@ class ReportCashCountDraft(db.Model):
     discrepancy_reason = db.Column(db.String(300))
     discrepancy_type = db.Column(db.String(20), default="none")
     actual_cash_total = db.Column(db.Float)
-    report_draft = db.relationship("ReportDraft", back_populates="cashcount_draft")
+    # FK re-pointed at report.id in r6a06.
+    report_draft = db.relationship("Report", lazy=True)

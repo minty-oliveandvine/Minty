@@ -13,8 +13,8 @@ from blueprints.xero.services.publish import (
     process_xero_integration_background, validate_expenses_for_system_accounts)
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, sync_entity_xero_status)
-from models.db import Entity, Report, db
-from services.auth.token_service import resolve_xero_token
+from models.db import Entity, Report, User, db
+from services.auth.token_service import ensure_valid_token, resolve_xero_token
 from services.authz import require_entity_access, require_permission
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission)
@@ -119,6 +119,36 @@ def report_submitted_publish_to_xero():
                 f"Using {owner_user.username}'s token for publishing "
                 f"(current user: {current_user.username})"
             )
+
+        # Legacy tier: resolve_xero_token gives up when a user has no
+        # ``user_token`` row (it hydrates from there and bails if absent), but
+        # accounts that connected before that table was populated still hold
+        # usable tokens in the legacy ``User`` columns and were publishing fine
+        # through the old hand-rolled lookup. Preserve that path so this fix
+        # doesn't lock them out; ensure_valid_token still refreshes/validates,
+        # so no unvalidated token gets through.
+        if not access_token:
+            for candidate in (
+                (
+                    User.query.filter(
+                        User.id == entity.connected_by_user_id
+                    ).first()
+                    if entity and entity.connected_by_user_id
+                    else None
+                ),
+                current_user,
+            ):
+                if candidate is None or not getattr(candidate, "access_token", None):
+                    continue
+                if ensure_valid_token(candidate):
+                    owner_user = candidate
+                    access_token = candidate.access_token
+                    logger.warning(
+                        f"LEGACY_USER_COLUMN_TOKEN entity={entity_id} "
+                        f"user={candidate.username} — no usable user_token row; "
+                        f"published from legacy User columns. Backfill required."
+                    )
+                    break
 
         # No usable token. Do NOT fall back to publishing with an unvalidated
         # one: it cannot succeed, and it turns a clear "reconnect" prompt into
