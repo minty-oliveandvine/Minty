@@ -1571,9 +1571,13 @@ def update_after_deposit_change(entity_id, date, amount):
             return None
 
         report_date = datetime.strptime(normalized_date, "%Y-%m-%d").date()
+        # Submitted only: this corrects a deposit on a report already pushed
+        # to Xero, so a draft-shaped row (status='draft', Stage 4a) is never
+        # the right target — it was never published in the first place.
         report_to_update = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == report_date,
+            Report.status != "draft",
         ).first()
         if not report_to_update:
             logger.info(
