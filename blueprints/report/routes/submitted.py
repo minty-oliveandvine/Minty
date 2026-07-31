@@ -13,8 +13,8 @@ from blueprints.xero.services.publish import (
     process_xero_integration_background, validate_expenses_for_system_accounts)
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, sync_entity_xero_status)
-from models.db import Entity, Report, User, db
-from services.auth.token_service import ensure_valid_token
+from models.db import Entity, Report, db
+from services.auth.token_service import resolve_xero_token
 from services.authz import require_entity_access, require_permission
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission)
@@ -103,50 +103,26 @@ def report_submitted_publish_to_xero():
         if entity_id:
             entity = Entity.query.get_or_404(entity_id)
 
-        # Get access token - prioritize owner user's token for publishing
-        access_token = None
-        owner_user = None
-
-        # Find the owner user via the entity's connector
-        if entity and entity.connected_by_user_id:
-            try:
-                owner_user = User.query.filter(
-                    User.id == entity.connected_by_user_id,
-                ).first()
-            except Exception as e:
-                logger.error(f"Error finding owner user: {str(e)}")
-
-        # Try to use owner user's token first (they're the one who connected)
+        # Resolve the Xero token bearer. This MUST go through
+        # resolve_xero_token: the authoritative tokens live in the
+        # ``user_token`` table, and reading ``User.access_token`` directly
+        # yields whatever was written the last time this route refreshed --
+        # typically hours stale once any other code path has refreshed. A
+        # stale bundle is worse than none: Xero rotates refresh tokens on
+        # every use and invalidates the one it was sent, so refreshing with
+        # the stale copy spends a token that was already spent, fails, and
+        # leaves us publishing with a dead access token that Xero 401s.
+        owner_user = resolve_xero_token(entity_id, current_user)
+        access_token = owner_user.access_token if owner_user else None
         if owner_user:
-            if ensure_valid_token(owner_user):
-                access_token = owner_user.access_token
-                logger.info(
-                    f"Using owner user {owner_user.username}'s token for publishing (current user: {current_user.username})"
-                )
-            else:
-                logger.warning(
-                    f"Owner user {owner_user.username}'s token validation failed, will try current user's token"
-                )
-
-        # Fallback: if owner user's token is not available or invalid, try
-        # current user's token
-        if not access_token and current_user.access_token:
-            if ensure_valid_token(current_user):
-                access_token = current_user.access_token
-                owner_user = current_user
-                logger.info(
-                    f"Using current user {current_user.username}'s token for publishing"
-                )
-
-        # If we still don't have a token, use owner_user if found (even if token validation failed)
-        # This allows the background thread to try refreshing it
-        if not access_token and owner_user:
-            access_token = owner_user.access_token
-            logger.warning(
-                f"Using owner user {owner_user.username}'s token without validation (will be validated in background thread)"
+            logger.info(
+                f"Using {owner_user.username}'s token for publishing "
+                f"(current user: {current_user.username})"
             )
 
-        # Check if we have a valid access token
+        # No usable token. Do NOT fall back to publishing with an unvalidated
+        # one: it cannot succeed, and it turns a clear "reconnect" prompt into
+        # an opaque mid-publish rejection.
         if not access_token:
             return (
                 jsonify(
@@ -193,8 +169,12 @@ def report_submitted_publish_to_xero():
                 id=report_id, company=entity_id
             ).first()
         else:
+            # This is the SUBMITTED-report view; a draft must never load here.
             posted_report = (
-                Report.query.filter_by(company=entity_id)
+                Report.query.filter(
+                    Report.company == entity_id,
+                    db.or_(Report.status.is_(None), Report.status != "draft"),
+                )
                 .order_by(Report.date.desc())
                 .first()
             )

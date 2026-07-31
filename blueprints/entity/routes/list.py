@@ -254,6 +254,9 @@ def report_dashboard(id):
     today_is_latest_report = today == latest_report_date_str
     today_report_id = None
     if today_has_report:
+        # Unfiltered is safe here: today_has_report is derived from
+        # published_dates, which already excludes drafts, so this only runs
+        # when a SUBMITTED report exists for today.
         today_report = Report.query.filter(
             Report.company == str(id),
             Report.transaction_date == datetime.now().date()).first()
@@ -281,6 +284,8 @@ def report_dashboard(id):
     if not has_complete_xero_settings:
         missing_settings_fields = get_missing_xero_settings_fields(id)
     main_bank_account = get_main_bank_account(id)
+    # Includes drafts on purpose: a deposit entered on a draft is a real
+    # deposit for the "has this entity ever deposited" question.
     has_deposit = (
         Report.query.filter(Report.company == str(id), Report.bank_deposit > 0)
         .order_by(Report.transaction_date.desc())

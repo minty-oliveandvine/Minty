@@ -437,6 +437,9 @@ def delete_report(id):
                 entity_id=entity_id,
             )
 
+        # Deliberately INCLUDES drafts. Deleting a report whose successor
+        # exists — draft or submitted — would leave that successor's opening
+        # balance dangling, since it chains off this report's closing balance.
         newer_report = (
             Report.query.filter(
                 Report.company == report.company,

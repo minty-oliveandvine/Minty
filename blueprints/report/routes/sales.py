@@ -807,6 +807,7 @@ def report_sale(id=None):
         # report for this date
         if is_edit_mode and not id:
             existing_report = Report.query.filter(
+                db.or_(Report.status.is_(None), Report.status != "draft"),
                 Report.company == entity_id,
                 Report.transaction_date == transaction_date,
             ).first()

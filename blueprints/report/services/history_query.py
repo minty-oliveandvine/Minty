@@ -184,6 +184,8 @@ def get_entity_report_history(
 
     report_history = [_to_report_history_item(item) for item in report_history_page]
 
+    # Includes drafts: paired with latest_draft_obj below to work out which
+    # is newer, and a draft IS a legitimate "latest report" for that purpose.
     latest_report_obj = (
         Report.query.filter(Report.company == entity_id)
         .order_by(Report.transaction_date.desc())
