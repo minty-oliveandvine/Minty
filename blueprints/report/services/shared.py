@@ -378,9 +378,14 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
     if amount < 0:
         return {"error": "Opening amount cannot be negative"}, 400
 
+    # Submitted reports only. Drafts live in `report` since Stage 4a, so an
+    # unfiltered check finds the onboarding opening draft this very function
+    # created on a previous call and refuses to update it — which is what
+    # broke the "all set" page after the r0 backfill ran.
     if Report.query.filter(
         Report.company == entity_id,
         Report.transaction_date == tx_date,
+        Report.status != "draft",
     ).first():
         return {"error": f"A report for {tx_date} already exists."}, 409
 

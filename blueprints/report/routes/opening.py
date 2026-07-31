@@ -307,9 +307,12 @@ def report_opening(id=None, entity_id=None):
     # If edit mode is enabled and no id provided, try to load existing report
     # (any report for this date)
     if is_edit_mode and not id and selected_date:
+        # Edit mode targets a SUBMITTED report — drafts live in `report` too
+        # since Stage 4a.
         existing_report = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == selected_date,
+            Report.status != "draft",
         ).first()
         if existing_report:
             # Redirect to opening page with report id
@@ -517,9 +520,14 @@ def report_opening(id=None, entity_id=None):
             logger.info(
                 f"Checking for existing report on date {transaction_date} for company {entity_id}"
             )
+            # status != 'draft' is load-bearing. This guard means "has a report
+            # already been SUBMITTED for this date". Since drafts now live in
+            # `report` too (Stage 4a), an unfiltered match also finds the
+            # user's own in-progress draft and refuses to let them continue it.
             existing_report = Report.query.filter(
                 Report.company == entity_id,
                 Report.transaction_date == transaction_date,
+                Report.status != "draft",
             ).first()
 
             if existing_report and not is_edit_mode:
@@ -617,9 +625,13 @@ def report_opening(id=None, entity_id=None):
             else:
                 # Before creating a new draft: ensure no report and no other
                 # draft for this (entity, date)
+                # Submitted reports only — see the note above. Without the
+                # status filter this finds the draft-shaped report row that
+                # ensure_report_row_for_draft created moments earlier.
                 any_report_for_date = Report.query.filter(
                     Report.company == entity_id,
                     Report.transaction_date == transaction_date,
+                    Report.status != "draft",
                 ).first()
                 if any_report_for_date:
                     logger.warning(

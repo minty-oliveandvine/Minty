@@ -228,9 +228,13 @@ def report_sale(id=None):
             # If edit mode is enabled, check for any existing report for this
             # date
             if is_edit_mode:
+                # Edit mode targets a SUBMITTED report. Drafts live in
+                # `report` since Stage 4a, so without the status filter this
+                # picks up an in-progress draft and "edits" that instead.
                 existing_report = Report.query.filter(
                     Report.company == entity_id,
                     Report.transaction_date == transaction_date,
+                    Report.status != "draft",
                 ).first()
                 if existing_report:
                     # Update existing report sales data
