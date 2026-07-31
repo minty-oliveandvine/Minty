@@ -401,7 +401,7 @@ def report_opening(id=None, entity_id=None):
                 "report": default_report,
                 "next_transaction_date": report.next_transaction_date,
                 "is_first_report": False,
-                "is_draft": False,
+wh                "is_draft": False,
                 "draft_id": report_draft.id,
                 # For new reports, start with opening as current and no
                 # completed sections
@@ -1020,10 +1020,16 @@ def report_opening(id=None, entity_id=None):
         # No existing draft, find the latest report before the selected date
         if selected_date:
             # Find the latest report before the selected date
+            # Submitted only. This is deliberately paired with the draft-only
+            # query below and BOTH get their bank_deposit zeroed under
+            # "no change". Unfiltered, the two now resolve to the same logical
+            # report (drafts live in `report` since Stage 4a) and the
+            # adjustment would be applied twice to one row.
             last_report = (
                 Report.query.filter(
                     Report.company == entity_id,
-                    Report.transaction_date < selected_date) .order_by(
+                    Report.transaction_date < selected_date,
+                    Report.status != "draft") .order_by(
                     Report.transaction_date.desc()) .first())
 
             # Draft-only: the paired `last_report` query above is already the

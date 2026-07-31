@@ -450,7 +450,14 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 db.func.coalesce(ReportDraft.current_section, db.null()).label(
                     "current_section"
                 ),
-                db.func.coalesce(ReportDraft.status, "posted").label("status"),
+                # Prefer Report.status: since Stage 4a it is the authoritative
+                # column and is set for drafts too. Falling straight back to
+                # the "posted" literal when the DRAFT row is missing would mark
+                # an in-progress report submitted — and line 637 branches on
+                # this to choose ShopExpenseDraft vs ShopExpense.
+                db.func.coalesce(
+                    Report.status, ReportDraft.status, "posted"
+                ).label("status"),
                 ReportCashCountDraft.thousand_note,
                 ReportCashCountDraft.fivehundred_note,
                 ReportCashCountDraft.onehundred_note,
@@ -536,7 +543,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         # Ensure report has status attribute
         if not hasattr(report, "status") or not report.status:
-            if report_draft:
+            # Only reached when BOTH sides lack a status. Report.status is set
+            # at draft creation since Stage 4a, so this is a legacy-row path;
+            # "posted" is the right default there because a report row with no
+            # draft and no status predates the consolidation.
+            if report_draft and report_draft.status:
                 report.status = report_draft.status
             else:
                 report.status = "posted"
