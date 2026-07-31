@@ -541,14 +541,8 @@ def create_bank_transaction(
         _record_module_error(pfr, module_label, "could not reach Xero, please try again", error_meta)
         return False
     except Exception as e:
-        # NOT a Xero rejection: Xero's own 4xx is handled in the else-branch
-        # above. Reaching here means our code raised before/around the call, so
-        # naming Xero as the culprit sends people to look in the wrong place.
         logger.error(f"Error creating bank transaction: {str(e)}", exc_info=True)
-        _record_module_error(
-            pfr, module_label, f"could not be prepared for Xero ({type(e).__name__}: {e})",
-            error_meta,
-        )
+        _record_module_error(pfr, module_label, "Xero rejected this entry", error_meta)
         return False
 
 
@@ -640,12 +634,8 @@ def create_bank_transfer(
             )
             return False
     except Exception as e:
-        # Local exception, not a Xero rejection -- see create_bank_transaction.
-        logger.error(f"Error creating bank transfer: {str(e)}", exc_info=True)
-        _record_module_error(
-            pfr, module_label, f"could not be prepared for Xero ({type(e).__name__}: {e})",
-            error_meta,
-        )
+        logger.error(f"Error creating bank transfer: {str(e)}")
+        _record_module_error(pfr, module_label, "Xero rejected this entry", error_meta)
         return False
 
 
@@ -722,12 +712,8 @@ def create_invoice(
                 )
             return False
     except Exception as e:
-        # Local exception, not a Xero rejection -- see create_bank_transaction.
-        logger.error(f"Error in create_invoice: {str(e)}", exc_info=True)
-        _record_module_error(
-            pfr, module_label, f"could not be prepared for Xero ({type(e).__name__}: {e})",
-            error_meta,
-        )
+        logger.error(f"Error in create_invoice: {str(e)}")
+        _record_module_error(pfr, module_label, "Xero rejected this entry", error_meta)
         return False
 
 
@@ -1126,10 +1112,8 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
                         except Exception as e:
                             expenses_submitted.append(False)
                             failed_expenses.append(f"Expense {index}: {expense.item} (${expense.amount}) - {str(e)}")
-                            # Local exception, not a Xero rejection.
                             _record_module_error(
-                                pfr, f"Expense '{expense.item}'",
-                                f"could not be prepared for Xero ({type(e).__name__}: {e})",
+                                pfr, f"Expense '{expense.item}'", "Xero rejected this entry",
                                 {
                                     "scope": "expense",
                                     "expense_id": expense.id,
@@ -1178,12 +1162,8 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
             logger.info("No expenses amount in report")
             return (0, 0)
     except Exception as e:
-        # Local exception, not a Xero rejection -- see create_bank_transaction.
         logger.error(f"Error in xero_expenses: {str(e)}", exc_info=True)
-        _record_module_error(
-            pfr, "Expenses",
-            f"could not be prepared for Xero ({type(e).__name__}: {e})",
-        )
+        _record_module_error(pfr, "Expenses", "Xero rejected this entry")
         return (0, 1)
 
 

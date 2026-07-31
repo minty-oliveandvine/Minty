@@ -10,7 +10,6 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history
-from blueprints.report.services.expense_draft_mirror import ensure_shop_expense_for_draft
 from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
                                                header_publishing_status_for,
@@ -425,8 +424,9 @@ def report_expense(id=None):
                     file_paths.append(file_path)
 
                 # Create expense object with the draft ID
-                expense = ShopExpenseDraft(
-                    report_draft_id=current_draft.id,
+                # WRITE FLIP (Step 3): creates the shop_expense row directly.
+                expense = ShopExpense(
+                    report_id=current_draft.id,
                     item=item,
                     amount=amount,
                     remarks=remarks,
@@ -503,8 +503,6 @@ def report_expense(id=None):
                     # Pair with a shop_expense row so expense reads can move off
                     # the draft table (Stage 4b). flush() first: expense.id is
                     # only assigned once the INSERT is staged.
-                    db.session.flush()
-                    ensure_shop_expense_for_draft(expense)
 
                 # Update draft expenses total (replace, don't add); track last
                 # editor

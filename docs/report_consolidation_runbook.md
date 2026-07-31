@@ -12,6 +12,31 @@ stages are summarised only enough to explain why the remaining ones are safe.
 Companion to `docs/cash_denomination_migration_runbook.md` — same structure.
 The two are independent.
 
+**Status as of 31 Jul 2026:** the application is fully working, Xero publish
+included. Everything below is scaffolding removal. There is no deadline, and
+nothing degrades if it waits.
+we have finished step 2 and it is currently being deployed, only need to dro pthe columnbs 
+
+
+---
+
+## Start here
+
+If you are picking this up cold, in order:
+
+1. Read **Where things stand** and **The invariant** — five minutes, and every
+   later step depends on them.
+2. Read **Order of operations**. The schema-first/code-first direction flips
+   partway through and getting it wrong takes production down.
+3. Run the **verification checklist** against the current deploy to confirm the
+   starting state is good.
+4. Then Step 1.
+
+Do not start Step 2 at the end of a working day. It touches every wizard write
+path, and the failure mode of this codebase is silently wrong data rather than
+an exception — the test suite has caught none of the six production bugs this
+migration produced.
+
 ---
 
 ## Where things stand
@@ -53,6 +78,45 @@ firing raises nothing; reads just silently go stale.
 `ShopExpense.id == ShopExpenseDraft.id` (`ending.py:1617` copies reusing the
 primary key). Every re-pointed FK below is therefore a constraint change with
 **no data movement** — the values are already correct.
+
+### If something breaks
+
+Every migration `r1a01`–`r6a06` has a `DOWN` section at the foot of its `.sql`
+twin. Two things are **not** reversible by those:
+
+* `r0` PART 3 / `r5a05` **inserted rows**. Undoing those needs a backup — the
+  `DOWN` cannot distinguish a backfilled row from one the app has created since.
+* Once the write flip ships, `report_draft` stops receiving writes. Rolling the
+  *code* back without rolling the schema back is safe (drafts resume, the
+  mirror catches up). Rolling the schema back after the flip is not.
+
+The safest rollback at any point before Step 4 is **redeploy the previous code
+revision** and leave the schema alone. Every schema change so far is
+additive or a constraint re-point; old code runs against it unchanged.
+
+---
+
+## Order of operations
+
+Read this before starting anything.
+
+| # | Change | Type | Deploy order |
+|---|---|---|---|
+| 1 | `r6a06` FK re-point | Schema | **Schema first**, then code |
+| 2 | Report write flip | Code | Code only |
+| 3 | Expense write flip | Code | Code only |
+| 4 | Drops | Schema | **Code first**, then schema |
+
+The direction flips between 1 and 4, and getting it backwards is what caused
+the worst incident in this project:
+
+* **Adding** something (a column, a wider constraint) → schema first. New code
+  needs it to exist; old code ignores it.
+* **Removing** something (a table, a constraint) → code first. The schema must
+  keep satisfying the old code until that code is gone.
+
+Deploying the Stage 4a code before its columns existed produced
+`column report.status does not exist` on every request that touched a report.
 
 ---
 
@@ -217,9 +281,10 @@ This was flagged rather than decided. Decide it here.
 
 Neither is caused by the consolidation; both predate it.
 
-**Cross-tenant draft lookup.** `blueprints/xero/services/publish.py:452` matches
-drafts on `transaction_date` **alone — no company filter**, so it can return
-another entity's draft. Deserves its own fix and a test.
+**Cross-tenant draft lookup.** `blueprints/xero/services/publish.py:461` matches
+rows on `transaction_date` **alone — no company filter**, so it can return
+another entity's report. Left visible with a comment rather than silently
+patched. Deserves its own fix and a test.
 
 **No HTTP timeouts.** No `requests` call in the codebase sets one except
 `services/auth/token_service.py:79`, fixed after it hung a worker until
@@ -240,7 +305,11 @@ Run after each deploy.
 | Draft with expenses → expense + ending pages | Expenses render |
 | Delete a draft | Vanishes from dashboard and history, stays gone |
 | Submit a report | Succeeds; expenses carry over with receipts |
+| **Publish to Xero** | Succeeds; `publishing_status` reaches `completed` |
 | Next report's opening balance | Equals the previous closing balance, not 0 |
+
+Everything in this table was verified working end to end on 31 Jul 2026, Xero
+publish included (it was the last to be fixed — see the lifecycle lesson below).
 
 ### Useful queries
 
@@ -268,14 +337,30 @@ SELECT cl.relname AS child, con.conname
 
 ---
 
-## Two lessons worth carrying
+## Three lessons worth carrying
 
 **"A row in `report` means submitted" is no longer true.** Since Stage 4a,
 drafts live there too. Every query written before that carries the old
-assumption. Five production incidents came from this, each in a different
+assumption. Six production incidents came from this, each in a different
 shape: `WHERE` clauses, a hardcoded `"posted"` dict literal, a template
 class-name sniff, and a variable reused by both a guard and a balance
 calculation. When touching anything that reads `report`, ask which it means.
+
+**A filter is only correct for a point in the lifecycle.** Three of the bugs
+were caused by *fixes* — a predicate that was right in one place, applied where
+the opposite meaning held:
+
+| Query | Correct reading |
+|---|---|
+| `last_report` in a date-sequence guard | Submitted only |
+| `last_report` for balance chaining | Any status — a draft's closing balance is what the next report opens from |
+| `report_draft` during data entry | `status == 'draft'` |
+| `report_draft` in the Xero publish path | **No status filter** — publishing runs *after* submit, so the row is `posted` |
+
+That last one broke every Xero publish: `publish.py` dereferenced
+`.cash_addition` and `.first().id` on a lookup that had become `None`. Before
+adding a predicate, ask **when in the lifecycle** the code runs, not just what
+the variable is called.
 
 **Status filters must be NULL-safe.** `status != 'draft'` evaluates to NULL —
 not true — for a NULL-status row, silently excluding it from every "submitted"
@@ -289,7 +374,7 @@ draft.
 
 The suite sits at **56 failed / 286 passed** and has done throughout. Those 56
 are pre-existing and unrelated — 31 are `test_invitation.py` alone. None of the
-five production bugs was caught by a test.
+six production bugs was caught by a test.
 
 Before any further change, capture the baseline and diff against it:
 
