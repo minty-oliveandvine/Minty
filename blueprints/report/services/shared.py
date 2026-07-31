@@ -385,7 +385,7 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
     if Report.query.filter(
         Report.company == entity_id,
         Report.transaction_date == tx_date,
-        Report.status != "draft",
+        db.or_(Report.status.is_(None), Report.status != "draft"),
     ).first():
         return {"error": f"A report for {tx_date} already exists."}, 409
 
