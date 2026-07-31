@@ -17,7 +17,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
-                       ReportV2, UserEntity, db)
+                       UserEntity, db)
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_xero_data_dynamic
 from services.permission_policy import Permission, has_permission
@@ -39,9 +39,10 @@ def report_deposit(id=None):
             entity_id=entity_id,
         )
     if id:
+        # The ReportDraft fallback that used to sit here is gone: since Stage 4a
+        # every draft has a paired `report` row with the same id, so the first
+        # lookup already covers drafts. Kept as one query, not two.
         report_for_access = Report.query.filter_by(id=id).first()
-        if not report_for_access:
-            report_for_access = ReportDraft.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
@@ -69,12 +70,13 @@ def report_deposit(id=None):
     ]
     if id:
         report = (
-            Report.query.join(
-                ReportDraft,
-                ReportDraft.id == Report.id,
-                full=True) .filter(
-                Report.id == id,
-                ReportDraft.id == id) .with_entities(
+            # Was a full outer join to ReportDraft filtering BOTH ids to `id`,
+            # which collapsed it back to an inner join — `report` was None
+            # whenever either side was missing. The draft columns it supplied
+            # live on `report` since r1a01.
+            Report.query
+            .filter(Report.id == id)
+            .with_entities(
                 Report.id,
                 Report.transaction_date,
                 Report.next_transaction_date,
@@ -93,8 +95,8 @@ def report_deposit(id=None):
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
-                ReportDraft.completed_sections,
-                ReportDraft.current_section,
+                Report.completed_sections,
+                Report.current_section,
                 ReportCashCountDraft.thousand_note,
                 ReportCashCountDraft.fivehundred_note,
                 ReportCashCountDraft.onehundred_note,
@@ -262,39 +264,13 @@ def report_deposit(id=None):
                 - current_draft.bank_deposit
             )
 
-            # Update or create ReportV2 with the new bank_deposit value, and
-            # store old value for logging
-            report_v2 = ReportV2.query.filter_by(
-                report_id=current_draft.id).first()
-            old_bank_deposit = report_v2.cash_deposit if report_v2 else None
-
-            if report_v2:
-                report_v2.cash_deposit = bank_deposit
-                logger.info(
-                    f"Updated ReportV2 {report_v2.report_id} with bank_deposit: {bank_deposit} (old: {old_bank_deposit})"
-                )
-            else:
-                report_v2 = ReportV2(
-                    report_id=current_draft.id,
-                    entity_id=entity_id,
-                    report_date=current_draft.transaction_date,
-                    status=current_draft.status or "draft",
-                    starting_balance=current_draft.opening_balance,
-                    opening_balance=current_draft.opening_balance,
-                    adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                    add_cash_amount=current_draft.cash_addition,
-                    cash_from_type="shop",
-                    add_cash_bank_account_id=current_draft.withdrawal_bank_account,
-                    xero_organiztion_id=current_user.xero_entity_id,
-                    cashsale_total=current_draft.cash_sales or 0,
-                    nocashsale_total=current_draft.delivery_sales or 0,
-                    expense_total=current_draft.expenses or 0,
-                    cash_deposit=bank_deposit,
-                )
-                db.session.add(report_v2)
-                logger.info(
-                    f"Created new ReportV2 {report_v2.report_id} with bank_deposit: {bank_deposit}"
-                )
+            # ReportV2 mirrored bank_deposit here purely as FK scaffolding for
+            # the detail tables (r2a02 dropped those FKs). The deposit itself
+            # lives on current_draft.bank_deposit, set above, which is what
+            # every reader actually uses.
+            logger.info(
+                f"Draft {current_draft.id} bank_deposit set to {bank_deposit}"
+            )
 
             # Update progress tracking (only for save_next)
             if action_type == "save_next":

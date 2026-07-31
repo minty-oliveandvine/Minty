@@ -33,14 +33,6 @@ class _FakeFilterSequenceQuery:
         return _FakeQueryResult(None)
 
 
-class _FakeFilterByQuery:
-    def __init__(self, result):
-        self._result = result
-
-    def filter_by(self, **_kwargs):
-        return _FakeQueryResult(self._result)
-
-
 def _build_report(**overrides):
     values = {
         "id": "report-1",
@@ -93,12 +85,6 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
         bank_deposit=0.0,
         closing_balance=18000.0,
     )
-    report_v2 = SimpleNamespace(
-        cash_deposit=5000.0,
-        starting_balance=20000.0,
-        opening_balance=20000.0,
-        adjusted_opening_balance=20000.0,
-    )
     commit_calls: list[str] = []
 
     with app.app_context():
@@ -107,15 +93,19 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
             "get_cash_sales_from_detail",
             lambda _report_id, fallback_value=0.0: fallback_value,
         )
+        # recalculate_report sums report_sale_detail, which has no table in the
+        # sqlite fixture. Previously this went unnoticed: the ReportV2 patch this
+        # test used to install sat in front of it. Stub it so the test exercises
+        # the balance arithmetic it is actually about.
+        monkeypatch.setattr(
+            shared,
+            "sum_sales_by_type",
+            lambda _report_id: {"Cash": 0.0, "Electronic": 0.0, "Delivery": 0.0},
+        )
         monkeypatch.setattr(
             shared.ReportDraft,
             "query",
             _FakeFilterSequenceQuery([same_day_draft, next_day_draft]),
-        )
-        monkeypatch.setattr(
-            shared.ReportV2,
-            "query",
-            _FakeFilterByQuery(report_v2),
         )
         monkeypatch.setattr(
             shared.db.session,
@@ -141,7 +131,6 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
     assert next_day_draft.opening_balance == 17000.0
     assert next_day_draft.adjusted_opening_balance == 17000.0
     assert next_day_draft.closing_balance == 17000.0
-    assert report_v2.cash_deposit == 3000.0
     assert commit_calls == ["commit"]
 
 
