@@ -59,9 +59,13 @@ def create_report():
                 f"Checking for existing report with transaction_date: {transaction_date} for company: {entity_id}"
             )
 
+            # Submitted reports only: drafts live in `report` since Stage 4a,
+            # so an unfiltered match would treat an in-progress draft as a
+            # duplicate.
             existing_report = Report.query.filter(
                 Report.company == entity_id,
                 Report.transaction_date == transaction_date,
+                Report.status != "draft",
             ).first()
 
             if existing_report and not hasattr(
