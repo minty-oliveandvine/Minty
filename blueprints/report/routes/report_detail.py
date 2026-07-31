@@ -395,6 +395,13 @@ def delete_report(id):
             ShopExpenseDraft.query.filter_by(report_draft_id=report_draft.id).delete()
             ReportCashCountDraft.query.filter_by(report_id=report_draft.id).delete()
             _delete_report_v2_cascade(report_draft.id)
+            # Since Stage 4a a draft has a paired `report` row with the same id.
+            # This branch predates that and only deleted the draft, so the
+            # report row survived and the "deleted" report kept showing up in
+            # the dashboard and history, which read `report` now.
+            paired = Report.query.filter_by(id=report_draft.id).first()
+            if paired:
+                db.session.delete(paired)
             db.session.delete(report_draft)
 
             # status filter is load-bearing: this deletes SIBLING rows matched
@@ -413,6 +420,9 @@ def delete_report(id):
                 ShopExpenseDraft.query.filter_by(report_draft_id=draft.id).delete()
                 ReportCashCountDraft.query.filter_by(report_id=draft.id).delete()
                 _delete_report_v2_cascade(draft.id)
+                paired_sibling = Report.query.filter_by(id=draft.id).first()
+                if paired_sibling:
+                    db.session.delete(paired_sibling)
                 db.session.delete(draft)
 
             db.session.commit()
@@ -497,6 +507,11 @@ def delete_report(id):
             ShopExpenseDraft.query.filter_by(report_draft_id=draft.id).delete()
             ReportCashCountDraft.query.filter_by(report_id=draft.id).delete()
             _delete_report_v2_cascade(draft.id)
+            # Sibling drafts have paired `report` rows too (Stage 4a) — delete
+            # both or the sibling survives in the dashboard as a ghost draft.
+            paired_sibling = Report.query.filter_by(id=draft.id).first()
+            if paired_sibling:
+                db.session.delete(paired_sibling)
             db.session.delete(draft)
 
         db.session.delete(report)

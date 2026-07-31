@@ -372,8 +372,11 @@ def download_reports_csv(entity_id):
             if report:
                 expenses = ShopExpense.query.filter_by(report_id=report_id).all()
             elif report_draft:
-                expenses = ShopExpenseDraft.query.filter_by(
-                    report_draft_id=report_id
+                # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+                # exists from draft creation via ensure_shop_expense_for_draft, and
+                # report_id holds the same value report_draft_id did.
+                expenses = ShopExpense.query.filter_by(
+                    report_id=report_id
                 ).all()
 
             for exp in expenses:
@@ -656,8 +659,11 @@ def download_reports_csv(entity_id):
                 if report:
                     expenses = ShopExpense.query.filter_by(report_id=rid).all()
                 elif report_draft:
-                    expenses = ShopExpenseDraft.query.filter_by(
-                        report_draft_id=rid
+                    # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+                    # exists from draft creation via ensure_shop_expense_for_draft, and
+                    # report_id holds the same value report_draft_id did.
+                    expenses = ShopExpense.query.filter_by(
+                        report_id=rid
                     ).all()
 
                 for exp in expenses:

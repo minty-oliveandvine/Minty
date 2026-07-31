@@ -241,13 +241,12 @@ def report_expense(id=None):
         if not org:
             org = Entity.query.get_or_404(entity_id)
         entity_acronym, display_date = entity_badge_data(org)
+        # Was a full outer join to ShopExpenseDraft that filtered BOTH sides to
+        # `id`, collapsing it back to an inner join — so an expense present in
+        # only one table vanished. Since Stage 4b every draft expense has a
+        # paired shop_expense row with the same id, so one table answers it.
         existing_expenses = (
-            ShopExpense.query.join(
-                ShopExpenseDraft,
-                ShopExpenseDraft.id == ShopExpense.id,
-                full=True) .filter(
-                ShopExpense.report_id == id,
-                ShopExpenseDraft.report_draft_id == id) .all())
+            ShopExpense.query.filter(ShopExpense.report_id == id).all())
 
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
@@ -363,8 +362,11 @@ def report_expense(id=None):
                 return redirect(url_for("report.report_opening", entity_id=entity_id))
 
             # Get existing expenses total from database
-            existing_expenses = ShopExpenseDraft.query.filter_by(
-                report_draft_id=current_draft.id
+            # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+            # exists from draft creation via ensure_shop_expense_for_draft, and
+            # report_id holds the same value report_draft_id did.
+            existing_expenses = ShopExpense.query.filter_by(
+                report_id=current_draft.id
             ).all()
             existing_total = sum(
                 expense.amount for expense in existing_expenses)
@@ -706,8 +708,11 @@ def report_expense(id=None):
     # Get existing expenses for this draft
     existing_expenses = []
     if current_draft:
-        existing_expenses = ShopExpenseDraft.query.filter_by(
-            report_draft_id=current_draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        existing_expenses = ShopExpense.query.filter_by(
+            report_id=current_draft.id
         ).all()
 
     # Get organization info for the template (if not already fetched)

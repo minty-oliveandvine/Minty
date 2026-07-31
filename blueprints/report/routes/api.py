@@ -254,8 +254,11 @@ def report_expense_submit_all():
         expenses_data = json.loads(expenses_json)
 
         # Get existing expenses total from database
-        existing_expenses = ShopExpenseDraft.query.filter_by(
-            report_draft_id=current_draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        existing_expenses = ShopExpense.query.filter_by(
+            report_id=current_draft.id
         ).all()
         existing_total = sum(expense.amount for expense in existing_expenses)
 
@@ -704,8 +707,11 @@ def report_expense_add():
         db.session.flush()  # Generate expense.id
 
         # Recompute the draft expense total from all DB rows (idempotent).
-        all_expenses = ShopExpenseDraft.query.filter_by(
-            report_draft_id=current_draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        all_expenses = ShopExpense.query.filter_by(
+            report_id=current_draft.id
         ).all()
         total_expenses = sum(exp.amount for exp in all_expenses)
         current_draft.expenses = total_expenses
@@ -916,8 +922,11 @@ def report_expense_update(expense_id):
 
         # Recalculate draft total + closing balance using same formula as
         # create/delete handlers.
-        remaining_expenses = ShopExpenseDraft.query.filter_by(
-            report_draft_id=draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        remaining_expenses = ShopExpense.query.filter_by(
+            report_id=draft.id
         ).all()
         new_total = sum(exp.amount for exp in remaining_expenses)
         draft.expenses = new_total
@@ -1343,8 +1352,11 @@ def report_expense_delete(expense_id):
 
         db.session.delete(expense)
 
-        remaining_expenses = ShopExpenseDraft.query.filter_by(
-            report_draft_id=draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        remaining_expenses = ShopExpense.query.filter_by(
+            report_id=draft.id
         ).all()
         new_total = sum(exp.amount for exp in remaining_expenses)
         logger.info(
@@ -1467,8 +1479,11 @@ def get_draft_totals():
         calculated_total = current_draft.total_expenses or 0
         stored_total = current_draft.expenses or 0
 
-        expenses_count = ShopExpenseDraft.query.filter_by(
-            report_draft_id=current_draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        expenses_count = ShopExpense.query.filter_by(
+            report_id=current_draft.id
         ).count()
 
         opening_bal = float(current_draft.opening_balance or 0)
@@ -1970,7 +1985,10 @@ def expense_validate_drafts():
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}), 403
 
-    drafts = ShopExpenseDraft.query.filter_by(report_draft_id=report_draft_id).all()
+    # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+    # exists from draft creation via ensure_shop_expense_for_draft, and
+    # report_id holds the same value report_draft_id did.
+    drafts = ShopExpense.query.filter_by(report_id=report_id).all()
 
     if not drafts:
         # No uploaded files — nothing to validate, treat as complete

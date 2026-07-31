@@ -647,8 +647,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         existing_expenses = []
         if hasattr(report, "status") and report.status == "draft":
             # For drafts, calculate from ShopExpenseDraft records
-            expense_drafts = ShopExpenseDraft.query.filter_by(
-                report_draft_id=report.id
+            # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+            # exists from draft creation via ensure_shop_expense_for_draft, and
+            # report_id holds the same value report_draft_id did.
+            expense_drafts = ShopExpense.query.filter_by(
+                report_id=report.id
             ).all()
             existing_expenses = expense_drafts
             total_expense = (
@@ -1158,8 +1161,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     existing_expenses = []
     if current_draft.status == "draft":
         # For drafts, calculate from ShopExpenseDraft records
-        expense_drafts = ShopExpenseDraft.query.filter_by(
-            report_draft_id=current_draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        expense_drafts = ShopExpense.query.filter_by(
+            report_id=current_draft.id
         ).all()
         existing_expenses = expense_drafts
 
@@ -1545,8 +1551,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                     logger.info(
                         f"Processing expense drafts for draft {current_draft.id}"
                     )
-                    shop_expense_drafts = ShopExpenseDraft.query.filter(
-                        ShopExpenseDraft.report_draft_id == current_draft.id
+                    # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+                    # exists from draft creation via ensure_shop_expense_for_draft, and
+                    # report_id holds the same value report_draft_id did.
+                    shop_expense_drafts = ShopExpense.query.filter(
+                        ShopExpense.report_id == current_draft.id
                     ).all()
                     logger.info(f"Found {len(shop_expense_drafts)} expense drafts")
 
