@@ -182,9 +182,11 @@ def report_cash_count(id=None):
     # If edit mode is enabled and no id provided, try to load any existing
     # report for this date
     if is_edit_mode and not id:
+        # Edit mode targets a SUBMITTED report — see the note in sales.py.
         existing_report = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == transaction_date,
+            Report.status != "draft",
         ).first()
         if existing_report:
             # Redirect to cash_count page with report id

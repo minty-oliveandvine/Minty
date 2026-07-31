@@ -646,9 +646,11 @@ def report_expense(id=None):
 
     # If edit mode is enabled and no id provided, try to load existing report
     if is_edit_mode and not id:
+        # Edit mode targets a SUBMITTED report — see the note in sales.py.
         existing_report = Report.query.filter(
             Report.company == entity_id,
             Report.transaction_date == transaction_date,
+            Report.status != "draft",
         ).first()
         if existing_report:
             # Redirect to expense page with report id
