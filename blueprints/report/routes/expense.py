@@ -9,7 +9,8 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
-from blueprints.report.services.history import log_history_draft
+from blueprints.report.services.history import log_history
+from blueprints.report.services.expense_draft_mirror import ensure_shop_expense_for_draft
 from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
                                                header_publishing_status_for,
@@ -240,13 +241,12 @@ def report_expense(id=None):
         if not org:
             org = Entity.query.get_or_404(entity_id)
         entity_acronym, display_date = entity_badge_data(org)
+        # Was a full outer join to ShopExpenseDraft that filtered BOTH sides to
+        # `id`, collapsing it back to an inner join — so an expense present in
+        # only one table vanished. Since Stage 4b every draft expense has a
+        # paired shop_expense row with the same id, so one table answers it.
         existing_expenses = (
-            ShopExpense.query.join(
-                ShopExpenseDraft,
-                ShopExpenseDraft.id == ShopExpense.id,
-                full=True) .filter(
-                ShopExpense.report_id == id,
-                ShopExpenseDraft.report_draft_id == id) .all())
+            ShopExpense.query.filter(ShopExpense.report_id == id).all())
 
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
@@ -362,8 +362,11 @@ def report_expense(id=None):
                 return redirect(url_for("report.report_opening", entity_id=entity_id))
 
             # Get existing expenses total from database
-            existing_expenses = ShopExpenseDraft.query.filter_by(
-                report_draft_id=current_draft.id
+            # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+            # exists from draft creation via ensure_shop_expense_for_draft, and
+            # report_id holds the same value report_draft_id did.
+            existing_expenses = ShopExpense.query.filter_by(
+                report_id=current_draft.id
             ).all()
             existing_total = sum(
                 expense.amount for expense in existing_expenses)
@@ -497,6 +500,11 @@ def report_expense(id=None):
                 # Add all expenses to database
                 for expense in expenses:
                     db.session.add(expense)
+                    # Pair with a shop_expense row so expense reads can move off
+                    # the draft table (Stage 4b). flush() first: expense.id is
+                    # only assigned once the INSERT is staged.
+                    db.session.flush()
+                    ensure_shop_expense_for_draft(expense)
 
                 # Update draft expenses total (replace, don't add); track last
                 # editor
@@ -540,8 +548,8 @@ def report_expense(id=None):
                 db.session.commit()
 
                 # Log the expense addition to draft history
-                log_history_draft(
-                    report_draft_id=current_draft.id,
+                log_history(
+                    report_id=current_draft.id,
                     company=entity_id,
                     user_id=current_user.id,
                     action="added",
@@ -700,8 +708,11 @@ def report_expense(id=None):
     # Get existing expenses for this draft
     existing_expenses = []
     if current_draft:
-        existing_expenses = ShopExpenseDraft.query.filter_by(
-            report_draft_id=current_draft.id
+        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
+        # exists from draft creation via ensure_shop_expense_for_draft, and
+        # report_id holds the same value report_draft_id did.
+        existing_expenses = ShopExpense.query.filter_by(
+            report_id=current_draft.id
         ).all()
 
     # Get organization info for the template (if not already fetched)
