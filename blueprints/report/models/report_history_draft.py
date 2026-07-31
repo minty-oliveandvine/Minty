@@ -9,7 +9,7 @@ class ReportHistoryDraft(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     report_draft_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.report_draft.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE"),
         nullable=False,
     )
     company = db.Column(db.String(150), nullable=False, index=True)
@@ -22,6 +22,5 @@ class ReportHistoryDraft(db.Model):
     new_value = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     user = db.relationship("User", back_populates="report_history_drafts")
-    report_draft = db.relationship(
-        "ReportDraft", back_populates="report_history_drafts"
-    )
+    # FK re-pointed at report.id in r6a06.
+    report_draft = db.relationship("Report", lazy=True)

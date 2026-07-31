@@ -42,9 +42,11 @@ def get_entity_report_history(
     report_query = Report.query.options(
         joinedload(cast(Any, Report.report_histories))
     ).filter(Report.company == entity_id)
-    draft_query = ReportDraft.query.options(
-        joinedload(cast(Any, ReportDraft.report_history_drafts))
-    ).filter(ReportDraft.company == entity_id)
+    # No joinedload: ReportDraft.report_history_drafts was removed in r6a06
+    # (report_history_draft now FKs report.id). History for drafts lives in
+    # report_history and is loaded by report_query above, since every draft
+    # has a `report` row with the same id.
+    draft_query = ReportDraft.query.filter(ReportDraft.company == entity_id)
 
     if start_date and end_date:
         report_query = report_query.filter(
@@ -122,9 +124,10 @@ def get_entity_report_history(
             continue
 
         user = User.query.filter_by(username=draft.uploaded_by).first()
-        draft_histories_list = (
-            list(draft.report_history_drafts) if draft.report_history_drafts else []
-        )
+        # Draft history now lands in report_history (the log_history_draft
+        # callers were redirected), and this branch only runs for drafts with
+        # no `report` row — which have no history rows either.
+        draft_histories_list = []
         draft_date = ensure_hk_timezone(draft.date)
 
         merged_reports[draft.id] = {
