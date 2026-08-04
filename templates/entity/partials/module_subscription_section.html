@@ -1,0 +1,384 @@
+{# Module cards + "Your subscription" panel, shared by settings_module.html and
+   settings_module_bills_ui.html. Data comes from entity.services.modules:
+   get_module_cards (cards), get_subscription_summary (bundle/prices) and
+   build_subscription_panel (the panel model), plus get_billing_anchor. Both parent
+   templates pass the same context (module_cards, subscription_summary,
+   subscription_panel, billing_anchor, org, can_manage_modules).
+
+   Module access is driven entirely by the module subscription state; each card's
+   action (open trial, cancel, renew, subscribe) acts on that directly — there is no
+   on/off toggle. The panel shows the SAME thing in two modes: while the entity is on a
+   free trial (no billing anchor yet) it previews the price and offers "Subscribe with
+   Stripe"; once a charge pins the anchor it shows "Manage subscription". #}
+
+{# Two different reasons the actions can be missing, and they need different sentences.
+   "Only admins can change modules" to someone who IS an admin but is not the payer reads
+   as a bug — they know they are an admin. Naming the payer tells them who to ask. #}
+<p class="text-sm text-gray-600 mb-6">Choose which modules your company wants to use.
+  {%- if not can_manage_modules %}
+  {%- if subscription_payer %}
+  <span class="text-gray-400">(Billing for this company is managed by
+    {{ subscription_payer.first_name }} {{ subscription_payer.last_name }}
+    &lt;{{ subscription_payer.email }}&gt; — only they can change its subscription.)</span>
+  {%- else %}
+  <span class="text-gray-400">(Only admins can change modules.)</span>
+  {%- endif %}
+  {%- endif %}
+</p>
+
+{# Billing anchor — the one date every entity is billed on. "To Be Decided" until the
+   first charge pins it (an app-level trial has no cycle). #}
+<div class="mb-6 flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
+  <div class="flex items-center gap-3 min-w-0">
+    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#FFEDE8] text-[#FF6B4A]">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+        <rect x="3.5" y="4.5" width="17" height="16" rx="2" />
+        <path stroke-linecap="round" d="M3.5 9h17M8 3v3m8-3v3" />
+      </svg>
+    </span>
+    <div class="min-w-0">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Billing anchor date</p>
+      <p class="text-base font-bold text-gray-900">{{ billing_anchor or 'To Be Decided' }}</p>
+    </div>
+  </div>
+  <p class="max-w-[16rem] text-right text-xs text-gray-500">All entities are billed on this date — set by your first payment.</p>
+</div>
+
+{# ONE page-level trial nudge, not one per module — the thing that needs fixing (a
+   missing card, or billing this company hasn't been authorised for) is a property of
+   the COMPANY, so repeating it per card just says the same thing twice. Only shows for
+   a trial that WON'T convert, so it stays hidden on the happy path the panel describes.
+
+   Two reasons a trial won't convert, and the fixes differ:
+     * no card at all            -> "Add payment method"
+     * card, but this company was never authorised -> "Confirm billing"
+   The payer's card is shared across every company they pay for, so having one does not
+   by itself authorise this one (see checkout._convert_due_trial). #}
+{% set nudge_cards = (module_cards | selectattr('needs_card') | list) if module_cards else [] %}
+{% if can_manage_modules and nudge_cards %}
+{% set nudge_names = nudge_cards | map(attribute='name') | join(' and ') %}
+{% set nudge_deadline = (nudge_cards | map(attribute='period_end_short') | select | first) %}
+<div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start justify-between gap-4">
+  <p class="text-sm text-amber-900">
+    {% if nudge_cards[0].needs_consent_only %}
+    <span class="font-semibold">Confirm billing for this company</span>
+    {%- if nudge_deadline %} before {{ nudge_deadline }}{% endif %}
+    to keep {{ nudge_names }} when your free trial ends.
+    Your saved card is used by your other companies and won't be charged for this one until you confirm.
+    {% else %}
+    <span class="font-semibold">Add a payment method</span>
+    {%- if nudge_deadline %} before {{ nudge_deadline }}{% endif %}
+    to keep {{ nudge_names }} when your free trial ends.
+    {% endif %}
+  </p>
+  {% if nudge_cards[0].needs_consent_only %}
+  <button type="button" onclick="confirmBillingForEntity(this)"
+          class="shrink-0 bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-4 py-2 rounded-md transition-colors">
+    Confirm billing
+  </button>
+  {% else %}
+  <button type="button" onclick="addPaymentMethod(this)"
+          class="shrink-0 bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-4 py-2 rounded-md transition-colors">
+    Add payment method
+  </button>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="flex flex-col lg:flex-row lg:items-start gap-8">
+  <!-- Left column: module cards -->
+  <div class="flex-1 min-w-0 space-y-4">
+    {% for card in module_cards %}
+    {# Billing-shaped: is there a live subscription to show Cancel against. Access is a
+       separate question (card.has_access, what the request gate answers) and the two can
+       part company until the sweep repairs it — so this branch stays on the rows, while
+       card.trial_eligible is what accounts for access. Otherwise a module switched on
+       with no row behind it offered "Start free trial" to someone already inside it. #}
+    {% set is_on = card.subscription_status in ['trialing', 'active', 'past_due'] %}
+    <div class="flex items-start gap-4 rounded-xl border border-gray-100 bg-white p-4">
+      <!-- Illustration -->
+      <div class="shrink-0 w-20 h-20 rounded-lg border border-gray-100 bg-white flex items-center justify-center overflow-hidden">
+        <img src="{{ url_for('static', filename=card.image) }}" alt="{{ card.name }}" class="w-full h-full object-contain" />
+      </div>
+
+      <!-- Text -->
+      <div class="flex-1 min-w-0">
+        <h3 class="font-bold text-gray-900">{{ card.name }}</h3>
+        <p class="text-sm text-gray-600 mt-1">{{ card.description }}</p>
+        <a href="{{ card.learn_more }}" target="_blank" rel="noopener noreferrer" class="text-sm text-gray-500 underline mt-2 inline-block hover:text-gray-700">Learn more</a>
+      </div>
+
+      <!-- Status + action -->
+      <div class="shrink-0 flex flex-col items-end gap-2 pt-0.5 text-right">
+        {# Status badge. A cancelled trial keeps its free days but won't convert, so it
+           reads amber rather than plain "active". #}
+        {% if card.trial_cancelled %}
+        <span class="text-sm font-semibold text-amber-600">trial ending</span>
+        {% elif card.subscription_status == 'past_due' %}
+        <span class="text-sm font-semibold text-red-500">payment due</span>
+        {% elif is_on %}
+        <span class="text-sm font-semibold text-[#2FBFC7]">active</span>
+        {% else %}
+        <span class="text-sm font-semibold text-[#F97362]">not active</span>
+        {% endif %}
+
+        {% if can_manage_modules %}
+        {# PAST DUE first, because card.pending_cancel is true for it as well — one
+           "winding down" flag serves both a scheduled cancellation and a failed renewal.
+           They need opposite actions, and offering the wrong one was not merely confusing:
+           Renew calls reactivate_module, which requires phase == scheduled_cancel and
+           answered "Module PETTY_CASH isn't scheduled to cancel." to every past-due card.
+
+           There is nothing to un-cancel here — the subscription is live and the money is
+           owed. Dunning retries it on a schedule (billing_policy.retry_offsets_days), so
+           the only lever the customer has is the card the retry will use. #}
+        {% if card.subscription_status == 'past_due' %}
+        {# Pay now is the PRIMARY action: the debt is what locks them out, and the
+           scheduled retry is up to two days away. Update payment method sits beside it
+           for the case the saved card is the problem — saving one settles nothing by
+           itself, so it is the secondary. #}
+        <button type="button" onclick="retryPayment(this)"
+                class="bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          Pay now
+        </button>
+        <button type="button" onclick="addPaymentMethod(this)"
+                class="border border-gray-300 text-gray-600 hover:bg-gray-100 text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          Update payment method
+        </button>
+        {% if card.access_end_long %}
+        <p class="text-xs text-gray-500">Pay by {{ card.access_end_long }} to keep access</p>
+        {% endif %}
+
+        {# Winding down (a real scheduled cancellation): offer Renew / Keep trial. #}
+        {% elif card.pending_cancel %}
+        <button type="button" onclick="renewSubscription(this, '{{ card.code }}')"
+                class="bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          {% if card.trial_cancelled %}Keep free trial{% else %}Renew subscription{% endif %}
+        </button>
+        {% if card.trial_cancelled and card.period_end_short %}
+        <p class="text-xs text-gray-500">Trial ends {{ card.period_end_short }} · won't renew</p>
+        {% elif card.access_end_long %}
+        <p class="text-xs text-gray-500">Access until {{ card.access_end_long }}</p>
+        {% endif %}
+
+        {# Running free trial: dark trial banner; cancelling is still possible. #}
+        {% elif card.subscription_status == 'trialing' %}
+        <span class="inline-block bg-[#1F2937] text-white text-xs font-semibold px-3 py-1.5 rounded-md whitespace-nowrap">
+          Free trial{% if card.period_end_short %} · ends {{ card.period_end_short }}{% endif %}
+        </span>
+        {% if card.can_cancel %}
+        {# data-module-name, not an onclick argument: a name with an apostrophe would
+           break out of the JS string literal. #}
+        <button type="button" data-module-name="{{ card.name }}"
+                onclick="cancelSubscription(this, '{{ card.code }}')"
+                class="border border-gray-300 text-gray-600 hover:bg-gray-100 text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          Cancel subscription
+        </button>
+        {% endif %}
+
+        {# Live paid module: cancel in-app (prorated), access continues until paid-through. #}
+        {% elif is_on %}
+        <button type="button" data-module-name="{{ card.name }}"
+                onclick="cancelSubscription(this, '{{ card.code }}')"
+                class="bg-[#EAF8F9] hover:bg-[#d9f1f3] text-[#3aa0a6] text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          Cancel Subscription
+        </button>
+        {% if card.period_end_long %}
+        <p class="text-xs text-gray-500">valid until {{ card.period_end_long }}</p>
+        {% endif %}
+
+        {# Never held it: card-free trial available. Clicking STAGES it in the panel so
+           the user previews it before confirming — it doesn't start the trial yet. #}
+        {% elif card.trial_eligible %}
+        <button type="button"
+                data-trial-code="{{ card.code }}"
+                data-trial-name="{{ card.name }}"
+                data-trial-amount="{{ card.amount }}"
+                data-cart-kind="trial"
+                onclick="toggleCartSelection(this)"
+                class="border border-[#54d3da] text-[#54d3da] hover:bg-[#54d3da]/10 text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          Start free trial
+        </button>
+
+        {# Trial already used up, or held and lost: straight to paid. STAGES it too,
+           into the same cart — buying jumped to Stripe from here, so the bundle price of
+           adding a second module was never shown until after the decision. The panel's
+           button then commits, and its caption switches to "Subscribe". #}
+        {% else %}
+        <button type="button"
+                data-trial-code="{{ card.code }}"
+                data-trial-name="{{ card.name }}"
+                data-trial-amount="{{ card.amount }}"
+                data-cart-kind="paid"
+                onclick="toggleCartSelection(this)"
+                class="border border-[#54d3da] text-[#54d3da] hover:bg-[#54d3da]/10 text-xs font-semibold px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+          Subscribe
+        </button>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Right column: "Your subscription" panel -->
+  {# Split the cards into what's currently enabled (for the live future-invoice total)
+     and what can be staged for a trial (eligible + not yet enabled). #}
+  {% set ns = namespace(enabled=[], stageable=[]) %}
+  {% for c in module_cards or [] %}
+    {% if c.subscription_status in ['trialing', 'active', 'past_due'] and not c.pending_cancel %}
+      {% set ns.enabled = ns.enabled + [{'code': c.code, 'name': c.name, 'amount': c.amount | float}] %}
+    {% elif c.trial_eligible %}
+      {% set ns.stageable = ns.stageable + [c] %}
+    {% endif %}
+  {% endfor %}
+
+  {% set panel = subscription_panel %}
+  {% set summ = subscription_summary %}
+  {# ALWAYS rendered. It used to disappear when nothing was enabled, which removed the
+     answer at the moment it was most wanted — right after cancelling the last module the
+     page simply lost a column, with nothing stating what was and wasn't being billed.
+     build_subscription_panel returns an is_empty panel instead, so what changes is the
+     CONTENT, never the presence. #}
+  <aside class="w-full lg:w-80 shrink-0">
+    {# data-* feed the client-side future-invoice preview: staging a trial recomputes the
+       combined monthly total (bundle-priced when the enabled+staged set is the bundle). #}
+    <div id="subscription-panel"
+         data-bundle-amount="{{ summ.bundle_amount if summ else 0 }}"
+         data-bundle-codes="{{ summ.bundle_codes | join(',') if summ else '' }}"
+         data-currency="{{ panel.currency if panel else (summ.currency if summ else '') }}"
+         data-enabled='{{ ns.enabled | tojson }}'
+         {% if not panel or panel.is_empty %}data-empty="1"{% endif %}
+         class="rounded-2xl bg-[#EAF8F9] p-6">
+      <h2 class="text-lg font-bold text-gray-900">Your subscription</h2>
+      <p class="text-xs text-gray-500 mb-5">
+        {% if panel and panel.is_empty %}Nothing enabled yet{% else %}Modules you've enabled · billed monthly{% endif %}
+      </p>
+
+      <div data-panel-lines class="space-y-3">
+        {% if panel %}
+        {% for line in panel.lines %}
+        {% if line.kind == 'bundle' %}
+        <div>
+          <div class="flex items-baseline justify-between text-sm text-gray-900">
+            <span class="font-semibold">{{ line.label }}</span>
+            <span>
+              <span class="text-gray-400 line-through">{{ line.original }}</span>
+              <span class="font-semibold">{{ line.amount }}</span><span class="text-gray-500">/mo</span>
+            </span>
+          </div>
+          <p class="text-xs text-gray-500 mt-0.5">{{ line.sublabel }}</p>
+        </div>
+        {% else %}
+        <div class="flex items-center justify-between text-sm text-gray-700">
+          <span>{{ line.label }}</span>
+          {% if line.billed %}
+          <span>{{ line.amount }}</span>
+          {% else %}
+          <span class="text-gray-400">Not billed</span>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+        {# staged lines (trial or paid) are inserted here by renderCart #}
+      </div>
+
+      {# Shown only while trials are staged — explains the total is the future invoice. #}
+      <div data-staged-note class="mt-4 rounded-lg bg-white/70 px-3 py-2 text-sm font-medium text-[#3aa0a6] hidden"></div>
+
+      {% if panel and panel.note %}
+      <div data-panel-note class="mt-4 rounded-lg bg-white/70 px-3 py-2 text-sm font-medium text-[#3aa0a6]">
+        {{ panel.note }}
+      </div>
+      {% endif %}
+
+      <div class="flex items-center justify-between border-t border-gray-300 pt-3 mt-4">
+        <span class="text-sm font-bold text-gray-900">Total</span>
+        <span class="text-base font-bold text-gray-900"><span data-panel-total>{{ panel.total if panel else '' }}</span><span class="text-sm font-normal text-gray-500">/month</span></span>
+      </div>
+
+      {# Still accessible, billing no further. Without this a cancelled last module
+         leaves the panel reading "nothing enabled" while the user demonstrably still
+         has it. NOT an upcoming charge, which is why it sits above that list. #}
+      {% for w in (panel.winding_down if panel else []) %}
+      <div class="flex items-baseline justify-between mt-3">
+        <span class="text-sm text-gray-700">
+          {{ w.label }} access until
+          <span class="block text-xs text-gray-500">{{ w.date }}</span>
+        </span>
+        <span class="text-sm font-normal text-gray-500">Not billed again</span>
+      </div>
+      {% endfor %}
+
+      {# Every charge, in the order it happens. A trial converting mid-cycle and the
+         renewal that follows are two charges on two dates — the conversion collects the
+         days between it and the cycle end, then the renewal bills the full month. Split
+         across separate blocks the reader had to work out the order, and whether one
+         already included the other; one chronological list answers "what leaves my card,
+         and when" in a single pass.
+
+         No "/mo" anywhere here: these are amounts charged ON their date, and a trial
+         landing inside a running cycle pays only the days left in it.
+
+         Trials that will NOT convert are absent by construction — nothing is charged for
+         a trial that expires. The footer carries that case, which is where "add a card
+         or lose this" belongs. #}
+      {% if panel and panel.upcoming_charges %}
+      <div data-panel-upcoming class="mt-4 border-t border-gray-200 pt-3">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Upcoming charges</p>
+        {% for u in panel.upcoming_charges %}
+        <div class="flex items-baseline justify-between mt-2">
+          <span class="text-sm text-gray-700">
+            {% if u.overdue %}{{ u.label }} — overdue{% else %}{{ u.label }}{% endif %}
+            {% if u.date %}<span class="block text-xs text-gray-500">{{ u.date }}</span>{% endif %}
+          </span>
+          <span class="text-sm font-semibold {% if u.overdue %}text-red-500{% else %}text-gray-900{% endif %}">
+            {{ u.amount }}
+          </span>
+        </div>
+        {% if u.note %}
+        <p class="text-xs text-gray-500 mt-1">{{ u.note }}</p>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if panel %}
+      <p data-panel-footer class="text-xs text-gray-500 mt-3">{{ panel.footer }}</p>
+      {% endif %}
+
+      {% if can_manage_modules %}
+      {# The current-state action, hidden while trials are staged. An empty panel has no
+         primary action — subscribing starts from a module card, and there is no billing
+         account to manage until something has been charged — so the div renders empty
+         and renderCart still has its hook for the staged-cart swap. #}
+      <div data-panel-primary>
+        {% if panel and panel.primary_action == 'subscribe_stripe' %}
+        <button type="button" data-codes="{{ panel.subscribe_codes | join(',') }}" onclick="subscribeWithStripe(this)"
+                class="w-full mt-5 bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-colors">
+          Subscribe to Minty
+        </button>
+        {% elif panel and panel.primary_action == 'manage' %}
+        {# Invoice history + payment method + card updates all live in the billing portal. #}
+        <button type="button" onclick="openManageBilling(this)"
+                class="w-full mt-5 border border-[#54d3da] text-[#54d3da] hover:bg-[#54d3da]/10 text-sm font-semibold px-5 py-3 rounded-lg transition-colors">
+          Manage subscription
+        </button>
+        {% endif %}
+      </div>
+      {# Commit the staged free trials — shown only while something is staged. #}
+      {# Caption is set by renderCart — "Start free trial" or "Subscribe" depending on
+         what is staged. The one below is only what shows before anything is. #}
+      <button type="button" data-panel-confirm onclick="commitCart(this)"
+              class="w-full mt-5 bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-colors hidden">
+        Start free trial
+      </button>
+      <button type="button" data-panel-clear onclick="clearCart()"
+              class="w-full mt-2 text-xs text-gray-500 underline hover:text-gray-700 hidden">
+        Clear
+      </button>
+      {% endif %}
+    </div>
+  </aside>
+</div>

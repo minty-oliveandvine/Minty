@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Access Denied - Petty Cash</title>
+  <title>{% if module_inactive %}Module not active{% else %}Access Denied{% endif %} - Petty Cash</title>
   <link rel="icon" type="image/webp" href="{{ url_for('static', filename='img/logo_v2.webp') }}" />
 
   <!-- Tailwind CSS -->
@@ -59,7 +59,7 @@
         <div class="flex-1 flex justify-start min-w-0">
           <div class="w-6 h-6"></div>
         </div>
-        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">Access Denied</h1>
+        <h1 class="absolute left-1/2 -translate-x-1/2 text-[#474747] text-lg font-semibold">{% if module_inactive %}Module not active{% else %}Access Denied{% endif %}</h1>
         <div class="flex-1 flex justify-end">
           <div class="flex items-center gap-2">
             {% set fn = (current_user.first_name or '')[:1] %}
@@ -79,6 +79,21 @@
       <div class="bg-gray-50 main-content p-6 pb-40 flex-1 overflow-y-auto">
         <div class="flex flex-col items-center justify-center h-full">
           <div class="flex flex-col gap-8 items-center align-center p-5">
+            {% if module_inactive %}
+            <!-- Module switched off / subscription lapsed -->
+            <div class="flex size-20 items-center justify-center rounded-full bg-amber-100 text-amber-600 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" class="size-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-900">Module not active</h1>
+            <p class="text-center text-gray-600 max-w-sm">
+              This module isn't active for this entity. That usually means it was switched off, or its subscription has lapsed.
+              {% if not subscription_settings_url %}
+                Ask an admin for this entity to check its subscription settings.
+              {% endif %}
+            </p>
+            {% else %}
             <!-- Lock / access denied icon -->
             <div class="flex size-20 items-center justify-center rounded-full bg-red-100 text-red-600 shadow-inner">
               <svg xmlns="http://www.w3.org/2000/svg" class="size-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -89,14 +104,30 @@
             <p class="text-center text-gray-600 max-w-sm">
               You don't have permission to view this page. Please contact your administrator or go back to the entity list.
             </p>
+            {% endif %}
           </div>
-          <div class="px-6 mb-6 mt-6 w-full max-w-md">
+          <div class="px-6 mb-6 mt-6 w-full max-w-md flex flex-col gap-3">
+            {% if module_inactive and subscription_settings_url %}
+            <a href="{{ subscription_settings_url }}" class="bg-[#54D3DA] flex font-medium gap-2 hover-scale hover:bg-[#54D3DA]/80 items-center justify-center py-3 rounded-xl shadow-md text-white transition-colors w-full" onclick="PageTransition.navigateWithFade(this.href); return false;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+              <span class="w-fit">Check subscription settings</span>
+            </a>
+            <a href="{{ url_for('entity.entity_list') }}" class="bg-white border border-gray-300 flex font-medium gap-2 hover-scale hover:bg-gray-100 items-center justify-center py-3 rounded-xl text-[#474747] transition-colors w-full" onclick="PageTransition.navigateWithFade(this.href); return false;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span class="w-fit">Back to Entity List</span>
+            </a>
+            {% else %}
             <a href="{{ url_for('entity.entity_list') }}" class="bg-[#54D3DA] flex font-medium gap-2 hover-scale hover:bg-[#54D3DA]/80 items-center justify-center py-3 rounded-xl shadow-md text-white transition-colors w-full" onclick="PageTransition.navigateWithFade(this.href); return false;">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
               <span class="w-fit">Back to Entity List</span>
             </a>
+            {% endif %}
           </div>
         </div>
       </div>

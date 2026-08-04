@@ -1,0 +1,686 @@
+{# Module-settings JS, shared by settings_module.html and
+   settings_module_bills_ui.html. Handles the Stripe checkout / trial / cancel /
+   renew / manage-billing redirects (endpoints in
+   blueprints/entity/routes/settings.py). Module access is driven by Stripe — there
+   is no on/off toggle — and the subscription summary is rendered server-side.
+
+   Cancelling goes through the in-app prorated flow, never Stripe's portal: the
+   portal's own cancel skips the access extension and the 30-day guarantee. #}
+
+{# Full-screen blocking loader. Stripe calls can take a few seconds; this covers
+   the whole viewport (fixed inset-0, top z-index) so the user can't click anything
+   else while the request is in flight. #}
+<div id="subLoadingOverlay" class="fixed inset-0 bg-black bg-opacity-40 z-[100] hidden flex items-center justify-center">
+  <div class="bg-white rounded-lg p-4 shadow-lg">
+    <div class="flex items-center space-x-3">
+      <svg class="animate-spin h-5 w-5 text-[#54D3DA]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span id="subLoadingText" class="text-gray-700 font-medium">Please wait…</span>
+    </div>
+  </div>
+</div>
+
+{# Billing confirmation dialog. The payer's card is shared across every company they
+   pay for, so the FIRST charge on a company has to be authorised explicitly — that's a
+   money decision and deserves the real amount and card on screen, which window.confirm
+   can't show. z-[110] puts it above the blocking loader (z-[100]).
+
+   Same `hidden flex` pairing as the loader above: Tailwind emits `.hidden` after
+   `.flex`, so it wins until the class is removed. #}
+<div id="billingConfirmModal"
+     class="fixed inset-0 bg-black bg-opacity-40 z-[110] hidden flex items-center justify-center p-4"
+     role="dialog" aria-modal="true" aria-labelledby="billingConfirmTitle">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+    <h2 id="billingConfirmTitle" class="text-lg font-bold text-gray-900">Confirm billing</h2>
+    <p id="billingConfirmBody" class="mt-3 text-sm text-gray-700"></p>
+
+    {# Amount / card block — hidden on the trial path, where no charge happens today
+       and quoting a single figure would be wrong for a two-module bundle.
+       The row LABEL is set by the caller: on a purchase it's what you pay now, on a
+       cancellation it's what lands on the next invoice, and calling both "Amount"
+       loses the distinction that decides whether a card is about to be charged. #}
+    <div id="billingConfirmDetail" class="mt-4 rounded-lg bg-[#EAF8F9] p-4 hidden">
+      <div class="flex items-baseline justify-between">
+        <span id="billingConfirmAmountLabel" class="text-sm text-gray-700">Amount</span>
+        <span id="billingConfirmAmount" class="text-base font-bold text-gray-900"></span>
+      </div>
+      <div id="billingConfirmCardRow" class="mt-2 flex items-baseline justify-between hidden">
+        <span class="text-sm text-gray-700">Card</span>
+        <span id="billingConfirmCard" class="text-sm font-medium text-gray-900"></span>
+      </div>
+    </div>
+
+    <p id="billingConfirmNote" class="mt-4 text-xs text-gray-500"></p>
+
+    {# Both buttons are captioned by the caller. "Cancel / Confirm" is unreadable on a
+       dialog that cancels a subscription — "Confirm" and "Cancel" would name the same
+       intent — so the cancel flow passes "Keep subscription" / "Cancel subscription". #}
+    <div class="mt-6 flex justify-end gap-3">
+      <button type="button" id="billingConfirmCancel"
+              class="border border-gray-300 text-gray-700 hover:bg-gray-100 text-sm font-semibold px-5 py-2.5 rounded-md transition-colors">
+        Cancel
+      </button>
+      <button type="button" id="billingConfirmOk"
+              class="bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-2.5 rounded-md transition-colors">
+        Confirm
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const csrfToken = document.querySelector('meta[name="csrf_token"]')?.content || '';
+
+  function notifyError(msg) {
+    if (typeof showErrorToast === 'function') showErrorToast(msg);
+    else alert(msg);
+  }
+
+  // Full-screen blocking loader shown while a (slow) Stripe request is in flight,
+  // so the user can't click elsewhere. Left visible when we redirect to Stripe;
+  // hidden again if the request fails and the page stays.
+  function showBlockingLoader(text) {
+    const overlay = document.getElementById('subLoadingOverlay');
+    if (!overlay) return;
+    const label = document.getElementById('subLoadingText');
+    if (label && text) label.textContent = text;
+    overlay.classList.remove('hidden');
+  }
+  function hideBlockingLoader() {
+    const overlay = document.getElementById('subLoadingOverlay');
+    if (overlay) overlay.classList.add('hidden');
+  }
+
+  async function postJson(url, body) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok || data.error) {
+      const err = new Error(data.error || 'Request failed');
+      // Callers key on the status — notably 402, which means "no card on file"
+      // and routes the user into the add-payment-method flow.
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  // Subscribe to the given modules — one paid subscription each. With a saved
+  // card the server creates them right away (reload to show them); with no card it
+  // returns a setup-checkout url to capture one first (redirect).
+  // The payer's card is shared across every company they pay for, so the FIRST
+  // charge on a company has to be authorised explicitly — otherwise saving a card
+  // for company A silently pays for company B. The server answers
+  // needs_confirmation instead of charging; this shows what will be billed and to
+  // which card, and only then posts to confirm-billing.
+  // Promise<boolean> — resolves true only on an explicit Confirm. Cancel, Escape and
+  // a backdrop click all resolve false, so every exit that isn't a deliberate yes is
+  // treated as a no; this authorises real charges, so the default must be "don't".
+  // Falls back to window.confirm if the markup isn't on the page, rather than silently
+  // resolving true and billing someone.
+  function openBillingConfirm(opts) {
+    const modal = document.getElementById('billingConfirmModal');
+    if (!modal) {
+      return Promise.resolve(window.confirm(
+        (opts.title || 'Confirm billing') + '\n\n' + (opts.body || '')
+      ));
+    }
+    return new Promise(function (resolve) {
+      const okBtn = document.getElementById('billingConfirmOk');
+      const cancelBtn = document.getElementById('billingConfirmCancel');
+      const detail = document.getElementById('billingConfirmDetail');
+      const cardRow = document.getElementById('billingConfirmCardRow');
+
+      document.getElementById('billingConfirmTitle').textContent = opts.title || 'Confirm billing';
+      document.getElementById('billingConfirmBody').textContent = opts.body || '';
+      document.getElementById('billingConfirmNote').textContent = opts.note || '';
+      okBtn.textContent = opts.confirmLabel || 'Confirm';
+      cancelBtn.textContent = opts.dismissLabel || 'Cancel';
+
+      // Destructive actions get a red primary button. Leaving it teal made "Cancel
+      // subscription" look like the safe, encouraged choice.
+      okBtn.classList.toggle('bg-[#54d3da]', !opts.danger);
+      okBtn.classList.toggle('hover:bg-[#54d3da]/90', !opts.danger);
+      okBtn.classList.toggle('bg-[#E5484D]', !!opts.danger);
+      okBtn.classList.toggle('hover:bg-[#E5484D]/90', !!opts.danger);
+
+      if (opts.amount) {
+        document.getElementById('billingConfirmAmountLabel').textContent =
+          opts.amountLabel || 'Amount';
+        document.getElementById('billingConfirmAmount').textContent = opts.amount;
+        detail.classList.remove('hidden');
+        if (opts.card) {
+          document.getElementById('billingConfirmCard').textContent = opts.card;
+          cardRow.classList.remove('hidden');
+        } else {
+          cardRow.classList.add('hidden');
+        }
+      } else {
+        detail.classList.add('hidden');
+      }
+
+      function onKey(e) { if (e.key === 'Escape') close(false); }
+      function onBackdrop(e) { if (e.target === modal) close(false); }
+
+      function close(result) {
+        modal.classList.add('hidden');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        modal.removeEventListener('click', onBackdrop);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      }
+      function onOk() { close(true); }
+      function onCancel() { close(false); }
+
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      modal.addEventListener('click', onBackdrop);
+      document.addEventListener('keydown', onKey);
+
+      modal.classList.remove('hidden');
+      // Focus Cancel, not Confirm — a stray Enter shouldn't authorise a charge.
+      cancelBtn.focus();
+    });
+  }
+
+  function confirmFirstCharge(info) {
+    // Server-formatted: minor units per major unit vary by currency (2 for HKD, 0 for
+    // JPY), and only the server can read currency_info. This used to divide by 100 here,
+    // which quoted the wrong figure on any non-two-decimal currency — on the one screen
+    // where the customer authorises a charge.
+    const amount = info.formatted_amount || '';
+    const per = info.interval ? ('/' + info.interval) : '';
+    return openBillingConfirm({
+      title: 'Subscribe ' + (info.entity_name || 'this company') + '?',
+      body: 'This company hasn’t been billed before. Confirming authorises charges '
+          + 'for it on the card already saved to your account.',
+      amount: (info.currency || '') + ' ' + amount + per,
+      card: info.card
+        ? (String(info.card.brand || 'card') + ' ending ' + (info.card.last4 || '••••'))
+        : null,
+      note: 'That card is shared with your other companies. Authorising it here doesn’t '
+          + 'change how they’re billed.',
+      confirmLabel: 'Confirm and subscribe',
+    });
+  }
+
+  async function doCheckout(codes, btn) {
+    if (!codes.length) { notifyError('No modules to subscribe to.'); return; }
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+    showBlockingLoader('Setting up your subscription…');
+    try {
+      const data = await postJson("{{ url_for('entity.entity_settings_module_checkout', org_id=org.id) }}", { codes: codes });
+      if (data.url) { window.location.href = data.url; return; }
+      if (data.needs_confirmation) {
+        hideBlockingLoader();
+        if (!(await confirmFirstCharge(data.needs_confirmation))) {
+          if (btn) { btn.disabled = false; btn.textContent = orig; }
+          return;  // nothing charged, no consent recorded
+        }
+        showBlockingLoader('Setting up your subscription…');
+        const done = await postJson("{{ url_for('entity.entity_settings_module_confirm_billing', org_id=org.id) }}", { codes: codes });
+        if (done.url) { window.location.href = done.url; return; }
+      }
+      window.location.reload();
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not start checkout.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  }
+
+  // "Subscribe to Minty" (panel) and the per-card "Subscribe": both carry the module
+  // codes to buy in data-codes and route through the same checkout flow. During a trial
+  // this captures a card and converts the trialing modules to paid at term end.
+  window.subscribeWithStripe = function (btn) {
+    const codes = (btn.dataset.codes || '')
+      .split(',').map(function (c) { return c.trim(); }).filter(Boolean);
+    doCheckout(codes, btn);
+  };
+
+  // Authorise this company to be billed on the payer's already-saved card, from the
+  // trial banner. Without it the trial EXPIRES at term end rather than converting —
+  // a card alone doesn't authorise a company the payer never confirmed.
+  // Records consent ONLY — it must not charge. The module still has trial time left,
+  // so the correct outcome is "convert when the trial ends", not "bill now".
+  window.confirmBillingForEntity = async function (btn) {
+    const ok = await openBillingConfirm({
+      title: 'Authorise billing for this company?',
+      body: 'Your trialing modules will convert to paid when the free trial ends, '
+          + 'charged to the card already saved on your account.',
+      // No amount: with two modules the total is the bundle price, and the Subscription
+      // panel beside this shows the real figures. Better silent than wrong.
+      note: 'Nothing is charged today — the trial runs to the end either way. '
+          + 'Without this, the trial expires instead of converting.',
+      confirmLabel: 'Authorise billing',
+    });
+    if (!ok) return;
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+    showBlockingLoader('Confirming billing…');
+    try {
+      await postJson("{{ url_for('entity.entity_settings_module_authorize_billing', org_id=org.id) }}", {});
+      window.location.reload();
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not confirm billing.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+
+  // --- staged modules (cart) ----------------------------------------------------
+  // A card's "Start free trial" or "Subscribe" STAGES the module into the Subscription
+  // panel instead of acting immediately, so the user previews it — and the live total
+  // updates to the FUTURE invoice (the combined monthly, bundle-priced when the enabled
+  // + staged set is exactly the bundle). The panel's button then commits them.
+  //
+  // Both kinds share one cart because they share one question: what will this company
+  // cost once these are on. Buying jumped straight to Stripe, so the bundle price of
+  // adding a second module was never shown until after the decision — the exact preview
+  // the trial path already gave.
+  const cart = new Map(); // code -> { code, name, amount, kind: 'trial' | 'paid' }
+
+  function cartKinds() {
+    const kinds = new Set();
+    cart.forEach(function (i) { kinds.add(i.kind); });
+    return kinds;
+  }
+
+  // Match the server's money formatting (modules._fmt_money): no cents when whole, two
+  // when not, and a CODE spaced off the number while a glyph is not — "HKD 400" but
+  // "HK$400". These figures land in the same panel as the server-rendered ones, so a
+  // difference here shows up as two spacings side by side.
+  function fmtMoney(sym, n) {
+    n = Math.round(n * 100) / 100;
+    const s = Number.isInteger(n)
+      ? n.toLocaleString()
+      : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const space = /[A-Za-z]$/.test(sym || '') ? ' ' : '';
+    return (sym || '') + space + s;
+  }
+
+  function renderCart() {
+    const panel = document.getElementById('subscription-panel');
+    if (!panel) return;
+    const linesEl = panel.querySelector('[data-panel-lines]');
+    const totalEl = panel.querySelector('[data-panel-total]');
+    const noteEl = panel.querySelector('[data-panel-note]');
+    const footerEl = panel.querySelector('[data-panel-footer]');
+    const primaryEl = panel.querySelector('[data-panel-primary]');
+    const confirmEl = panel.querySelector('[data-panel-confirm]');
+    const clearEl = panel.querySelector('[data-panel-clear]');
+    const stagedNote = panel.querySelector('[data-staged-note]');
+    // NOTE: the column is no longer shown or hidden — the panel is always rendered and
+    // only its CONTENT changes. data-empty survives on the element for the server's
+    // "nothing enabled" state; the footer it carries is hidden and restored by the
+    // data-panel-footer handling below, same as a live panel's.
+    const sym = panel.dataset.currency || '';
+
+    // Remember the server-rendered total once, so clearing the cart can restore it.
+    if (totalEl && panel.dataset.serverTotal === undefined) {
+      panel.dataset.serverTotal = totalEl.textContent;
+    }
+
+    // Re-render the staged lines under the existing ones.
+    linesEl.querySelectorAll('[data-staged]').forEach(function (n) { n.remove(); });
+    cart.forEach(function (it) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between text-sm text-gray-700';
+      row.setAttribute('data-staged', '');
+      // The tag names which kind this line is. Without it a mixed cart shows two lines
+      // at the same price where one is free for a month and the other is charged now.
+      const tag = it.kind === 'paid' ? 'subscribing' : 'free trial';
+      row.innerHTML = '<span>' + it.name + ' <span class="text-[#3aa0a6]">· ' + tag + '</span></span>'
+        + '<span>' + fmtMoney(sym, it.amount) + '/mo</span>';
+      linesEl.appendChild(row);
+    });
+
+    const staged = Array.from(cart.values());
+    if (staged.length) {
+      // Future invoice = currently-enabled modules + staged, at the bundle price when the
+      // union is exactly the bundle. Mirrors build_subscription_panel on the server.
+      let enabled = [];
+      try { enabled = JSON.parse(panel.dataset.enabled || '[]'); } catch (e) {}
+      const bundleAmount = parseFloat(panel.dataset.bundleAmount || '0') || 0;
+      const bundleCodes = (panel.dataset.bundleCodes || '').split(',')
+        .map(function (c) { return c.trim().toUpperCase(); }).filter(Boolean).sort();
+      const all = enabled.concat(staged);
+      const codes = all.map(function (i) { return (i.code || '').toUpperCase(); }).sort();
+      const isBundle = bundleAmount > 0 && bundleCodes.length > 1
+        && codes.length === bundleCodes.length
+        && codes.every(function (c, i) { return c === bundleCodes[i]; });
+      const sum = all.reduce(function (a, i) { return a + (parseFloat(i.amount) || 0); }, 0);
+      const total = isBundle ? bundleAmount : sum;
+
+      if (totalEl) totalEl.textContent = fmtMoney(sym, total);
+      if (noteEl) noteEl.classList.add('hidden');
+      if (footerEl) footerEl.classList.add('hidden');
+      if (primaryEl) primaryEl.classList.add('hidden');
+      if (clearEl) clearEl.classList.remove('hidden');
+
+      // The commit button and the note both describe what CONFIRMING does, and that
+      // differs by kind: a trial starts free and bills later, a subscribe bills now.
+      // Saying "Starts free" over a cart that is about to charge would be a lie.
+      const kinds = cartKinds();
+      const hasPaid = kinds.has('paid');
+      const hasTrial = kinds.has('trial');
+      if (confirmEl) {
+        confirmEl.textContent = hasPaid ? 'Subscribe' : 'Start free trial';
+        confirmEl.classList.remove('hidden');
+      }
+      if (stagedNote) {
+        stagedNote.textContent = hasPaid && hasTrial
+          ? 'The trial starts free; the subscription is charged for the rest of the current period. The total below is your monthly rate.'
+          : hasPaid
+            ? 'Charged for the rest of the current billing period when you confirm. The total below is your monthly rate.'
+            : 'Starts free — the total below is your next invoice, charged when the trial converts.';
+        stagedNote.classList.remove('hidden');
+      }
+    } else {
+      if (totalEl) totalEl.textContent = panel.dataset.serverTotal || '';
+      if (noteEl) noteEl.classList.remove('hidden');
+      if (footerEl) footerEl.classList.remove('hidden');
+      if (primaryEl) primaryEl.classList.remove('hidden');
+      if (confirmEl) confirmEl.classList.add('hidden');
+      if (clearEl) clearEl.classList.add('hidden');
+      if (stagedNote) stagedNote.classList.add('hidden');
+    }
+  }
+
+  // Reflect the staged/unstaged state on a card's stage button.
+  //
+  // The unstaged caption is whatever the SERVER rendered — "Start free trial" on a
+  // module never held, "Subscribe" on one being re-bought — captured the first time the
+  // button is touched. Hardcoding "Start free trial" here relabelled every Subscribe
+  // button the moment it was un-staged.
+  function markCartButton(btn, staged) {
+    if (!btn.dataset.cartLabel) {
+      btn.dataset.cartLabel = (btn.textContent || '').trim() || 'Add';
+    }
+    if (staged) {
+      btn.textContent = 'Added ✓';
+      btn.classList.remove('border', 'border-[#54d3da]', 'text-[#54d3da]');
+      btn.classList.add('bg-[#54d3da]', 'text-white');
+    } else {
+      btn.textContent = btn.dataset.cartLabel;
+      btn.classList.remove('bg-[#54d3da]', 'text-white');
+      btn.classList.add('border', 'border-[#54d3da]', 'text-[#54d3da]');
+    }
+  }
+
+  window.toggleCartSelection = function (btn) {
+    const code = btn.dataset.trialCode;
+    if (!code) return;
+    markCartButton(btn, !cart.has(code));  // captures the caption before it changes
+    if (cart.has(code)) {
+      cart.delete(code);
+    } else {
+      cart.set(code, {
+        code: code,
+        name: btn.dataset.trialName || code,
+        amount: parseFloat(btn.dataset.trialAmount || '0') || 0,
+        kind: btn.dataset.cartKind === 'paid' ? 'paid' : 'trial',
+      });
+    }
+    renderCart();
+  };
+
+  window.clearCart = function () {
+    cart.clear();
+    document.querySelectorAll('[data-trial-code]').forEach(function (b) {
+      markCartButton(b, false);
+    });
+    renderCart();
+  };
+
+  // Commit the cart. Trials go first and in one call — card-free, no redirect — then the
+  // paid ones through the ordinary checkout, which may redirect to Stripe or ask for
+  // first-charge confirmation. That order matters: if checkout redirects, the trials are
+  // already started rather than lost with the page.
+  window.commitCart = async function (btn) {
+    const items = Array.from(cart.values());
+    if (!items.length) { notifyError('Add a module first.'); return; }
+    const trialCodes = items.filter(function (i) { return i.kind !== 'paid'; })
+                            .map(function (i) { return i.code; });
+    const paidCodes = items.filter(function (i) { return i.kind === 'paid'; })
+                           .map(function (i) { return i.code; });
+
+    const orig = btn ? btn.textContent : '';
+    if (trialCodes.length) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+      showBlockingLoader('Starting your free trial…');
+      try {
+        await postJson("{{ url_for('entity.entity_settings_module_start_trial', org_id=org.id) }}", { codes: trialCodes });
+      } catch (err) {
+        hideBlockingLoader();
+        notifyError(err.message || 'Could not start free trial.');
+        if (btn) { btn.disabled = false; btn.textContent = orig; }
+        return;
+      }
+      if (!paidCodes.length) { window.location.reload(); return; }
+    }
+
+    // doCheckout owns its own loader, confirmation dialog and redirect/reload.
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+    hideBlockingLoader();
+    await doCheckout(paidCodes, btn);
+  };
+
+  // The confirmation copy for a cancellation, built from the server's preview. Kept as
+  // a pure function of the preview so the two things the dialog exists to answer —
+  // when access ends, and what is still owed — come from the server's own calculation
+  // (checkout._paid_cancel_terms, the same one the cancellation then records) rather
+  // than being re-derived here from the card.
+  function cancelConfirmCopy(name, p) {
+    const until = p.access_until;
+    const money = p.amount_formatted
+      ? ((p.currency ? p.currency + ' ' : '') + p.amount_formatted)
+      : null;
+
+    if (p.kind === 'trial') {
+      return {
+        title: 'Cancel your ' + name + ' trial?',
+        body: until
+          ? 'Your free trial keeps running until ' + until + ' — cancelling only stops '
+            + 'it converting to paid. You can change your mind any time before then.'
+          : 'Cancelling stops this trial converting to paid.',
+        note: 'Nothing to pay. No card is charged for a trial that never converts.',
+        confirmLabel: 'Cancel trial',
+        dismissLabel: 'Keep trial',
+      };
+    }
+
+    if (p.kind === 'trial_expired') {
+      return {
+        title: 'Cancel ' + name + '?',
+        body: 'This trial has already run out, so there are no free days left to keep. '
+            + 'Cancelling closes it now.',
+        note: 'Nothing to pay.',
+        confirmLabel: 'Cancel ' + name,
+        dismissLabel: 'Keep it',
+      };
+    }
+
+    // Paid. Access runs to the later of what was paid for and the cancellation window,
+    // and only the days BEYOND the paid period are charged — which is why there can be
+    // an amount here at all, and why it is never collected today.
+    const lastModule = !p.remaining || p.remaining.length === 0;
+    return {
+      title: 'Cancel ' + name + '?',
+      body: (until ? 'You keep access until ' + until + '. ' : '')
+          + (lastModule
+              ? 'That is this company\'s last module, so billing for it ends after that date.'
+              : 'Your other modules are unaffected.'),
+      amount: money,
+      amountLabel: 'Due on your next invoice',
+      note: money
+        ? 'Nothing is charged today. The extra days after your paid period are added to '
+          + 'your next invoice.'
+          + (p.remaining_amount
+              ? ' Your subscription then continues at ' + (p.currency ? p.currency + ' ' : '')
+                + p.remaining_amount + '/mo.'
+              : '')
+        : 'Nothing further to pay — your access is already paid through that date.'
+          + (p.remaining_amount
+              ? ' Your subscription continues at ' + (p.currency ? p.currency + ' ' : '')
+                + p.remaining_amount + '/mo.'
+              : ''),
+      confirmLabel: 'Cancel ' + name,
+      dismissLabel: 'Keep it',
+    };
+  }
+
+  // Cancel ONE module (by code — the payer's subscription covers several, so a
+  // subscription id no longer identifies one). An active paid module cancels in-app
+  // under the 30-day prorated rule; an app-level trial just stops converting. Reload
+  // to show the new state.
+  //
+  // Confirms FIRST, against a server-computed preview: cancelling can put money on the
+  // next invoice and always changes when access ends, and neither was stated anywhere
+  // before the click took effect.
+  window.cancelSubscription = async function (btn, code) {
+    const orig = btn ? btn.textContent : '';
+    const name = (btn && btn.dataset.moduleName) || 'this module';
+
+    if (btn) { btn.disabled = true; }
+    let preview;
+    try {
+      preview = await postJson(
+        "{{ url_for('entity.entity_settings_module_cancel_preview', org_id=org.id) }}",
+        { code: code }
+      );
+    } catch (err) {
+      // postJson throws on a body-level `error` too, so a module that isn't
+      // cancellable surfaces the server's own wording rather than this fallback.
+      notifyError(err.message || 'Could not check what cancelling would do.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+      return;
+    }
+
+    const confirmed = await openBillingConfirm(
+      Object.assign({ danger: true }, cancelConfirmCopy(name, preview))
+    );
+    if (!confirmed) {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+      return;
+    }
+
+    if (btn) { btn.textContent = 'Cancelling…'; }
+    showBlockingLoader('Cancelling your subscription…');
+    try {
+      await postJson("{{ url_for('entity.entity_settings_module_cancel', org_id=org.id) }}", { code: code });
+      window.location.reload();
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not start cancellation.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+
+  // Renew (undo a scheduled cancellation) in-app — no portal round trip — then
+  // refresh so the card reflects the restored subscription.
+  window.renewSubscription = async function (btn, code) {
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Renewing…'; }
+    showBlockingLoader('Renewing your subscription…');
+    try {
+      await postJson("{{ url_for('entity.entity_settings_module_renew', org_id=org.id) }}", { code: code });
+      window.location.reload();
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not renew subscription.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+
+  // Add/update a card via the Stripe portal's payment-method flow, which opens
+  // straight on the card form and redirects back here once it's saved.
+  // Settle a past-due account on the spot. Automatic retries run on a 1/4/7/10/13-day
+  // schedule, so without this the customer saves a card and then waits, still locked
+  // out, with nothing to press. Same budget and the same give-up deadline as the cron
+  // (dunning.retry_now) — this skips the pacing, not the guards.
+  window.retryPayment = async function (btn) {
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Charging…'; }
+    showBlockingLoader('Taking payment…');
+    try {
+      const data = await postJson("{{ url_for('entity.entity_settings_module_retry_payment', org_id=org.id) }}", {});
+      if (data.ok) { window.location.reload(); return; }
+      // A decline is a NORMAL outcome here, not an error: the request succeeded and the
+      // answer is "that card was refused". Say so and leave the page up, so the next
+      // thing they click is the payment-method form beside this button.
+      hideBlockingLoader();
+      notifyError(data.message || 'Payment could not be completed.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not take payment.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+
+  window.addPaymentMethod = async function (btn) {
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+    showBlockingLoader('Opening the payment form…');
+    try {
+      const data = await postJson("{{ url_for('entity.entity_settings_module_payment_method', org_id=org.id) }}", {});
+      if (data.url) { window.location.href = data.url; return; }
+      hideBlockingLoader();
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not open the payment method form.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+
+  // Invoice history + payment-method management (no cancellation — that's the
+  // in-app prorated flow). Uses the dedicated portal configuration.
+  window.openManageBilling = async function (btn) {
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+    showBlockingLoader('Opening the billing portal…');
+    try {
+      const data = await postJson("{{ url_for('entity.entity_settings_module_manage_billing', org_id=org.id) }}", {});
+      if (data.url) { window.location.href = data.url; return; }
+      hideBlockingLoader();
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    } catch (err) {
+      hideBlockingLoader();
+      notifyError(err.message || 'Could not open billing portal.');
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  };
+
+  // If the user redirected to Stripe and came Back, the page may restore from the
+  // bfcache with the blocking loader still visible — clear it so the UI isn't stuck.
+  window.addEventListener('pageshow', hideBlockingLoader);
+
+  // Sync the panel with the (empty) cart on load — captures serverTotal so clearing can
+  // restore it, and puts the commit/clear buttons in their unstaged state.
+  renderCart();
+
+  // Surface a failed setup-checkout return (redirected back with ?checkout_error=…)
+  // as a toast, then strip it from the URL so a refresh doesn't repeat it.
+  (function () {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('checkout_error');
+    if (err) {
+      notifyError(err);
+      params.delete('checkout_error');
+      const qs = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+    }
+  })();
+
+})();
+</script>

@@ -604,6 +604,206 @@ def onboarding_update_entity(entity_id):
     return _cors(resp)
 
 
+@entity_bp.route("/api/onboarding/plans", methods=["GET", "OPTIONS"])
+def onboarding_plans():
+    """Module price list for onboarding Step 2's subscription summary.
+
+    GET → {plans: [{code, name, amount, currency_code, …}], bundle_amount,
+    bundle_codes, bundle_currency, trial_period_days}, read live from Stripe. The
+    bundle price is what both modules together cost. Entity-independent
+    (it's the catalog, not a customer's state), but token-gated like the other
+    onboarding routes so an unauthenticated caller can't drive Stripe API traffic.
+
+    Same JWT/CORS contract as the rest of ``/api/onboarding/*``.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    # Lazy import — pulls in the model graph and the Stripe layer.
+    from blueprints.entity.services.modules import get_module_plan_catalog
+
+    try:
+        data = get_module_plan_catalog()
+    except Exception:
+        # Stripe unreachable / not configured: the wizard falls back to hiding the
+        # summary rather than blocking module selection, so this is not fatal.
+        current_app.logger.exception("onboarding_plans: could not load plan catalog")
+        resp = jsonify({"error": "Plans are unavailable right now."})
+        resp.status_code = 503
+        return _cors(resp)
+
+    return _cors(jsonify(data))
+
+
+def _entity_for_member(user_id, entity_id):
+    """The entity, if ``user_id`` is a member of it. Returns ``(entity, error_resp)``
+    — exactly one is None. Shared by the payment-method routes."""
+    from models.db import Entity, UserEntity
+
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return None, _cors(resp)
+
+    membership = UserEntity.query.filter(
+        UserEntity.user_id == str(user_id),
+        UserEntity.entity_id == entity_id,
+    ).first()
+    if not membership:
+        resp = jsonify({"error": "You don't have access to this entity"})
+        resp.status_code = 403
+        return None, _cors(resp)
+
+    entity = Entity.query.get(entity_id)
+    if not entity:
+        resp = jsonify({"error": "Entity not found"})
+        resp.status_code = 404
+        return None, _cors(resp)
+    return entity, None
+
+
+@entity_bp.route("/api/onboarding/payment-method", methods=["GET", "OPTIONS"])
+def onboarding_payment_method_status():
+    """Does this entity have a card on file? (onboarding Step 2's Save & Next gate)
+
+    GET ?entity_id=… → {"has_payment_method": bool}, read live from Stripe. Trials are
+    card-backed, so the wizard can't move past module selection until this is true.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    entity, err = _entity_for_member(user_id, (request.args.get("entity_id") or "").strip())
+    if err:
+        return err
+
+    from blueprints.subscription.services.checkout import entity_has_payment_method
+
+    try:
+        has_pm = entity_has_payment_method(entity)
+    except Exception:
+        # Stripe unreachable — report "no card" rather than 500. The user can retry
+        # the add-card button; they just can't advance yet.
+        current_app.logger.exception(
+            "onboarding payment-method: status check failed for %s", entity.id
+        )
+        has_pm = False
+
+    return _cors(jsonify({"has_payment_method": has_pm}))
+
+
+@entity_bp.route("/api/onboarding/payment-method/setup", methods=["POST", "OPTIONS"])
+def onboarding_payment_method_setup():
+    """Open a hosted Stripe Checkout (setup mode) to save a card — no charge.
+
+    POST {entity_id} → {"url": …}. Stripe redirects back to the wizard with
+    ``?pm_session_id=…``, which the wizard hands to /payment-method/complete. No
+    subscription is created here: onboarding starts the trials at finalize.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity, err = _entity_for_member(user_id, (payload.get("entity_id") or "").strip())
+    if err:
+        return err
+
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        start_payment_method_setup,
+    )
+    from models.db import User
+
+    app_url = _onboarding_base_url()
+    try:
+        result = start_payment_method_setup(
+            entity,
+            User.query.get(str(user_id)),
+            success_url=f"{app_url}/?pm_session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{app_url}/?pm_cancelled=1",
+        )
+    except CheckoutError as exc:
+        resp = jsonify({"error": exc.message})
+        resp.status_code = exc.status
+        return _cors(resp)
+    except Exception:
+        current_app.logger.exception(
+            "onboarding payment-method: could not open setup checkout for %s", entity.id
+        )
+        resp = jsonify({"error": "Could not open the payment form. Please try again."})
+        resp.status_code = 503
+        return _cors(resp)
+
+    return _cors(jsonify(result))
+
+
+@entity_bp.route("/api/onboarding/payment-method/complete", methods=["POST", "OPTIONS"])
+def onboarding_payment_method_complete():
+    """Save the card captured by a setup checkout as the customer's default.
+
+    POST {entity_id, session_id} → {"has_payment_method": true}. Called by the wizard
+    when Stripe redirects back with ``pm_session_id``. Idempotent, so a refresh of the
+    return URL is harmless.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity, err = _entity_for_member(user_id, (payload.get("entity_id") or "").strip())
+    if err:
+        return err
+
+    session_id = (payload.get("session_id") or "").strip()
+    if not session_id:
+        resp = jsonify({"error": "session_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        complete_payment_method_setup,
+    )
+
+    try:
+        complete_payment_method_setup(entity, session_id)
+    except CheckoutError as exc:
+        resp = jsonify({"error": exc.message})
+        resp.status_code = exc.status
+        return _cors(resp)
+    except Exception:
+        current_app.logger.exception(
+            "onboarding payment-method: could not save card for %s", entity.id
+        )
+        resp = jsonify({"error": "Could not save your card. Please try again."})
+        resp.status_code = 503
+        return _cors(resp)
+
+    return _cors(jsonify({"has_payment_method": True}))
+
+
 @entity_bp.route("/api/onboarding/modules", methods=["POST", "OPTIONS"])
 def onboarding_modules():
     """Token-authenticated module selection (onboarding Step 2).
@@ -714,6 +914,23 @@ def onboarding_finalize():
     if entity.status == "onboarding":
         entity.status = "active"
         _db.session.commit()
+
+        # Start card-free Stripe trials for the modules the wizard enabled. The
+        # subscription webhook keeps entity_function_map in lock-step. Best-effort:
+        # a Stripe hiccup must not fail onboarding finalize.
+        try:
+            from blueprints.subscription.services.checkout import (
+                start_trials_for_enabled_modules,
+            )
+            from models.db import User
+
+            user = User.query.get(str(user_id))
+            start_trials_for_enabled_modules(entity, user)
+        except Exception:
+            current_app.logger.exception(
+                "onboarding finalize: failed to start trials for entity %s",
+                entity_id,
+            )
 
     resp = jsonify({"status": "success"})
     resp.status_code = 200
