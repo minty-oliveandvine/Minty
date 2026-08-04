@@ -26,9 +26,7 @@ from loguru import logger
 from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
-from models.db import (Entity, EntityFunction, EntityFunctionMap,
-                       EntityPettycashSettings, Report, ReportDraft,
-                       EntitySaleSetting, UserEntity, db)
+from models.db import (Entity, EntityFunction, EntityFunctionMap, EntityPettycashSettings, Report, EntitySaleSetting, UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"

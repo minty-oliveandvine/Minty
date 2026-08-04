@@ -2,7 +2,7 @@
 
 Verifies the three fixes:
 1. sessionStorage snapshot includes draft_id and restore logic validates it.
-2. delete_report cleans up ReportV2, ReportExpenseDetail, ReportSaleDetail.
+2. delete_report cleans up ReportSaleDetail before the report row.
 3. delete_report cleans up sibling drafts for the same (entity, date).
 """
 from __future__ import annotations
@@ -86,12 +86,27 @@ class TestExpenseSnapshotIncludesDraftId:
 
 
 # ---------------------------------------------------------------------------
-# 2. delete_report cleans up ReportV2 and dependent records
+# 2. delete_report cleans up dependent records
 # ---------------------------------------------------------------------------
 
-class TestDeleteReportCleansUpReportV2:
-    """The delete_report function must delete ReportV2, ReportExpenseDetail,
-    ReportSaleDetail, XeroReportSync, and XeroBankTransfer records."""
+class TestDeleteReportCleansUpChildren:
+    """The delete_report function must delete ReportSaleDetail before the
+    report row it hangs off.
+
+    The list has shrunk twice, each time because the code it described was
+    deliberately removed rather than the assertion weakened:
+
+    * Step 3.5 — ReportExpenseDetail: nothing writes that table any more (it
+      duplicated shop_expense), so there is nothing to clean up.
+    * Step 4a-2 — ReportV2: no writers since r2a02, and the table is dropped
+      in r10a10. There is no successor, so these assertions are gone, not
+      re-pointed.
+    * Step 4a-2 — XeroReportSync / XeroBankTransfer: their deletes were
+      removed ON PURPOSE. They are the Xero publish audit trail, and r9a09
+      flips their FKs to ON DELETE SET NULL so the trail survives a report
+      deletion. Asserting the app still deletes them would lock in the very
+      behaviour that migration removes.
+    """
 
     def _get_delete_report_source(self) -> str:
         path = ROOT / "blueprints" / "report" / "routes" / "report_detail.py"
@@ -105,16 +120,6 @@ class TestDeleteReportCleansUpReportV2:
                 return node
         raise AssertionError("delete_report function not found in report_detail.py")
 
-    def test_imports_report_v2_model(self):
-        source = self._get_delete_report_source()
-        assert "ReportV2" in source, "report_detail.py must import ReportV2"
-
-    def test_imports_report_expense_detail_model(self):
-        source = self._get_delete_report_source()
-        assert "ReportExpenseDetail" in source, (
-            "report_detail.py must import ReportExpenseDetail"
-        )
-
     def test_imports_report_sale_detail_model(self):
         source = self._get_delete_report_source()
         assert "ReportSaleDetail" in source, (
@@ -122,41 +127,17 @@ class TestDeleteReportCleansUpReportV2:
         )
 
     def test_cascade_helper_exists(self):
-        """A helper function must exist to delete ReportV2 and its FK dependents."""
+        """A helper must exist to delete a report's children before the report."""
         source = self._get_delete_report_source()
-        assert "_delete_report_v2_cascade" in source, (
-            "delete_report must define or call _delete_report_v2_cascade helper"
+        assert "_delete_report_children" in source, (
+            "delete_report must define or call _delete_report_children helper"
         )
-
-    def test_cascade_deletes_report_expense_detail(self):
-        source = self._get_delete_report_source()
-        assert re.search(
-            r"ReportExpenseDetail\.query\.filter_by\(.*report_id.*\)\.delete\(\)", source
-        ), "Cascade must delete ReportExpenseDetail records"
 
     def test_cascade_deletes_report_sale_detail(self):
         source = self._get_delete_report_source()
         assert re.search(
             r"ReportSaleDetail\.query\.filter_by\(.*report_id.*\)\.delete\(\)", source
         ), "Cascade must delete ReportSaleDetail records"
-
-    def test_cascade_deletes_xero_report_sync(self):
-        source = self._get_delete_report_source()
-        assert re.search(
-            r"XeroReportSync\.query\.filter_by\(.*report_id.*\)\.delete\(\)", source
-        ), "Cascade must delete XeroReportSync records"
-
-    def test_cascade_deletes_xero_bank_transfer(self):
-        source = self._get_delete_report_source()
-        assert re.search(
-            r"XeroBankTransfer\.query\.filter_by\(.*sync_report_id.*\)\.delete\(\)", source
-        ), "Cascade must delete XeroBankTransfer records"
-
-    def test_cascade_deletes_report_v2(self):
-        source = self._get_delete_report_source()
-        assert re.search(
-            r"ReportV2\.query\.filter_by\(.*report_id.*\)\.delete\(\)", source
-        ), "Cascade must delete ReportV2 record"
 
     def test_cascade_called_for_draft_only_delete(self):
         """When deleting a draft-only report, the cascade must be invoked."""
@@ -169,8 +150,8 @@ class TestDeleteReportCleansUpReportV2:
         # The cascade must be called in the draft-only branch (before the
         # `entity_id = report.company` line that starts the submitted-report branch)
         draft_branch = source.split("entity_id = report.company")[0]
-        assert "_delete_report_v2_cascade" in draft_branch, (
-            "Draft-only delete path must call _delete_report_v2_cascade"
+        assert "_delete_report_children" in draft_branch, (
+            "Draft-only delete path must call _delete_report_children"
         )
 
     def test_cascade_called_for_submitted_report_delete(self):
@@ -182,18 +163,18 @@ class TestDeleteReportCleansUpReportV2:
             fn,
         )
         submitted_branch = source.split("entity_id = report.company")[1]
-        assert "_delete_report_v2_cascade" in submitted_branch, (
-            "Submitted report delete path must call _delete_report_v2_cascade"
+        assert "_delete_report_children" in submitted_branch, (
+            "Submitted report delete path must call _delete_report_children"
         )
 
-    def test_report_v2_deleted_before_report(self):
-        """ReportV2 must be deleted before the Report itself to avoid FK issues."""
+    def test_children_deleted_before_report(self):
+        """Child rows must be deleted before the Report itself to avoid FK issues."""
         source = self._get_delete_report_source()
-        cascade_pos = source.find("_delete_report_v2_cascade(report.id)")
+        cascade_pos = source.find("_delete_report_children(report.id)")
         delete_report_pos = source.find("db.session.delete(report)")
-        assert cascade_pos != -1, "Must call _delete_report_v2_cascade(report.id)"
+        assert cascade_pos != -1, "Must call _delete_report_children(report.id)"
         assert cascade_pos < delete_report_pos, (
-            "_delete_report_v2_cascade must be called before db.session.delete(report)"
+            "_delete_report_children must be called before db.session.delete(report)"
         )
 
 
@@ -202,9 +183,21 @@ class TestDeleteReportCleansUpReportV2:
 # ---------------------------------------------------------------------------
 
 class TestDeleteReportCleansSiblingDrafts:
-    """When deleting a draft-only report, any other drafts for the same
-    (entity, transaction_date) must also be deleted to prevent stale data
-    from being picked up when creating a new report."""
+    """When deleting a report, any other DRAFT rows for the same
+    (entity, transaction_date) must also be deleted, so stale data is not
+    picked up when creating a new report.
+
+    Step 4a-6 collapsed the two delete branches into one. There used to be a
+    draft-only path (no Report row, fall back to ReportDraft) and a submitted
+    path; since Stage 4a every draft has a `report` row with the same id, and
+    with report_draft dropped the fallback is unreachable. So these assertions
+    now target a single branch instead of two, and name `Report` rather than
+    `ReportDraft`.
+
+    The status filter is the part that matters most: it used to be implied by
+    the table, and is now the only thing keeping this from deleting SUBMITTED
+    reports that share an entity and date.
+    """
 
     def _get_delete_function_source(self) -> str:
         path = ROOT / "blueprints" / "report" / "routes" / "report_detail.py"
@@ -215,39 +208,37 @@ class TestDeleteReportCleansSiblingDrafts:
                 return ast.get_source_segment(full_source, node)
         raise AssertionError("delete_report function not found")
 
-    def test_draft_delete_queries_other_drafts(self):
-        """Draft-only delete path must query for other_drafts with same (company, date)."""
+    def test_delete_queries_other_drafts(self):
+        """delete_report must query siblings with the same (company, date)."""
         source = self._get_delete_function_source()
-        # The draft-only branch is before the first "entity_id = report.company"
-        # inside delete_report
-        draft_branch = source.split("entity_id = report.company")[0]
-        assert "other_drafts" in draft_branch, (
-            "Draft-only delete must query for other drafts with same (company, date)"
+        assert "other_drafts" in source, (
+            "delete_report must query for sibling rows with same (company, date)"
         )
 
-    def test_draft_delete_excludes_self_from_other_drafts(self):
-        """The other_drafts query must exclude the draft being deleted (id != id)."""
+    def test_other_drafts_excludes_self(self):
+        """The sibling query must exclude the row being deleted."""
         source = self._get_delete_function_source()
-        draft_branch = source.split("entity_id = report.company")[0]
-        assert "ReportDraft.id != report_draft.id" in draft_branch, (
-            "other_drafts query must filter out the draft being deleted"
+        assert "Report.id != report.id" in source, (
+            "sibling query must filter out the report being deleted"
         )
 
-    def test_submitted_delete_excludes_self_from_other_drafts(self):
-        """The other_drafts query for submitted reports must not re-process the main draft."""
+    def test_other_drafts_is_scoped_to_drafts(self):
+        """The sibling query MUST be status-scoped.
+
+        Without this it deletes submitted reports for the same entity and
+        date — the table no longer implies "draft".
+        """
         source = self._get_delete_function_source()
-        submitted_branch = source.split("entity_id = report.company")[1]
-        assert "ReportDraft.id != report.id" in submitted_branch, (
-            "Submitted report other_drafts query must exclude the report's own draft"
+        assert 'Report.status == "draft"' in source, (
+            "sibling query must filter status == 'draft' or it will delete "
+            "submitted reports sharing an entity and transaction_date"
         )
 
     def test_other_drafts_expenses_are_deleted(self):
-        """Sibling drafts' expense rows must be deleted."""
+        """Sibling rows' expense records must be deleted."""
         source = self._get_delete_function_source()
-        # Step 3 pointed expense writes at shop_expense; ShopExpenseDraft is
-        # no longer written or deleted. Same assertion, new table.
-        assert source.count("ShopExpense.query.filter_by(report_id=draft.id).delete()") >= 2, (
-            "ShopExpense must be deleted for each sibling draft in both paths"
+        assert "ShopExpense.query.filter_by(report_id=draft.id).delete()" in source, (
+            "ShopExpense must be deleted for each sibling draft"
         )
 
     def test_exception_handler_rolls_back(self):

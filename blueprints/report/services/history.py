@@ -6,7 +6,7 @@ import traceback
 
 from loguru import logger
 
-from models.db import ReportHistory, ReportHistoryDraft, User, db
+from models.db import ReportHistory, User, db
 
 
 def log_history(
@@ -60,42 +60,7 @@ def log_history(
         return None
 
 
-def log_history_draft(
-    report_draft_id,
-    company,
-    user_id,
-    action,
-    field_changed=None,
-    old_value=None,
-    new_value=None,
-):
-    try:
-        user = (
-            User.query.filter_by(username=user_id).first()
-            or User.query.filter_by(id=user_id).first()
-        )
-        if not user:
-            logger.warning(
-                f"User {user_id} not found in database, skipping history log"
-            )
-            return None
-        actual_user_id = user.id
-        old_value_str = str(old_value) if old_value is not None else None
-        new_value_str = str(new_value) if new_value is not None else None
-        history = ReportHistoryDraft(
-            report_draft_id=report_draft_id,
-            company=company,
-            user_id=actual_user_id,
-            action=action,
-            field_changed=field_changed,
-            old_value=old_value_str,
-            new_value=new_value_str,
-        )
-        db.session.add(history)
-        db.session.commit()
-        return history
-    except Exception as e:
-        logger.error(f"Error logging draft history: {e}")
-        traceback.print_exc()
-        db.session.rollback()
-        return None
+# log_history_draft was deleted in Step 4a-2/4a-4. It was the only writer to
+# report_history_draft and had no callers — log_history (above) resolves a
+# username or an id, which is why the callers could redirect to it. Draft
+# history lands in report_history; see history_query.py:127.

@@ -19,9 +19,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                sum_sales_by_type,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (AccountInfo, Entity, EntityAccountXero, Report,
-                       ReportDraft, ReportExpenseDetail, ShopExpense,
-                       ShopExpenseDraft, XeroContactSync, db)
+from models.db import (AccountInfo, Entity, EntityAccountXero, Report, ShopExpense, XeroContactSync, db)
 from services.authz import permission_denied
 from services.helpers.xero_bridge import (account_info_to_xero_format,
                                           contact_sync_to_xero_format,
@@ -231,12 +229,10 @@ def report_expense(id=None):
         )
 
     if id:
-        current_draft = (
-            ReportDraft.query.join(
-                Report,
-                ReportDraft.id == Report.id,
-                full=True) .filter_by(
-                id=id) .first())
+        # Step 4a-6: was a full outer join to Report filtering on id. One row,
+        # one table since Stage 4a — and the join filtered `id` on the DRAFT
+        # side, so a report with no draft returned None here.
+        current_draft = Report.query.filter_by(id=id).first()
         if not org:
             org = Entity.query.get_or_404(entity_id)
         entity_acronym, display_date = entity_badge_data(org)
@@ -249,20 +245,19 @@ def report_expense(id=None):
 
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
+        # Step 4a-6: was max(coalesce(Report.transaction_date,
+        # ReportDraft.transaction_date)) over a full outer join. Drafts live in
+        # `report` since Stage 4a, so one table answers it. No status filter —
+        # balance chaining and "is this the latest" both mean ANY status; a
+        # draft's date is still the latest date.
         latest_report_date = (
-            db.session.query(
-                db.func.max(
-                    db.func.coalesce(
-                        Report.transaction_date,
-                        ReportDraft.transaction_date))) .filter(
-                db.or_(
-                    Report.company == entity_id,
-                    ReportDraft.company == entity_id),
-            ) .scalar())
+            db.session.query(db.func.max(Report.transaction_date))
+            .filter(Report.company == entity_id)
+            .scalar())
 
         is_latest_report = current_draft.transaction_date == latest_report_date
 
-        # Publish sets xero_integrated_yes on Report, not always synced on ReportDraft;
+        # Publish sets xero_integrated_yes on Report;
         # header badge reads this for Published vs Submitted.
         _report_for_xero = Report.query.filter_by(id=id).first()
         header_xero_integrated_yes = bool(
@@ -343,13 +338,14 @@ def report_expense(id=None):
                     f"falling back to today: {transaction_date}"
                 )
 
+            # Step 4a-6: data entry, so status='draft' stays explicit.
             current_draft = (
-                ReportDraft.query.filter(
-                    ReportDraft.company == entity_id,
-                    ReportDraft.transaction_date == transaction_date,
-                    ReportDraft.status == "draft",
+                Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date == transaction_date,
+                    Report.status == "draft",
                 )
-                .order_by(ReportDraft.transaction_date.desc())
+                .order_by(Report.transaction_date.desc())
                 .first()
             )
 
@@ -511,24 +507,13 @@ def report_expense(id=None):
 
                 # The ReportV2 row formerly created/updated here existed only so
                 # report_expense_detail's FK resolved; r2a02 dropped that FK and
-                # nothing read its columns back. Detail rows below keep using
-                # current_draft.id, the same value report_v2.report_id held.
-
-                # Insert report_expense_detail records for each expense
-                for expense in expenses:
-                    report_expense_detail = ReportExpenseDetail(
-                        expense_id=expense.id,
-                        report_id=current_draft.id,
-                        account_id=getattr(expense, "account_id", None),
-                        amount=expense.amount,
-                        info_filepath=getattr(expense, "files", None),
-                        description=getattr(expense, "remarks", None),
-                        create_at=datetime.now(),
-                    )
-                    db.session.add(report_expense_detail)
-                    logger.info(
-                        f"Added ReportExpenseDetail: {expense.id} -> {report_v2.report_id} = {expense.amount}"
-                    )
+                # nothing read its columns back.
+                #
+                # The report_expense_detail inserts that followed went with
+                # Step 3.5 — they duplicated the ShopExpense rows above. The
+                # log line went with them: it dereferenced `report_v2`, a name
+                # deleted in r2a02, so it would have raised NameError had the
+                # loop ever run.
 
                 # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
                 # Get cash sales from ReportSaleDetail with fallback to

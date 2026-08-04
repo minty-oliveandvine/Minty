@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 
 from flask import flash, redirect, render_template, request, url_for
@@ -7,7 +6,7 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.cash_denominations import (
-    build_denomination_rows, counts_to_legacy_columns, form_field_for,
+    build_denomination_rows, form_field_for,
     resolve_denominations_for_entity, save_cash_count_details)
 from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
@@ -16,8 +15,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                safe_float,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportCashCountDraft, ReportDetail,
-                       ReportDraft, db)
+from models.db import Entity, Report, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -63,14 +61,13 @@ def report_cash_count(id=None):
             # was None whenever either side was missing and report.company below
             # raised. Its two columns live on `report` since r1a01.
             #
-            # The cash-count join stays — those denominations have no home on
-            # `report` — but it now hangs off Report.id (the same value it used
-            # via ReportDraft.id) and is a real outerjoin, so a report with no
-            # cash count yet still returns a row with NULL denominations.
-            Report.query.outerjoin(
-                ReportCashCountDraft,
-                ReportCashCountDraft.report_id == Report.id,
-            ) .filter(
+            # The cash-count join is gone too (Step 3.5). The nine denomination
+            # columns it supplied were never rendered — the template iterates
+            # `denomination_rows`, built from report_cash_count — and the four
+            # scalars below now come from `report`, where cash_count.py writes
+            # them. Selecting them off ReportCashCountDraft shadowed Report's
+            # own identically-named columns in the result Row.
+            Report.query .filter(
                 Report.id == id,
                 Report.company == entity_id,
             ) .with_entities(
@@ -94,41 +91,34 @@ def report_cash_count(id=None):
                 Report.xero_integrated_yes,
                 Report.completed_sections,
                 Report.current_section,
-                ReportCashCountDraft.thousand_note,
-                ReportCashCountDraft.fivehundred_note,
-                ReportCashCountDraft.onehundred_note,
-                ReportCashCountDraft.fifty_note,
-                ReportCashCountDraft.twenty_note,
-                ReportCashCountDraft.ten_note,
-                ReportCashCountDraft.five_coin,
-                ReportCashCountDraft.two_coin,
-                ReportCashCountDraft.one_coin,
-                ReportCashCountDraft.safe_box_balance,
-                ReportCashCountDraft.discrepancy_amount,
-                ReportCashCountDraft.discrepancy_type,
-                ReportCashCountDraft.discrepancy_reason,
+                Report.safe_box_balance,
+                Report.discrepancy_amount,
+                Report.discrepancy_type,
+                Report.discrepancy_reason,
+                # NOTE: Report.status is deliberately NOT selected, matching
+                # what this query returned before Step 3.5. The template does
+                # `current_draft.status != 'draft'` to decide readonly, and an
+                # absent attribute makes that true — so this branch has always
+                # rendered read-only. Adding it here would silently make the
+                # form editable; that is a behaviour change, not scaffolding
+                # removal, so it belongs in its own commit.
             ) .first())
         user_entity = Entity.query.get_or_404(report.company)
         entity_acronym, display_date = entity_badge_data(user_entity)
         completed_sections = (
             report.completed_sections if report.completed_sections else []
         )
-        cashcount_draft = ReportCashCountDraft.query.filter(
-            ReportCashCountDraft.report_id == report.id
-        ).first()
-
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
+        # Step 4a-6: was max(coalesce(Report.transaction_date,
+        # ReportDraft.transaction_date)) over a full outer join. Drafts live in
+        # `report` since Stage 4a, so one table answers it. No status filter —
+        # balance chaining and "is this the latest" both mean ANY status; a
+        # draft's date is still the latest date.
         latest_report_date = (
-            db.session.query(
-                db.func.max(
-                    db.func.coalesce(
-                        Report.transaction_date,
-                        ReportDraft.transaction_date))) .filter(
-                db.or_(
-                    Report.company == entity_id,
-                    ReportDraft.company == entity_id),
-            ) .scalar())
+            db.session.query(db.func.max(Report.transaction_date))
+            .filter(Report.company == entity_id)
+            .scalar())
 
         is_latest_report = report.transaction_date == latest_report_date
 
@@ -139,9 +129,7 @@ def report_cash_count(id=None):
             current_section="cash_count",
             current_draft=report,
             header_publishing_status=header_publishing_status_for(report_id=(report.id if report else None)),
-            cashcount_draft=cashcount_draft,
-            safe_box_balance=(
-                cashcount_draft.safe_box_balance if cashcount_draft else 0.00),
+            safe_box_balance=report.safe_box_balance or 0.00,
             closing_balance=report.closing_balance if report.closing_balance else 0.00,
             datenow=datetime.now(),
             transaction_date=report.transaction_date,
@@ -150,9 +138,7 @@ def report_cash_count(id=None):
             display_date=display_date,
             is_edit_mode=is_edit_mode,
             denomination_rows=build_denomination_rows(
-                entity_id,
-                report_id=report.id,
-                fallback_draft=cashcount_draft,
+                entity_id, report_id=report.id
             ),
         )
 
@@ -223,13 +209,6 @@ def report_cash_count(id=None):
     logger.info(
         f"  Found existing draft: {current_draft.id if current_draft else 'None'}"
     )
-
-    if current_draft:
-        cashcount_draft = ReportCashCountDraft.query.filter(
-            ReportCashCountDraft.report_id == current_draft.id
-        ).first()
-    else:
-        cashcount_draft = None
 
     # Denominations this entity logs, in display order. Drives both the form
     # and the POST parsing, so the two can never drift apart.
@@ -357,106 +336,39 @@ def report_cash_count(id=None):
             # Track last editor
             current_draft.uploaded_by = current_user.username
 
-            # The nine note/coin columns still have five readers (ending.py,
-            # export_screenshot.py, deposit.py, the template, and the
-            # next-day opening balance), so keep them in sync with the detail
-            # rows until those are converted. Denominations without a legacy
-            # column — the HK$200 note, and anything an entity adds — live
-            # only in report_cashcount_detail.
-            legacy_columns = counts_to_legacy_columns(counts_by_cash_id)
+            # STEP 3.5: the create/update branches on ReportCashCountDraft and
+            # the paired ReportDetail upsert are gone. Everything they wrote now
+            # has exactly one home:
+            #
+            #   nine note/coin columns  -> report_cash_count rows, via
+            #                              save_cash_count_details() below
+            #   safe_box_balance        -> report
+            #   discrepancy_*           -> report
+            #   actual_cash_total       -> report (Unit 0a added this writer)
+            #
+            # `report` is `current_draft` since the Step 2 write flip, so these
+            # are direct writes to the one canonical row.
+            current_draft.discrepancy_amount = discrepancy_amount
+            current_draft.discrepancy_reason = discrepancy_reason
+            current_draft.discrepancy_type = discrepancy_type
+            current_draft.safe_box_balance = safe_box_balance
+            # report.actual_cash_total had NO writer before Step 3.5. r1a01
+            # hoisted the column and opening.py prefers it, but every
+            # assignment targeted cashcount_draft and the draft mirror
+            # deliberately excluded this column — so the preferred read always
+            # found NULL and fell through. It seeds the NEXT report's opening
+            # balance, so without this the Step 4 drop would silently zero it.
+            current_draft.actual_cash_total = total_cash_count
 
-            if not cashcount_draft:
-                cashcount_draft = ReportCashCountDraft(
-                    id=str(uuid.uuid4()),
-                    report_id=current_draft.id,
-                    safe_box_balance=safe_box_balance,
-                    discrepancy_amount=discrepancy_amount,
-                    discrepancy_type=discrepancy_type,
-                    discrepancy_reason=discrepancy_reason,
-                    actual_cash_total=total_cash_count,
-                    **legacy_columns,
-                )
-
-                # Update current_draft with discrepancy information
-                current_draft.discrepancy_amount = discrepancy_amount
-                current_draft.discrepancy_reason = discrepancy_reason
-                current_draft.discrepancy_type = discrepancy_type
-                current_draft.safe_box_balance = safe_box_balance
-
-                logger.info(
-                    f"  Updated current_draft.discrepancy_amount: {current_draft.discrepancy_amount}"
-                )
-                logger.info(
-                    f"  Updated current_draft.discrepancy_reason: {current_draft.discrepancy_reason}"
-                )
-                logger.info(
-                    f"  Updated current_draft.discrepancy_type: {current_draft.discrepancy_type}"
-                )
-
-                db.session.add(cashcount_draft)
-
-                # Create ReportDetail with discrepancy information
-                report_detail = ReportDetail(
-                    report_id=current_draft.id,
-                    entity_id=entity_id,
-                    opening_balance=opening_balance,
-                    adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                    nocashsale_total=(current_draft.total_sales or 0) -
-                    cash_sales,
-                    cashsale_total=cash_sales,
-                    expense_total=expenses,
-                    discrepancy_amount=discrepancy_amount,
-                    discrepancy_description=discrepancy_reason,
-                )
-                db.session.add(report_detail)
-            else:
-                for column, count in legacy_columns.items():
-                    setattr(cashcount_draft, column, count)
-                cashcount_draft.safe_box_balance = safe_box_balance
-                cashcount_draft.discrepancy_amount = discrepancy_amount
-                cashcount_draft.discrepancy_type = discrepancy_type
-                cashcount_draft.discrepancy_reason = discrepancy_reason
-                cashcount_draft.actual_cash_total = total_cash_count
-
-                # Update current_draft with discrepancy information
-                current_draft.discrepancy_amount = discrepancy_amount
-                current_draft.discrepancy_reason = discrepancy_reason
-                current_draft.discrepancy_type = discrepancy_type
-                current_draft.safe_box_balance = safe_box_balance
-
-                logger.info(
-                    f"  Updated current_draft.discrepancy_amount: {current_draft.discrepancy_amount}"
-                )
-                logger.info(
-                    f"  Updated current_draft.discrepancy_reason: {current_draft.discrepancy_reason}"
-                )
-                logger.info(
-                    f"  Updated current_draft.discrepancy_type: {current_draft.discrepancy_type}"
-                )
-
-                # Update or create ReportDetail with discrepancy information
-                report_detail = ReportDetail.query.filter(
-                    ReportDetail.report_id == current_draft.id,
-                    ReportDetail.entity_id == entity_id,
-                ).first()
-
-                if not report_detail:
-                    report_detail = ReportDetail(
-                        report_id=current_draft.id,
-                        entity_id=entity_id,
-                        opening_balance=opening_balance,
-                        adjusted_opening_balance=current_draft.adjusted_opening_balance,
-                        nocashsale_total=(current_draft.total_sales or 0) -
-                        cash_sales,
-                        cashsale_total=cash_sales,
-                        expense_total=expenses,
-                    )
-                    db.session.add(report_detail)
-
-                # Update discrepancy fields in ReportDetail
-                report_detail.discrepancy_amount = discrepancy_amount
-                report_detail.discrepancy_description = discrepancy_reason
-                cashcount_draft.actual_cash_total = actual_cash_total
+            logger.info(
+                f"  Updated current_draft.discrepancy_amount: {current_draft.discrepancy_amount}"
+            )
+            logger.info(
+                f"  Updated current_draft.discrepancy_reason: {current_draft.discrepancy_reason}"
+            )
+            logger.info(
+                f"  Updated current_draft.discrepancy_type: {current_draft.discrepancy_type}"
+            )
 
             # Per-denomination counts — the source of truth. Written in the
             # same transaction as the discrepancy it drives, so the two can
@@ -469,11 +381,12 @@ def report_cash_count(id=None):
             logger.info(
                 f"  Verifying saved discrepancy data for draft {current_draft.id}"
             )
-            # Stays on ReportDraft deliberately: this verifies the DRAFT row
-            # itself persisted, so reading the mirrored `report` row would
-            # defeat the check.
-            saved_draft = ReportDraft.query.filter(
-                ReportDraft.id == current_draft.id
+            # Step 4a-6: this verified the separate DRAFT row survived the
+            # commit. There is no separate draft row now, so re-pointing it at
+            # Report would just assert that the row we committed exists —
+            # vacuous. Kept only as a read-back of what was persisted.
+            saved_draft = Report.query.filter(
+                Report.id == current_draft.id
             ).first()
             if saved_draft:
                 logger.info(
@@ -584,8 +497,8 @@ def report_cash_count(id=None):
         current_draft=current_draft,
         header_publishing_status=header_publishing_status_for(report_id=(current_draft.id if current_draft else None)),
         transaction_date=transaction_date,
-        cashcount_draft=cashcount_draft,
-        safe_box_balance=cashcount_draft.safe_box_balance if cashcount_draft else 0.00,
+        safe_box_balance=(
+            current_draft.safe_box_balance if current_draft else 0.00) or 0.00,
         closing_balance=(
             current_draft.closing_balance if current_draft.closing_balance else 0.00),
         datenow=datetime.now(),
@@ -596,6 +509,5 @@ def report_cash_count(id=None):
         denomination_rows=build_denomination_rows(
             entity_id,
             report_id=current_draft.id if current_draft else None,
-            fallback_draft=cashcount_draft,
         ),
     )

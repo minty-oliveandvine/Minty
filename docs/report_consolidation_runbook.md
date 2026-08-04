@@ -15,7 +15,67 @@ The two are independent.
 **Status as of 31 Jul 2026:** the application is fully working, Xero publish
 included. Everything below is scaffolding removal. There is no deadline, and
 nothing degrades if it waits.
-we have finished step 2 and it is currently being deployed, only need to dro pthe columnbs 
+
+### Progress
+
+| Step | State |
+|---|---|
+| 1 — `r6a06` FK re-point | **DONE** — applied to `pettycashv2` |
+| 2 — Report write flip | **DONE** — `fe87216` |
+| 3 — Expense write flip | **DONE** — `fe87216` |
+| 3.5 — Cash-count / detail tables | **DONE** (code) |
+| 4a/4b — Remove reads + models | **DONE** (code) |
+| 4c — `r10a10` drops | **DONE on localhost** — NOT run on production |
+| 4d — `r9a09` Xero PKs | **DONE** — option B |
+
+**Everything is code-complete and verified on localhost as of 4 Aug 2026.**
+Nothing has been deployed and no migration has been run on production.
+See `docs/report_consolidation_step_4_runbook.md` for the per-unit detail.
+
+**Step 3.5 status (3 Aug 2026).** All writers to the three tables are gone;
+`grep -rn "ReportCashCountDraft(\|ReportDetail(\|ReportExpenseDetail("
+blueprints/` returns only the model definitions. Remaining reads are the
+legacy-fallback path in `cash_denominations.py` and the four cascade-deletes in
+`report_detail.py`, both deliberately kept until Step 4 — see
+`docs/report_consolidation_step_3_5_runbook.md`.
+
+**Two migrations ship with Step 3.5. Both are required before Step 4:**
+
+| Revision | Fixes |
+|---|---|
+| `r7a07_backfill_actual_cash` | `report.actual_cash_total` never had a writer, so the Step 4 pre-drop check cannot pass without it |
+| `r8a08_repoint_rcc_fk` | `report_cash_count.report_id` still FK'd `report_draft.id` — **a live bug**, see below |
+
+### 🔴 `r8a08` — the FK `r6a06` missed
+
+`r6a06` re-pointed `shop_expense_draft`, `report_cashcount_draft` and
+`report_history_draft`. **`report_cash_count` was not on that list** — the new
+source-of-truth table for denominations was left pointing at `report_draft`.
+
+Because Step 2 stopped creating `report_draft` rows, any report created from
+31 Jul 2026 onward has no draft twin, and inserting its cash count violates
+that FK:
+
+```
+insert or update on table "report_cash_count" violates foreign key
+constraint "report_cash_count_report_id_fkey"
+```
+
+**Saving a cash count on a newly created report fails until `r8a08` runs.**
+Reproduced against the live schema on 3 Aug 2026. It had not surfaced only
+because no report had been created since the Step 2 deploy — every existing
+report still had its pre-flip draft twin.
+
+This is the `s6a06` failure mode inverted: there, code stopped writing
+something the schema still demanded; here, the schema demands a parent row the
+code no longer creates.
+
+Steps 2 and 3 also deleted both mirrors, so `report_draft` and
+`shop_expense_draft` have no writers left. **Step 4 is not the next step** —
+three tables (`report_cashcount_draft`, `report_expense_detail`,
+`report_detail`) still have live writers and are covered by Step 3.5.
+
+Steps 1–3 were deployed on 31 Jul 2026.
 
 
 ---
@@ -30,12 +90,13 @@ If you are picking this up cold, in order:
    partway through and getting it wrong takes production down.
 3. Run the **verification checklist** against the current deploy to confirm the
    starting state is good.
-4. Then Step 1.
+4. Then **Step 3.5** — Steps 1 to 3 are already done (see Progress above).
 
-Do not start Step 2 at the end of a working day. It touches every wizard write
-path, and the failure mode of this codebase is silently wrong data rather than
-an exception — the test suite has caught none of the six production bugs this
-migration produced.
+Steps 2 and 3 removed both mirrors, so there is no longer a safety net: a
+missed write site is lost data, not a stale read. The failure mode of this
+codebase is silently wrong data rather than an exception, and the test suite
+has caught none of the six production bugs this migration produced. Verify by
+exercising the app, not by reading the diff.
 
 ---
 
@@ -44,31 +105,38 @@ migration produced.
 | Table | Status |
 |---|---|
 | `report_v2` | Retired. No reads, no writes, no FKs. **Droppable.** |
-| `report_draft` | Still the WRITE target. Reads mostly migrated. |
-| `shop_expense_draft` | Still the WRITE target. Reads migrated. |
+| `report_draft` | **No writers** (Step 2). 27 reads left to migrate. |
+| `shop_expense_draft` | **No writers** (Step 3). 3 reads left. |
 | `report_history_draft` | Write-free (callers redirected). **Droppable.** |
-| `report_cashcount_draft` | Still written by the cash-count step. |
-| `report_expense_detail` | Written by expense routes; no longer read. |
-| `report_detail` | Written by cash-count; read once in `api.py`. |
+| `report_cashcount_draft` | Still written — 5 sites. **Step 3.5.** |
+| `report_expense_detail` | Still written — 4 sites. **Step 3.5.** |
+| `report_detail` | Still written — 2 sites. **Step 3.5.** |
 
-Applied migrations: `r1a01` → `r5a05`. Alembic head is `r5a05_backfill_expense`.
-`r6a06` is **written but not yet applied** (see Step 1).
+Migration chain (localhost head: `r10a10_drop_legacy_report`):
 
-### The two mirrors
+    r1a01 ... r6a06  ->  r7a07_backfill_actual_cash
+                     ->  r8a08_repoint_rcc_fk
+                     ->  r9a09_reshape_xero_pks
+                     ->  r10a10_drop_legacy_report   <- IRREVERSIBLE
 
-Two `before_flush` listeners keep the real row current while the draft is
-still the write target:
+`r9a09` deliberately precedes `r10a10`: it is reversible and independent, and
+the drops should be the last thing that ever runs. Every one has a `.sql` twin
+in `migrations/` for the Supabase path — run the `.sql` **or** the `.py`, never
+both.
 
-* `blueprints/report/services/draft_report_mirror.py` — 27 columns,
-  `report_draft` → `report`
-* `blueprints/report/services/expense_draft_mirror.py` — 10 columns,
-  `shop_expense_draft` → `shop_expense`
+### The two mirrors — REMOVED
 
-Both are **temporary scaffolding**. They are deleted in Step 3 once writes
-land on the real tables directly. Both have tests
-(`tests/test_draft_report_mirror.py`, `tests/test_expense_draft_mirror.py`) —
-keep them passing until the mirrors are removed, because a listener that stops
-firing raises nothing; reads just silently go stale.
+Two `before_flush` listeners kept the real row current while the drafts were
+still the write target. Both were deleted at the end of Steps 2 and 3, once
+their tables had no writers left.
+
+**This means the safety net is gone.** While a mirror was running, a missed
+site degraded to a stale read. Now it is lost data. Verify writes are actually
+gone before deleting anything else:
+
+```
+grep -rn "ReportDraft(\|ShopExpenseDraft(" blueprints/ | grep -v import
+```
 
 ### The invariant everything rests on
 
@@ -105,6 +173,7 @@ Read this before starting anything.
 | 1 | `r6a06` FK re-point | Schema | **Schema first**, then code |
 | 2 | Report write flip | Code | Code only |
 | 3 | Expense write flip | Code | Code only |
+| 3.5 | Cash-count / detail tables | Code | Code only |
 | 4 | Drops | Schema | **Code first**, then schema |
 
 The direction flips between 1 and 4, and getting it backwards is what caused
@@ -120,7 +189,7 @@ Deploying the Stage 4a code before its columns existed produced
 
 ---
 
-## Step 1 — Apply `r6a06` (schema)
+## Step 1 — Apply `r6a06` (schema)  ✅ DONE
 
 Re-points the last three FKs off `report_draft`:
 
@@ -156,7 +225,7 @@ report end to end: opening → sales → expense → deposit → cash count → 
 
 ---
 
-## Step 2 — The report write flip (code)
+## Step 2 — The report write flip (code)  ✅ DONE
 
 **This is the largest remaining piece. Give it a fresh session.**
 
@@ -212,22 +281,172 @@ Work **one function at a time**, not one query at a time. For each:
   variable written later is not the one the query named. Grep for the alias,
   not just the query.
 
-### When done
+### What was done
 
-Delete `draft_report_mirror.py`, its registration in `models/db.py`, and
-`tests/test_draft_report_mirror.py`.
+All 5 creation sites and all 12 write-through lookups flipped, across
+`opening.py`, `deposit.py`, `cash_count.py`, `api.py`, `ending.py` and
+`shared.py`. `draft_report_mirror.py`, its registration and its tests deleted
+after verifying zero remaining writes.
+
+Two paths collapsed sharply, because `report` and `report_draft` became one row:
+
+* **Submit** went from 124 lines to 22. It had been building a `Report` from
+  `current_draft` field by field — self-assignment once they are the same row.
+  What remains is the recalculated `closing_balance`, `date`, `uploaded_by`,
+  and `status = "posted"`.
+* **Revert** no longer deletes the `Report` and rebuilds it from the draft; it
+  sets `status = "draft"`. That also fixed the old hazard where a report with
+  no draft could not be reverted at all. `ShopExpense` rows are still deleted —
+  those belong to the submitted report and are rebuilt on re-submit.
+
+A ~50-line self-heal block in `ending.py` was deleted outright: it existed to
+create a `ReportDraft` when a `Report` had none, which is no longer reachable.
+
+**Known consequence — RESOLVED in Step 4, but not as predicted.**
+`sync_same_day_draft_after_deposit_change` was expected to become a guaranteed
+no-op. It did not: the `Report.id != report_to_update.id` guard meant it could
+still match a SIBLING draft for the same (company, date), and duplicates per
+date do occur.
+
+It was deleted in Step 4 for a stronger reason — its meaning had inverted.
+"Sync my own draft" became "overwrite a DIFFERENT report's `bank_deposit` and
+recalculate its balances". A separate in-progress report for the same date is
+not this report, so that is data corruption, not a sync. Next-day chaining is
+unaffected and still handled by `propagate_opening_balance_to_next_day_draft`.
 
 ---
 
-## Step 3 — The expense write flip (code)
+## Step 3 — The expense write flip (code)  ✅ DONE
 
 Same shape, smaller. Four `ShopExpenseDraft(...)` creation sites:
 `routes/expense.py:428`, `routes/api.py:398`, `:691`, `:1761`.
 
 Reads are already migrated, so this is writes only.
 
-When done, delete `expense_draft_mirror.py`, its registration, and
-`tests/test_expense_draft_mirror.py`.
+### What was done
+
+All 4 creation sites flipped to `ShopExpense` (`report_draft_id` →
+`report_id`), 3 `.get()` lookups feeding updates and deletes re-pointed, 4
+deletes in `report_detail.py` re-pointed, and the 4 now-redundant
+`ensure_shop_expense_for_draft` calls removed — the row created *is* the
+`shop_expense`. `expense_draft_mirror.py`, its registration and its tests
+deleted after verifying zero remaining writes.
+
+One structural test updated: `test_delete_report_cleanup.py` greps source text
+for the old query string, so the assertion was re-pointed at the new table.
+Behaviour unchanged.
+
+---
+
+## Step 3.5 — The cash-count and detail tables (code) ✅ DONE
+
+Steps 2 and 3 covered `report_draft` and `shop_expense_draft`. Three tables
+were never in their scope and still have live writers. **Step 4 cannot start
+until these are done.**
+
+Current state (verified by counting reads/writes outside `models/`):
+
+| Table | Reads | Writes |
+|---|---|---|
+| `report_cashcount_draft` | 14 | 5 |
+| `report_expense_detail` | 3 | 4 |
+| `report_detail` | 2 | 2 |
+
+### `report_cashcount_draft`
+
+Its columns split three ways, and **the destination differs per group** — this
+is not a single-table flip like Steps 2 and 3:
+
+| Columns | Destination | Status |
+|---|---|---|
+| `thousand_note` … `one_coin` (9 denominations) | `report_cash_count` **rows** | Already dual-written by `cash_count.py` |
+| `safe_box_balance`, `discrepancy_*` | `report` | Already on `report`; already dual-written |
+| `actual_cash_total` | `report` | Hoisted by `r1a01`; `opening.py` already prefers it |
+
+So every value already has a home and is already being written there. What
+remains is deleting the writes to this table and re-pointing the 14 reads.
+
+Note the denominations are a *shape* change: nine wide columns become nine
+rows keyed on `cash_id`. `cash_denominations.py` already reads
+`report_cash_count` first and falls back to the wide columns — removing that
+fallback is the last step, and `c2a02` only backfilled HKD, so check other
+currencies before removing it.
+
+Write sites: `cash_count.py:369` (create), `api.py:1166` (mutate),
+`report_detail.py:396/421/495/511` (delete).
+
+### `report_detail`
+
+Duplicates `report`. Its distinct columns (`cashsale_total`,
+`nocashsale_total`, `expense_total`, `discrepancy_description`) are all
+derivable from `report` or already mirrored onto it —
+`discrepancy_description` was backfilled into `report.discrepancy_reason` by
+`r0` PART 1c.
+
+Only one reader: `api.py:1207`. Write sites: `cash_count.py:399/444`,
+`api.py:1174`.
+
+The composite PK is `(report_id, entity_id)` with **no FK on `report_id`**, so
+nothing constrains it — the drop needs no FK work.
+
+### `report_expense_detail`
+
+Duplicates `shop_expense` for the same expense. `expense_id` is its PK and
+plays the role `shop_expense.id` does; `description` maps to `remarks`,
+`info_filepath` to `files`, `create_at` has no counterpart and is unused.
+
+Write sites: `api.py:450/732`, `expense.py:519`, `api.py:913` (mutate),
+`report_detail.py:376` (delete). Reads: `publish.py:1329` matters —
+`validate_expenses_for_system_accounts` genuinely reads it.
+
+Its FK was re-pointed at `report.id` in `r4a04`, so the values are already
+correct if anything needs migrating.
+
+### Method
+
+Same as Steps 2 and 3: **one function at a time**, creation site and its
+lookups together, exercise the step in the browser before moving on.
+
+Unlike Steps 2 and 3 there is no mirror to remove afterwards — these tables
+never had one, because their values were already being dual-written by the
+application itself.
+
+### Before starting
+
+Confirm the dual-writes really are complete, or the flip loses data:
+
+```sql
+-- Cash counts present as rows? (should match, per report)
+SELECT c.report_id,
+       (SELECT count(*) FROM pettycashv2.report_cash_count rc
+         WHERE rc.report_id = c.report_id) AS rows_present
+  FROM pettycashv2.report_cashcount_draft c
+ WHERE (SELECT count(*) FROM pettycashv2.report_cash_count rc
+         WHERE rc.report_id = c.report_id) = 0
+   AND (c.thousand_note IS NOT NULL OR c.onehundred_note IS NOT NULL);
+-- Rows returned = cash counts that exist ONLY as wide columns. Investigate.
+```
+
+> **⚠️ This query over-reports (verified 3 Aug 2026 — it returned 8, all false
+> positives).** `save_cash_count_details` deliberately stores **no** row for a
+> denomination counted as zero, so an all-zero cash count correctly has no
+> `report_cash_count` rows — while its wide columns are `0`, not NULL, so the
+> `IS NOT NULL` test still matches. Always check the column TOTAL before
+> investigating; only a non-zero total is a real gap:
+>
+> ```sql
+> SELECT c.report_id,
+>        COALESCE(c.thousand_note,0)*1000 + COALESCE(c.fivehundred_note,0)*500
+>      + COALESCE(c.onehundred_note,0)*100 + COALESCE(c.fifty_note,0)*50
+>      + COALESCE(c.twenty_note,0)*20  + COALESCE(c.ten_note,0)*10
+>      + COALESCE(c.five_coin,0)*5     + COALESCE(c.two_coin,0)*2
+>      + COALESCE(c.one_coin,0)*1 AS col_total
+>   FROM pettycashv2.report_cashcount_draft c
+>  WHERE NOT EXISTS (SELECT 1 FROM pettycashv2.report_cash_count rc
+>                     WHERE rc.report_id = c.report_id);
+> -- col_total = 0  -> all-zero count, correct, ignore
+> -- col_total > 0  -> a REAL gap. Investigate.
+> ```
 
 ---
 
@@ -235,7 +454,9 @@ When done, delete `expense_draft_mirror.py`, its registration, and
 
 **Take a backup first.** Nothing below can be undone without one.
 
-Only after Steps 2 and 3 have soaked in production for at least a few days.
+Only after Steps 2, 3 **and 3.5** have soaked in production for at least a few
+days. Three of the seven tables below still had live writers after Step 3 —
+confirm the counts in Step 3.5 are all zero before starting.
 
 Drop in this order (children before parents):
 
@@ -251,7 +472,20 @@ Drop in this order (children before parents):
 
 `actual_cash_total` seeds the *next* report's opening balance
 (`create.py:288`, `opening.py:1044`). `r1a01` hoisted it onto `report`, and
-`opening.py` now prefers the `report` column. Confirm no rows would lose it:
+`opening.py` now prefers the `report` column.
+
+> **⚠️ Corrected 3 Aug 2026.** `report.actual_cash_total` **never had a
+> writer** — every assignment targeted `cashcount_draft`, and the draft mirror
+> excluded the column by design, so the preferred read always found NULL and
+> fell through. This check therefore FAILS on the pre-3.5 codebase, and
+> "backfill before dropping" was not sufficient on its own: without adding the
+> missing write, every report created afterwards loses the value again.
+>
+> Step 3.5 fixed both — `cash_count.py` now writes it, and
+> `migrations/r7a07_backfill_actual_cash_total.sql` fills the history. **Run
+> that migration before relying on the check below.**
+
+Confirm no rows would lose it:
 
 ```sql
 SELECT count(*)
@@ -281,14 +515,26 @@ This was flagged rather than decided. Decide it here.
 
 Neither is caused by the consolidation; both predate it.
 
-**Cross-tenant draft lookup.** `blueprints/xero/services/publish.py:461` matches
-rows on `transaction_date` **alone — no company filter**, so it can return
-another entity's report. Left visible with a comment rather than silently
-patched. Deserves its own fix and a test.
+**Cross-tenant draft lookup — FIXED in Step 4a-3.** `publish.py` matched rows
+on `transaction_date` **alone**, so it could return another entity's report.
+Step 4a-3 rewrote those exact lines while collapsing the draft/posted branches,
+so the fix landed there: the lookup now filters `Report.company == entity_id`.
+Covered by `tests/test_report_consolidation_step4.py` (`TestPublishReportLookupIsTenantScoped`),
+which also pins the two things that must NOT change — no status filter (publish
+runs after submit) and a None-guard before `.id` is read.
 
-**No HTTP timeouts.** No `requests` call in the codebase sets one except
-`services/auth/token_service.py:79`, fixed after it hung a worker until
-gunicorn killed it mid-response. Every other call can do the same.
+**No HTTP timeouts — STILL OPEN, deliberately out of scope.** 35 `requests`
+calls set no timeout; only `services/auth/token_service.py:79` does, fixed
+after it hung a worker until gunicorn killed it mid-response. Every other call
+can do the same. Unrelated to the consolidation and untouched by it — worth its
+own pass.
+
+**Export PDF was broken independently — FIXED 4 Aug 2026.** `app.root_path`
+resolves to the app-factory package (`services/app_runtime/legacy`), which has
+no `static/`, so `Daily_Report_Template.docx` was never found and the export
+500'd with "missing the report template". Now uses `app.static_folder`; the two
+`temp` paths in the same file were re-pointed at `app.instance_path` for the
+same reason. Pre-existing, not caused by this work.
 
 ---
 

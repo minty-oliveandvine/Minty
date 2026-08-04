@@ -16,7 +16,7 @@ from blueprints.xero.services.integration import get_accounts_from_xero
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, get_entity_account_settings,
     get_missing_xero_settings_fields)
-from models.db import Entity, Report, ReportDraft, User, UserEntity, db, tz
+from models.db import Entity, Report, User, UserEntity, db, tz
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
 from services.authz import (permission_denied, require_entity_access,

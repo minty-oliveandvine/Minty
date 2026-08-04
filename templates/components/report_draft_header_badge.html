@@ -1,6 +1,6 @@
 {# Report flow header status — colors/labels match report_history.html (Published > Draft > Submitted). #}
 {% set _xo = false %}
-{# Xero publish updates Report.xero_integrated_yes; expense step passes header_xero_integrated_yes when current_draft is ReportDraft. #}
+{# Xero publish updates Report.xero_integrated_yes; expense step passes header_xero_integrated_yes for draft-status reports. #}
 {% if header_xero_integrated_yes is defined and header_xero_integrated_yes %}
   {% set _xo = true %}
 {% endif %}

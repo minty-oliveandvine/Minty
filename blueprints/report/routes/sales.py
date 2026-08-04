@@ -15,8 +15,7 @@ from blueprints.report.services.shared import (
     safe_float, sum_sales_by_type, update_draft_progress,
     update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportDraft, ReportSaleDetail,
-                       EntitySaleSetting, db, tz)
+from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, db, tz
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -151,17 +150,11 @@ def report_sale(id=None):
 
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
+        # Step 4a-6: collapsed off the ReportDraft coalesce — drafts live in
+        # `report` since Stage 4a. Any status, as before.
         latest_report_date = (
-            db.session.query(
-                db.func.max(
-                    db.func.coalesce(
-                        Report.transaction_date, ReportDraft.transaction_date
-                    )
-                )
-            )
-            .filter(
-                db.or_(Report.company == entity_id, ReportDraft.company == entity_id),
-            )
+            db.session.query(db.func.max(Report.transaction_date))
+            .filter(Report.company == entity_id)
             .scalar()
         )
 
@@ -242,7 +235,7 @@ def report_sale(id=None):
                         f"Edit mode - updating sales for report {existing_report.id}"
                     )
                     # The sales update logic will handle updating the report
-                    # We'll update both Report and ReportDraft
+                    # One row covers both draft and submitted
 
             # Check for existing draft: by id when in URL, else by (entity,
             # transaction_date)
@@ -250,13 +243,13 @@ def report_sale(id=None):
             logger.info(f"  Company: {entity_id}")
             logger.info(f"  Transaction date: {transaction_date}")
             if id:
-                existing_draft = ReportDraft.query.filter_by(
+                existing_draft = Report.query.filter_by(
                     id=id,
                     company=entity_id,
                     status="draft",
                 ).first()
             else:
-                existing_draft = ReportDraft.query.filter_by(
+                existing_draft = Report.query.filter_by(
                     company=entity_id,
                     transaction_date=transaction_date,
                     status="draft",
@@ -268,15 +261,17 @@ def report_sale(id=None):
 
             # Debug logging only — deliberately unfiltered so the log shows
             # every row and its status. Nothing branches on this result.
-            all_user_drafts = ReportDraft.query.filter(
-                ReportDraft.company == entity_id,
-                ReportDraft.uploaded_by == current_user.username,
+            # Now spans submitted reports too, since they share the table.
+            # Still debug-only; nothing branches on it.
+            all_user_drafts = Report.query.filter(
+                Report.company == entity_id,
+                Report.uploaded_by == current_user.username,
             ).all()
             logger.info(
                 f"Sales form - All drafts for user {current_user.username}: {[(d.id, d.transaction_date, d.status) for d in all_user_drafts]}"
             )
 
-            report_draft: ReportDraft | None = existing_draft
+            report_draft: Report | None = existing_draft
 
             if existing_draft:
                 # Update existing draft - preserve all existing data, only update sales fields; track last editor
@@ -446,12 +441,26 @@ def report_sale(id=None):
 
             else:
                 # No existing draft found - this should not happen if user came
-                # from opening form. Deliberately status-AGNOSTIC: the recovery
-                # path forces status="draft" below, so it must be able to find a
-                # row the "draft" filter would have excluded.
-                any_draft = ReportDraft.query.filter(
-                    ReportDraft.company == entity_id,
-                    ReportDraft.transaction_date == transaction_date,
+                # from opening form.
+                #
+                # STEP 4a-6 — THE LANDMINE. This was deliberately
+                # status-AGNOSTIC so the recovery could pick up a row the
+                # "draft" filter excluded, then force status="draft" below.
+                # That was survivable while report_draft was a separate table.
+                # It is NOT now: an unfiltered match can return a genuinely
+                # SUBMITTED report and the forced flip would UN-SUBMIT it.
+                #
+                # Constrained to drafts. The cost is that the recovery can no
+                # longer resurrect a posted row — which is the point: silently
+                # un-submitting a real report is far worse than failing to
+                # recover. In the no-id branch this makes the lookup redundant
+                # with `existing_draft` above (same filter), so the recovery is
+                # now only meaningful when an `id` was supplied and the row is
+                # found by date instead.
+                any_draft = Report.query.filter(
+                    Report.company == entity_id,
+                    Report.transaction_date == transaction_date,
+                    Report.status == "draft",
                 ).first()
 
                 if any_draft:
@@ -764,9 +773,9 @@ def report_sale(id=None):
             try:
                 # Check if the draft still exists after rollback
                 draft_obj = locals().get("report_draft")
-                if isinstance(draft_obj, ReportDraft):
+                if isinstance(draft_obj, Report):
                     draft_id = draft_obj.id
-                    draft_check = ReportDraft.query.filter_by(id=draft_id).first()
+                    draft_check = Report.query.filter_by(id=draft_id).first()
                     if draft_id is not None and not draft_check:
                         logger.warning(
                             f"Draft record {draft_id} may have been lost due to rollback"

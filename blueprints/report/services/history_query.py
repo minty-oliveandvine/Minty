@@ -9,7 +9,7 @@ from sqlalchemy.orm import joinedload
 from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.publish_errors import latest_publish_reason_items
 from blueprints.xero.services.publish_resolution import annotate_resolution
-from models.db import Entity, Report, ReportDraft, User
+from models.db import Entity, Report, User
 from utils.entity import ensure_hk_timezone
 
 
@@ -42,32 +42,25 @@ def get_entity_report_history(
     report_query = Report.query.options(
         joinedload(cast(Any, Report.report_histories))
     ).filter(Report.company == entity_id)
-    # No joinedload: ReportDraft.report_history_drafts was removed in r6a06
-    # (report_history_draft now FKs report.id). History for drafts lives in
-    # report_history and is loaded by report_query above, since every draft
-    # has a `report` row with the same id.
-    draft_query = ReportDraft.query.filter(ReportDraft.company == entity_id)
+    # Step 4a-6: the parallel draft_query is gone. It selected the same rows
+    # report_query already returns — drafts live in `report` since Stage 4a —
+    # so keeping it would have listed every draft twice in the history.
+    # History itself lives in report_history and is joinedload'ed above.
 
     if start_date and end_date:
         report_query = report_query.filter(
             Report.transaction_date >= start_date,
             Report.transaction_date <= end_date,
         )
-        draft_query = draft_query.filter(
-            ReportDraft.transaction_date >= start_date,
-            ReportDraft.transaction_date <= end_date,
-        )
 
     if report_id:
         report_query = report_query.filter(Report.id == report_id)
-        draft_query = draft_query.filter(ReportDraft.id == report_id)
 
     if uploaded_by:
         report_query = report_query.filter(Report.uploaded_by == uploaded_by)
-        draft_query = draft_query.filter(ReportDraft.uploaded_by == uploaded_by)
 
     all_reports = report_query.all()
-    all_drafts = draft_query.all()
+    all_drafts = []  # see above: drafts are already in all_reports
 
     logger.info(
         f"Query results - Reports found: {len(all_reports)}, Drafts found: {len(all_drafts)}"
