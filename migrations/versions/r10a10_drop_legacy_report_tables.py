@@ -217,6 +217,46 @@ def upgrade():
         )
     print("r10a10: P4 OK — no view depends on the seven")
 
+    # ---- P5 -------------------------------------------------------------
+    # Sequences owned by the seven, borrowed by a table in ANOTHER schema.
+    #
+    # P3 only looks at foreign keys, which is not the only way something can
+    # depend on a table. A schema copied with CREATE TABLE ... (LIKE ...) or a
+    # hand-rolled clone keeps its columns pointing at the ORIGINAL sequences,
+    # so `DROP TABLE` fails with DependentObjectsStillExist part-way through.
+    #
+    # Found on prestaging (4 Aug 2026): pettycashv2_clone.report_history_draft
+    # borrowed pettycashv2.report_history_draft_id_seq. The drop failed at the
+    # first table and rolled back — correct, but the pre-flight should have
+    # said so before starting.
+    borrowers = bind.execute(
+        sa.text(
+            """
+            SELECT cn.nspname || '.' || c.relname AS borrower, s.relname AS seq
+              FROM pg_depend d
+              JOIN pg_class s      ON s.oid = d.refobjid AND s.relkind = 'S'
+              JOIN pg_namespace sn ON sn.oid = s.relnamespace AND sn.nspname = :schema
+              JOIN pg_attrdef ad   ON ad.oid = d.objid
+              JOIN pg_class c      ON c.oid = ad.adrelid
+              JOIN pg_namespace cn ON cn.oid = c.relnamespace AND cn.nspname <> :schema
+             WHERE EXISTS (
+                     SELECT 1 FROM unnest(:targets) t
+                      WHERE s.relname LIKE t || '%')
+            """
+        ),
+        {"schema": SCHEMA, "targets": DROP_ORDER},
+    ).fetchall()
+    if borrowers:
+        detail = "; ".join(f"{b} uses {s}" for b, s in borrowers)
+        raise RuntimeError(
+            f"r10a10 P5: a table outside {SCHEMA} borrows a sequence owned by "
+            f"one of the seven: {detail}. Detach it first — e.g. "
+            "ALTER TABLE <borrower> ALTER COLUMN <col> DROP DEFAULT; — or drop "
+            "the copy entirely. Do NOT use DROP TABLE ... CASCADE: that removes "
+            "the sequence out from under the borrower and silently breaks it."
+        )
+    print("r10a10: P5 OK — no outside table borrows a sequence from the seven")
+
     # ---- DROP -------------------------------------------------------------
     for table in present:
         n = bind.execute(sa.text(f"SELECT count(*) FROM {SCHEMA}.{table}")).scalar()

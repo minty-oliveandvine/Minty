@@ -90,6 +90,34 @@ SELECT DISTINCT dependent.relname AS view_name,
    AND dependent.relkind IN ('v','m');
 
 
+-- ---- P5: sequences borrowed by a table in ANOTHER schema --------------
+-- Expect NO ROWS.
+--
+-- P3 only covers foreign keys, which is not the only way something can depend
+-- on a table. A schema copied with CREATE TABLE (LIKE ...) keeps its columns
+-- pointing at the ORIGINAL sequences, so DROP TABLE fails part-way through
+-- with DependentObjectsStillExist.
+--
+-- Hit on prestaging 4 Aug 2026: pettycashv2_clone.report_history_draft
+-- borrowed pettycashv2.report_history_draft_id_seq.
+--
+-- FIX: detach the borrower, do NOT use CASCADE (that drops the sequence out
+-- from under it and silently breaks the copy):
+--     ALTER TABLE <borrower> ALTER COLUMN <col> DROP DEFAULT;
+SELECT cn.nspname||'.'||c.relname AS borrower, s.relname AS borrowed_sequence
+  FROM pg_depend d
+  JOIN pg_class s      ON s.oid = d.refobjid AND s.relkind='S'
+  JOIN pg_namespace sn ON sn.oid = s.relnamespace AND sn.nspname='pettycashv2'
+  JOIN pg_attrdef ad   ON ad.oid = d.objid
+  JOIN pg_class c      ON c.oid = ad.adrelid
+  JOIN pg_namespace cn ON cn.oid = c.relnamespace AND cn.nspname <> 'pettycashv2'
+ WHERE EXISTS (
+   SELECT 1 FROM unnest(ARRAY['report_draft','shop_expense_draft',
+                              'report_cashcount_draft','report_history_draft',
+                              'report_detail','report_expense_detail','report_v2']) t
+    WHERE s.relname LIKE t||'%');
+
+
 -- ---- Row counts, for the record --------------------------------------
 SELECT 'report_history_draft' t, count(*) FROM pettycashv2.report_history_draft
 UNION ALL SELECT 'shop_expense_draft',     count(*) FROM pettycashv2.shop_expense_draft
