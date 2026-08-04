@@ -21,10 +21,12 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import jwt
-from flask import current_app, flash, redirect, request, url_for
+from flask import (current_app, flash, has_request_context, redirect, request,
+                   session, url_for)
 from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
+from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity)
 from services.permission_policy import Role, is_superuser
@@ -75,6 +77,10 @@ def module_selector(entity_id):
     # super_admin role in the JWT so Module 2 can identify them.
     effective_role = user_entity.role if user_entity else Role.SUPER_ADMIN.value
 
+    # No access resync here any more. It re-read live Stripe on every page view to
+    # catch a webhook that never arrived; the gate is now written by the app itself
+    # whenever access changes, and the daily sweep closes it when a grace window
+    # lapses (modules.sweep_expired_module_access).
     current_app.logger.info(f"Checking enabled modules for entity {entity_id}")
     billing_enabled = _is_module_enabled(entity_id, "BILL")
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
@@ -193,6 +199,12 @@ def _generate_module_token(
         "role": role or "",
         "system_role": system_role,
         "module": "billing",
+        # Which sign-in this token belongs to. Module 2 cannot see the Flask session,
+        # so this is how it honours "once per login" for the subscription notice: it
+        # keys its own per-tab flag by this value, and a fresh login mints a new one.
+        # Empty outside a request context (the CLI mints tokens too) — the frontend
+        # falls back to a plain per-tab flag, which is what it did before.
+        "sid": session.get(LOGIN_SID_SESSION_KEY, "") if has_request_context() else "",
         "billing_enabled": billing_enabled,
         # Mirror of billing_enabled for the petty-cash module — drives the
         # Module 2 nav's Petty Cash section visibility. Defaults True so old
@@ -205,18 +217,29 @@ def _generate_module_token(
 
 
 def _is_module_enabled(entity_id: str, function_code: str) -> bool:
-    """Check pettycashv2.entity_function / entity_function_map. Defaults to
-    enabled when the function row doesn't exist (backward-compatible for
-    entities that predate the gating table)."""
+    """Fast per-request access gate: reads ``entity_function_map``.
+
+    ``is_enabled`` is not a fact — it is a PROJECTION of the module's
+    ``entity_module_subscription`` row, which is the record of truth. Only the
+    subscription lifecycle writes it (trial start, conversion, expiry, uncancel,
+    renew, and the daily sweep that closes date boundaries no event fires on).
+    This function just reads the projection, so a request costs one indexed
+    lookup rather than a join across the billing tables.
+
+    Every unknown answers NO. A missing catalog row, or an entity with no map row,
+    used to fall through to ENABLED (via the catalog ``is_active``) — which granted
+    a module to every entity that had never subscribed to it, and left the "Start
+    free trial" button showing on a module the user was already inside.
+    """
     entity_function = EntityFunction.query.filter(
         EntityFunction.function_code == function_code
     ).first()
 
     if not entity_function:
-        current_app.logger.info(
-            f"Function {function_code} not found - defaulting to ENABLED"
+        current_app.logger.warning(
+            f"Function {function_code} not found - denying access"
         )
-        return True
+        return False
 
     function_map = EntityFunctionMap.query.filter(
         EntityFunctionMap.entity_id == entity_id,
@@ -226,7 +249,9 @@ def _is_module_enabled(entity_id: str, function_code: str) -> bool:
     if function_map:
         return function_map.is_enabled
 
-    return entity_function.is_active
+    # No projection row means nothing has ever granted this module. The catalog's
+    # ``is_active`` says whether a module is offered at all, never who may use it.
+    return False
 
 
 def _resolve_user_entity_role(user_id, entity_id) -> str:
@@ -337,6 +362,104 @@ def billing_app_profile_url(entity_id: str, org: Entity, user_id, *, from_bills:
     if from_bills:
         url += "&from=bills"
     return url
+
+
+def _notice_cors(resp):
+    """Let the Module 2 frontend call this cross-origin (bearer-token auth).
+
+    Mirrors the ``/api/onboarding/*`` contract in ``routes.create._cors``. The app
+    already installs flask-cors globally, but naming the origin explicitly keeps the
+    allowance narrow and pins ``Vary: Origin`` so a cached response for one origin is
+    never replayed to another.
+    """
+    resp.headers["Access-Control-Allow-Origin"] = _frontend_origin()
+    resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    return resp
+
+
+@entity_bp.route(
+    "/api/entity/<string:entity_id>/subscription-notice", methods=["GET", "OPTIONS"]
+)
+def subscription_notice_api(entity_id):
+    """Subscription notice for the Module 2 (Payment) landing page.
+
+    Same data the Petty Cash dashboard modal renders, over JSON. The billing frontend
+    talks to its own backend for everything else; subscription state lives only here,
+    so this is the one endpoint it calls on Minty's origin.
+
+    Auth is the billing JWT — the same token Module 2 already holds, signed with this
+    app's ``SECRET_KEY``. The token's ``entity_id`` claim must match the path, so a
+    token minted for one company cannot read another's billing state, and membership
+    is re-checked server-side rather than trusted from the claim.
+
+    Stateless by design: it does NOT consume ``claim_subscription_notice``. The
+    "show once per session" rule is the caller's, and the frontend keeps its own
+    per-tab flag — a shared Flask session doesn't exist across the two origins.
+    """
+    from flask import jsonify, make_response
+
+    if request.method == "OPTIONS":
+        return _notice_cors(make_response("", 204))
+
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return _notice_cors(make_response(jsonify({"error": "unauthorized"}), 401))
+
+    try:
+        decoded = jwt.decode(
+            header[len("Bearer "):].strip(),
+            current_app.config.get("SECRET_KEY"),
+            algorithms=["HS256"],
+        )
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
+        return _notice_cors(make_response(jsonify({"error": "unauthorized"}), 401))
+
+    user_id = decoded.get("user_id")
+    if not user_id:
+        return _notice_cors(make_response(jsonify({"error": "no_user_claim"}), 403))
+
+    # The claim scopes the token to one company. Enforced only when the token
+    # carries one: the refresh path mints tokens through the Module 2 backend, and a
+    # missing claim there would otherwise lock this endpoint out for every user whose
+    # 30-minute token has rolled over. Authorisation does not rest on this — the
+    # membership check below is what decides, and it reads the PATH entity.
+    claimed = str(decoded.get("entity_id") or "")
+    if claimed and claimed != str(entity_id):
+        current_app.logger.info(
+            f"Notice API: token scoped to {claimed}, asked for {entity_id}"
+        )
+        return _notice_cors(make_response(jsonify({"error": "entity_mismatch"}), 403))
+
+    from services.permission_policy import has_entity_access
+
+    user = User.query.get(str(user_id))
+    if not user or not (
+        is_superuser(user) or has_entity_access(user, entity_id)
+    ):
+        current_app.logger.info(
+            f"Notice API: user {user_id} has no access to {entity_id}"
+        )
+        return _notice_cors(make_response(jsonify({"error": "not_a_member"}), 403))
+
+    from blueprints.entity.services.modules import build_subscription_notices
+
+    try:
+        notice = build_subscription_notices(entity_id, user_id)
+    except Exception as exc:  # a notice must never break the landing page
+        current_app.logger.error(
+            f"Subscription notice API failed for {entity_id}: {exc}"
+        )
+        return _notice_cors(make_response(jsonify({"items": []}), 200))
+
+    # A Minty PATH, not a URL: subscription management lives on this side, and the
+    # frontend's buildMintyEnterUrl() already knows how to hand its token back for a
+    # session. Returning a bare origin here would skip that and land on the login form.
+    notice["settings_path"] = url_for(
+        "entity.entity_settings_module", org_id=entity_id
+    )
+    return _notice_cors(make_response(jsonify(notice), 200))
 
 
 def billing_app_profile_unscoped_url(user_id, *, from_bills: bool = False) -> str:

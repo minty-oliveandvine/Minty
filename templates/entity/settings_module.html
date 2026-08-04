@@ -144,9 +144,9 @@
             Payment Settings
           </a>
           {% endif %}
-          <!-- Module & Subscription Tab (Active) — TEMP: renamed to "Module" -->
+          <!-- Module & Subscription Tab (Active) -->
           <button type="button" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center text-center">
-            Module
+            Module &amp; Subscription
           </button>
         </div>
       </div>
@@ -155,118 +155,7 @@
       <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1">
         <h1 class="text-2xl font-bold text-gray-900 mb-2">Module</h1>
 
-        <div class="flex flex-col lg:flex-row lg:items-start gap-8">
-          <!-- Left column: module cards -->
-          <div class="flex-1 min-w-0">
-        <p class="text-sm text-gray-600 mb-8">Choose which modules your company wants to use.{% if not can_manage_modules %} <span class="text-gray-400">(Only admins can change modules.)</span>{% endif %}</p>
-        {# module_cards is built on the backend (entity.services.modules.get_module_cards):
-           DB-driven enabled state + cancellation date, catalog name/description,
-           and static presentation metadata (image/price/learn_more). #}
-        {% for card in module_cards %}
-        {% set enabled = card.is_enabled %}
-        <div class="flex items-start gap-4 mb-10 max-w-xl">
-          <!-- Illustration -->
-          <div class="shrink-0 w-28 h-28 rounded-lg border border-gray-100 bg-white flex items-center justify-center overflow-hidden">
-            <img src="{{ url_for('static', filename=card.image) }}" alt="{{ card.name }}" class="w-full h-full object-contain" />
-          </div>
-
-          <!-- Text -->
-          <div class="flex-1 min-w-0">
-            <h3 class="font-bold text-gray-900">{{ card.name }}</h3>
-            <p class="text-sm text-gray-600 mt-1">{{ card.description }}</p>
-            <a href="{{ card.learn_more }}" target="_blank" rel="noopener noreferrer" class="text-sm text-gray-500 underline mt-3 inline-block hover:text-gray-700">Learn more</a>
-
-            {# TEMP-HIDE (Module-only view): remove this {% if false %} wrapper to restore the pending-cancellation / reactivate block #}
-            {% if false %}
-            <!-- Pending-cancellation state: shown only while the module is disabled -->
-            <div class="mt-4 {% if enabled %}hidden{% endif %}" data-cancellation="{{ card.code }}">
-              <p class="text-sm text-gray-700">
-                You will have access to {{ card.name }} features until
-                <span class="font-medium text-[#54D3DA]">{{ card.cancellation_date }}</span>
-              </p>
-              <div class="mt-3">
-                <button type="button"
-                        class="bg-[#54D3DA] hover:bg-[#54D3DA]/90 text-white text-sm font-semibold px-5 py-2.5 rounded-md transition-colors"
-                        onclick="toggleModule('{{ card.code }}', true, null)">
-                  Reactivate your Module
-                </button>
-              </div>
-            </div>
-            {% endif %}
-          </div>
-
-          <!-- Toggle + price -->
-          <div class="shrink-0 flex flex-col items-end gap-1.5 pt-1">
-            <label class="relative inline-flex items-center {% if can_manage_modules %}cursor-pointer{% else %}cursor-not-allowed opacity-60{% endif %}">
-              <input type="checkbox" class="sr-only peer module-toggle" data-code="{{ card.code }}" {% if enabled %}checked{% endif %} {% if not can_manage_modules %}disabled{% endif %}>
-              <div class="w-9 h-5 bg-gray-200 rounded-full peer transition-colors
-                          peer-checked:bg-[#54D3DA]
-                          after:content-[''] after:absolute after:top-0.5 after:left-0.5
-                          after:bg-white after:rounded-full after:h-4 after:w-4 after:shadow
-                          after:transition-transform peer-checked:after:translate-x-4"></div>
-            </label>
-            {# TEMP-HIDE (Module-only view): remove this {% if false %} wrapper to restore the price #}
-            {% if false %}
-            <span class="text-[11px] text-gray-400 line-through whitespace-nowrap">{{ card.price }}</span>
-            {% endif %}
-            <span class="inline-block px-3 py-1 rounded-full text-[11px] font-medium bg-[#1F2937] text-white whitespace-nowrap">Free Trial</span>
-          </div>
-        </div>
-        {% endfor %}
-
-        <!-- Save (bottom right of cards): toggles only stage changes; this applies them. -->
-        <div class="mt-6 flex justify-end max-w-xl">
-          <button id="save-modules-button" type="button" disabled
-                  class="bg-[#54D3DA] hover:bg-[#54D3DA]/90 text-white text-sm font-semibold px-6 py-2.5 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            Save
-          </button>
-        </div>
-          </div>
-
-          {# TEMP-HIDE (Module-only view): remove this {% if false %} wrapper to restore the subscription summary #}
-          {% if false %}
-          <!-- Right column: subscription summary -->
-          {% if subscription_summary %}
-          {% set sub = subscription_summary %}
-          <aside class="w-full lg:w-80 shrink-0">
-            <div id="subscription-summary" class="rounded-2xl bg-[#EAF8F9] p-6" data-currency="{{ sub.currency }}">
-              <h2 class="text-lg font-bold text-gray-900 mb-5 flex items-center justify-between">
-                <span>Subscription</span>
-                <span class="text-sm font-semibold text-gray-700">{{ sub.currency }}</span>
-              </h2>
-
-              <div data-summary-lines>
-              {% for line in sub.lines %}
-              <div class="flex items-center justify-between text-sm text-gray-700 mb-3">
-                <span>{{ line.label }}</span>
-                <span>{{ line.amount }}</span>
-              </div>
-              {% endfor %}
-              </div>
-
-              <div class="flex items-center justify-end border-t border-gray-300 pt-2 mt-1 text-sm font-medium text-gray-900">
-                <span data-summary-subtotal>{{ sub.subtotal }}</span>
-              </div>
-
-              <div data-summary-discount class="flex items-center justify-between text-sm text-gray-700 mt-5 border-b border-gray-300 pb-2 {% if not sub.has_discount %}hidden{% endif %}">
-                <span>Bulk discount</span>
-                <span>(<span data-summary-discount-amount>{{ sub.bulk_discount }}</span>)</span>
-              </div>
-
-              <div class="flex items-center justify-between mt-3 mb-6">
-                <span class="text-sm font-bold text-gray-900">Total</span>
-                <span class="text-base font-bold text-gray-900" data-summary-total>{{ sub.total }}</span>
-              </div>
-
-              <button type="button"
-                      class="w-full bg-[#54D3DA] hover:bg-[#54D3DA]/90 text-white text-sm font-semibold px-5 py-3 rounded-lg transition-colors">
-                Activate Now
-              </button>
-            </div>
-          </aside>
-          {% endif %}
-          {% endif %}{# end TEMP-HIDE subscription summary #}
-        </div>
+        {% include 'entity/partials/module_subscription_section.html' %}
       </div>
 
     </div>
@@ -274,70 +163,7 @@
 
   <script>
     PageTransition.init('.main-content', 'fadeIn', 10);
-
-    // Toggles only stage changes now; nothing is applied until Save is clicked.
-    const saveBtn = document.getElementById('save-modules-button');
-
-    function markModulesDirty() {
-      if (saveBtn) saveBtn.disabled = false;
-    }
-
-    // Resolve the module-settings URL for the shell this entity belongs in,
-    // given its module state. Bills shell ONLY when Petty Cash is OFF and Bill
-    // is ON; every other combination uses the standard (non-Bills) shell.
-    function resolveShellUrl(mods) {
-      mods = mods || {};
-      const base = "{{ url_for('entity_settings_module', org_id=org.id) }}";
-      return (mods.PETTY_CASH === false && mods.BILL === true)
-        ? base + "?from=bills"
-        : base;
-    }
-
-    async function saveModules() {
-      const csrf = document.querySelector('meta[name="csrf_token"]')?.content || '';
-      const modules = {};
-      document.querySelectorAll('.module-toggle').forEach(function (t) {
-        modules[t.dataset.code] = t.checked;
-      });
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
-      try {
-        const res = await fetch("{{ url_for('entity.entity_settings_module_save', org_id=org.id) }}", {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-          body: JSON.stringify({ modules: modules })
-        });
-        const data = await res.json();
-        if (!res.ok || data.error) throw new Error(data.error || 'Failed to save modules');
-        // Reload into the correct shell so nav/pills reflect the saved state.
-        window.location.href = resolveShellUrl(data.modules);
-      } catch (err) {
-        console.error('Module save failed:', err);
-        showFlashMessages("I couldn't save those modules. Mind trying again?", 'error');
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
-      }
-    }
-
-    // At least one module must stay active. We never inter-switch the two modules:
-    // turning off the last active module is blocked — re-check it and warn instead
-    // of flipping the other module on.
-    function onToggleChange(changedBox) {
-      const toggles = Array.from(document.querySelectorAll('.module-toggle'));
-      if (!toggles.some(function (t) { return t.checked; })) {
-        changedBox.checked = true;
-        if (typeof showWarningToast === 'function') {
-          showWarningToast('At least one module should be active.');
-        } else {
-          showFlashMessages('Keep at least one module active.', 'error');
-        }
-        return;
-      }
-      markModulesDirty();
-    }
-
-    document.querySelectorAll('.module-toggle').forEach(function (box) {
-      box.addEventListener('change', function () { onToggleChange(this); });
-    });
-    if (saveBtn) saveBtn.addEventListener('click', saveModules);
   </script>
+  {% include 'entity/partials/module_subscription_scripts.html' %}
 </body>
 </html>

@@ -3,12 +3,15 @@
 
 from datetime import datetime
 
-from flask import flash, redirect, render_template, url_for
+from flask import (current_app, flash, redirect, render_template, request,
+                   session, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
 from sqlalchemy import func, or_
 
 from blueprints.entity import entity_bp
+from blueprints.entity.services.modules import (build_subscription_notices,
+                                                claim_subscription_notice)
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
 from blueprints.shared.entity_display import build_entity_acronym
@@ -315,9 +318,39 @@ def report_dashboard(id):
         if _currency and _currency.currency_code:
             currency_symbol = _currency.currency_code
 
+    # Subscription notice — once per entity per login. claim_* is checked FIRST so
+    # the billing queries behind build_* never run on a page view that wouldn't show
+    # the modal anyway; the dashboard is a hot path.
+    #
+    # ``?notice=1`` re-shows it without a fresh login. Debug-gated, because the whole
+    # point of the claim is that a customer sees this once — but testing it otherwise
+    # means logging out between every attempt, and the claim is spent even on a visit
+    # that had nothing to show.
+    force_notice = bool(current_app.debug) and request.args.get("notice") == "1"
+    claimed = force_notice or claim_subscription_notice(session, id)
+    subscription_notice = None
+    if claimed:
+        try:
+            notice = build_subscription_notices(id, current_user.id)
+            subscription_notice = notice if notice["items"] else None
+        except Exception as exc:  # never break the dashboard over a notice
+            logger.error(f"Subscription notice build failed for {id}: {exc}")
+    # One line per dashboard load. "Not showing" has several indistinguishable
+    # causes — claim already spent, nothing to report, a build that threw — and
+    # without this the only way to tell them apart is to guess.
+    logger.info(
+        f"NOTICE {id}: forced={force_notice} claimed={claimed} "
+        f"items={len(subscription_notice['items']) if subscription_notice else 0} "
+        f"user={current_user.id}"
+    )
+
     return render_template(
         "entity/entity_dashboard_v2.html",
         org=org,
+        subscription_notice=subscription_notice,
+        subscription_settings_url=url_for(
+            "entity.entity_settings_module", org_id=id
+        ),
         currency_symbol=currency_symbol,
         server_today_hk=server_today_hk,
         main_bank_account=main_bank_account,

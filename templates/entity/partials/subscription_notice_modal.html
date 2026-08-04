@@ -1,0 +1,121 @@
+{# Subscription notice modal — shown once per entity per login.
+
+   The route decides WHETHER to render this (services.modules.claim_subscription_notice);
+   this partial only decides how it looks. It is deliberately a modal rather than a
+   toast: every item carries a deadline, and the page's toasts fade after 3 seconds.
+
+   Context: subscription_notice = {items, can_manage, payer, severity} from
+   services.modules.build_subscription_notices, and subscription_settings_url.
+   Items are entity-wide and each names its own module, so one company can be past
+   due on Petty Cash and winding down Payment in the same list. #}
+
+{% if subscription_notice and subscription_notice.items %}
+{% set notice = subscription_notice %}
+{% set critical = notice.severity == 'critical' %}
+{# Stacking: this must sit above every other overlay here, in particular
+   #setupSettingsModal at z-50 — which renders VISIBLE whenever the entity's Xero
+   settings are incomplete, i.e. on exactly the entities most likely to have a billing
+   problem. Dismissing this reveals whatever sits beneath.
+
+   The z-index is an INLINE STYLE, not a Tailwind class. This page styles itself from
+   the Tailwind Play CDN, which generates utilities by scanning the DOM at runtime;
+   `z-[60]` would have been the only arbitrary-value class on the page, and if the CDN
+   did not emit it the element would get no z-index at all and fall back to DOM order —
+   where #setupSettingsModal appears later and therefore paints on top. An inline style
+   cannot fail that way. #}
+<div id="subscriptionNoticeModal"
+     class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4"
+     style="z-index: 60;"
+     role="dialog" aria-modal="true" aria-labelledby="subscriptionNoticeTitle">
+  <div class="bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] overflow-y-auto"
+       style="min-width: 0;" onclick="event.stopPropagation()">
+
+    <div class="mb-4 flex items-start justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full
+                     {{ 'bg-red-100 text-red-600' if critical else 'bg-amber-100 text-amber-600' }}">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+        </span>
+        <h2 id="subscriptionNoticeTitle" class="text-xl font-bold text-gray-900">
+          {% if critical %}Action needed{% else %}Your subscription{% endif %}
+        </h2>
+      </div>
+      <button type="button" onclick="hideSubscriptionNotice()" aria-label="Close"
+              class="text-gray-400 hover:text-gray-600 shrink-0">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+
+    <ul class="space-y-3">
+      {% for item in notice['items'] %}
+      <li class="rounded-lg border p-3
+                 {{ 'border-red-200 bg-red-50' if item.severity == 'critical'
+                    else ('border-amber-200 bg-amber-50' if item.severity == 'warning'
+                    else 'border-gray-200 bg-gray-50') }}">
+        <p class="text-sm font-semibold
+                  {{ 'text-red-900' if item.severity == 'critical'
+                     else ('text-amber-900' if item.severity == 'warning' else 'text-gray-900') }}">
+          {{ item.title }}
+        </p>
+        <p class="mt-1 text-sm text-gray-600">{{ item.detail }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+
+    {# Only the payer can act. Anyone else gets a button that @require_subscription_payer
+       would refuse, so they are told who to ask instead. #}
+    {% if not notice.can_manage and notice.payer %}
+    <p class="mt-4 text-sm text-gray-500">
+      Billing for this company is managed by {{ notice.payer.name or notice.payer.email }}{% if notice.payer.name and notice.payer.email %}
+      &lt;{{ notice.payer.email }}&gt;{% endif %} — only they can change its subscription.
+    </p>
+    {% endif %}
+
+    <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+      <button type="button" onclick="hideSubscriptionNotice()"
+              class="w-full sm:w-auto rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-[#474747] transition-colors hover:bg-gray-100">
+        Dismiss
+      </button>
+      {% if notice.can_manage %}
+      <a href="{{ subscription_settings_url }}"
+         class="w-full sm:w-auto rounded-xl bg-[#54D3DA] px-4 py-3 text-center text-sm font-medium text-white shadow-md transition-colors hover:bg-[#54D3DA]/80">
+        Go to subscription settings
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+  /** Is some other overlay still up? The setup-settings modal in particular can be
+      visible underneath this one, and handing scrolling back while it is showing
+      would let the page move behind it. */
+  function subscriptionNoticeOthersVisible() {
+    return Array.from(document.querySelectorAll('[id$="Modal"]')).some(
+      (el) => el.id !== 'subscriptionNoticeModal' && !el.classList.contains('hidden')
+    );
+  }
+
+  function hideSubscriptionNotice() {
+    const modal = document.getElementById('subscriptionNoticeModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    // The dashboard's own helper, defined further down the page. Guarded because
+    // this partial is included before that script block runs.
+    if (typeof enableBodyScroll === 'function' && !subscriptionNoticeOthersVisible()) {
+      enableBodyScroll();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof disableBodyScroll === 'function') disableBodyScroll();
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') hideSubscriptionNotice();
+    });
+  });
+</script>
+{% endif %}

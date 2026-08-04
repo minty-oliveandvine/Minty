@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import uuid
 from collections import defaultdict
 from typing import Any, cast
 
@@ -16,7 +17,7 @@ import boto3
 import pytz
 from botocore.config import Config
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, session
 from flask_cors import CORS
 from flask_login import LoginManager
 from flask_mail import Mail
@@ -206,6 +207,7 @@ def create_app():
         os.environ.get("MAIL_DEBUG", "False").lower() == "true"
     )
 
+
     flask_env = os.environ.get("FLASK_ENV", "production")
     if flask_env == "production":
         app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("RDS_DATABASE_URI")
@@ -220,6 +222,30 @@ def create_app():
     login_manager = LoginManager()
     login_manager.init_app(app)
     cast(Any, login_manager).login_view = "auth.home"
+
+    # Per-sign-in state: reset the "already shown" flags, and stamp a new login id.
+    #
+    # ``logout_user()`` only removes Flask-Login's own session keys — the session
+    # COOKIE survives, and with it anything else stored there. So a once-per-login
+    # flag written into the session was really once-per-browser-forever: logging out
+    # and back in did not clear it, and a DIFFERENT user signing in on the same
+    # browser inherited the previous user's flags.
+    #
+    # The login id is what lets the Module 2 frontend honour the same rule. It cannot
+    # read this session, so it gets the id as a JWT claim and keys its own flag by it.
+    #
+    # Hooking the signal rather than the login route covers every path that
+    # authenticates someone — password, OTP, invitation accept, and the JWT
+    # re-entry from Module 2 — which is more than any one route could.
+    from flask_login import user_logged_in
+
+    from blueprints.entity.services.modules import (LOGIN_SID_SESSION_KEY,
+                                                    NOTICE_SEEN_SESSION_KEY)
+
+    @user_logged_in.connect_via(app)
+    def _reset_per_login_state(_sender, **_kwargs):
+        session.pop(NOTICE_SEEN_SESSION_KEY, None)
+        session[LOGIN_SID_SESSION_KEY] = uuid.uuid4().hex
 
     csrf = CSRFProtect(app)
     # Cross-module sync endpoints from Module 2 (billing_backend) authenticate
@@ -250,12 +276,16 @@ def create_app():
                                                   onboarding_invite_cancel,
                                                   onboarding_modules,
                                                   onboarding_opening_balance,
+                                                  onboarding_payment_method_complete,
+                                                  onboarding_payment_method_setup,
                                                   onboarding_sales_methods,
                                                   onboarding_saved_step,
                                                   onboarding_update_entity,
                                                   onboarding_xero_disconnect)
     csrf.exempt(onboarding_create_entity)
     csrf.exempt(onboarding_modules)
+    csrf.exempt(onboarding_payment_method_setup)
+    csrf.exempt(onboarding_payment_method_complete)
     csrf.exempt(onboarding_sales_methods)
     csrf.exempt(onboarding_opening_balance)
     csrf.exempt(onboarding_account_codes)
@@ -304,6 +334,11 @@ def create_app():
     # CLI commands — manual ops knobs while a subscription admin UI doesn't exist.
     from cli.modules import modules_cli
     app.cli.add_command(modules_cli)
+    # Subscription CLI: live-from-Stripe catalog inspection + access sweep.
+    from cli.subscription_access import subscriptions_cli
+    from cli.subscription_plans import plans_cli
+    app.cli.add_command(subscriptions_cli)
+    app.cli.add_command(plans_cli)
 
     return (
         app,

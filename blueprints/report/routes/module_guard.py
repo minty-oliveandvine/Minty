@@ -115,8 +115,10 @@ def _enforce_petty_cash_module():
         logger.error(f"Petty Cash module guard error: {exc}")
         return None
 
-    from services.authz import permission_denied
+    from services.authz import DENIAL_MODULE_INACTIVE, permission_denied
 
     return permission_denied(
-        "Petty Cash is not activated for this entity.", entity_id=entity_id
+        "Petty Cash is not activated for this entity.",
+        entity_id=entity_id,
+        reason=DENIAL_MODULE_INACTIVE,
     )

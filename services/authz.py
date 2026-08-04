@@ -28,18 +28,38 @@ def _auth_redirect() -> ResponseReturnValue:
     return redirect(url_for("auth.home"))
 
 
-def _forbidden(message: str, entity_id: str | None = None) -> ResponseReturnValue:
+#: Why a request was refused. Carried to the no-permission page so it can say
+#: something useful instead of the generic "you don't have permission" — a
+#: disabled module is usually a lapsed subscription, which the user can fix
+#: themselves, while a real permission denial is not.
+DENIAL_MODULE_INACTIVE = "module_inactive"
+
+
+def _forbidden(
+    message: str, entity_id: str | None = None, *, reason: str | None = None
+) -> ResponseReturnValue:
     if _wants_json_response():
-        return jsonify({"status": "error", "message": message}), 403
-    flash(message, "danger")
+        payload: dict[str, str] = {"status": "error", "message": message}
+        if reason:
+            payload["reason"] = reason
+        return jsonify(payload), 403
+    # No toast for an inactive module: the no-permission page renders its own
+    # "Module not active" copy for that case, so flashing here would say the
+    # same thing twice — once permanently, once for three seconds. Real
+    # permission denials still need the toast; the page only has generic copy
+    # for them. JSON callers get ``message`` either way.
+    if reason != DENIAL_MODULE_INACTIVE:
+        flash(message, "danger")
     target_kwargs = {"entity_id": entity_id} if entity_id else {}
+    if reason:
+        target_kwargs["reason"] = reason
     return redirect(url_for("auth.no_permission", **target_kwargs))
 
 
 def permission_denied(
-    message: str, *, entity_id: str | None = None
+    message: str, *, entity_id: str | None = None, reason: str | None = None
 ) -> ResponseReturnValue:
-    return _forbidden(message, entity_id=entity_id)
+    return _forbidden(message, entity_id=entity_id, reason=reason)
 
 
 def _bad_request(message: str) -> ResponseReturnValue:
@@ -155,7 +175,9 @@ def require_module(
 
             if not _is_module_enabled(entity_id, module_code):
                 msg = message or "This module is not activated for this entity."
-                return _forbidden(msg, entity_id=entity_id)
+                return _forbidden(
+                    msg, entity_id=entity_id, reason=DENIAL_MODULE_INACTIVE
+                )
             return func(*args, **kwargs)
 
         return wrapper
@@ -181,6 +203,61 @@ def require_permission(
             )
             if not has_permission(current_user, permission, entity_id=entity_id):
                 return _forbidden(message, entity_id=entity_id)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def require_subscription_payer(
+    *,
+    entity_arg: str | None = None,
+    entity_keys: Iterable[str] | None = None,
+    message: str | None = None,
+):
+    """Block a route unless the caller is the entity's PAYER.
+
+    Money, not permissions. ``Permission.MODULE_MANAGE`` says who may administer an
+    entity; this says whose card is on the line. They are different questions, and every
+    subscription action — cancel, renew, start a trial, buy, retry a payment, open the
+    billing portal — spends or commits ONE person's money. Without this a co-admin could
+    cancel a module or trigger a charge against a card belonging to someone who never saw
+    the screen.
+
+    Sits ALONGSIDE the permission guard rather than replacing it: being the payer is
+    necessary, not sufficient. Order does not matter — both must pass.
+
+    An entity with no payer yet is open to any admin, because starting the first trial or
+    subscription is what establishes the payer (``store.upsert_module_row``). See
+    ``store.may_manage_subscription``.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not getattr(current_user, "is_authenticated", False):
+                return _auth_redirect()
+
+            entity_id = _extract_entity_id(
+                kwargs, entity_arg=entity_arg, entity_keys=entity_keys
+            )
+            if not entity_id:
+                return _bad_request(
+                    "I need to know which entity we're working with first!"
+                )
+
+            # Lazy import: the subscription store pulls in the model graph, and this
+            # module is imported early by the blueprints that use it.
+            from blueprints.subscription.services import store as sub_store
+
+            if not sub_store.may_manage_subscription(entity_id, current_user.id):
+                return _forbidden(
+                    message
+                    or "Only the person who pays for this company can change its "
+                    "subscription.",
+                    entity_id=entity_id,
+                )
             return func(*args, **kwargs)
 
         return wrapper

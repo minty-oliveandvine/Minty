@@ -37,6 +37,14 @@ from blueprints.xero.models.xero_bank_transaction import XeroBankTransaction  # 
 from blueprints.xero.models.xero_bank_transfer import XeroBankTransfer  # noqa: E402
 from blueprints.xero.models.xero_contact_sync import XeroContactSync  # noqa: E402
 from blueprints.xero.models.xero_report_sync import XeroReportSync  # noqa: E402
+from blueprints.subscription.models.user_stripe_customer import UserStripeCustomer  # noqa: E402
+from blueprints.subscription.models.entity_module_subscription import EntityModuleSubscription  # noqa: E402
+from blueprints.subscription.models.entity_billing_consent import EntityBillingConsent  # noqa: E402
+from blueprints.subscription.models.billing_plan import BillingPlan  # noqa: E402
+from blueprints.subscription.models.billing_policy import BillingPolicy  # noqa: E402
+from blueprints.subscription.models.subscription_audit_log import SubscriptionAuditLog  # noqa: E402
+from blueprints.subscription.models.subscription_invoice import SubscriptionInvoice, SubscriptionInvoiceLine  # noqa: E402
+from blueprints.subscription.models.subscription_email_log import SubscriptionEmailLog  # noqa: E402
 
 __all__ = [
     "db",
@@ -70,5 +78,14 @@ __all__ = [
     "Permissions",
     "RolePermissions",
     "Invitation",
+    "UserStripeCustomer",
+    "EntityModuleSubscription",
+    "EntityBillingConsent",
+    "BillingPlan",
+    "BillingPolicy",
+    "SubscriptionAuditLog",
+    "SubscriptionInvoice",
+    "SubscriptionInvoiceLine",
+    "SubscriptionEmailLog",
 ]
 

@@ -73,6 +73,12 @@ def _standalone_page_templates() -> list[pathlib.Path]:
     for p in TEMPLATES.rglob("*.html"):
         if p.name == "flash_messages.html":
             continue
+        # Email bodies are full documents but are never SERVED, so there is no
+        # session and no flash queue to drain — and the partial they would have to
+        # include emits a <script> call that no mail client would run. Rendered by
+        # ``subscription.services.notify`` and handed straight to Flask-Mail.
+        if p.relative_to(TEMPLATES).parts[0] == "email":
+            continue
         text = p.read_text(encoding="utf-8")
         if "<body" in text:
             pages.append(p)
