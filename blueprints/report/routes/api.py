@@ -20,8 +20,7 @@ from blueprints.report.services.share import create_share_link_for_report
 from blueprints.report.services.shared import get_cash_sales_from_detail
 from blueprints.xero.services.publish_errors import latest_publish_reason_items
 from blueprints.xero.services.publish_resolution import annotate_resolution
-from models.db import (Entity, Report, ReportDraft, ReportHistory, ShopExpense,
-                       ShopExpenseDraft, UserEntity, db)
+from models.db import Entity, Report, ReportHistory, ShopExpense, UserEntity, db
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token,
                                          get_xero_token_user_for_entity)
@@ -274,7 +273,7 @@ def report_expense_submit_all():
         from blueprints.report.services.s3_storage import upload_file_to_s3
         from blueprints.report.services.shared import (safe_float,
                                                        update_draft_progress)
-        from models.db import ReportExpenseDetail, db
+        from models.db import db
         from services.helpers.xero_bridge import (get_xero_data_dynamic,
                                                   resolve_contact_name)
 
@@ -446,17 +445,11 @@ def report_expense_submit_all():
         # the one it then wrote detail rows under — the exact hazard the note at
         # sales.py:706 warned about.
 
-        for expense in expenses:
-            report_expense_detail = ReportExpenseDetail(
-                expense_id=expense.id,
-                report_id=current_draft.id,
-                account_id=getattr(expense, "account_id", None),
-                amount=expense.amount,
-                info_filepath=getattr(expense, "files", None),
-                description=getattr(expense, "remarks", None),
-                create_at=datetime.now(),
-            )
-            db.session.add(report_expense_detail)
+        # The report_expense_detail rows written here went with Step 3.5. They
+        # duplicated shop_expense for the same expense (expense_id == the
+        # ShopExpense id, description -> remarks, info_filepath -> files), and
+        # the only genuine reader — validate_expenses_for_system_accounts —
+        # now reads ShopExpense directly.
         db.session.commit()
 
         # Get action_type from form data
@@ -545,8 +538,8 @@ def report_expense_submit_all():
 def report_expense_add():
     """Persist a single expense immediately when the user clicks "Add".
 
-    Uploads the expense's file(s) to S3 and commits one ShopExpenseDraft row
-    (plus its ReportExpenseDetail), then recomputes the draft total / closing
+    Uploads the expense's file(s) to S3 and commits one ShopExpense row
+    then recomputes the draft total / closing
     balance. This is one iteration of ``report_expense_submit_all`` returning
     JSON instead of a redirect — it does NOT advance draft progress, so the
     user stays on the expense page and can keep adding. Uploading one expense
@@ -560,7 +553,7 @@ def report_expense_add():
     from blueprints.report.services.s3_storage import upload_file_to_s3
     from blueprints.report.services.shared import (normalize_expense_files,
                                                    safe_float)
-    from models.db import ReportExpenseDetail, db
+    from models.db import db
     from services.helpers.xero_bridge import (get_xero_data_dynamic,
                                               resolve_contact_name)
 
@@ -729,16 +722,8 @@ def report_expense_add():
         # ReportV2 mirroring removed with its FK (r2a02) — see the note on the
         # bulk expense path above, including the lookup/insert key mismatch.
 
-        report_expense_detail = ReportExpenseDetail(
-            expense_id=expense.id,
-            report_id=current_draft.id,
-            account_id=account_id,
-            amount=expense.amount,
-            info_filepath=expense.files,
-            description=remarks,
-            create_at=datetime.now(),
-        )
-        db.session.add(report_expense_detail)
+        # report_expense_detail row removed in Step 3.5 — it duplicated the
+        # ShopExpense created above.
 
         db.session.commit()
 
@@ -818,7 +803,7 @@ def report_expense_update(expense_id):
     """
     from blueprints.report.services.s3_storage import upload_file_to_s3
     from blueprints.report.services.shared import safe_float
-    from models.db import ReportExpenseDetail, db
+    from models.db import db
     from services.helpers.xero_bridge import resolve_contact_name
 
     try:
@@ -908,16 +893,8 @@ def report_expense_update(expense_id):
         expense.account_code = account_code
         expense.item_code = item_code
 
-        # Mirror the change on ReportExpenseDetail if a row exists for this
-        # expense; the create flow inserts one per expense, so most drafts will.
-        detail = ReportExpenseDetail.query.filter_by(
-            expense_id=expense.id
-        ).first()
-        if detail:
-            detail.account_id = account_id
-            detail.amount = amount
-            detail.info_filepath = expense.files
-            detail.description = remarks
+        # The ReportExpenseDetail mirror that sat here went with Step 3.5 —
+        # the assignments above already updated the one surviving row.
 
         # Recalculate draft total + closing balance using same formula as
         # create/delete handlers.
@@ -1157,25 +1134,14 @@ def report_edit_discrepancy_reason(id):
         reason = (request.form.get("discrepancy_reason") or "").strip()[:300]
         report.discrepancy_reason = reason
 
-        # The cash count page reads the discrepancy reason from the linked
-        # ReportCashCountDraft / ReportDraft (and Xero/exports read ReportDetail),
-        # so keep all of them in sync — otherwise the saved value won't show on
-        # reload and downstream consumers see the stale text.
-        from models.db import ReportCashCountDraft, ReportDetail
-
-        cashcount_draft = ReportCashCountDraft.query.filter(
-            ReportCashCountDraft.report_id == report.id
-        ).first()
-        if cashcount_draft:
-            cashcount_draft.discrepancy_reason = reason
-
-        # The draft-side write that used to sit here was redundant: `report`
-        # is the same row and already took the reason above (line ~1161).
-        report_detail = ReportDetail.query.filter(
-            ReportDetail.report_id == report.id
-        ).first()
-        if report_detail:
-            report_detail.discrepancy_description = reason
+        # Both mirror writes that used to sit here went with Step 3.5:
+        #
+        #   ReportCashCountDraft.discrepancy_reason — the cash count page now
+        #     reads the reason off `report`, which the line above already set.
+        #   ReportDetail.discrepancy_description    — the comment claiming
+        #     "Xero/exports read ReportDetail" was stale; nothing in the
+        #     codebase ever read it back. publish.py, the download and the
+        #     export-screenshot paths all read `report` directly.
 
         # Editing diverges the report from Xero — revert it to "Submitted" while
         # keeping publishing_status as the "was previously published" marker.
@@ -1213,7 +1179,7 @@ def report_edit_withdrawal(id):
 
     The cash amount (cash_addition) is locked; this changes only where the
     cash came from (withdrawal_type + bank account), which feeds Xero mapping,
-    not the cash balance. Persisted on the linked ReportDraft — the submitted
+    not the cash balance. Persisted on the report row — the submitted
     Report has no withdrawal columns and Xero reads them from the draft
     (matched by company + transaction_date).
     """
@@ -1244,7 +1210,7 @@ def report_edit_withdrawal(id):
             )
         bank_account = (request.form.get("withdrawal_bank_account") or "").strip()
 
-        # The submitted Report and its ReportDraft share the same id; fall back
+        # Draft and submitted share one row and one id; fall back
         # to the company+date match Xero uses if the id link is ever missing.
         resolved_bank_account = bank_account if withdrawal_type == "company" else ""
 
@@ -1618,7 +1584,7 @@ _MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 @report_bp.route("/report/expense/upload_files", methods=["POST"])
 @login_required
 def expense_upload_files():
-    """Upload multiple receipt files to S3 and create a ShopExpenseDraft skeleton
+    """Upload multiple receipt files to S3 and create a ShopExpense skeleton
     record for each one.  Details (amount, contact, account_code, etc.) are
     intentionally left null — they are filled in later via PATCH.
 
@@ -1644,7 +1610,12 @@ def expense_upload_files():
                 403,
             )
 
-        draft = ReportDraft.query.filter_by(id=report_draft_id).first()
+        # Step 4a-6: data-entry path, so it means status='draft' explicitly —
+        # the old table implied it. NULL-safe form is not needed here: this is
+        # "is a draft", not "is not a draft".
+        draft = Report.query.filter_by(
+            id=report_draft_id, status="draft"
+        ).first()
         if not draft or str(draft.company) != str(entity_id):
             return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
@@ -1785,14 +1756,14 @@ def expense_upload_files():
 
 
 # ---------------------------------------------------------------------------
-# Get / update a single ShopExpenseDraft record (Steps 2 & 3)
+# Get / update a single ShopExpense record
 # ---------------------------------------------------------------------------
 
 
 @report_bp.route("/report/expense/draft/<string:draft_id>", methods=["GET"])
 @login_required
 def expense_draft_get(draft_id):
-    """Return the detail fields of one ShopExpenseDraft record."""
+    """Return the detail fields of one ShopExpense record."""
     expense = ShopExpense.query.get(draft_id)
     if not expense:
         return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
@@ -1875,7 +1846,7 @@ def expense_draft_get(draft_id):
 @report_bp.route("/report/expense/draft/<string:draft_id>", methods=["PATCH"])
 @login_required
 def expense_draft_patch(draft_id):
-    """Update the expense detail fields of a single ShopExpenseDraft.
+    """Update the expense detail fields of a single ShopExpense.
 
     JSON body:
       amount, item, remarks, contact_id, contact_name, account_id,
@@ -1931,7 +1902,7 @@ def expense_draft_patch(draft_id):
 @report_bp.route("/report/expense/validate_drafts", methods=["GET"])
 @login_required
 def expense_validate_drafts():
-    """Check every ShopExpenseDraft for a given report_draft_id has required
+    """Check every ShopExpense for a given report id has required
     fields filled in (amount > 0, contact_id, account_id).
 
     Query params:
@@ -1957,7 +1928,12 @@ def expense_validate_drafts():
     # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
     # exists from draft creation via ensure_shop_expense_for_draft, and
     # report_id holds the same value report_draft_id did.
-    drafts = ShopExpense.query.filter_by(report_id=report_id).all()
+    # report_id=report_draft_id, not report_id=report_id — the latter is not a
+    # variable in this function and raised NameError on every call. Introduced
+    # when the query moved from ShopExpenseDraft.report_draft_id to
+    # ShopExpense.report_id and the keyword was renamed but the value was not.
+    # The two ids are the same value, so passing report_draft_id is correct.
+    drafts = ShopExpense.query.filter_by(report_id=report_draft_id).all()
 
     if not drafts:
         # No uploaded files — nothing to validate, treat as complete

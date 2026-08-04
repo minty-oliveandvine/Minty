@@ -24,8 +24,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from models.db import (CashInfo, CountryInfo, Entity, EntityCashSetting,
-                       ReportCashCount, ReportCashCountDraft, db)
+from models.db import (CashInfo, CountryInfo, Entity, EntityCashSetting, ReportCashCount, db)
 
 # Legacy column -> (face value, denomination type). Used only by the fallback
 # path for reports with no count rows. Mirrors the nine columns that still
@@ -161,16 +160,17 @@ def get_cash_count_details(report_id):
     }
 
 
-def get_cash_count_total(report_id, fallback_draft=None):
+def get_cash_count_total(report_id):
     """Total counted cash for a report.
 
     Sums ``quantity * cash_value`` over count rows. ``cash_value`` is read
     from the count row, not the catalog, so a revalued or retired
     denomination cannot retroactively change a historical total.
 
-    Falls back to the nine legacy columns when a report has no count rows,
-    matching how get_cash_sales_from_detail handles pre-backfill reports.
-    Pass ``fallback_draft`` (the ReportCashCountDraft) to enable it.
+    The legacy wide-column fallback went in Step 4a-5, with the
+    report_cashcount_draft table. It was gated on a currency check: c2a02
+    backfilled HKD only, and the check came back clean (no non-HKD entity had
+    wide-column-only counts with a non-zero total).
     """
     total = (
         db.session.query(
@@ -179,26 +179,7 @@ def get_cash_count_total(report_id, fallback_draft=None):
         .filter(ReportCashCount.report_id == report_id)
         .scalar()
     )
-    if total is not None:
-        return float(total)
-
-    if fallback_draft is None:
-        fallback_draft = ReportCashCountDraft.query.filter_by(
-            report_id=report_id
-        ).first()
-    if fallback_draft is None:
-        return 0.0
-
-    logger.info(
-        f"No cash count rows for report {report_id}, "
-        "falling back to legacy columns"
-    )
-    return float(
-        sum(
-            (getattr(fallback_draft, column, 0) or 0) * value
-            for column, value, _ in LEGACY_COLUMN_DENOMINATIONS
-        )
-    )
+    return float(total) if total is not None else 0.0
 
 
 def save_cash_count_details(report_id, counts_by_cash_id):
@@ -264,30 +245,62 @@ def counts_to_legacy_columns(counts_by_cash_id):
     }
 
 
-def build_denomination_rows(entity_id, report_id=None, fallback_draft=None):
+def legacy_column_counts_for_report(report_id):
+    """``{legacy_column: quantity}`` for a report, sourced from count rows.
+
+    The read-side counterpart to ``counts_to_legacy_columns``, for consumers
+    that are keyed on the nine legacy names and cannot be reshaped — the
+    export's .docx template addresses its placeholders as ``qty1_1000`` and
+    friends, so the face-value keys have to survive the migration verbatim.
+
+    Returns ``None`` when the report has no cash count at all, so callers can
+    tell that from "counted, all zero" — the export 404s on the former and
+    must NOT on the latter.
+
+    That distinction used to come from the presence of a
+    report_cashcount_draft row. With that table gone (Step 4a-5) the signal is
+    ``report.actual_cash_total IS NOT NULL``, which cash_count.py writes on
+    every save. It cannot come from the count rows alone: a denomination
+    counted as zero has its row deleted, so an all-zero count legitimately has
+    NO rows and would otherwise look identical to "never counted".
+
+    Matching is on (value, type), so the HK$10 note and the HK$10 coin stay
+    distinct and only the note lands in ``ten_note``, exactly as the wide
+    columns behaved.
+    """
+    rows = get_cash_count_details(report_id)
+    if rows:
+        return counts_to_legacy_columns(
+            {cash_id: row.quantity for cash_id, row in rows.items()}
+        )
+
+    from models.db import Report
+
+    counted = (
+        db.session.query(Report.actual_cash_total)
+        .filter(Report.id == report_id)
+        .scalar()
+    )
+    if counted is None:
+        return None  # never counted -> caller 404s
+
+    logger.info(f"Report {report_id} counted as all-zero; returning zeros")
+    return {column: 0 for column, _value, _kind in LEGACY_COLUMN_DENOMINATIONS}
+
+
+def build_denomination_rows(entity_id, report_id=None):
     """Denominations paired with their saved counts, ready for the template.
 
     Each row exposes ``cash_id``, ``field`` (the form input name), ``label``,
     ``value``, ``type`` and ``count``. The template iterates these instead of
     hardcoding one input per denomination.
 
-    Counts come from report_cash_count. For reports predating the backfill,
-    ``fallback_draft`` supplies them from the legacy columns so an old report
-    still renders with its original figures.
+    Counts come from report_cash_count. The legacy wide-column fallback went
+    in Step 4a-5 with the report_cashcount_draft table; a denomination with no
+    row renders as 0, which is also how a zero count is stored.
     """
     denominations = resolve_denominations_for_entity(entity_id)
     saved = get_cash_count_details(report_id) if report_id else {}
-
-    legacy_counts = {}
-    if not saved and fallback_draft is not None:
-        by_denomination = {
-            (value, kind): getattr(fallback_draft, column, 0) or 0
-            for column, value, kind in LEGACY_COLUMN_DENOMINATIONS
-        }
-        legacy_counts = {
-            d.cash_id: by_denomination.get((float(d.cash_value), d.type), 0)
-            for d in denominations
-        }
 
     rows = []
     for denomination in denominations:
@@ -299,11 +312,7 @@ def build_denomination_rows(entity_id, report_id=None, fallback_draft=None):
                 "label": denomination.cash_name,
                 "value": float(denomination.cash_value),
                 "type": denomination.type,
-                "count": (
-                    detail.quantity
-                    if detail is not None
-                    else legacy_counts.get(denomination.cash_id, 0)
-                ),
+                "count": detail.quantity if detail is not None else 0,
             }
         )
     return rows

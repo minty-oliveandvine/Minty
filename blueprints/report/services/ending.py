@@ -19,9 +19,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
-                       ReportSaleDetail, EntitySaleSetting, ShopExpense,
-                       ShopExpenseDraft, UserEntity, db, tz)
+from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission, is_superuser)
@@ -77,7 +75,7 @@ def revert_report_to_draft(report_id):
     """Revert a submitted report to an editable draft.
 
     Deletes the posted Report (and its ShopExpense rows) and rewinds the
-    ReportDraft to the opening step, so the whole report — balances included —
+    report to the opening step, so the whole report — balances included —
     can be re-entered through the normal flow and re-submitted.
 
     Two things are deliberately preserved on the draft before the Report row
@@ -90,7 +88,7 @@ def revert_report_to_draft(report_id):
     * ``xero_integrated_yes`` — whether that push fully succeeded.
 
     Raises RevertError on a failed guard. Commits on success and returns the
-    ReportDraft.
+    reverted report row.
     """
     report = Report.query.filter(Report.id == report_id).first()
     if not report:
@@ -391,13 +389,18 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             f"Report found: id={id}, company={report_exists.company}, entity_id={entity_id}"
         )
 
-        # Now query with outerjoins for draft data
+        # Both joins are gone (Step 3.5). This used to outerjoin ReportDraft
+        # and then chain the cash-count join off ReportDraft.id — the same
+        # value as Report.id, but Step 2 stopped creating draft rows, so the
+        # intermediate join yielded NULL and every column it fed came back
+        # empty for any report created after the flip.
+        #
+        # Nothing needs either table now: completed_sections / current_section
+        # / status live on Report since Stage 4a, safe_box_balance and the
+        # discrepancy trio are written to Report by cash_count.py, and the nine
+        # denomination columns were never read here at all.
         report = (
-            Report.query.outerjoin(ReportDraft, ReportDraft.id == Report.id)
-            .outerjoin(
-                ReportCashCountDraft,
-                ReportCashCountDraft.report_id == ReportDraft.id,
-            )
+            Report.query
             .filter(
                 Report.id == id,
                 Report.company == entity_id,
@@ -422,32 +425,34 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 Report.company,
                 Report.xero_integrated_yes,
                 db.func.coalesce(
-                    ReportDraft.completed_sections, db.cast("[]", db.JSON)
+                    Report.completed_sections, db.cast("[]", db.JSON)
                 ).label("completed_sections"),
-                db.func.coalesce(ReportDraft.current_section, db.null()).label(
+                db.func.coalesce(Report.current_section, db.null()).label(
                     "current_section"
                 ),
-                # Prefer Report.status: since Stage 4a it is the authoritative
-                # column and is set for drafts too. Falling straight back to
-                # the "posted" literal when the DRAFT row is missing would mark
-                # an in-progress report submitted — and line 637 branches on
-                # this to choose ShopExpenseDraft vs ShopExpense.
-                db.func.coalesce(
-                    Report.status, ReportDraft.status, "posted"
-                ).label("status"),
-                ReportCashCountDraft.thousand_note,
-                ReportCashCountDraft.fivehundred_note,
-                ReportCashCountDraft.onehundred_note,
-                ReportCashCountDraft.fifty_note,
-                ReportCashCountDraft.twenty_note,
-                ReportCashCountDraft.ten_note,
-                ReportCashCountDraft.five_coin,
-                ReportCashCountDraft.two_coin,
-                ReportCashCountDraft.one_coin,
-                ReportCashCountDraft.safe_box_balance,
-                ReportCashCountDraft.discrepancy_amount,
-                ReportCashCountDraft.discrepancy_type,
-                ReportCashCountDraft.discrepancy_reason,
+                # Report.status is authoritative since Stage 4a and is set for
+                # drafts too. The "posted" literal only answers for legacy rows
+                # that predate the consolidation — line 637 branches on this to
+                # choose ShopExpenseDraft vs ShopExpense, so defaulting an
+                # in-progress report to "posted" would pick the wrong table.
+                db.func.coalesce(Report.status, "posted").label("status"),
+                # The nine denomination columns that used to be selected here
+                # were never read — ending.html renders no cash-count grid.
+                # They went with Step 3.5 along with the join that fed them.
+                #
+                # These four DO get read (line ~658) and now come from `report`
+                # itself, where cash_count.py has been writing them all along.
+                # Selecting them off ReportCashCountDraft shadowed Report's own
+                # identically-named columns in the result Row.
+                Report.safe_box_balance,
+                Report.discrepancy_amount,
+                Report.discrepancy_type,
+                Report.discrepancy_reason,
+                # Step 4a-5 reads this below to decide whether the report was
+                # counted at all (an all-zero count stores no rows). A Row from
+                # with_entities only carries the columns named here, so leaving
+                # it out raised AttributeError on the ending page.
+                Report.actual_cash_total,
             )
             .first()
         )
@@ -571,7 +576,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         # Calculate total expenses - check if it's a draft or completed report
         existing_expenses = []
         if hasattr(report, "status") and report.status == "draft":
-            # For drafts, calculate from ShopExpenseDraft records
+            # For drafts, calculate from the report's ShopExpense records
             # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
             # exists from draft creation via ensure_shop_expense_for_draft, and
             # report_id holds the same value report_draft_id did.
@@ -632,17 +637,22 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             cash_sales = report.cash_sales if report.cash_sales else 0
 
         total_sales = report.total_sales if report.total_sales else 0
-        # Calculate actual cash balance from cash count data
-        cashcount_draft = ReportCashCountDraft.query.filter(
-            ReportCashCountDraft.report_id == report.id
-        ).first()
-        if cashcount_draft:
-            # Total from report_cashcount_detail, falling back to the legacy
-            # note/coin columns for reports predating the backfill.
-            total_actual_cash = get_cash_count_total(
-                report.id, fallback_draft=cashcount_draft
-            )
-            safe_box_balance = cashcount_draft.safe_box_balance or 0
+        # Calculate actual cash balance from cash count data.
+        #
+        # "Has a cash count" is decided by the count ROWS, not by the presence
+        # of a report_cashcount_draft row: Step 3.5 stops writing that table,
+        # so keying on it would send every new report down the else-branch and
+        # report a zero count against a report that was counted.
+        # "Counted" is actual_cash_total being set, not the count rows: a
+        # denomination counted as zero has its row deleted, so an all-zero
+        # count has no rows at all.
+        has_cash_count = (
+            bool(get_cash_count_details(report.id))
+            or report.actual_cash_total is not None
+        )
+        if has_cash_count:
+            total_actual_cash = get_cash_count_total(report.id)
+            safe_box_balance = report.safe_box_balance or 0
             cash_balance = total_actual_cash + safe_box_balance
         else:
             total_actual_cash = 0
@@ -668,35 +678,25 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         bank_deposit = report.bank_deposit if report.bank_deposit else 0
         cash_expense = total_expense  # Total of all individual expenses added
-        safe_box_balance = (
-            cashcount_draft.safe_box_balance
-            if cashcount_draft and cashcount_draft.safe_box_balance
-            else 0
-        )
+        safe_box_balance = report.safe_box_balance or 0
         total_expense = (
             cash_expense + bank_deposit + safe_box_balance
         )  # Total expenses = cash expenses + bank deposits + safe box balance
 
         # Determine if this is the latest report (most recent transaction_date) or old report
         # Find the latest report ID for this entity (same logic as report_history)
-        latest_report_query = (
-            Report.query.join(ReportDraft, ReportDraft.id == Report.id, full=True)
-            .with_entities(
-                db.func.coalesce(Report.id, ReportDraft.id).label("id"),
-                db.func.coalesce(
-                    Report.transaction_date, ReportDraft.transaction_date
-                ).label("transaction_date"),
-            )
-            .filter(
-                db.or_(Report.company == entity_id, ReportDraft.company == entity_id),
-            )
+        # Step 4a-6: was a full outer join to ReportDraft with a coalesce on
+        # every column. Drafts live in `report` since Stage 4a, so the join,
+        # the coalesces and the or_ all collapse to one table. No status filter
+        # — "latest report" means any status here, which is what the full outer
+        # join was expressing.
+        latest_report = (
+            Report.query
+            .with_entities(Report.id, Report.transaction_date)
+            .filter(Report.company == entity_id)
+            .order_by(Report.transaction_date.desc())
+            .first()
         )
-
-        latest_report = latest_report_query.order_by(
-            db.func.coalesce(
-                Report.transaction_date, ReportDraft.transaction_date
-            ).desc()
-        ).first()
 
         # Check if this report is the latest by comparing IDs
         is_latest_report = latest_report and report.id == latest_report.id
@@ -789,7 +789,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             transaction_date=report.transaction_date,
             is_latest_report=is_latest_report,
             today_date=datetime.now().date(),
-            cashcount_draft=cashcount_draft,
+            safe_box_balance=safe_box_balance,
             closing_balance=report.closing_balance if report.closing_balance else 0,
             existing_expenses=existing_expenses,
             entity_acronym=entity_acronym,
@@ -882,12 +882,6 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             Report.company == entity_id,
             Report.transaction_date == transaction_date,
             Report.status == "draft",
-        ).first()
-
-    cashcount_draft = None
-    if current_draft:
-        cashcount_draft = ReportCashCountDraft.query.filter(
-            ReportCashCountDraft.report_id == current_draft.id
         ).first()
 
     # Check if entity and draft exist
@@ -1046,7 +1040,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             added_value_names.add(sale.value_name)
 
     # Build sales amounts dictionary for template
-    # Use ONLY amounts from ReportSaleDetail - no fallback to ReportDraft model
+    # Use ONLY amounts from ReportSaleDetail - no fallback to the report row
     sales_amounts = {}
     for sale in sale_info:
         if sale.value_name and sale.value_name != "deliveroo_sales":
@@ -1093,7 +1087,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Calculate total expenses from individual expense records for drafts
     existing_expenses = []
     if current_draft.status == "draft":
-        # For drafts, calculate from ShopExpenseDraft records
+        # For drafts, calculate from the report's ShopExpense records
         # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
         # exists from draft creation via ensure_shop_expense_for_draft, and
         # report_id holds the same value report_draft_id did.
@@ -1147,8 +1141,15 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             grouped_expenses.values(), key=lambda x: x["amount"], reverse=True
         )
 
-    # Calculate actual cash balance from cash count data
-    if cashcount_draft:
+    # Calculate actual cash balance from cash count data.
+    #
+    # Keyed on the count ROWS plus the legacy row, not on the legacy row alone:
+    # Step 3.5 stops writing report_cashcount_draft, so a new report that HAS
+    # been counted has no row there and would otherwise fall to the else-branch.
+    if (
+        bool(get_cash_count_details(current_draft.id))
+        or current_draft.actual_cash_total is not None
+    ):
         logger.info(f"Retrieved cash count data for draft {current_draft.id}:")
         # Enumerate what was actually counted rather than the nine fixed
         # columns, so custom denominations show up here too.
@@ -1170,17 +1171,15 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 )
             except Exception:
                 logger.exception("  Counted: failed to format cash count rows")
-        logger.info(f"  Safe box balance: {cashcount_draft.safe_box_balance}")
+        logger.info(f"  Safe box balance: {current_draft.safe_box_balance}")
         logger.info(
-            f"  Stored actual_cash_total: {cashcount_draft.actual_cash_total}"
+            f"  Stored actual_cash_total: {current_draft.actual_cash_total}"
         )
 
-        # Total from report_cashcount_detail, falling back to the legacy
-        # note/coin columns for reports predating the backfill.
-        total_actual_cash = get_cash_count_total(
-            current_draft.id, fallback_draft=cashcount_draft
-        )
-        safe_box_balance = cashcount_draft.safe_box_balance or 0
+        # Total from report_cash_count, falling back to the legacy note/coin
+        # columns for reports predating the backfill.
+        total_actual_cash = get_cash_count_total(current_draft.id)
+        safe_box_balance = current_draft.safe_box_balance or 0
         cash_balance = total_actual_cash + safe_box_balance
 
         logger.info(f"  Calculated total_actual_cash: {total_actual_cash}")
@@ -1191,15 +1190,12 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             current_draft.closing_balance if current_draft.closing_balance else 0
         )
 
-    discrepancy_amount = (
-        cashcount_draft.discrepancy_amount if cashcount_draft.discrepancy_amount else 0
-    )
-    discrepancy_type = (
-        cashcount_draft.discrepancy_type if cashcount_draft.discrepancy_type else "none"
-    )
-    discrepancy_reason = (
-        cashcount_draft.discrepancy_reason if cashcount_draft.discrepancy_reason else ""
-    )
+    # Read off `report` (current_draft), where cash_count.py writes them. These
+    # three used to dereference cashcount_draft with no None-guard, so a report
+    # whose cash count was never saved raised AttributeError here.
+    discrepancy_amount = current_draft.discrepancy_amount or 0
+    discrepancy_type = current_draft.discrepancy_type or "none"
+    discrepancy_reason = current_draft.discrepancy_reason or ""
     if request.method == "POST":
         expected_balance = (
             (current_draft.opening_balance or 0)
@@ -1285,17 +1281,19 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
                 # 4. Validate cash count data if cash count section is completed
                 if "cash_count" in completed_sections:
-                    if not cashcount_draft:
+                    # Presence is decided by the count ROWS, with the legacy row
+                    # answering for reports predating the backfill. Keying on
+                    # cashcount_draft alone would block submit outright once
+                    # Step 3.5 stops writing that table.
+                    if (
+                        not get_cash_count_details(current_draft.id)
+                        and current_draft.actual_cash_total is None
+                    ):
                         validation_errors.append("Cash count data is missing")
-                    else:
-                        # Validate cash count - allow zero cash count
-                        # Cash balance (cash count + safe box) can be <= 0
-                        # Discrepancy validation will handle description requirements
-                        total_cash_count = get_cash_count_total(
-                            current_draft.id, fallback_draft=cashcount_draft
-                        )
-                        # No validation needed - allow zero cash count
-                        # The discrepancy validation will ensure description is provided when needed
+                    # Otherwise no validation: a zero cash count is allowed, and
+                    # cash balance (count + safe box) may be <= 0. The
+                    # discrepancy validation below ensures a description is
+                    # provided when one is needed.
 
                 # 5. Validate sales data
                 if "sales" in completed_sections:
@@ -1544,11 +1542,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                                 f"No expenses found for report {current_draft.id} despite expenses section being completed"
                             )
 
-                        # Validate cash count data if applicable
-                        if "cash_count" in completed_sections and cashcount_draft:
+                        # Validate cash count data if applicable. Reads
+                        # actual_cash_total off `report`, which cash_count.py
+                        # now writes (Step 3.5, Unit 0a).
+                        if "cash_count" in completed_sections:
                             if (
-                                not cashcount_draft.actual_cash_total
-                                or cashcount_draft.actual_cash_total <= 0
+                                not current_draft.actual_cash_total
+                                or current_draft.actual_cash_total <= 0
                             ):
                                 logger.warning(
                                     f"Cash count total is zero or negative for report {current_draft.id}"
@@ -1656,9 +1656,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             # Check and restore draft state after rollback
             try:
                 logger.info("Checking draft state after rollback...")
-                # Stays on ReportDraft: the point is to confirm the DRAFT row
-                # survived the rollback, not its mirror.
-                draft_check = ReportDraft.query.filter_by(id=current_draft.id).first()
+                # Step 4a-6: was a check that the separate DRAFT row survived
+                # the rollback. One row now, so this reads back the report
+                # itself — still meaningful (the rollback could have removed a
+                # row created in this request).
+                draft_check = Report.query.filter_by(id=current_draft.id).first()
                 if not draft_check:
                     logger.error(
                         f"Draft record {current_draft.id} was lost due to rollback - this is a critical error"
@@ -1760,11 +1762,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     bank_deposit = current_draft.bank_deposit if current_draft.bank_deposit else 0
     cash_expense = total_expense  # Total of all individual expenses added
-    safe_box_balance = (
-        cashcount_draft.safe_box_balance
-        if cashcount_draft and cashcount_draft.safe_box_balance
-        else 0
-    )
+    safe_box_balance = current_draft.safe_box_balance or 0
     total_expense = (
         cash_expense + bank_deposit + safe_box_balance
     )  # Total expenses = cash expenses + bank deposits + safe box balance
@@ -1826,7 +1824,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             )
 
     # Surface the posted report's Xero publish state so the header badge can
-    # show "Partially Published" (set on Report, not on the ReportDraft above).
+    # show "Partially Published" (set on Report by the publish flow).
     posted_report_row = Report.query.filter(
         db.or_(Report.status.is_(None), Report.status != "draft"),
         Report.company == entity_id,
@@ -1868,7 +1866,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         transaction_date=transaction_date,
         is_latest_report=is_latest_report,
         today_date=datetime.now().date(),
-        cashcount_draft=cashcount_draft,
+        safe_box_balance=safe_box_balance,
         closing_balance=current_draft.closing_balance if current_draft else 0,
         existing_expenses=existing_expenses,
         entity_acronym=entity_acronym,

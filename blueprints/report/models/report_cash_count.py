@@ -7,8 +7,8 @@ class ReportCashCount(db.Model):
     """One counted denomination on one report.
 
     The cash-count equivalent of ReportSaleDetail: replaces the nine fixed
-    note/coin columns on ReportCashCountDraft, which are kept as a fallback
-    for reports predating the backfill.
+    note/coin columns that used to live on report_cashcount_draft (dropped in
+    r10a10).
     """
 
     __tablename__ = "report_cash_count"
@@ -18,12 +18,13 @@ class ReportCashCount(db.Model):
         {"schema": "pettycashv2"},
     )
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    # report_draft.id, not report.id — a report and its draft share one id
-    # (ending.py:445), so one set of rows serves both. Re-points at report(id)
-    # when the v3 schema merges the three report tables.
+    # Re-pointed at report.id in r8a08. It referenced report_draft.id, which
+    # r6a06 missed — and once Step 2 stopped creating draft rows, inserting a
+    # cash count for any new report violated that FK. The value never changed:
+    # a report and its draft share one id.
     report_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.report_draft.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE"),
         nullable=False,
     )
     cash_id = db.Column(

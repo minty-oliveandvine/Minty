@@ -12,3 +12,18 @@ app.log
 .env
 .DS_Store
 venv
+CLAUDE.md
+
+# Database dumps — these contain real customer data. Never commit them.
+backups/
+*.dump
+*.sql.gz
+prod_*.dump
+local_before_restore_*.dump
+
+# Flask instance folder — generated PDFs/DOCX of real reports, temp files.
+# Never commit: these contain customer financial data.
+instance/
+
+# Rotated app logs
+*.log.zip

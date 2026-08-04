@@ -18,7 +18,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                safe_float,
                                                update_draft_progress)
 from blueprints.shared.entity_display import build_entity_acronym
-from models.db import Entity, Report, ReportCashCountDraft, ReportDraft, db, tz
+from models.db import Entity, Report, db, tz
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
 from services.authz import permission_denied
@@ -31,7 +31,7 @@ from utils import jsonify
 def _onboarding_floor_date(entity_id):
     """The earliest date a first report may use: the onboarding opening date.
 
-    Onboarding seeds an opening ReportDraft whose ``transaction_date`` is the
+    Onboarding seeds an opening draft-status report whose ``transaction_date`` is the
     date the user chose to start reporting from. That date is the floor for the
     first report (replaces the legacy "within 7 days from today" window).
     Returns a date, or None if no onboarding draft exists.
@@ -372,13 +372,9 @@ def report_opening(id=None, entity_id=None):
             # Determine if this is the latest report (most recent
             # transaction_date) or old report
             latest_report_date = (
-                db.session.query(
-                    db.func.max(
-                        db.func.coalesce(
-                            Report.transaction_date,
-                            Report.transaction_date))) .filter(
-                    Report.company == entity_id,
-                ) .scalar())
+                db.session.query(db.func.max(Report.transaction_date))
+                .filter(Report.company == entity_id)
+                .scalar())
 
             is_latest_report = report.transaction_date == latest_report_date
 
@@ -408,22 +404,25 @@ def report_opening(id=None, entity_id=None):
                 "next_transaction_date": report.next_transaction_date,
                 "is_first_report": False,
                 "is_draft": False,
-                "draft_id": report_draft.id,
+                # These six read `report`, not `report_draft`.
+                #
+                # `report_draft` is never assigned in this branch — it is bound
+                # much further down, inside the POST handler — so every one of
+                # these raised UnboundLocalError. This branch is the
+                # "view a SUBMITTED report's opening page" path, which is why
+                # it went unnoticed: it needs a report id whose row is not a
+                # draft. Pre-existing, not introduced by the consolidation.
+                #
+                # `report` is the right source regardless: draft and report are
+                # one row, and all four fields live on it.
+                "draft_id": report.id,
                 # For new reports, start with opening as current and no
                 # completed sections
                 "current_section": "opening",  # Always set to current page
-                "completed_sections": report_draft.completed_sections,
+                "completed_sections": report.completed_sections,
                 "bank_accounts": bank_accounts,
-                "withdrawal_type": (
-                    report_draft.withdrawal_type
-                    if report_draft.withdrawal_type
-                    else "personal"
-                ),
-                "withdrawal_bank_account": (
-                    report_draft.withdrawal_bank_account
-                    if report_draft.withdrawal_bank_account
-                    else ""
-                ),
+                "withdrawal_type": report.withdrawal_type or "personal",
+                "withdrawal_bank_account": report.withdrawal_bank_account or "",
             }
 
             return render_template(
@@ -1109,21 +1108,10 @@ def report_opening(id=None, entity_id=None):
                         f"Using previous day's closing balance as opening balance: {opening_balance} (from report {prev_report_any_status.id})"
                     )
                 else:
-                    # Fallback: actual_cash_total lives on `report` itself since
-                    # r1a01 hoisted it; report_cashcount_draft is the older
-                    # source for rows predating that.
-                    fallback_total = getattr(
-                        prev_report_any_status, "actual_cash_total", None
-                    )
-                    if fallback_total is None:
-                        last_cashcount = ReportCashCountDraft.query.filter(
-                            ReportCashCountDraft.report_id == prev_report_any_status.id
-                        ).first()
-                        fallback_total = (
-                            last_cashcount.actual_cash_total
-                            if last_cashcount
-                            else None
-                        )
+                    # actual_cash_total lives on `report` since r1a01. The
+                    # report_cashcount_draft fallback went in Step 4a-5 —
+                    # r7a07 backfilled the history onto `report`.
+                    fallback_total = prev_report_any_status.actual_cash_total
                     if fallback_total is not None:
                         opening_balance = fallback_total
                         logger.info(
@@ -1155,13 +1143,12 @@ def report_opening(id=None, entity_id=None):
                         f"Using previous day's closing balance as opening balance: {opening_balance} (from report {last_report.id})"
                     )
                 else:
-                    # Fallback to cash count for backward compatibility with
-                    # old data
-                    last_cashcount = ReportCashCountDraft.query.filter(
-                        ReportCashCountDraft.report_id == last_report.id
-                    ).first()
-                    if last_cashcount and last_cashcount.actual_cash_total is not None:
-                        opening_balance = last_cashcount.actual_cash_total
+                    # actual_cash_total lives on `report` since r1a01. The
+                    # report_cashcount_draft fallback went in Step 4a-5 —
+                    # r7a07 backfilled the history onto `report`.
+                    fallback_total = last_report.actual_cash_total
+                    if fallback_total is not None:
+                        opening_balance = fallback_total
                         logger.info(
                             f"Using previous day's cash count balance as opening balance (fallback): {opening_balance} (from report {last_report.id})"
                         )

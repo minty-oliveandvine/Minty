@@ -13,7 +13,7 @@ from flask_login import current_user
 from loguru import logger
 
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from models.db import Report, ReportDraft, ShopExpense, ShopExpenseDraft, db
+from models.db import Report, ShopExpense, db
 from services.helpers.xero_bridge import get_entity_account_settings
 
 
@@ -286,12 +286,17 @@ def download_reports_csv(entity_id):
         report_id = request.args.get("report_id")
 
         if report_id:
-            report = Report.query.filter_by(id=report_id).first()
+            # Step 4a-6: the ReportDraft second-try is gone — one row, one
+            # table since Stage 4a.
+            current_report = Report.query.filter_by(id=report_id).first()
+            # `report` / `report_draft` are kept as bindings so the ~20
+            # `X if report else (report_draft.X if report_draft else default)`
+            # ternaries below stay correct without touching each one. With
+            # report_draft always None every ternary takes the `report` branch,
+            # which is exactly what it did whenever a Report existed — and a
+            # draft without a Report row is no longer representable.
+            report = current_report
             report_draft = None
-            if not report:
-                report_draft = ReportDraft.query.filter_by(id=report_id).first()
-
-            current_report = report if report else report_draft
             if not current_report:
                 return (
                     jsonify({"status": "error", "message": "Hmm, I couldn't find that report."}),
@@ -561,34 +566,20 @@ def download_reports_csv(entity_id):
                 "account_code"
             )
 
+            # Step 4a-6: was a full outer join to ReportDraft with coalesced
+            # columns and or_'d date bounds on both sides. One row, one table
+            # since Stage 4a. No status filter — an export over a date range
+            # covers every report in it, drafts included, exactly as the full
+            # outer join did.
             report_ids_query = (
-                Report.query.join(ReportDraft, ReportDraft.id == Report.id, full=True)
-                .with_entities(
-                    db.func.coalesce(Report.id, ReportDraft.id).label("id"),
-                    db.func.coalesce(
-                        Report.transaction_date, ReportDraft.transaction_date
-                    ).label("transaction_date"),
-                )
+                Report.query
+                .with_entities(Report.id, Report.transaction_date)
                 .filter(
-                    db.or_(
-                        Report.company == entity_id, ReportDraft.company == entity_id
-                    ),
-                    db.and_(
-                        db.or_(
-                            Report.transaction_date >= start_date,
-                            ReportDraft.transaction_date >= start_date,
-                        ),
-                        db.or_(
-                            Report.transaction_date <= end_date,
-                            ReportDraft.transaction_date <= end_date,
-                        ),
-                    ),
+                    Report.company == entity_id,
+                    Report.transaction_date >= start_date,
+                    Report.transaction_date <= end_date,
                 )
-                .order_by(
-                    db.func.coalesce(
-                        Report.transaction_date, ReportDraft.transaction_date
-                    ).asc()
-                )
+                .order_by(Report.transaction_date.asc())
                 .all()
             )
 
@@ -614,20 +605,16 @@ def download_reports_csv(entity_id):
                     continue
                 processed_report_ids.add(rid)
 
-                report = Report.query.filter_by(id=rid).first()
+                # Step 4a-6: the ReportDraft second-try is gone — one row,
+                # one table since Stage 4a. See the note in the single-report
+                # branch above for why `report` / `report_draft` are rebound.
+                current_report = Report.query.filter_by(id=rid).first()
+                report = current_report
                 report_draft = None
-                if not report:
-                    report_draft = ReportDraft.query.filter_by(id=rid).first()
-
-                current_report = report if report else report_draft
                 if not current_report:
                     continue
 
-                cash_addition = (
-                    report.cash_addition
-                    if report
-                    else (report_draft.cash_addition if report_draft else 0)
-                )
+                cash_addition = current_report.cash_addition or 0
                 cash_addition_account_code = main_bank_account
                 withdrawal_type = getattr(current_report, "withdrawal_type", None)
                 if withdrawal_type == "personal":
