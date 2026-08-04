@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
-from models.db import (Report, ReportDraft, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
+from models.db import (Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 
@@ -18,7 +18,7 @@ safe_float = _safe_float
 parse_nested_keys = _parse_nested_keys
 
 
-# Fields a draft-shaped Report row mirrors from its ReportDraft. Deliberately
+# Fields a draft-shaped Report row is seeded with at creation. Deliberately
 # not every column: this is the identity//balance core needed for the row to be
 # a valid FK parent and to render, not a full copy. The submit path still owns
 # the authoritative field-by-field copy (ending.py:1418).
@@ -117,7 +117,7 @@ def header_publishing_status_for(
     """Return the posted Report's ``publishing_status`` for the header badge.
 
     Report flow steps (opening/sales/expense/deposit/cash count/ending) render
-    the shared status badge but operate on a ReportDraft, which has no
+    the shared status badge but operate on a draft-status report, which has no
     ``publishing_status``.  This looks up the matching posted Report so the
     badge can show "Partially Published".  Returns ``None`` when no posted
     report exists yet (draft-only), leaving the badge on Draft/Submitted.
@@ -141,7 +141,7 @@ def normalize_expense_files(
     files_value: str | None,
     s3_key_column: str | None = None,
 ) -> list[dict]:
-    """Normalize the ``files`` column of a ShopExpense / ShopExpenseDraft row
+    """Normalize the ``files`` column of a ShopExpense row
     into a consistent list of dicts suitable for template rendering.
 
     Handles two on-disk formats:
@@ -524,11 +524,9 @@ def resolve_report_entity_id(report_id: str | None) -> str | None:
     if report and report.company:
         return str(report.company)
 
-    # ReportDraft fallback kept: this resolves an entity from an arbitrary id
-    # and must still work for pre-Stage-4a drafts that never got a paired row.
-    draft = ReportDraft.query.filter_by(id=report_id).first()
-    if draft and draft.company:
-        return str(draft.company)
+    # The ReportDraft fallback went with Step 4a-6. It covered pre-Stage-4a
+    # drafts with no paired `report` row; r0 backfilled those, and the table
+    # is dropped in r10a10.
 
     return None
 
@@ -575,7 +573,7 @@ def get_next_section_for_user(
 def get_cash_sales_from_detail(report_id, fallback_value=0.0):
     """
     Calculate cash sales from ReportSaleDetail table for a given report_id.
-    Works for both Report and ReportDraft.
+    Works for a report in any status.
     """
     logger.info(
         f"Getting cash sales from report_sale_detail for report {report_id}")
@@ -616,12 +614,14 @@ def calculate_sales_from_report_sale_detail(report_draft_id):
             db.func.sum(ReportSaleDetail.amount).label("total_amount"),
         )
         .join(ReportSaleDetail, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id)
-        .join(ReportDraft, ReportDraft.id == ReportSaleDetail.report_id)
+        # The ReportDraft join went with Step 4a-6. It contributed no columns
+        # and no extra predicate — the filter below already pins the report —
+        # so it only served to require the draft row's existence.
         .filter(ReportSaleDetail.report_id == report_draft_id)
         .group_by(EntitySaleSetting.value_name, EntitySaleSetting.type)
         .all()
     )
-    report_draft = ReportDraft.query.get(report_draft_id)
+    report_draft = Report.query.get(report_draft_id)
     cash_sales = (report_draft.cash_sales or 0.0) if report_draft else 0.0
     sales_totals = {}
     shop_sales_total = 0.0
@@ -806,7 +806,7 @@ def sales_amounts_by_short_name(report_id, entity_id):
 def sales_by_method_for(report_id):
     """Per-method amounts for a report, keyed by catalog code.
 
-    Backs the ``sales_by_method`` property on Report / ReportDraft, which is
+    Backs the ``sales_by_method`` property on Report, which is
     what templates iterate instead of naming each ``*_sales`` column.
 
     Keys are the ``sales_method.code`` (e.g. 'VISA'); rows whose catalog link
@@ -918,30 +918,27 @@ def propagate_opening_balance_to_next_day_draft(previous_report):
     return recalculate_report(next_day_draft, commit=False)
 
 
-def sync_same_day_draft_after_deposit_change(report_to_update, new_bank_deposit):
-    """Keep a same-day draft aligned when a posted report deposit is corrected."""
-    # WRITE FLIP (Step 2). NOTE: post-flip this can only ever return None —
-    # a submitted report and a same-day draft were two rows before, and are
-    # one row now, which cannot be both 'posted' and 'draft'. The deposit
-    # correction already updates that row directly in
-    # update_report_after_deposit_change. Kept as a guarded no-op rather than
-    # deleted, so the caller's shape is unchanged; remove it in Stage 5.
-    same_day_draft = (
-        Report.query.filter(
-            Report.company == report_to_update.company,
-            Report.transaction_date == report_to_update.transaction_date,
-            Report.status == "draft",
-            Report.id != report_to_update.id,
-        )
-        .order_by(Report.date.desc())
-        .first()
-    )
-
-    if not same_day_draft:
-        return None
-
-    same_day_draft.bank_deposit = new_bank_deposit
-    return recalculate_report(same_day_draft, commit=False)
+# sync_same_day_draft_after_deposit_change was deleted in Step 4.
+#
+# It existed because a submitted report and its same-day draft were two rows
+# in two tables: correcting the deposit on the posted row had to be mirrored
+# onto the draft, because they were the same logical report.
+#
+# The runbook predicted it would become a guaranteed no-op after the write
+# flip. That turned out to be wrong — the `Report.id != report_to_update.id`
+# guard means it could still match a SIBLING draft for the same (company,
+# date), and duplicates per date do occur.
+#
+# It was deleted for a stronger reason than being dead: post-consolidation its
+# meaning had inverted. "Sync my own draft" became "overwrite a DIFFERENT
+# report's bank_deposit and recalculate its balances" — a separate in-progress
+# report for the same date is not this report, and silently rewriting its
+# deposit is a data-corruption bug, not a sync.
+#
+# The deposit correction updates the canonical row directly in
+# update_report_after_deposit_change; next-day chaining is still handled by
+# propagate_opening_balance_to_next_day_draft, which is a genuinely different
+# report and correct to update.
 
 
 def update_report_after_deposit_change(report_to_update, new_bank_deposit):
@@ -956,7 +953,8 @@ def update_report_after_deposit_change(report_to_update, new_bank_deposit):
     # with the rest of the ReportV2 writes in r2a02. report_to_update is the
     # canonical row and has already been updated above.
 
-    sync_same_day_draft_after_deposit_change(report_to_update, new_bank_deposit)
+    # sync_same_day_draft_after_deposit_change() called here until Step 4 —
+    # see the note above its former definition.
     propagate_opening_balance_to_next_day_draft(report_to_update)
     db.session.commit()
     return recalculated_report

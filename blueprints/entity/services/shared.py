@@ -1,14 +1,14 @@
 # Entity shared helpers: check_user_has_entities,
 # get_settings_redirect_url, create_default_entity_settings,
 # display_deposit_balance, get_main_bank_account.
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from flask import url_for
 from loguru import logger
 
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
-from models.db import (AccountInfo, EntityPettycashSettings, ReportV2,
+from models.db import (AccountInfo, EntityPettycashSettings,
                        EntitySaleSetting, SaleInfo, UserEntity, db, tz)
 
 
@@ -241,13 +241,6 @@ def create_default_entity_settings(entity_id):
             f"Error creating default settings for entity {entity_id}: {str(e)}"
         )
         raise
-
-
-def display_deposit_balance(id):
-    yesterday = datetime.now(tz) - timedelta(days=1)
-    return ReportV2.query.filter(
-        ReportV2.entity_id == id, ReportV2.report_date == yesterday
-    ).first()
 
 
 def get_main_bank_account(entity_id):

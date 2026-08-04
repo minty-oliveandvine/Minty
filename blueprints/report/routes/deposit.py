@@ -16,8 +16,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                safe_float,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportCashCountDraft, ReportDraft,
-                       UserEntity, db)
+from models.db import Entity, Report, UserEntity, db
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_xero_data_dynamic
 from services.permission_policy import Permission, has_permission
@@ -97,19 +96,12 @@ def report_deposit(id=None):
                 Report.xero_integrated_yes,
                 Report.completed_sections,
                 Report.current_section,
-                ReportCashCountDraft.thousand_note,
-                ReportCashCountDraft.fivehundred_note,
-                ReportCashCountDraft.onehundred_note,
-                ReportCashCountDraft.fifty_note,
-                ReportCashCountDraft.twenty_note,
-                ReportCashCountDraft.ten_note,
-                ReportCashCountDraft.five_coin,
-                ReportCashCountDraft.two_coin,
-                ReportCashCountDraft.one_coin,
-                ReportCashCountDraft.safe_box_balance,
-                ReportCashCountDraft.discrepancy_amount,
-                ReportCashCountDraft.discrepancy_type,
-                ReportCashCountDraft.discrepancy_reason,
+                # The 13 ReportCashCountDraft columns that used to be selected
+                # here are gone (Step 3.5). Nothing read them — not this route,
+                # not deposit.html — and after Step 2 removed the join they had
+                # become an implicit CARTESIAN PRODUCT: selecting columns from
+                # an unjoined table cross-joins it, so the values returned came
+                # from an arbitrary other report's cash count.
             ) .first())
         entity = (
             Entity.query.join(UserEntity, UserEntity.entity_id == Entity.id)
@@ -124,16 +116,15 @@ def report_deposit(id=None):
 
         # Determine if this is the latest report (most recent transaction_date)
         # or old report
+        # Step 4a-6: was max(coalesce(Report.transaction_date,
+        # ReportDraft.transaction_date)) over a full outer join. Drafts live in
+        # `report` since Stage 4a, so one table answers it. No status filter —
+        # balance chaining and "is this the latest" both mean ANY status; a
+        # draft's date is still the latest date.
         latest_report_date = (
-            db.session.query(
-                db.func.max(
-                    db.func.coalesce(
-                        Report.transaction_date,
-                        ReportDraft.transaction_date))) .filter(
-                db.or_(
-                    Report.company == entity_id,
-                    ReportDraft.company == entity_id),
-            ) .scalar())
+            db.session.query(db.func.max(Report.transaction_date))
+            .filter(Report.company == entity_id)
+            .scalar())
 
         is_latest_report = report.transaction_date == latest_report_date
 

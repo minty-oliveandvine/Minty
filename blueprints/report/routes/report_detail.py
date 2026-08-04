@@ -24,9 +24,7 @@ from blueprints.report.services.shared import (get_cash_sales_from_detail,
                                                safe_float,
                                                sales_amounts_by_short_name,
                                                write_sales_detail_rows)
-from models.db import (Report, ReportCashCountDraft, ReportDraft,
-                       ReportExpenseDetail, ReportHistory, ReportSaleDetail,
-                       ReportV2, ShopExpense, ShopExpenseDraft, db)
+from models.db import Report, ReportHistory, ReportSaleDetail, ShopExpense, db
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_entity_account_settings
 from services.permission_policy import (Permission, can_delete_report,
@@ -371,64 +369,32 @@ def delete_report(id):
     s3_client = get_s3_client()
     bucket = get_s3_bucket()
 
-    def _delete_report_v2_cascade(report_id):
-        """Delete ReportV2 and all records that reference it via FK."""
-        ReportExpenseDetail.query.filter_by(report_id=report_id).delete()
+    def _delete_report_children(report_id):
+        """Delete the child rows that must go before a report row can.
+
+        Renamed from _delete_report_v2_cascade in Step 4a-2: ReportV2 had no
+        writers since r2a02, its delete went with that edit, and the table
+        itself was dropped in r10a10.
+
+        The report_expense_detail delete went in Step 3.5.
+
+        The xero_report_sync / xero_bank_transfer deletes went too, and that is
+        deliberate: they are the audit trail of what was pushed to Xero — the
+        record that detects a double-publish — and erasing it on report delete
+        is what r9a09 (Step 4d) exists to stop. Removing them here is a no-op
+        until then, because both FKs still ON DELETE CASCADE off report.id;
+        once r9a09 flips those to ON DELETE SET NULL the trail survives.
+        Leaving these lines in would have defeated that migration entirely.
+        """
         ReportSaleDetail.query.filter_by(report_id=report_id).delete()
-        from models.db import XeroBankTransfer, XeroReportSync
-        XeroReportSync.query.filter_by(report_id=report_id).delete()
-        XeroBankTransfer.query.filter_by(sync_report_id=report_id).delete()
-        ReportV2.query.filter_by(report_id=report_id).delete()
 
     try:
-        report = Report.query.get(id)
-
-        if not report:
-            report_draft = ReportDraft.query.get_or_404(id)
-            if not can_delete_report(current_user, report_draft):
-                return permission_denied(
-                    "You are not authorized to delete this report.",
-                    entity_id=report_draft.company,
-                )
-            entity_id = report_draft.company
-
-            ShopExpense.query.filter_by(report_id=report_draft.id).delete()
-            ReportCashCountDraft.query.filter_by(report_id=report_draft.id).delete()
-            _delete_report_v2_cascade(report_draft.id)
-            # Since Stage 4a a draft has a paired `report` row with the same id.
-            # This branch predates that and only deleted the draft, so the
-            # report row survived and the "deleted" report kept showing up in
-            # the dashboard and history, which read `report` now.
-            paired = Report.query.filter_by(id=report_draft.id).first()
-            if paired:
-                db.session.delete(paired)
-            db.session.delete(report_draft)
-
-            # status filter is load-bearing: this deletes SIBLING rows matched
-            # on (company, transaction_date), and duplicates per date do occur.
-            # Without it, once drafts live in `report`, this would delete
-            # submitted reports for the same entity and date.
-            other_drafts = (
-                ReportDraft.query.filter(
-                    ReportDraft.company == report_draft.company,
-                    ReportDraft.transaction_date == report_draft.transaction_date,
-                    ReportDraft.id != report_draft.id,
-                    ReportDraft.status == "draft",
-                ).all()
-            )
-            for draft in other_drafts:
-                ShopExpense.query.filter_by(report_id=draft.id).delete()
-                ReportCashCountDraft.query.filter_by(report_id=draft.id).delete()
-                _delete_report_v2_cascade(draft.id)
-                paired_sibling = Report.query.filter_by(id=draft.id).first()
-                if paired_sibling:
-                    db.session.delete(paired_sibling)
-                db.session.delete(draft)
-
-            db.session.commit()
-
-            flash("That report's deleted.", "success")
-            return redirect(url_for("entity.report_dashboard", id=entity_id))
+        # Step 4a-6: the whole "no Report row, fall back to a ReportDraft"
+        # branch that used to sit here is gone. It existed for drafts predating
+        # Stage 4a, which is when every draft gained a paired `report` row with
+        # the same id. With report_draft dropped there is nothing to fall back
+        # to — no row means the report genuinely does not exist.
+        report = Report.query.get_or_404(id)
 
         entity_id = report.company
         if not can_delete_report(current_user, report):
@@ -487,31 +453,28 @@ def delete_report(id):
                     logger.warning(f"Failed to delete file {file_key} from S3: {e}")
 
         ShopExpense.query.filter_by(report_id=report.id).delete()
-        _delete_report_v2_cascade(report.id)
+        _delete_report_children(report.id)
 
-        report_draft = ReportDraft.query.filter_by(id=report.id).first()
-        if report_draft:
-            ShopExpense.query.filter_by(report_id=report_draft.id).delete()
-            ReportCashCountDraft.query.filter_by(report_id=report_draft.id).delete()
-            db.session.delete(report_draft)
+        # The paired-ReportDraft delete that sat here went with Step 4a-6 —
+        # report and draft are one row, already being deleted below.
 
-        # See the note on the draft-only branch: status keeps this from
-        # deleting submitted reports once drafts move into `report`.
+        # Sibling rows for the same (company, transaction_date); duplicates per
+        # date do occur. The status filter is LOAD-BEARING and now the only
+        # thing scoping this to drafts — the table used to imply it. Without
+        # it this deletes submitted reports for the same entity and date.
         other_drafts = (
-            ReportDraft.query.filter(
-                ReportDraft.company == report.company,
-                ReportDraft.transaction_date == report.transaction_date,
-                ReportDraft.id != report.id,
-                ReportDraft.status == "draft",
+            Report.query.filter(
+                Report.company == report.company,
+                Report.transaction_date == report.transaction_date,
+                Report.id != report.id,
+                Report.status == "draft",
             ).all()
         )
 
         for draft in other_drafts:
             ShopExpense.query.filter_by(report_id=draft.id).delete()
-            ReportCashCountDraft.query.filter_by(report_id=draft.id).delete()
-            _delete_report_v2_cascade(draft.id)
-            # Sibling drafts have paired `report` rows too (Stage 4a) — delete
-            # both or the sibling survives in the dashboard as a ghost draft.
+            _delete_report_children(draft.id)
+            # One row per sibling now (Step 4a-6) — delete it directly.
             paired_sibling = Report.query.filter_by(id=draft.id).first()
             if paired_sibling:
                 db.session.delete(paired_sibling)
@@ -535,10 +498,6 @@ def delete_report(id):
         r = Report.query.get(id)
         if r:
             entity_id = r.company
-        else:
-            rd = ReportDraft.query.get(id)
-            if rd:
-                entity_id = rd.company
         return redirect(url_for("entity.report_dashboard", id=entity_id))
     except Exception:
         logger.exception(f"Error deleting report {id}")
@@ -548,10 +507,6 @@ def delete_report(id):
         r = Report.query.get(id)
         if r:
             entity_id = r.company
-        else:
-            rd = ReportDraft.query.get(id)
-            if rd:
-                entity_id = rd.company
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
 
@@ -734,14 +689,14 @@ def resume_report():
                     f"Invalid transaction_date parameter: {transaction_date_param}"
                 )
                 if draft_id:
-                    draft = ReportDraft.query.get(draft_id)
+                    draft = Report.query.get(draft_id)
                     if draft:
                         transaction_date = draft.transaction_date
                         logger.info(
                             f"Using draft transaction_date as fallback: {transaction_date}"
                         )
         elif draft_id:
-            draft = ReportDraft.query.get(draft_id)
+            draft = Report.query.get(draft_id)
             if draft:
                 transaction_date = draft.transaction_date
                 logger.info(
