@@ -45,7 +45,9 @@ class User(UserMixin, db.Model):
     reset_token = db.Column(db.String(100), nullable=True)
     reset_token_expiry = db.Column(db.DateTime, nullable=True)
     report_histories = db.relationship("ReportHistory", back_populates="user")
-    report_history_drafts = db.relationship("ReportHistoryDraft", back_populates="user")
+    # report_history_drafts went with Step 4a-4 — log_history_draft was the
+    # only writer and had no callers. Both sides of the back_populates pair
+    # had to go together or mapper configuration fails.
     xero_token = db.Column(db.String(2048), nullable=True)
     access_token = db.Column(db.String(2048), nullable=True)
     refresh_token = db.Column(db.String(255), nullable=True)

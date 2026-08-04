@@ -15,8 +15,9 @@ from loguru import logger
 from user_agents import parse
 
 from blueprints.report import report_bp
-from models.db import (Entity, Report, ReportCashCountDraft, ReportSaleDetail,
-                       EntitySaleSetting, ShopExpense, db)
+from blueprints.report.services.cash_denominations import \
+    legacy_column_counts_for_report
+from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, db)
 from services.helpers.docx import convert_docx_to_pdf
 from services.permission_policy import can_view_report
 
@@ -57,8 +58,13 @@ def generate_pdf_report(id):
             )
 
         expenses = ShopExpense.query.filter_by(report_id=id).all()
-        cash_count = ReportCashCountDraft.query.filter_by(report_id=id).first()
-        if not cash_count:
+        # Counts come from report_cash_count now (Step 3.5); the legacy wide
+        # columns answer only for reports predating the backfill. The result
+        # keeps the nine legacy column names because the .docx template
+        # addresses its placeholders by face value (qty1_1000, amt2_5, ...) and
+        # cannot be reshaped from here.
+        cash_count = legacy_column_counts_for_report(id)
+        if cash_count is None:
             return (
                 jsonify(
                     {"status": "error", "message": "I couldn't find a cash count for that report."}
@@ -85,8 +91,13 @@ def generate_pdf_report(id):
             if sale_info.value_name:
                 sale_detail_amounts[sale_info.value_name] = sale_detail.amount or 0
 
+        # app.root_path points at the app-factory package
+        # (services/app_runtime/legacy), which has no static/ directory — so
+        # this looked for the template somewhere it has never existed and the
+        # export 500'd with "missing the report template". Flask's
+        # static_folder is configured correctly; use it.
         template_path = os.path.join(
-            app.root_path, "static", "doc", "Daily_Report_Template.docx"
+            app.static_folder, "doc", "Daily_Report_Template.docx"
         )
         if not os.path.exists(template_path):
             return (
@@ -138,20 +149,21 @@ def generate_pdf_report(id):
             "shop_sales": shop_sales,
             "delivery_sales": delivery_sales,
             "expenses": [],
+            # cash_count is now a {legacy_column: quantity} dict, not a model
+            # row — the face-value keys below are unchanged, so the .docx
+            # placeholders resolve exactly as before.
             "drawer_set1": {
-                "1000": cash_count.thousand_note if cash_count.thousand_note else 0,
-                "500": (
-                    cash_count.fivehundred_note if cash_count.fivehundred_note else 0
-                ),
-                "100": cash_count.onehundred_note if cash_count.onehundred_note else 0,
-                "50": cash_count.fifty_note if cash_count.fifty_note else 0,
-                "20": cash_count.twenty_note if cash_count.twenty_note else 0,
+                "1000": cash_count.get("thousand_note") or 0,
+                "500": cash_count.get("fivehundred_note") or 0,
+                "100": cash_count.get("onehundred_note") or 0,
+                "50": cash_count.get("fifty_note") or 0,
+                "20": cash_count.get("twenty_note") or 0,
             },
             "drawer_set2": {
-                "10": cash_count.ten_note if cash_count.ten_note else 0,
-                "5": cash_count.five_coin if cash_count.five_coin else 0,
-                "2": cash_count.two_coin if cash_count.two_coin else 0,
-                "1": cash_count.one_coin if cash_count.one_coin else 0,
+                "10": cash_count.get("ten_note") or 0,
+                "5": cash_count.get("five_coin") or 0,
+                "2": cash_count.get("two_coin") or 0,
+                "1": cash_count.get("one_coin") or 0,
             },
             "opening_balance": report.opening_balance if report.opening_balance else 0,
             "cash_withdrawal": report.cash_addition if report.cash_addition else 0,
@@ -271,7 +283,9 @@ def generate_pdf_report(id):
 
         doc.render(context)
 
-        temp_dir = os.path.join(app.root_path, "temp")
+        # Same root_path problem as the template above: writes landed under
+        # the factory package instead of the project directory.
+        temp_dir = os.path.join(app.instance_path, "temp")
         os.makedirs(temp_dir, exist_ok=True)
         docx_filename = f"Daily_Report_{report.transaction_date}_{report.id}.docx"
         pdf_filename = f"Daily_Report_{report.transaction_date}_{report.id}.pdf"
@@ -410,7 +424,8 @@ def report_screenshot(id=None):
             )
 
         driver.get(url)
-        screenshots_dir = os.path.join(app.root_path, "temp", "screenshots")
+        # See the note on temp_dir above.
+        screenshots_dir = os.path.join(app.instance_path, "temp", "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
         filepath = os.path.join(
             screenshots_dir,

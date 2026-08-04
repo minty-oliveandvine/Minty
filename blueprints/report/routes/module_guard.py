@@ -8,7 +8,7 @@ can't be forgotten when a new report route is added.
 
 Entity resolution mirrors how the routes themselves find their entity:
   * ``entity_id`` / ``org_id`` in the URL, query string, form, or JSON body;
-  * a report id (``id`` / ``report_id``) -> Report.company or ReportDraft.company;
+  * a report id (``id`` / ``report_id``) -> Report.company;
   * an expense / expense-draft id (``expense_id`` / ``draft_id``)
     -> the owning report(_draft)'s ``company``.
 
@@ -58,20 +58,17 @@ def _resolve_entity_id():
     # while those models are still initializing), which would silently disable
     # this guard.
     from blueprints.report.models.report import Report
-    from blueprints.report.models.report_draft import ReportDraft
     from blueprints.report.models.shop_expense import ShopExpense
-    from blueprints.report.models.shop_expense_draft import ShopExpenseDraft
 
-    # 2. A report id -> owning entity (a published Report first, then a draft;
-    #    the same id space is used for both across the report routes).
+    # 2. A report id -> owning entity. The ReportDraft second-try went with
+    #    Step 4a-6: drafts and reports share one id AND one table now, so the
+    #    first lookup already answers for both. No status filter — this is an
+    #    authorization guard and must resolve an entity whatever the state.
     report_id = _from_request(("id", "report_id"))
     if report_id:
         report = Report.query.get(report_id)
         if report:
             return report.company
-        draft = ReportDraft.query.get(report_id)
-        if draft:
-            return draft.company
 
     # 3. An expense id -> owning report's entity (submitted expense first,
     #    then a draft expense).
@@ -82,16 +79,19 @@ def _resolve_entity_id():
             report = Report.query.get(expense.report_id)
             if report:
                 return report.company
-        draft_expense = ShopExpenseDraft.query.get(expense_id)
-        if draft_expense and draft_expense.report_draft:
-            return draft_expense.report_draft.company
 
-    # 4. An expense-draft id -> owning report-draft's entity.
+    # 4. An expense-draft id -> owning report's entity.
+    #    The ShopExpenseDraft lookups that used to sit in both branches went
+    #    with Step 4a-3: draft and real share one id, so ShopExpense.get()
+    #    answers for both. `draft_id` stays a distinct request key because
+    #    routes still pass it under that name.
     draft_id = _from_request(("draft_id",))
     if draft_id:
-        draft_expense = ShopExpenseDraft.query.get(draft_id)
-        if draft_expense and draft_expense.report_draft:
-            return draft_expense.report_draft.company
+        expense = ShopExpense.query.get(draft_id)
+        if expense:
+            report = Report.query.get(expense.report_id)
+            if report:
+                return report.company
 
     return None
 

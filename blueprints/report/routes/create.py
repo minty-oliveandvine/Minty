@@ -11,7 +11,7 @@ from blueprints.report.services.s3_storage import upload_file_to_s3
 from blueprints.report.services.shared import (future_date_error,
                                                parse_nested_keys, safe_float,
                                                write_sales_detail_rows)
-from models.db import Entity, Report, ReportCashCountDraft, ShopExpense, db, tz
+from models.db import Entity, Report, ShopExpense, db, tz
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -119,16 +119,16 @@ def create_report():
                 # (Step 4). The future-date guard above already rejected any date
                 # after today; the onboarding date is the lower bound when one
                 # exists.
-                from models.db import ReportDraft
                 # Draft-only, same reasoning as _onboarding_floor_date in
                 # opening.py: unfiltered, this resolves to the oldest SUBMITTED
-                # report once drafts move into `report`, moving the floor date.
+                # report and moves the floor date. The status filter is now
+                # load-bearing rather than implied by the table (Step 4a-6).
                 opening_draft = (
-                    ReportDraft.query.filter(
-                        ReportDraft.company == entity_id,
-                        ReportDraft.status == "draft",
+                    Report.query.filter(
+                        Report.company == entity_id,
+                        Report.status == "draft",
                     )
-                    .order_by(ReportDraft.transaction_date.asc())
+                    .order_by(Report.transaction_date.asc())
                     .first()
                 )
                 onboarding_date = (
@@ -303,11 +303,13 @@ def create_report():
                 f"Using previous day's closing balance as opening balance: {opening_balance} (from report {last_report.id})"
             )
         else:
-            last_cashcount = ReportCashCountDraft.query.filter(
-                ReportCashCountDraft.report_id == last_report.id
-            ).first()
-            if last_cashcount and last_cashcount.actual_cash_total is not None:
-                opening_balance = last_cashcount.actual_cash_total
+            # actual_cash_total lives on `report` since r1a01 hoisted it. The
+            # report_cashcount_draft fallback went in Step 4a-5: r7a07
+            # backfilled every historical value onto `report`, and
+            # cash_count.py has written it there since Step 3.5.
+            fallback_total = last_report.actual_cash_total
+            if fallback_total is not None:
+                opening_balance = fallback_total
                 logger.info(
                     f"Using previous day's cash count balance as opening balance (fallback): {opening_balance} (from report {last_report.id})"
                 )

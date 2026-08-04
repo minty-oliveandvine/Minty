@@ -7,11 +7,14 @@ class XeroBankTransfer(db.Model):
     __tablename__ = "xero_bank_transfer"
     __table_args__ = {"schema": "pettycashv2"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
-    # Re-pointed at report.id in r4a04 (Stage 3). See xero_report_sync.
+    # Re-pointed at report.id in r4a04 (Stage 3), reshaped in r9a09
+    # (Step 4d) — see xero_report_sync for the full reasoning. Was a composite
+    # PK member with a forced CASCADE; now a nullable FK with SET NULL, so the
+    # Xero audit trail survives a report deletion.
     sync_report_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE"),
-        primary_key=True,
+        db.ForeignKey("pettycashv2.report.id", ondelete="SET NULL"),
+        nullable=True,
     )
     from_bank_account_id = db.Column(db.String(36), nullable=False)
     to_bank_account_id = db.Column(db.String(36), nullable=False)

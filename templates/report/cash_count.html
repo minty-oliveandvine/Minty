@@ -270,7 +270,7 @@ document.addEventListener('submit', function(e){
               <div class="mb-4">
                 <h3 class="text-sm mb-2 font-semibold text-gray-700">Safebox Cash Balance</h3>
                 <div class="flex items-center gap-2">
-                  <input type="text" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ cashcount_draft.safe_box_balance if cashcount_draft and cashcount_draft.safe_box_balance is not none else '' }}" placeholder="Please enter Balance of the safebox" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); calculateTotals();" onblur="formatWithCommas(this); calculateTotals();">
+                  <input type="text" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ current_draft.safe_box_balance if current_draft and current_draft.safe_box_balance is not none else '' }}" placeholder="Please enter Balance of the safebox" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); calculateTotals();" onblur="formatWithCommas(this); calculateTotals();">
 
                 </div>
               </div>
@@ -308,7 +308,7 @@ document.addEventListener('submit', function(e){
 
           <!-- Description Input -->
           <div>
-            <textarea id="discrepancyDescription"  name="discrepancy_reason" class="w-full px-3 py-3 border border-gray-300 rounded-2xl {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent resize-none" rows="1" placeholder="Description" {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}readonly{% endif %}>{{ cashcount_draft.discrepancy_reason if cashcount_draft else '' }}</textarea>
+            <textarea id="discrepancyDescription"  name="discrepancy_reason" class="w-full px-3 py-3 border border-gray-300 rounded-2xl {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent resize-none" rows="1" placeholder="Description" {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}readonly{% endif %}>{{ current_draft.discrepancy_reason if current_draft else '' }}</textarea>
           </div>
           {% if is_report_edit_mode %}
           <!-- Submitted report in edit mode: save the discrepancy reason -->

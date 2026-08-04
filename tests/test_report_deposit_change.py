@@ -71,12 +71,8 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
     from blueprints.report.services import shared
 
     previous_day_report = _build_report()
-    same_day_draft = _build_report(
-        id="draft-same-day",
-        transaction_date=date(2025, 3, 2),
-        bank_deposit=5000.0,
-        closing_balance=15000.0,
-    )
+    # The same_day_draft fixture that used to sit here went with
+    # sync_same_day_draft_after_deposit_change (Step 4).
     next_day_draft = _build_report(
         id="draft-1",
         transaction_date=date(2025, 3, 3),
@@ -102,14 +98,17 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
             "sum_sales_by_type",
             lambda _report_id: {"Cash": 0.0, "Electronic": 0.0, "Delivery": 0.0},
         )
-        # Patch Report, not ReportDraft: the write flip pointed both
-        # propagation helpers at `report`. The same-day lookup now returns
-        # None by construction — a submitted report and a same-day draft were
-        # two rows before and are one row now, so it cannot be both.
+        # Patch Report, not ReportDraft: the write flip pointed the
+        # propagation helper at `report`.
+        #
+        # ONE queued result, not two. The leading None used to answer
+        # sync_same_day_draft_after_deposit_change's lookup; that function was
+        # deleted in Step 4, so a two-item queue now feeds the None to the
+        # NEXT-DAY lookup and the propagation silently does nothing.
         monkeypatch.setattr(
             shared.Report,
             "query",
-            _FakeFilterSequenceQuery([None, next_day_draft]),
+            _FakeFilterSequenceQuery([next_day_draft]),
         )
         monkeypatch.setattr(
             shared.db.session,
@@ -130,9 +129,9 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
     assert updated_report is previous_day_report
     assert previous_day_report.bank_deposit == 3000.0
     assert previous_day_report.closing_balance == 17000.0
-    # same_day_draft is deliberately NOT asserted: post write-flip the
-    # same-day lookup returns None (one row cannot be both posted and draft),
-    # and the correction is applied to previous_day_report directly above.
+    # The same-day assertions went with the function they described: the
+    # correction is applied to previous_day_report directly above, and
+    # next-day chaining is the only propagation left.
     assert next_day_draft.opening_balance == 17000.0
     assert next_day_draft.adjusted_opening_balance == 17000.0
     assert next_day_draft.closing_balance == 17000.0

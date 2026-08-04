@@ -15,10 +15,7 @@ from loguru import logger
 
 from blueprints.report.services.shared import update_report_after_deposit_change
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from models.db import (AccountInfo, Report, ReportExpenseDetail, ReportHistory,
-                       ReportDraft, User, XeroReportSync,
-                       Entity,
-                       ShopExpense, ShopExpenseDraft, XeroContactSync, db)
+from models.db import (AccountInfo, Report, ReportHistory, User, XeroReportSync, Entity, ShopExpense, XeroContactSync, db)
 from services.auth.token_service import ensure_valid_token, resolve_xero_token
 from services.helpers.xero_bridge import (get_entity_account_settings,
                                           get_entity_contact_settings)
@@ -284,7 +281,7 @@ def create_bank_transaction(
     line_items=[{}],
     type_of_transaction="",
     access_token=None,
-    report_id=None,  # Optional: for posted reports (ShopExpense), None for draft reports (ShopExpenseDraft)
+    report_id=None,  # Optional; resolved from (entity_id, date) when omitted
     pfr=None,  # Optional PublishFailureReason accumulator (out-parameter)
     subject=None,  # "contact" / "account" — helps phrase the failure reason
     module_label=None,  # short label for the failing module/line, used in the reason bullet
@@ -435,70 +432,55 @@ def create_bank_transaction(
 
                     expense = None
 
-                    # If report_id is provided, we're working with posted reports (ShopExpense)
-                    if report_id:
-                        expense = ShopExpense.query.filter(
-                            ShopExpense.report_id == report_id,
-                            ShopExpense.amount == first_unit_amount,
-                            ShopExpense.item == item,
-                            ShopExpense.account_code == account_code,
-                            ShopExpense.contact_id == contact_id,
-                        ).first()
-                        if expense:
-                            logger.info(f"Found ShopExpense for {item} in posted report {report_id}")
-                    else:
-                        # Otherwise, we're working with draft reports (ShopExpenseDraft)
-                        # Get user email from report_draft (since current_user may not be available in background thread)
-                        # NOTE: no company filter — this matches on date ALONE,
-                        # so it can return another entity's row. Pre-existing
-                        # cross-tenant bug, left visible rather than silently
-                        # patched; it needs its own fix and test.
+                    # STEP 4a-3: the draft branch is gone. Since Step 3 the
+                    # expense row IS the ShopExpense from data entry onward, so
+                    # both the posted and draft cases resolve here. `report_id`
+                    # is still optional — callers that do not know it fall
+                    # through to the date lookup below.
+                    #
+                    # NO STATUS FILTER anywhere in this path, deliberately.
+                    # Publishing runs AFTER submit, so the row is
+                    # status='posted'; filtering for "draft" here returned None
+                    # and broke every Xero publish once already.
+                    if not report_id:
+                        # Resolve the report from (entity, date).
                         #
-                        # No status filter: by publish time the row is
-                        # status='posted', so filtering on "draft" returned
-                        # None and broke the email lookup.
-                        report_draft = ReportDraft.query.filter(
-                            ReportDraft.transaction_date == date,
+                        # `Report.company == entity_id` is NEW: this lookup
+                        # used to match on transaction_date ALONE and could
+                        # return another tenant's report. Pre-existing
+                        # cross-tenant bug, fixed here because 4a-3 rewrites
+                        # these exact lines.
+                        _report_row = Report.query.filter(
+                            Report.company == entity_id,
+                            Report.transaction_date == date,
                         ).first()
-                        email = report_draft.uploaded_by if report_draft else None
-
-                        if not email:
-                            # Try to get from current_user as fallback
-                            try:
-                                if hasattr(current_user, 'username') and current_user.username:
-                                    email = current_user.username
-                                else:
-                                    logger.warning("Could not determine user email for expense file upload")
-                                    return True  # Transaction was created, return success
-                            except RuntimeError:
-                                logger.warning("Could not determine user email for expense file upload")
-                                return True  # Transaction was created, return success
-
-                        # No status filter (see above). `.id` is dereferenced
-                        # with no None guard, so an over-narrow filter here
-                        # raises AttributeError mid-publish.
-                        _draft_row = (
-                            ReportDraft.query.filter(
-                                ReportDraft.transaction_date == date,
-                                ReportDraft.uploaded_by == email,
-                            )
-                            .first()
-                        )
-                        if not _draft_row:
+                        if not _report_row:
                             logger.warning(
-                                "No report row for date=%s uploaded_by=%s; "
-                                "skipping expense file upload", date, email
+                                "No report for entity=%s date=%s; skipping "
+                                "expense file upload", entity_id, date
                             )
-                            return True
-                        report_draft_id = _draft_row.id
-                        expense = ShopExpenseDraft.query.filter(
-                            ShopExpenseDraft.report_draft_id == report_draft_id,
-                            ShopExpenseDraft.amount == first_unit_amount,
-                            ShopExpenseDraft.item == item,
-                            ShopExpenseDraft.account_code == account_code,
-                        ).first()
-                        if expense:
-                            logger.info(f"Found ShopExpenseDraft for {item} in draft report")
+                            return True  # Transaction was created, return success
+                        report_id = _report_row.id
+
+                    _filters = [
+                        ShopExpense.report_id == report_id,
+                        ShopExpense.amount == first_unit_amount,
+                        ShopExpense.item == item,
+                        ShopExpense.account_code == account_code,
+                    ]
+                    # contact_id narrowed the posted branch but not the draft
+                    # one. Applied only when truthy, so neither case changes:
+                    # the posted path keeps its narrower match, and a call
+                    # without a contact (the old draft path) is not newly
+                    # filtered into finding nothing.
+                    if contact_id:
+                        _filters.append(ShopExpense.contact_id == contact_id)
+
+                    expense = ShopExpense.query.filter(*_filters).first()
+                    if expense:
+                        logger.info(
+                            f"Found ShopExpense for {item} in report {report_id}"
+                        )
 
                     if expense:
                         file_upload_result = upload_each_file(expense, entity, bank_transction_id, access_token=access_token)
@@ -1326,7 +1308,15 @@ def validate_expenses_for_system_accounts(
     `access_token` is kept for signature compatibility with the existing callsite.
     """
     try:
-        expense_details = ReportExpenseDetail.query.filter_by(
+        # Reads ShopExpense since Step 3.5: report_expense_detail duplicated it
+        # for the same expense, and only account_id / the expense id were ever
+        # read here. `expense_id` there is `id` here — the same value, since
+        # both were written from the draft's primary key.
+        #
+        # This is a WIDER net than the old query, not a narrower one: after
+        # Step 3, shop_expense is the row created at data entry, and r5a05
+        # backfilled everything older.
+        expense_details = ShopExpense.query.filter_by(
             report_id=report_id).all()
         if not expense_details:
             return []
@@ -1350,7 +1340,7 @@ def validate_expenses_for_system_accounts(
                         "expense": (
                             account.name
                             if account.name
-                            else f"Expense {detail.expense_id}"
+                            else f"Expense {detail.id}"
                         ),
                         "account_code": account.xero_code,
                         "message": "System accounts are not allowed to be published to Xero.",

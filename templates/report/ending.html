@@ -528,7 +528,7 @@ document.addEventListener('submit', function(e){
                 </div>
                 <div class="flex items-center justify-between">
                   <span class="text-[12px] sm:text-lg font-base text-gray-400">Safebox</span>
-                  <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not (cashcount_draft and cashcount_draft.safe_box_balance) else "{:,.2f}".format(cashcount_draft.safe_box_balance) }}</span>
+                  <span class="text-[12px] sm:text-lg font-base text-gray-400">{{ "-" if not safe_box_balance else "{:,.2f}".format(safe_box_balance) }}</span>
                 </div>
               </div>
             </div>

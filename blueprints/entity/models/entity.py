@@ -47,12 +47,12 @@ class Entity(db.Model):
     account_info = db.relationship(
         "AccountInfo", cascade="all, delete-orphan", backref="entity", lazy=True
     )
-    report_detail = db.relationship(
-        "ReportDetail", cascade="all, delete-orphan", backref="entity", lazy=True
-    )
-    report_v2 = db.relationship(
-        "ReportV2", cascade="all, delete-orphan", backref="entity", lazy=True
-    )
+    # The ReportDetail relationship went with Step 3.5 — nothing writes that
+    # table any more, so there are no children for the cascade to reach. The
+    # model itself survives until the Step 4 drop.
+    # The report_v2 relationship went with Step 4a-2, alongside report_detail.
+    # ReportV2 has had no writers since r2a02; the model outlives this only
+    # until the r10a10 drop.
     sale_info = db.relationship(
         "EntitySaleSetting", cascade="all, delete-orphan", backref="entity", lazy=True
     )
