@@ -10,9 +10,11 @@ preview and commit share ONE calculation. ``test_preview_matches_what_cancelling
 is what holds that: it previews, then cancels, and asserts the recorded row carries the
 previewed date and amount.
 
-Marginal pricing is the part most easily got wrong. Dropping Petty Cash from a 400 bundle
-leaves Payment Request at 280, so Petty Cash was worth 120 — not its 280 list price — and
-the extension is prorated off that 120.
+Pricing is the part most easily got wrong, and it is measured against what is LEAVING —
+not against the line the entity keeps. Petty Cash cancelled on its own is charged its 280
+list price for the extra days, because nothing else is leaving with it; cancel Payment
+Request too and the pair is priced as the bundle it still is until it goes, making each
+worth the 120 margin inside it (see checkout._leaving_marginal).
 """
 from __future__ import annotations
 
@@ -50,12 +52,16 @@ class _Row:
         self.trial_end = trial_end
         self.app_access_until = None
         self.first_billed_at = None
+        # Read by the re-pricing pass that runs after a cancellation: only rows with a
+        # PENDING extension are re-priced, and these rows have none.
+        self.extension_state = None
+        self.extension_amount = None
 
 
 class _Plan:
-    def __init__(self, amount):
+    def __init__(self, amount, display_name="plan"):
         self.amount = amount
-        self.display_name = "plan"
+        self.display_name = display_name
         self.currency = "HKD"
 
 
@@ -77,7 +83,10 @@ def _setup(monkeypatch, *, row, siblings=None, paid_through=_PAID_THROUGH):
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
     monkeypatch.setattr(
         store, "billing_plan_for_codes",
-        lambda codes: _Plan(40000 if len(set(codes)) > 1 else 28000),
+        lambda codes: (
+            _Plan(40000, "Super Minty") if len(set(codes)) > 1
+            else _Plan(28000, sorted(codes)[0].title().replace("_", " "))
+        ),
     )
     monkeypatch.setattr(
         store, "upsert_module_row",
@@ -131,8 +140,10 @@ def test_preview_writes_nothing(monkeypatch):
 # --- paid ----------------------------------------------------------------------
 
 
-def test_paid_preview_charges_the_marginal_price_not_the_list_price(monkeypatch):
-    """Petty Cash out of a 400 bundle leaves Bill at 280, so it was worth 120.
+def test_a_lone_leaver_is_quoted_its_own_price(monkeypatch):
+    """Petty Cash is the only module leaving, so the extra days are charged at its own
+    280 — the 120 margin is what it was worth to a subscription that KEPT Payment
+    Request, and that is not what these days are.
 
     Access ends at max(paid_through, now + grace). With paid_through 19 days out and a
     30-day window, the window wins and the days BEYOND paid_through are what's owed.
@@ -146,8 +157,8 @@ def test_paid_preview_charges_the_marginal_price_not_the_list_price(monkeypatch)
     assert p["remaining"] == ["BILL"]
     # Survivor's price, so the dialog can say what billing continues at.
     assert p["remaining_amount"] == "280.00"
-    # Charged off 120 (400 - 280), never off 280.
-    assert 0 < p["amount"] < 28000
+    # 28000 x 11/31 — off its own price, not the 12000 margin (which would be 4258).
+    assert p["amount"] == 9935
     assert p["access_end"] > _PAID_THROUGH
     assert p["charged_now"] is False
 
@@ -231,3 +242,25 @@ def test_preview_requires_a_code(monkeypatch):
 
     with pytest.raises(checkout.CheckoutError):
         checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "")
+
+
+def test_previewing_a_PAIR_quotes_the_pair_not_two_solos(monkeypatch):
+    """Both halves of a bundle dropped in one click.
+
+    Previewed independently each one looks like a lone leaver at its 280 list price
+    (9935 apiece, 19870 quoted) while the cancellations, run in sequence, re-price them
+    to a pair — so the dialog named more than twice what the invoice collects. Told what
+    else is going, the preview prices the set: 120 each, 8516 in total, under the plan
+    that covers them.
+    """
+    checkout, _ = _setup(monkeypatch, row=_Row("PETTY_CASH"))
+
+    p = checkout.preview_cancel_module(
+        _FakeEntity(), _FakeUser(), "PETTY_CASH", ["BILL"]
+    )
+
+    assert p["amount"] == 4258, "12000 x 11/31, not the solo 9935"
+    assert p["leaving_count"] == 2
+    assert p["leaving_label"] == "Super Minty"
+    assert p["leaving_total"] == 8516, "both halves, which is what the invoice holds"
+    assert p["leaving_total_formatted"] == "85.16"

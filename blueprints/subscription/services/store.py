@@ -649,10 +649,15 @@ def record_action(
     app_access_until=None,
     extension_amount=None,
     extension_state=None,
+    cancel_reason=None,
     note=None,
 ) -> SubscriptionAuditLog:
     """Append an immutable cancel/uncancel record. ``extension_amount`` is frozen here
-    (the mirror deliberately doesn't store it)."""
+    (the mirror deliberately doesn't store it).
+
+    ``cancel_reason`` is the customer's own text from the cancellation dialog. It is
+    kept here rather than on the module row because it is history: every cancellation
+    keeps its own, where a column on the row would hold only the most recent one."""
     entry = SubscriptionAuditLog(
         id=_uuid(),
         entity_id=str(entity_id),
@@ -666,6 +671,7 @@ def record_action(
         app_access_until=app_access_until,
         extension_amount=extension_amount,
         extension_state=extension_state,
+        cancel_reason=cancel_reason,
         note=note,
     )
     db.session.add(entry)

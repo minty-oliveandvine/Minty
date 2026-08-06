@@ -21,11 +21,13 @@ from loguru import logger
 
 from blueprints.subscription.constants import (
     AUDIT_CANCEL,
+    AUDIT_TERMINATE,
     AUDIT_UNCANCEL,
     EXT_INVOICED,
     EXT_PENDING,
     OUTCOME_SUCCEEDED,
     PHASE_ACTIVE,
+    PHASE_CANCELLED,
     PHASE_EXPIRED,
     PHASE_PAST_DUE,
     PHASE_SCHEDULED_CANCEL,
@@ -1222,17 +1224,52 @@ def _billed_codes_in_house(entity_id) -> set[str]:
     remainder of the period. Adding Payment Request to an entity already on Petty Cash was
     billed 65.33 (280 prorated) instead of 28.00 (the 120 bundle margin prorated).
 
-    ``is_billing_forward`` matches what ``_cancel_module_in_house`` already uses to price
-    a cancellation, so the two directions of a change agree on what the line holds.
-    A ``scheduled_cancel`` module is therefore NOT counted: it is winding down and its
-    marginal value has already been charged as an extension. Whether an entity that is
-    part-way out should be re-priced onto a bundle is a pricing decision, not a coding
-    one; it is left alone deliberately rather than settled here by accident.
+    A module winding down IS counted, as long as it was billed and the period it was
+    billed for has not ended. That pricing decision — left open here originally — is
+    settled: the customer paid for that module through the period end, so for the days
+    before that end the line genuinely holds it, and adding a second module to it is an
+    upgrade to the bundle rather than a fresh join. Petty Cash converting on 20 Aug beside
+    a Payment Request paid to 28 Aug is 30.97 (credit 72.26 unused, charge 103.23 of
+    bundle for the 8 days), not 72.26 (its standalone price for the same 8 days). The
+    re-price to what survives happens at 28 Aug, on the renewal, which is where the
+    cancelled module actually leaves.
+
+    ``first_billed_at`` is what keeps a cancelled TRIAL out of this: it is winding down
+    too, and nothing was ever paid for it, so there is no covered period to price against.
+
+    This deliberately does NOT match the set ``_paid_cancel_terms`` uses. The two answer
+    different questions: this one prices a change INSIDE a period already paid for, that
+    one prices access BEYOND it, where a module winding down is no longer on the line.
     """
+    now = clock.now()
+    rows = list(store.module_rows_for_entity(entity_id))
+    payer_user_id = next(
+        (r.payer_user_id for r in rows if getattr(r, "payer_user_id", None)), None
+    )
+    # Best-effort: a failure here must not cost anyone their purchase. Falling back to
+    # None drops the winding-down module from the set, which is the pre-existing
+    # behaviour — it can overcharge a wind-down overlap, never undercharge.
+    try:
+        paid_through = (
+            store.paid_through_for_user(payer_user_id) if payer_user_id else None
+        )
+    except Exception:
+        logger.exception(
+            "billing: could not read paid_through for entity {}; pricing its change "
+            "without the modules that are winding down",
+            entity_id,
+        )
+        paid_through = None
+
     return {
         row.function_code.upper()
-        for row in store.module_rows_for_entity(entity_id)
-        if access.is_billing_forward(phase=row.phase)
+        for row in rows
+        if access.is_covered_this_period(
+            phase=row.phase,
+            first_billed_at=getattr(row, "first_billed_at", None),
+            paid_through=paid_through,
+            now=now,
+        )
     }
 
 
@@ -1429,6 +1466,68 @@ def _expire_due_trial(row) -> None:
     _set_module_access(row.entity_id, row.function_code, False)
 
 
+def terminate_lapsed_module(row) -> bool:
+    """End a wound-down module whose access has now actually run out. Returns whether
+    it moved.
+
+    ``scheduled_cancel`` and ``past_due`` are both TEMPORARY states with a date on them:
+    one is riding out the days its extension bought, the other the grace its debt is
+    allowed. Nothing fired when that date passed, so the phase stayed as it was — a
+    module nobody can use still reading as "cancelling" or "in arrears" indefinitely,
+    with the panel offering Renew or Pay now for a subscription that is over.
+
+    ``cancelled`` is the terminal phase for both. It grants no access (``access_end``
+    refuses terminal phases outright, without consulting a date) and, unlike
+    ``scheduled_cancel``, it does not stand in the way of buying the module again —
+    ``is_subscribed`` excludes it precisely because nothing is held any more. That is the
+    difference the customer feels: cancelled-but-running means Renew, and terminated
+    means Subscribe.
+
+    Deliberately NOT applied to a trial. ``convert_or_expire_due_trials`` owns that
+    boundary because it decides convert-or-expire, which this cannot; a trial that ends
+    lands on ``expired`` instead — terminal too, and equally re-purchasable.
+
+    The extension is left alone. ``pending_extensions_for_payer`` selects on
+    ``extension_state``, not phase, so money recorded at cancellation is still collected
+    by the next renewal run after the module has been terminated. Terminating ends the
+    subscription, not the debt.
+    """
+    phase = getattr(row, "phase", None)
+    if phase not in (PHASE_SCHEDULED_CANCEL, PHASE_PAST_DUE):
+        return False
+
+    ended_at = getattr(row, "app_access_until", None)
+    store.upsert_module_row(
+        row.entity_id,
+        row.function_code,
+        row.payer_user_id,
+        phase=PHASE_CANCELLED,
+        # Cleared for the same reason ``_expire_due_trial`` clears it: the window is
+        # spent, and a leftover date on a terminal row is a trap for any future reader
+        # that checks dates before phases.
+        app_access_until=None,
+    )
+    store.record_action(
+        entity_id=row.entity_id,
+        function_code=row.function_code,
+        payer_user_id=row.payer_user_id,
+        actor_user_id=None,          # nobody clicked; a date passed
+        action=AUDIT_TERMINATE,
+        outcome=OUTCOME_SUCCEEDED,
+        phase_before=phase,
+        phase_after=PHASE_CANCELLED,
+        # Kept here because the row's copy is being cleared — this is the log of WHEN
+        # the access being terminated actually ran out.
+        app_access_until=ended_at,
+        note=(
+            "access ran out after cancellation; subscription terminated"
+            if phase == PHASE_SCHEDULED_CANCEL
+            else "past-due grace ran out; subscription terminated"
+        ),
+    )
+    return True
+
+
 def _extension_amount(line_amount: int, remaining_codes) -> int:
     """What cancelling a module actually saves — its MARGINAL price on the line.
 
@@ -1452,7 +1551,163 @@ def _prorate(amount: int, period_start, period_end, access_end) -> int:
     return max(0, round(amount * extra / span))
 
 
-def _paid_cancel_terms(entity, user, code: str, row) -> dict:
+def _leaving_codes(rows, paid_through, now) -> set[str]:
+    """The modules on their way out that were PAID for the period they are leaving.
+
+    Not ``is_billing_forward`` (they bill no further, by definition) and not
+    ``is_covered_this_period`` (that counts the ones staying too): this is the middle
+    set, and it is what an extension is priced against — see ``_leaving_marginal``.
+
+    A cancelled TRIAL is excluded by ``first_billed_at``: nothing was paid for it, so it
+    has no extension and does not change what the others are worth.
+    """
+    if paid_through is None or now is None or paid_through <= now:
+        return set()
+    return {
+        r.function_code.upper()
+        for r in rows
+        if r.phase == PHASE_SCHEDULED_CANCEL
+        and getattr(r, "first_billed_at", None) is not None
+    }
+
+
+def _leaving_marginal(leaving: set[str], code: str) -> int:
+    """What ``code`` is worth WITHIN the set that is leaving, per month.
+
+    The rule for the extra days a cancellation buys, in one line: price the leaving set
+    as the plan that covers it, and charge each module what it adds to the rest of that
+    set.
+
+        leaving alone      {PETTY_CASH}       280 - 0   = 280
+        leaving together   {PETTY_CASH, BILL} 400 - 280 = 120 each
+
+    So a module cancelled on its own is charged its list price for those days — nothing
+    else is leaving to share the line with it — while two cancelled together are priced
+    as the bundle they still are until they go.
+    """
+    from blueprints.subscription.services.billing import marginal_amount
+
+    plan_all = store.billing_plan_for_codes(leaving)
+    if not plan_all:
+        return 0
+    rest = set(leaving) - {code}
+    plan_rest = store.billing_plan_for_codes(rest) if rest else None
+    return marginal_amount(plan_all.amount, plan_rest.amount if plan_rest else None)
+
+
+def _segmented_extension(code: str, ends: dict, period, paid_through) -> int:
+    """What ``code`` owes for its extra days, priced piece by piece as others fall away.
+
+    Modules cancelled on different days stop on different days, so the set sharing the
+    line CHANGES during the window. Petty Cash cancelled on the 5th runs to 4 Sep and
+    Payment Request cancelled on the 6th to 5 Sep: up to 4 Sep they are a pair and each is
+    worth the 120 margin, but on the 5th Payment Request is alone and worth its whole 280.
+    One rate for the whole window would charge that last day at a bundle price nobody is
+    in.
+
+    So the window is cut at every date another leaver ends, and each piece is priced with
+    ``_leaving_marginal`` against whoever is still there. Pieces are taken as differences
+    of the cumulative charge, so this bills exactly what ``extension_charge`` would for a
+    single-rate window and cannot drift from it.
+
+    ``ends`` is {code: access_end} for everything leaving, this module included.
+    """
+    from blueprints.subscription.services.billing import Period, extension_charge
+
+    end = ends.get(code)
+    if end is None or end <= paid_through:
+        return 0
+
+    window = Period(period.start, paid_through)
+    cuts = sorted(
+        {paid_through, end}
+        | {e for c, e in ends.items() if c != code and e and paid_through < e < end}
+    )
+    total = 0
+    for start, stop in zip(cuts, cuts[1:]):
+        # Who still holds their module during this piece: everyone whose access outlasts
+        # its start. The cuts are the only points where that can change.
+        live = {c for c, e in ends.items() if e and e > start}
+        base = _leaving_marginal(live, code)
+        total += extension_charge(base, window, stop) - extension_charge(base, window, start)
+    return max(0, total)
+
+
+def _reprice_pending_extensions(
+    entity, payer_user_id, *, also_leaving=(), no_longer_leaving=()
+) -> None:
+    """Re-price every not-yet-billed extension on this entity, in place.
+
+    The price of a cancellation depends on what else is leaving with it, and that is not
+    settled when the customer clicks: cancelling a SECOND module makes the first one part
+    of a pair (280 -> 120), and reinstating one leaves the other alone again (120 -> 280).
+    Whichever way it moves, the figure has to be the one the renewal will actually
+    collect, so it is rewritten here rather than left as whatever the first dialog said.
+
+    Only ``pending`` rows are touched. Once an extension is INVOICED the money has moved,
+    and a bill already sent is not re-priced by a later click — that is what
+    ``_reverse_extension`` is for.
+
+    ``also_leaving`` ({code: access_end}) / ``no_longer_leaving`` name the module whose
+    phase this very call is a consequence of, rather than re-reading it back off the row. The write has happened,
+    but "re-read what I just wrote" is a property of the session's identity map, and the
+    price two customers are charged should not rest on that.
+    """
+    from blueprints.subscription.services.billing import period_containing
+
+    now = clock.now()
+    rows = list(store.module_rows_for_entity(entity.id))
+    anchor, _currency = store.billing_cycle_for_user(payer_user_id)
+    paid_through = store.paid_through_for_user(payer_user_id)
+    if anchor is None or paid_through is None:
+        return
+
+    also = {str(c).upper(): end for c, end in dict(also_leaving or {}).items()}
+    gone = {str(c).upper() for c in no_longer_leaving}
+    leaving = (_leaving_codes(rows, paid_through, now) | set(also)) - gone
+    if not leaving:
+        return
+
+    period = period_containing(anchor, paid_through - timedelta(seconds=1))
+    # Every leaver's access end, because each one's price depends on when the OTHERS stop
+    # — see _segmented_extension. The module this call is about supplies its own, for the
+    # same reason it supplies its own code: what was just written is not re-read.
+    ends = {
+        (r.function_code or "").upper(): getattr(r, "app_access_until", None)
+        for r in rows
+        if (r.function_code or "").upper() in leaving
+    }
+    for c, end in also.items():
+        if c in leaving and not ends.get(c):
+            ends[c] = end
+    for r in rows:
+        code = (r.function_code or "").upper()
+        if code not in leaving or r.extension_state != EXT_PENDING:
+            continue
+        access_end = ends.get(code)
+        if access_end is None:
+            continue
+        amount = _segmented_extension(code, ends, period, paid_through)
+        if amount == (getattr(r, "extension_amount", None) or 0):
+            continue
+        store.upsert_module_row(
+            entity.id,
+            code,
+            r.payer_user_id or payer_user_id,
+            extension_amount=amount if amount > 0 else None,
+            extension_state=EXT_PENDING if amount > 0 else None,
+        )
+        logger.info(
+            "billing: re-priced the pending extension for {} {} to {} "
+            "(leaving: {})",
+            entity.id,
+            code,
+            amount,
+            ",".join(sorted(leaving)),
+        )
+
+
+def _paid_cancel_terms(entity, user, code: str, row, also_cancelling=()) -> dict:
     """What cancelling this PAID module would cost and when access would end.
 
     PURE — reads only. ``_cancel_module_in_house`` calls this and then writes exactly
@@ -1473,13 +1728,15 @@ def _paid_cancel_terms(entity, user, code: str, row) -> dict:
 
     payer_user_id = (getattr(row, "payer_user_id", None)) or getattr(user, "id", None)
     now = clock.now()
+    rows = list(store.module_rows_for_entity(entity.id))
 
-    current = {
-        r.function_code.upper()
-        for r in store.module_rows_for_entity(entity.id)
-        if access.is_billing_forward(phase=r.phase)
+    # Only a module still billing forward can be cancelled. This is the guard against
+    # cancelling the same module twice — which would record a SECOND extension on the
+    # row — and it is deliberately not the set the price is taken from below.
+    live = {
+        r.function_code.upper() for r in rows if access.is_billing_forward(phase=r.phase)
     }
-    if code not in current:
+    if code not in live:
         raise CheckoutError(f"Module {code} isn't currently subscribed.", status=409)
 
     anchor, currency = store.billing_cycle_for_user(payer_user_id)
@@ -1491,19 +1748,58 @@ def _paid_cancel_terms(entity, user, code: str, row) -> dict:
         paid_through, now, extension_days=policy.current().paid_cancel_access_days
     )
 
-    # What the module was WORTH on the line — its marginal price, not its list price.
-    # Dropping Petty Cash from a 400 bundle leaves Bill at 280, so it was worth 120;
-    # charging 280 for the extension would bill more than it ever cost.
-    remaining = current - {code}
-    plan_now = store.billing_plan_for_codes(current)
-    plan_after = store.billing_plan_for_codes(remaining) if remaining else None
-    marginal = (
-        marginal_amount(plan_now.amount, plan_after.amount if plan_after else None)
-        if plan_now
-        else 0
+    # The extension is priced against the modules that are LEAVING — this one plus any
+    # already winding down — not against the line the entity is keeping.
+    #
+    # A module on its own is worth its list price: nothing else is leaving with it, so
+    # nothing offsets it. Two leaving together are priced as the bundle they were, which
+    # makes each worth its margin inside that pair (400 - 280 = 120). Same
+    # ``marginal_amount``, a different set to measure it against.
+    # ``also_cancelling`` is the rest of ONE decision — the other modules the customer is
+    # dropping in the same click. Without it each preview prices its module as if it were
+    # leaving alone (280) while the cancellations, run in sequence, re-price them all to a
+    # pair (120 each): the dialog would quote more than twice what the invoice collects.
+    leaving = (
+        _leaving_codes(rows, paid_through, now)
+        | {code}
+        | {str(c).upper() for c in (also_cancelling or ())}
     )
+    marginal = _leaving_marginal(leaving, code)
+
+    # What still BILLS after this, which is a different question and the one the
+    # confirmation dialog asks ("your other modules are unaffected" / "this is the last
+    # one"). A module already winding down is not an answer to it.
+    remaining = live - {code}
+    # Returned for the dialog's "your subscription then continues at ..." line, so it
+    # follows what still BILLS.
+    plan_after = store.billing_plan_for_codes(remaining) if remaining else None
     period = period_containing(anchor, paid_through - timedelta(seconds=1))
-    amount = extension_charge(marginal, Period(period.start, paid_through), access_end)
+
+    # Every leaver's access end, this one included. A module going in the SAME click has
+    # none recorded yet — it gets the one being computed here, because the window is the
+    # same rule applied at the same moment; already-cancelled ones carry their own, which
+    # is how a module cancelled a day earlier stops a day earlier.
+    also_upper = {str(c).upper() for c in (also_cancelling or ())}
+    ends = {code: access_end}
+    for r in rows:
+        r_code = (r.function_code or "").upper()
+        if r_code == code or r_code not in leaving:
+            continue
+        ends[r_code] = getattr(r, "app_access_until", None) or (
+            access_end if r_code in also_upper else None
+        )
+
+    amount = _segmented_extension(code, ends, period, paid_through)
+
+    # What the INVOICE will hold, which is not this module's share when something else is
+    # leaving with it: confirming this cancellation also RE-PRICES the modules already
+    # winding down (a lone 280 becomes one of a 400 pair), so quoting only this row would
+    # name a figure that is never billed on its own and understate what is actually due.
+    # The plan covering the leaving set names it — "Super Minty" for the pair.
+    plan_leaving = store.billing_plan_for_codes(leaving)
+    leaving_total = sum(
+        _segmented_extension(c, ends, period, paid_through) for c in ends
+    )
 
     return {
         "payer_user_id": payer_user_id,
@@ -1514,10 +1810,15 @@ def _paid_cancel_terms(entity, user, code: str, row) -> dict:
         "currency": currency,
         "remaining": sorted(remaining),
         "plan_after": plan_after,
+        # The cancellation as the invoice will state it: everything leaving together,
+        # under the name of the plan that covers it.
+        "leaving": sorted(leaving),
+        "leaving_label": (plan_leaving.display_name if plan_leaving else None),
+        "leaving_total": leaving_total,
     }
 
 
-def _cancel_module_in_house(entity, user, code: str, row) -> dict:
+def _cancel_module_in_house(entity, user, code: str, row, reason=None) -> dict:
     """Cancel a PAID module when Minty does the billing.
 
     Same promise as the Stripe path — access until ``max(paid_through, now + 30 days)``,
@@ -1552,6 +1853,13 @@ def _cancel_module_in_house(entity, user, code: str, row) -> dict:
         fields["extension_state"] = EXT_PENDING
     store.upsert_module_row(entity.id, code, payer_user_id, **fields)
 
+    # This module joining the ones already leaving changes what THEY are worth: a lone
+    # 280 becomes one of a 400 pair. Re-priced now, so the rows carry what the renewal
+    # will collect rather than what the first dialog happened to say.
+    _reprice_pending_extensions(
+        entity, payer_user_id, also_leaving={code: access_end}
+    )
+
     store.record_action(
         entity_id=entity.id,
         function_code=code,
@@ -1569,6 +1877,7 @@ def _cancel_module_in_house(entity, user, code: str, row) -> dict:
         app_access_until=access_end,
         extension_amount=amount or None,
         extension_state=EXT_PENDING if amount > 0 else None,
+        cancel_reason=reason,
         note="cancelled in-house; extension recorded for the next invoice",
     )
     return {
@@ -1577,8 +1886,25 @@ def _cancel_module_in_house(entity, user, code: str, row) -> dict:
     }
 
 
-def cancel_module(entity, user, function_code: str) -> dict:
+def _clean_cancel_reason(reason) -> str | None:
+    """Normalise the free-text reason from the cancellation dialog.
+
+    Trimmed to the audit column's width rather than rejected: the reason is a courtesy
+    the customer typed on their way out, and refusing a cancellation because it was too
+    long would be absurd. Blank (or whitespace) becomes None — "didn't say" is the
+    honest record, and an empty string in the column reads as if they had.
+    """
+    text = (reason or "").strip()
+    return text[:500] or None
+
+
+def cancel_module(entity, user, function_code: str, reason=None) -> dict:
     """Cancel ONE module under the prorated access-extension rule.
+
+    ``reason`` is the customer's own words from the cancellation dialog, optional on
+    every path. It is recorded in ``subscription_audit_log`` — history, not state, so
+    every cancellation keeps its own — and never affects what happens here; nobody has
+    to justify leaving to be allowed to.
 
     Cancelling one of two modules drops the entity to the survivor's price (400 -> 280);
     cancelling the last one ends the entity's billing altogether.
@@ -1600,6 +1926,7 @@ def cancel_module(entity, user, function_code: str) -> dict:
     if not code:
         raise CheckoutError("A module is required to cancel.")
     user_id = getattr(user, "id", None)
+    why = _clean_cancel_reason(reason)
 
     row = store.module_row(entity.id, code)
     # App-level trial: no Stripe object at all, and no charge either way.
@@ -1626,6 +1953,7 @@ def cancel_module(entity, user, function_code: str) -> dict:
                 outcome=OUTCOME_SUCCEEDED,
                 phase_before=PHASE_TRIAL,
                 phase_after=PHASE_EXPIRED,
+                cancel_reason=why,
                 note="app-level trial cancelled after its end date; expired immediately",
             )
             return {"access_end": None, "extension_state": None}
@@ -1648,6 +1976,7 @@ def cancel_module(entity, user, function_code: str) -> dict:
             phase_before=PHASE_TRIAL,
             phase_after=PHASE_SCHEDULED_CANCEL,
             app_access_until=access_end,
+            cancel_reason=why,
             note="app-level trial cancelled; access runs to trial end, will not convert",
         )
         return {"access_end": access_end, "extension_state": None}
@@ -1655,10 +1984,215 @@ def cancel_module(entity, user, function_code: str) -> dict:
     # A PAID module. Access continues to app_access_until and the extension is
     # recorded for the next renewal to collect, so cancelling never depends on a
     # card clearing.
-    return _cancel_module_in_house(entity, user, code, row)
+    return _cancel_module_in_house(entity, user, code, row, reason=why)
 
 
-def preview_cancel_module(entity, user, function_code: str) -> dict:
+def preview_subscribe_modules(entity, user, codes) -> dict:
+    """What subscribing ``codes`` would charge TODAY, and what it costs from then on.
+
+    The dialog before a purchase, and the counterpart of ``preview_cancel_module``: reads
+    only, and quotes the figure the charge itself will use rather than a price list.
+
+    "Charged today" is NOT the plan price whenever the payer already has a cycle running.
+    An entity joining mid-period pays for the days left in it, and one adding a second
+    module pays the difference to the bundle — both of which come out of
+    ``changes.build_change``, the same calculation ``_bill_module_change_in_house``
+    bills. A payer with no anchor yet starts their cycle here, so the first period is
+    charged in full; that is the branch that quotes the plain plan price.
+
+    Returns the plan being bought, what it covers, today's charge, the monthly rate that
+    follows, and the saving against buying the modules separately.
+    """
+    from blueprints.subscription.services import changes
+    from blueprints.subscription.services.billing import period_containing
+
+    wanted = {str(c).strip().upper() for c in (codes or []) if str(c).strip()}
+    if not wanted:
+        raise CheckoutError("No modules to subscribe to.")
+
+    payer_user_id = store.payer_for_entity(entity.id) or getattr(user, "id", None)
+    current = _billed_codes_in_house(entity.id)
+    target = current | wanted
+    plan_target = store.billing_plan_for_codes(target)
+    if plan_target is None:
+        raise CheckoutError("No available subscription plan for those modules.")
+
+    currency = getattr(plan_target, "currency", None) or ""
+    now = clock.now()
+    anchor, cycle_currency = store.billing_cycle_for_user(payer_user_id)
+    currency = cycle_currency or currency
+
+    if anchor is None:
+        # Nothing has ever been billed for this payer: this purchase starts the cycle, so
+        # the period is charged in full rather than prorated against one they were never
+        # part of. Mirrors _bill_module_change_in_house's own no-anchor branch.
+        charged_today = int(plan_target.amount)
+    else:
+        period = period_containing(anchor, now)
+        invoice = changes.build_change(
+            entity.id, getattr(entity, "name", None) or str(entity.id),
+            current, target, period, now,
+        )
+        charged_today = int(getattr(invoice, "total", 0) or 0) if invoice else 0
+
+    # What the same modules would cost bought one by one — the bundle IS the discount, so
+    # this is the only place the saving can come from.
+    separate = 0
+    names = []
+    for code in sorted(target):
+        one = store.billing_plan_for_codes({code})
+        if one is not None:
+            separate += int(one.amount)
+            names.append(one.display_name)
+
+    monthly = int(plan_target.amount)
+    saving = max(0, separate - monthly)
+    return {
+        "codes": sorted(target),
+        "label": plan_target.display_name,
+        "modules": names,
+        "currency": currency,
+        "charged_today": charged_today,
+        "charged_today_formatted": (
+            money.format_minor(charged_today, currency) if charged_today else None
+        ),
+        "monthly": monthly,
+        "monthly_formatted": money.format_minor(monthly, currency),
+        "saving": saving,
+        "saving_formatted": money.format_minor(saving, currency) if saving else None,
+        # Whether confirming also has to record this company's consent — the payer's card
+        # is shared, so the first charge on a company is authorised explicitly. The card
+        # is named in that case for the same reason ``_billing_confirmation`` names it:
+        # authorising a charge without saying which card it lands on is half a disclosure.
+        "needs_consent": not store.has_billing_consent(entity.id),
+        "card": _preview_card_display(payer_user_id),
+    }
+
+
+def _preview_card_display(payer_user_id) -> str | None:
+    """"Visa ending 4242" for the payer's saved card, or None. Never raises: this only
+    decorates a dialog, and a Stripe hiccup must not stop the customer subscribing."""
+    try:
+        customer_id = store.customer_id_for_user(payer_user_id) if payer_user_id else None
+        method = customer_default_payment_method(customer_id) if customer_id else None
+        card = payment_method_display(method) if method else None
+    except Exception:
+        logger.exception(
+            "billing: could not read the saved card for payer {}", payer_user_id
+        )
+        return None
+    if not card:
+        return None
+    return f"{card.get('brand') or 'card'} ending {card.get('last4') or '••••'}"
+
+
+def preview_reinstate_modules(entity, user, codes) -> dict:
+    """What resuming ``codes`` would charge NOW. Reads only.
+
+    Resuming is the one action in this flow that takes money on the spot: the extension
+    paid up to ``app_access_until`` and the renewal skipped the module for the rest of the
+    period, so the customer owes from one to the other — collected up front, because a
+    purchase that waits until month end is one they can walk away from having already had
+    the module. Until this preview existed, that charge happened with no dialog at all.
+
+    Mirrors ``_bill_reinstatement_in_house`` step for step, including its two "charge
+    nothing" branches: no anchor or no covered-to (nothing to prorate against) and an
+    extension already covering the rest of the period. A module whose extension was never
+    invoiced owes nothing either — deleting a pending number is free.
+
+    Returns the plan being resumed, the charge, and the window it covers.
+    """
+    from blueprints.subscription.services import changes
+    from blueprints.subscription.services.billing import period_containing
+
+    wanted = {str(c).strip().upper() for c in (codes or []) if str(c).strip()}
+    if not wanted:
+        raise CheckoutError("No modules to resume.")
+
+    rows = {
+        (r.function_code or "").upper(): r
+        for r in store.module_rows_for_entity(entity.id)
+    }
+    payer_user_id = next(
+        (rows[c].payer_user_id for c in wanted if c in rows and rows[c].payer_user_id),
+        None,
+    ) or getattr(user, "id", None)
+
+    plan_target = store.billing_plan_for_codes(
+        _billed_codes_in_house(entity.id) | wanted
+    )
+    label_plan = store.billing_plan_for_codes(wanted)
+    anchor, currency = store.billing_cycle_for_user(payer_user_id)
+    currency = currency or getattr(plan_target, "currency", None) or ""
+
+    # A cancelled TRIAL is winding down like a paid module and resumes through the same
+    # tick, but nothing about the money is the same: nothing was ever charged, so there
+    # are no paid days covering anything, and billing starts when the TRIAL ends rather
+    # than at the period end. Saying otherwise is the one thing this dialog must not do.
+    trials = [
+        c for c in wanted
+        if c in rows and getattr(rows[c], "first_billed_at", None) is None
+    ]
+    trial_ends = [
+        getattr(rows[c], "trial_end", None) for c in trials
+        if getattr(rows[c], "trial_end", None)
+    ]
+    kind = (
+        "trial" if len(trials) == len(wanted)
+        else ("paid" if not trials else "mixed")
+    )
+
+    charged = 0
+    covers_from = None
+    covers_to = None
+    if anchor is not None:
+        period = period_containing(anchor, clock.now())
+        covers_to = period.end
+        # ``before`` is the line WITHOUT this module, exactly as
+        # _bill_reinstatement_in_house builds it — the covered set minus the one being
+        # put back. Not a running accumulation: each reinstatement re-reads that set, and
+        # a module still cancelled is in it either way (it paid for this period).
+        covered = _billed_codes_in_house(entity.id) | wanted
+        for code in sorted(wanted):
+            row = rows.get(code)
+            covered_to = getattr(row, "app_access_until", None) if row else None
+            invoiced = (
+                getattr(row, "extension_state", None) == EXT_INVOICED if row else False
+            )
+            if not invoiced or covered_to is None or covered_to >= period.end:
+                continue
+            before = covered - {code}
+            invoice = changes.build_change(
+                entity.id, getattr(entity, "name", None) or str(entity.id),
+                before, before | {code}, period, covered_to,
+            )
+            charged += int(getattr(invoice, "total", 0) or 0) if invoice else 0
+            covers_from = min(covers_from or covered_to, covered_to)
+
+    monthly = int(plan_target.amount) if plan_target else 0
+    return {
+        "codes": sorted(wanted),
+        "label": (label_plan.display_name if label_plan else None),
+        # trial | paid | mixed — which sentences the dialog is allowed to say.
+        "kind": kind,
+        # When a resumed trial starts costing money. The earliest, because that is the
+        # first date something is charged.
+        "trial_end": min(trial_ends) if trial_ends else None,
+        "currency": currency,
+        "charged_today": charged,
+        "charged_today_formatted": (
+            money.format_minor(charged, currency) if charged else None
+        ),
+        # The window the charge covers — from where the cancellation's access ran out to
+        # the end of the period the entity is in.
+        "covers_from": covers_from,
+        "covers_to": covers_to,
+        "monthly": monthly,
+        "monthly_formatted": money.format_minor(monthly, currency) if monthly else None,
+    }
+
+
+def preview_cancel_module(entity, user, function_code: str, also_cancelling=()) -> dict:
     """What cancelling would do, WITHOUT doing it — for the confirmation dialog.
 
     Answers the two questions the dialog exists to answer: when does access end, and is
@@ -1694,6 +2228,10 @@ def preview_cancel_module(entity, user, function_code: str) -> dict:
         "amount": 0,
         "amount_formatted": None,
         "currency": None,
+        # The guaranteed-access window, so the dialog can name the number instead of
+        # hardcoding "30 days" in the template. It is a tunable policy lever, and copy
+        # that states it from memory is copy that goes wrong the day it is tuned.
+        "access_days": policy.current().paid_cancel_access_days,
         # Nothing is charged at cancellation on any path — the extension is recorded
         # and collected by the next renewal run. The dialog says so rather than
         # implying a card is about to be hit.
@@ -1711,7 +2249,7 @@ def preview_cancel_module(entity, user, function_code: str) -> dict:
         # The free days are kept: cancelling a trial only means "don't convert me".
         return {**base, "kind": "trial", "access_end": access_end}
 
-    terms = _paid_cancel_terms(entity, user, code, row)
+    terms = _paid_cancel_terms(entity, user, code, row, also_cancelling)
     currency = terms["currency"]
     amount = terms["amount"]
     plan_after = terms["plan_after"]
@@ -1730,6 +2268,18 @@ def preview_cancel_module(entity, user, function_code: str) -> dict:
         "remaining_amount": (
             money.format_minor(plan_after.amount, currency) if plan_after else None
         ),
+        # The whole cancellation as it will appear on the invoice: every module leaving
+        # together, under the name of the plan covering them. When something else is
+        # already winding down, confirming this re-prices it too, so THIS is the figure
+        # the customer is agreeing to — ``amount`` alone is one share of it.
+        "leaving_label": terms["leaving_label"],
+        "leaving_total": terms["leaving_total"],
+        "leaving_total_formatted": (
+            money.format_minor(terms["leaving_total"], currency)
+            if terms["leaving_total"]
+            else None
+        ),
+        "leaving_count": len(terms["leaving"]),
     }
 
 
@@ -1812,6 +2362,9 @@ def _reactivate_module_in_house(entity, user, code: str, row) -> None:
 
     store.upsert_module_row(entity.id, code, row.payer_user_id, **fields)
     _set_module_access(entity.id, code, True)
+    # This module leaving the leaving-set changes what the rest are worth: whatever stays
+    # cancelled is now alone, and alone costs its list price rather than a pair's margin.
+    _reprice_pending_extensions(entity, row.payer_user_id, no_longer_leaving={code})
     store.record_action(
         entity_id=entity.id,
         function_code=code,

@@ -407,6 +407,12 @@ def upgrade():
         sa.Column("extension_amount", sa.Integer, nullable=True),
         sa.Column("extension_state", sa.String(20), nullable=True),
         sa.Column("outcome", sa.String(20), nullable=False),
+        # The customer's own words from the cancellation dialog, optional on every path.
+        # History, which is why it is here and not on entity_module_subscription: a
+        # module cancelled, renewed and cancelled again has two reasons worth keeping,
+        # and a column on the row would hold only the second. Kept apart from ``note``
+        # (which WE write, about the action) so "why do people leave" is a query.
+        sa.Column("cancel_reason", sa.String(500), nullable=True),
         sa.Column("note", sa.String(500), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True),
                   server_default=sa.func.now(), nullable=False),

@@ -39,6 +39,11 @@ MODULE_PETTY_CASH = "PETTY_CASH"
 MODULE_BILL = "BILL"
 MODULE_CODES: tuple[str, ...] = (MODULE_PETTY_CASH, MODULE_BILL)
 
+# What the multi-module plan is called on screen. The catalog row carries its own
+# display_name and that wins; this is the fallback for a catalog that has no bundle
+# row yet, and the one place the name is written down.
+BUNDLE_DISPLAY_NAME = "Super Minty"
+
 # Audit-trail values for entity_function_map.created_by (column is 36 chars).
 ACTOR_ONBOARDING = "onboarding"
 ACTOR_CLI = "cli"
@@ -317,12 +322,21 @@ def get_module_cards(entity_id: str) -> list[dict]:
     except Exception:
         logger.exception("modules: could not read module rows for entity {}", entity_id)
 
-    # What this entity is ALREADY billed for. A trial converting alongside these is a
-    # mid-period change and bills the rest of the cycle immediately; converting with
-    # nothing here just starts the cycle. Same test the renewal uses, so the two agree
-    # about which modules are on the bill.
+    # What this period was ALREADY PAID FOR. A trial converting alongside these is a
+    # mid-period change priced against them; converting with nothing here just starts the
+    # cycle. Mirrors checkout._billed_codes_in_house exactly — the forecast and the
+    # invoice must not be computed two ways — INCLUDING its treatment of a module that is
+    # winding down: cancelled, but paid up to the period end, so for the days before that
+    # end it is still on the line and still part of a bundle.
     billed_now = {
-        c for c, r in rows.items() if access.is_billing_forward(phase=r.phase)
+        c
+        for c, r in rows.items()
+        if access.is_covered_this_period(
+            phase=getattr(r, "phase", None) or "",
+            first_billed_at=getattr(r, "first_billed_at", None),
+            paid_through=paid_through,
+            now=now,
+        )
     }
 
     # Read once for the whole card set, not per module: every card on this page must
@@ -394,6 +408,19 @@ def get_module_cards(entity_id: str) -> list[dict]:
         # on a module the user was already working inside.
         trial_eligible = fn is not None and row is None and not has_access
 
+        # ...and the other side of that coin: a trial this entity USED UP. It held one,
+        # it is over, and nothing was ever charged — so the module is off and cannot be
+        # trialled again. "not active" on its own reads as "never had this", which leaves
+        # the customer wondering why the card offers Subscribe instead of a free trial.
+        # A module whose PAID subscription ended is a different sentence and is excluded
+        # by never_billed.
+        trial_expired = bool(
+            row is not None
+            and never_billed
+            and getattr(row, "trial_end", None) is not None
+            and not granted
+        )
+
         plan = plans_by_code.get(code.upper())
         amount = (
             _normalize_price_amount(plan.amount, plan.currency_code)
@@ -463,6 +490,30 @@ def get_module_cards(entity_id: str) -> list[dict]:
                     row is not None and access.is_subscribed(phase=phase)
                 ),
                 "trial_eligible": trial_eligible,
+                # Held a trial, used it up, never paid: the card says "free trial
+                # expired" under its status so "not active" is not the whole story.
+                "trial_expired": trial_expired,
+                # The other half of that story: PAID for, and now out of access — with
+                # the DATE it ran out, and deliberately without a verdict on why.
+                #
+                # "Subscription ended" was wrong here. A module whose paid period lapses
+                # keeps ``phase = active`` until something writes it (see
+                # sweep_expired_module_access), so nothing has ended: nobody cancelled,
+                # and the renewal simply never replaced the period. Stating the date is
+                # true whether it lapsed, was cancelled to completion, or is waiting on a
+                # renewal that has not run.
+                "lapsed_long": (
+                    _fmt_day_month_year(
+                        getattr(row, "app_access_until", None) or paid_through
+                    )
+                    if (
+                        row is not None
+                        and not never_billed
+                        and not granted
+                        and (getattr(row, "app_access_until", None) or paid_through)
+                    )
+                    else None
+                ),
                 # What the request gate answers for this module. The card's "is it on"
                 # branch reads THIS, not subscription_status, so what the page shows and
                 # what the user can actually open are the same question.
@@ -527,6 +578,21 @@ def get_module_cards(entity_id: str) -> list[dict]:
                     and getattr(row, "extension_state", None) == EXT_PENDING
                     and getattr(row, "extension_amount", None)
                     else Decimal(0)
+                ),
+                # Ready to print. The card states what the cancellation costs, and money
+                # on a card is formatted by the same rule as money in the panel.
+                "extension_formatted": (
+                    _fmt_money(
+                        _currency_symbol(plan.currency_code if plan else None),
+                        _normalize_price_amount(
+                            row.extension_amount, plan.currency_code if plan else None
+                        ),
+                        money.decimal_places(plan.currency_code if plan else None),
+                    )
+                    if row is not None
+                    and getattr(row, "extension_state", None) == EXT_PENDING
+                    and getattr(row, "extension_amount", None)
+                    else None
                 ),
                 "access_end_date": access_end_date,
                 "access_end_long": (
@@ -669,6 +735,10 @@ def get_subscription_summary(entity_id: str) -> dict:
         "bundle_amount_formatted": f"{bundle_amount:,.2f}",
         "bundle_codes": sorted(bundle.function_codes) if bundle else [],
         "bundle_currency": bundle_currency,
+        # What to CALL the bundle. The trial-decision modal names the plan the customer
+        # is choosing, and it recomputes that name as modules are ticked, so it needs the
+        # name as data rather than as a string baked into a template.
+        "bundle_name": (bundle.display_name if bundle else None) or BUNDLE_DISPLAY_NAME,
     }
 
 
@@ -813,6 +883,108 @@ def _empty_panel_next_invoice(cards: list[dict], fmt) -> dict | None:
     }
 
 
+def _winding_notices(cards: list[dict], bundle_codes, bundle_name: str) -> list[dict]:
+    """The "X cancelled — active until DATE" lines, one per cancellation the customer made.
+
+    Grouped by what was CANCELLED, not by module: cancelling a two-module bundle is one
+    decision and reads as one sentence naming the plan, rather than the same date printed
+    twice under two module names.
+
+    ``past_due`` is excluded for the reason it is excluded everywhere else here: it
+    carries the same winding-down flag but is in arrears, not cancelled, and telling a
+    customer their module is "cancelled" while dunning still retries the charge would be
+    wrong in the direction that loses the account.
+    """
+    winding = [
+        c
+        for c in cards
+        if c.get("pending_cancel")
+        and c.get("access_end_long")
+        and c.get("subscription_status") != "past_due"
+    ]
+    if not winding:
+        return []
+
+    # A cancelled TRIAL is a different sentence from a cancelled subscription: nothing was
+    # bought, nothing is being ended early, and the free days run out on the date they
+    # were always going to. Calling that "cancelled" describes a purchase the customer
+    # never made. Mixed groups read as the paid case, which is the one with money in it.
+    def kind(cards_):
+        return "trial" if all(c.get("trial_cancelled") for c in cards_) else "paid"
+
+    codes = sorted((c["code"] or "").upper() for c in winding)
+    wanted = sorted((code or "").upper() for code in (bundle_codes or []))
+    if wanted and len(winding) > 1 and codes == wanted:
+        return [
+            {
+                "label": bundle_name,
+                "date": winding[0]["access_end_long"],
+                "kind": kind(winding),
+            }
+        ]
+    return [
+        {"label": c["name"], "date": c["access_end_long"], "kind": kind([c])}
+        for c in winding
+    ]
+
+
+def _extension_charges(cards: list[dict], fmt, bundle_codes=None, bundle_name="") -> list[dict]:
+    """One upcoming-charge row per CANCELLATION — not per module.
+
+    A cancellation extends access to the later of the paid period and 30 days, and bills
+    the days BEYOND what was paid for on the payer's next invoice
+    (renewals._pending_extension_lines). That is a different charge from a renewal and a
+    different charge from a trial conversion: it is one-off, it belongs to a module that
+    is going away, and it is the only line here the customer did not choose to keep
+    paying for.
+
+    Folding it into the renewal's figure made both unreadable — a "Renewal HKD 400" that
+    is really 280 of subscription and 120 of cancellation, with a footnote to explain the
+    arithmetic. Worse, when the cancelled module was the entity's LAST paid one there was
+    no renewal row to fold it into, and the charge disappeared from a list titled
+    "upcoming charges" while remaining perfectly real.
+
+    Cancelling a bundle is ONE decision and the two modules are priced against each other
+    for those days (checkout._leaving_marginal), so it is one line naming the plan and
+    carrying the whole figure — two half-rows the customer cannot reconcile against the
+    dialog they confirmed, or against the invoice, is the same mistake the renewal line
+    used to make by folding the extension in.
+
+    The date is the module's own period end — the extension rides the invoice raised for
+    the cycle it is already inside.
+    """
+    charged = [c for c in cards if (c.get("extension_amount") or Decimal(0)) > 0]
+    if not charged:
+        return []
+
+    total = sum((c["extension_amount"] for c in charged), Decimal(0))
+    note = "Extra days after your paid period — charged once, not monthly."
+    codes = sorted((c["code"] or "").upper() for c in charged)
+    wanted = sorted((code or "").upper() for code in (bundle_codes or []))
+    if wanted and len(charged) > 1 and codes == wanted and bundle_name:
+        return [
+            {
+                "at": charged[0].get("period_end"),
+                "date": charged[0].get("period_end_long"),
+                "label": f"{bundle_name} cancellation",
+                "amount": fmt(total),
+                "overdue": False,
+                "note": note,
+            }
+        ]
+    return [
+        {
+            "at": c.get("period_end"),
+            "date": c.get("period_end_long"),
+            "label": f"{c['name']} cancellation",
+            "amount": fmt(c["extension_amount"]),
+            "overdue": False,
+            "note": note,
+        }
+        for c in charged
+    ]
+
+
 def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_display: str | None) -> dict | None:
     """The "Your subscription" panel model, from the already-built cards + summary.
 
@@ -851,6 +1023,10 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
 
     def fmt(amount) -> str:
         return _fmt_money(symbol, amount, places)
+
+    # One name for the bundle everywhere it is spoken about: the priced line, its note,
+    # the cancellation notices below, and the decision modal.
+    bundle_name = summary.get("bundle_name") or BUNDLE_DISPLAY_NAME
 
     # "Enabled" = will be on the NEXT invoice: a running trial or a live paid line, but
     # NOT one that's winding down. A cancelled module keeps access until its period ends
@@ -899,21 +1075,12 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
             # "nothing will be billed".
             "next_invoice": owed,
             "trial_conversions": [],
-            # Nothing renews and no trial converts, so the list is that one owed
-            # extension or nothing at all.
-            "upcoming_charges": (
-                [
-                    {
-                        "at": None,
-                        "date": owed["date"],
-                        "label": "Renewal",
-                        "amount": owed["amount"],
-                        "overdue": False,
-                        "note": "Access charged after a cancellation.",
-                    }
-                ]
-                if owed
-                else []
+            # Nothing renews and no trial converts, so the list is the owed extensions or
+            # nothing at all — named per module, exactly as on a live panel. Calling it
+            # "Renewal" here was wrong twice: nothing is renewing, and the one thing that
+            # IS charged is the cancellation that emptied the panel.
+            "upcoming_charges": _extension_charges(
+                cards, fmt, summary.get("bundle_codes"), bundle_name
             ),
             # A module winding down is excluded from the total — it bills no further —
             # but the customer still HAS it until its access runs out. Saying only
@@ -930,16 +1097,42 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
                 # overdue charge for the same module.
                 and c.get("subscription_status") != "past_due"
             ],
+            # What the panel actually renders for those: one sentence per cancellation
+            # rather than one row per module — see _winding_notices.
+            "winding_notices": _winding_notices(
+                cards, summary.get("bundle_codes"), bundle_name
+            ),
             "footer": "No modules enabled — nothing will be billed.",
-            # No action: subscribing starts from a module card, and there is no
-            # billing account to manage until something has been charged.
-            "primary_action": None,
+            # The panel button is the ONLY way into the decision modal, so an empty panel
+            # still needs one whenever there is something to decide:
+            #   * a module winding down — re-ticking it is the undo, and withholding the
+            #     button would leave a cancellation with no way back;
+            #   * a module that could be bought — an entity whose trials are spent has
+            #     nothing enabled and nothing cancelled, and this is its way back in.
+            # Only a company with no modules at all in the catalog gets no action.
+            "primary_action": (
+                "manage"
+                if any(c.get("pending_cancel") for c in cards)
+                else ("subscribe_stripe" if cards else None)
+            ),
             "subscribe_codes": [],
         }
 
     # The anchor is pinned at the first charge, so its presence is exactly "has this
     # entity started paying" — the one bit that separates the trial panel from the paid.
     state = "active" if anchor_display else "trialing"
+
+    # ...which is the wrong question for the BUTTON, twice over. The anchor lives on the
+    # payer's ACCOUNT, so a payer already charged for another company gives this one an
+    # anchor on day one; and a trial that already has a card and this company's consent
+    # needs nothing from the customer — it converts on its own.
+    #
+    # So "Subscribe to Minty" is offered for exactly one condition: a running trial that
+    # will NOT convert as things stand, because there is no card or this company was
+    # never authorised for the saved one. That is what needs_card means (see
+    # get_module_cards); needs_consent_only says which of the two it is. Everything else
+    # — trials that will convert, and paying entities — is "Manage subscription".
+    needs_billing_setup = any(c.get("needs_card") for c in cards)
 
     enabled_codes = sorted((c["code"] or "").upper() for c in enabled)
     bundle_codes = sorted((code or "").upper() for code in (summary.get("bundle_codes") or []))
@@ -957,7 +1150,7 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
         lines.append(
             {
                 "kind": "bundle",
-                "label": "Super Minty",
+                "label": bundle_name,
                 "sublabel": " & ".join(c["name"] for c in enabled),
                 "original": fmt(subtotal),
                 "amount": fmt(total),
@@ -980,10 +1173,10 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
     # The highlighted context line — what the price actually is, in plain words.
     if is_bundle:
         if state == "trialing":
-            note = f"Super Minty price — save {fmt(saving)}"
+            note = f"{bundle_name} price — save {fmt(saving)}"
         else:
             each = fmt(enabled[0]["amount"])
-            note = f"Super Minty price — save {fmt(saving)} vs {each} each."
+            note = f"{bundle_name} price — save {fmt(saving)} vs {each} each."
     else:
         module = enabled[0]
         price = fmt(module["amount"])
@@ -1120,24 +1313,33 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
         and not c.get("needs_card")
         and c.get("period_end")
     ]
-    if next_invoice and next_invoice_at:
+    # The renewal quotes the RECURRING figure only. Any cancel-extension riding the same
+    # invoice is listed beside it as its own row, so each line is one thing the customer
+    # can recognise; ``next_invoice`` still carries the combined total, because that is
+    # what the invoice will say.
+    if next_invoice_on and next_invoice_at and recurring > 0:
         upcoming_charges.append(
             {
                 "at": next_invoice_at,
-                "date": next_invoice["date"],
+                "date": next_invoice_on,
                 "label": "Renewal",
-                "amount": next_invoice["amount"],
-                "overdue": next_invoice["overdue"],
-                "note": (
-                    "Includes access charged after a cancellation."
-                    if next_invoice["includes_extension"]
-                    else None
-                ),
+                "amount": fmt(recurring),
+                "overdue": bool(next_invoice and next_invoice["overdue"]),
+                "note": None,
             }
         )
+    # Cancellations are charged whether or not anything renews — including when the
+    # cancelled module was the last paid one, which is precisely when the panel used to
+    # drop the charge entirely.
+    upcoming_charges.extend(
+        _extension_charges(cards, fmt, summary.get("bundle_codes"), bundle_name)
+    )
     # Sorted on the raw datetime — the formatted date sorts alphabetically, which would
-    # put 11 Sep before 28 Aug.
-    upcoming_charges.sort(key=lambda e: e["at"])
+    # put 11 Sep before 28 Aug. A row with no date at all (an extension on a module whose
+    # period end never made it onto the card) goes last rather than blowing up the sort.
+    _dated = [e for e in upcoming_charges if e["at"] is not None]
+    _dated.sort(key=lambda e: e["at"])
+    upcoming_charges = _dated + [e for e in upcoming_charges if e["at"] is None]
 
     if state == "trialing":
         # Every trial here is pre-anchor, so "will any of them actually charge" decides
@@ -1220,10 +1422,14 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
             # charge for the very same module.
             and c.get("subscription_status") != "past_due"
         ],
+        "winding_notices": _winding_notices(
+            cards, summary.get("bundle_codes"), bundle_name
+        ),
         "footer": footer,
-        # Trial converts via checkout (capture card → convert at term end); a paid entity
-        # manages its card / invoices in the portal.
-        "primary_action": "subscribe_stripe" if state == "trialing" else "manage",
+        # Both captions open the same decision modal — this only says which question the
+        # entity is being asked. "Subscribe" when billing still has to be set up for a
+        # trial to convert; "Manage" once there is nothing missing.
+        "primary_action": "subscribe_stripe" if needs_billing_setup else "manage",
         "subscribe_codes": [c["code"] for c in enabled],
     }
 
@@ -1645,12 +1851,22 @@ def set_entity_module(
 
 
 def sweep_expired_module_access() -> dict:
-    """Disable modules whose access has lapsed past its grace.
+    """Disable modules whose access has lapsed past its grace, and END the ones that are
+    over.
 
     Nothing fires at a grace boundary — not the past-due window measured from
     ``paid_through``, and not ``app_access_until`` (a cancelled module's paid
     extension). So the access map goes stale the moment a window simply elapses, and
     this reconciles it.
+
+    Two things go stale at that boundary, not one. Access is the obvious one. The other
+    is the PHASE: ``scheduled_cancel`` and ``past_due`` describe a subscription on its
+    way out, and once the date they hang on has passed it is out — so they are moved to
+    ``cancelled``, which is terminal and, unlike either of them, lets the customer buy
+    the module again. Without that the row reads as mid-cancellation or in-arrears
+    forever and the panel keeps offering Renew or Pay now for something already ended.
+    See ``checkout.terminate_lapsed_module``; trials are excluded there, because the
+    trial-end job owns that transition.
 
     Runs the SAME sync the webhooks do, per entity, rather than reimplementing "who should
     have access" — the copy that used to live here had drifted into three bugs: it read
@@ -1673,7 +1889,7 @@ def sweep_expired_module_access() -> dict:
     Intended to run daily (``flask subscriptions sweep-access``). Returns
     ``{"disabled": [{"entity_id", "code"}, ...]}``.
     """
-    from blueprints.subscription.services import access, clock, policy
+    from blueprints.subscription.services import access, checkout, clock, policy
     from blueprints.subscription.services import store as sub_store
     from models.db import Entity
 
@@ -1759,6 +1975,12 @@ def sweep_expired_module_access() -> dict:
                 # extension, or a past-due account past its grace. Nothing else closes
                 # the gate: the boundary is a DATE, and no event fires when a date passes.
                 set_entity_module(entity_id, code, False, actor="subscription")
+                # The same date ENDS the subscription, so the phase has to say so too.
+                # Revoking access while leaving the row on scheduled_cancel / past_due
+                # left a module nobody could use still offering Renew or Pay now for
+                # something already over. A trial is left alone — the trial-end job owns
+                # that transition (see checkout.terminate_lapsed_module).
+                checkout.terminate_lapsed_module(row)
                 disabled.append(
                     {"entity_id": entity_id, "code": code, "payer_user_id": payer_id}
                 )

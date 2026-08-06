@@ -63,12 +63,15 @@ class _Row:
 
     def __init__(self, code="PETTY_CASH", *, phase="active", ext_state=None,
                  app_access_until=None, trial_end=None, billed=True,
-                 first_billed_at=_UNSET):
+                 first_billed_at=_UNSET, ext_amount=None):
         self.entity_id = "e1"
         self.function_code = code
         self.payer_user_id = "u1"
         self.phase = phase
         self.extension_state = ext_state
+        # What a cancellation recorded, and what re-pricing rewrites when the set of
+        # modules leaving together changes.
+        self.extension_amount = ext_amount
         self.app_access_until = app_access_until
         # An APP-LEVEL trial has a trial_end bounding its free days; together with
         # first_billed_at these are how the cancel/reactivate paths tell a trial from a
@@ -199,10 +202,80 @@ def test_in_house_cancel_records_the_extension_instead_of_charging_it(monkeypatc
     assert result["extension_state"] == "pending"
     written = dict(calls["rows"])["PETTY_CASH"]
     assert written["phase"] == "scheduled_cancel"
-    assert written["extension_amount"] == 4258
+    # 28000 x 11/31: it is the only module leaving, so it is priced on its own.
+    assert written["extension_amount"] == 9935
     assert written["extension_state"] == "pending"
     # Recorded, not charged: nothing was billed on the way out.
     assert calls["charged"] == []
+
+
+def test_a_cancellation_records_the_reason_in_the_audit_log(monkeypatch):
+    """The dialog asks why, so the answer has to survive the click.
+
+    It goes to the LOG, not the module row: why someone left is history, and nothing
+    reads it to decide access or billing. A module can be cancelled, renewed and
+    cancelled again, and a column on the row would keep only the second reason —
+    silently erasing the first, which is the one that explains the pattern.
+
+    It is also its own column rather than text appended to ``note``: ``note`` is what
+    WE write about the action, and mixing the two makes "why do people leave?" a string
+    search instead of a query.
+    """
+    rows = [_Row("PETTY_CASH", phase="active"), _Row("BILL")]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.cancel_module(
+        _FakeEntity(), _FakeUser(), "PETTY_CASH", reason="  too expensive  "
+    )
+
+    assert calls["audit"][0]["cancel_reason"] == "too expensive"
+    # The row itself carries no reason — it is not state.
+    assert "cancel_reason" not in dict(calls["rows"])["PETTY_CASH"]
+
+
+def test_a_cancellation_with_no_reason_stores_NULL_not_an_empty_string(monkeypatch):
+    """Nobody has to justify leaving, so "didn't say" is a normal outcome — and it must
+    read as absent rather than as a blank answer. An empty string in the column is
+    indistinguishable from someone who typed spaces and meant nothing by it."""
+    rows = [_Row("PETTY_CASH", phase="active"), _Row("BILL")]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "PETTY_CASH", reason="   ")
+
+    assert calls["audit"][0]["cancel_reason"] is None
+    # And the note keeps its own sentence, unpolluted by an empty reason.
+    assert calls["audit"][0]["note"] == (
+        "cancelled in-house; extension recorded for the next invoice"
+    )
+
+
+def test_a_reason_longer_than_the_column_is_trimmed_not_rejected(monkeypatch):
+    """Refusing to cancel a subscription because the explanation ran long would be
+    absurd — the reason is a courtesy on the way out, not a validated field."""
+    rows = [_Row("PETTY_CASH", phase="active"), _Row("BILL")]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "PETTY_CASH", reason="x" * 900)
+
+    assert len(calls["audit"][0]["cancel_reason"]) == 500
 
 
 def test_a_paid_cancellation_logs_the_phase_it_came_FROM(monkeypatch):
@@ -232,9 +305,13 @@ def test_a_paid_cancellation_logs_the_phase_it_came_FROM(monkeypatch):
     assert entry["phase_after"] == "scheduled_cancel"
 
 
-def test_in_house_cancel_charges_the_MARGINAL_price_not_the_list_price(monkeypatch):
-    """Dropping Petty Cash from a 400 bundle leaves Bill at 280, so it was worth 120.
-    Billing its 280 list price would charge more than the module ever cost."""
+def test_a_module_leaving_ALONE_is_priced_on_its_own(monkeypatch):
+    """The extension is priced against what is LEAVING, not against the line being kept.
+
+    Petty Cash is the only module going, so nothing is leaving with it to share the line:
+    it is charged its own 280. The 120 margin is what it was worth to a subscription that
+    KEPT Payment Request, and that subscription is not what these extra days are.
+    """
     rows = [_Row("PETTY_CASH"), _Row("BILL")]
     checkout, calls = _wire(
         monkeypatch,
@@ -247,8 +324,106 @@ def test_in_house_cancel_charges_the_MARGINAL_price_not_the_list_price(monkeypat
     checkout.cancel_module(_FakeEntity(), _FakeUser(), "PETTY_CASH")
 
     written = dict(calls["rows"])["PETTY_CASH"]
-    # 12000 x 11/31, not 28000 x 11/31 (which would be 9935).
-    assert written["extension_amount"] == 4258
+    # 28000 x 11/31, not the 12000 margin (which would be 4258).
+    assert written["extension_amount"] == 9935
+
+
+def test_the_SECOND_cancellation_is_worth_the_same_as_the_first(monkeypatch):
+    """The price must not depend on the order of two clicks.
+
+    Cancelling Petty Cash out of the bundle drops it off the billing-forward line, so
+    reading that line to price the NEXT cancellation made Payment Request look like a
+    lone 280 module: 63.57 against the 27.25 charged moments earlier, for the same days
+    out of the same bundle on the same invoice. The period is paid for either way, so
+    both are worth the bundle's 120 margin.
+    """
+    rows = [_Row("BILL"), _Row("PETTY_CASH", phase="scheduled_cancel",
+                               app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC))]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+
+    written = dict(calls["rows"])["BILL"]
+    assert written["extension_amount"] == 4258, "the same 12000 x 11/31 as the first"
+
+
+def test_cancelling_the_second_module_RE_PRICES_the_first(monkeypatch):
+    """What a cancellation costs depends on what else is leaving with it, and that is not
+    settled when the customer clicks.
+
+    Petty Cash left alone and was charged its own 280 (9935). Payment Request following it
+    out makes them a pair again for those days, so BOTH are worth the 120 margin — and the
+    row already written has to be corrected, or the renewal collects a figure that was
+    only ever true while Petty Cash was leaving by itself.
+    """
+    rows = [
+        _Row("BILL", phase="active"),
+        _Row("PETTY_CASH", phase="scheduled_cancel", ext_state="pending",
+             ext_amount=9935,
+             app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC)),
+    ]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+
+    written = dict(calls["rows"])
+    assert written["BILL"]["extension_amount"] == 4258
+    assert written["PETTY_CASH"]["extension_amount"] == 4258, "re-priced from 9935"
+
+
+def test_uncancelling_one_module_RE_PRICES_the_one_still_leaving(monkeypatch):
+    """The other direction. Payment Request comes back, so Petty Cash is leaving alone
+    again and goes back to its own 280 — otherwise it keeps a pair's price for days it
+    now spends by itself."""
+    rows = [
+        _Row("BILL", phase="scheduled_cancel", ext_state="pending", ext_amount=4258,
+             app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC)),
+        _Row("PETTY_CASH", phase="scheduled_cancel", ext_state="pending",
+             ext_amount=4258,
+             app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC)),
+    ]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.reactivate_module(_FakeEntity(), _FakeUser(), "BILL")
+
+    written = dict(calls["rows"])
+    assert written["BILL"]["extension_amount"] is None, "discarded, never billed"
+    assert written["PETTY_CASH"]["extension_amount"] == 9935, "alone again"
+
+
+def test_a_module_already_cancelled_cannot_be_cancelled_again(monkeypatch):
+    """Pricing counts a module that is winding down; cancelling must not — a second
+    cancellation would record a second extension on the same row."""
+    rows = [_Row("PETTY_CASH", phase="scheduled_cancel",
+                 app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC))]
+    checkout, _ = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+
+    with pytest.raises(checkout.CheckoutError) as exc:
+        checkout.cancel_module(_FakeEntity(), _FakeUser(), "PETTY_CASH")
+    assert exc.value.status == 409
 
 
 def test_cancel_rejects_a_module_that_isnt_billed(monkeypatch):
@@ -514,3 +689,65 @@ def test_rebuying_is_allowed_once_the_cancellation_window_has_passed(monkeypatch
     checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["PETTY_CASH"])
 
     assert calls["created"] == [["PETTY_CASH"]]
+
+
+def test_cancelling_on_DIFFERENT_DAYS_keeps_each_date_but_prices_them_as_a_pair(monkeypatch):
+    """Petty Cash today, Payment Request tomorrow — two clicks, one leaving set.
+
+    Two things are decided separately and it is easy to conflate them:
+
+      the DATE   each module's guarantee runs from its own cancellation, so the one
+                 cancelled a day later keeps access a day longer;
+      the PRICE  is what the module is worth against whoever still holds theirs — and
+                 that CHANGES mid-window when they stop on different days.
+
+    Anchor 8 Jan, paid_through 8 Feb (31 days). Petty Cash cancelled 20 Jan runs to
+    19 Feb; Payment Request cancelled 21 Jan runs to 20 Feb. So:
+
+      8 Feb -> 19 Feb   both there, each worth the 120 margin
+      19 Feb -> 20 Feb  Payment Request is alone, and worth its whole 280
+
+    which makes its last day cost 280/mo rather than a bundle price nobody is in.
+    """
+    day_one = datetime(2027, 1, 20, 13, tzinfo=UTC)
+    day_two = datetime(2027, 1, 21, 13, tzinfo=UTC)
+    paid_through = datetime(2027, 2, 8, 13, tzinfo=UTC)
+
+    # Day one: Petty Cash leaves on its own, so it is priced on its own (28000 x 11/31).
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=[_Row("PETTY_CASH"), _Row("BILL")],
+        paid_through=paid_through,
+        now=day_one,
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "PETTY_CASH")
+
+    first = dict(calls["rows"])["PETTY_CASH"]
+    assert first["extension_amount"] == 9935
+    assert first["app_access_until"] == datetime(2027, 2, 19, 13, tzinfo=UTC)
+
+    # Day two: Payment Request follows it out. Same entity, with Petty Cash now winding
+    # down and carrying the amount and date it was given yesterday.
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=[
+            _Row("BILL"),
+            _Row("PETTY_CASH", phase="scheduled_cancel", ext_state="pending",
+                 ext_amount=9935,
+                 app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC)),
+        ],
+        paid_through=paid_through,
+        now=day_two,
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+
+    written = dict(calls["rows"])
+    # Its own window — a day later than Petty Cash's — priced in two pieces:
+    # 12000 x 11/31 = 4258 shared, then 28000 x 1/31 = 904 alone.
+    assert written["BILL"]["app_access_until"] == datetime(2027, 2, 20, 13, tzinfo=UTC)
+    assert written["BILL"]["extension_amount"] == 5162
+    # Re-priced to the pair rate over the window it already had — one piece, since
+    # nothing outlasts it.
+    assert written["PETTY_CASH"]["extension_amount"] == 4258, "12000 x 11/31, was 9935"

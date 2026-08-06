@@ -120,3 +120,42 @@ def test_a_payer_with_no_paid_through_has_no_live_paid_module(app, monkeypatch):
 
     assert card["subscription_status"] is None
     assert card["can_cancel"] is False
+
+
+def test_a_used_up_trial_says_so_under_not_active(app, monkeypatch):
+    """"not active" alone reads as "never had this", and leaves the customer wondering
+    why the card offers Subscribe instead of a free trial. A module whose PAID
+    subscription ended is a different sentence — never_billed is what separates them."""
+    from flask import render_template
+
+    card = {
+        "code": "PETTY_CASH", "name": "Petty Cash", "description": "", "image": "x.png",
+        "learn_more": "#", "subscription_status": None, "amount": 280,
+        "pending_cancel": False, "trial_cancelled": False, "trial_eligible": False,
+        "trial_expired": True, "needs_card": False, "needs_consent_only": False,
+        "period_end_long": None, "period_end_short": None, "access_end_long": None,
+    }
+    with app.test_request_context():
+        html = render_template(
+            "entity/partials/module_subscription_section.html",
+            module_cards=[card], subscription_summary=None, subscription_panel=None,
+            org=type("O", (), {"id": "e1", "name": "Co"})(), can_manage_modules=True,
+        )
+
+    # Split at the panel: its hidden staged-cart button is captioned "Start free trial"
+    # until renderCart relabels it, so a whole-page search would always match.
+    cards_html = html.split("<aside", 1)[0]
+    assert "not active" in cards_html
+    assert "free trial expired" in cards_html
+    # The trial is spent, so the action is the paid one.
+    assert "Start free trial" not in cards_html
+    assert "Subscribe" in cards_html
+
+    card["trial_expired"] = False
+    with app.test_request_context():
+        html = render_template(
+            "entity/partials/module_subscription_section.html",
+            module_cards=[card], subscription_summary=None, subscription_panel=None,
+            org=type("O", (), {"id": "e1", "name": "Co"})(), can_manage_modules=True,
+        )
+    assert "free trial expired" not in html

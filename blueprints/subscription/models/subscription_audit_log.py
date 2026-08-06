@@ -36,6 +36,18 @@ class SubscriptionAuditLog(db.Model):
     extension_amount = db.Column(db.Integer, nullable=True)
     extension_state = db.Column(db.String(20), nullable=True)
     outcome = db.Column(db.String(20), nullable=False)  # succeeded / aborted
+    # Why the customer said they were leaving, in their own words, from the cancellation
+    # dialog. Optional on every path — nobody is made to justify cancelling — so NULL
+    # means "didn't say" rather than "not a cancellation"; read ``action`` for that.
+    #
+    # It lives HERE and not on entity_module_subscription because it is history, not
+    # state: nothing decides what to bill by reading it, and a module cancelled, renewed
+    # and cancelled again has two reasons worth keeping. A column on the row would hold
+    # only the latest and quietly erase the first.
+    cancel_reason = db.Column(db.String(500), nullable=True)
+    # Free text ABOUT the action, written by us. Distinct from cancel_reason, which is
+    # written by the customer — keeping them apart is what makes "why do people leave?"
+    # a query instead of a string search.
     note = db.Column(db.String(500), nullable=True)
     created_at = db.Column(
         db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
