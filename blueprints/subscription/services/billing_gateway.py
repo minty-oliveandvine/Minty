@@ -172,14 +172,64 @@ def _moment(timestamp) -> datetime | None:
 
 
 def _record_of(result: dict) -> dict:
-    """The settle fields describing ``result`` — status, total and when it moved."""
+    """The settle fields describing ``result`` — status, total, when it moved, and the
+    processor's own copies of the document.
+
+    The two URLs are free here: Stripe puts them on the invoice from finalization
+    onwards, so storing them costs nothing and saves the invoice list from being N round
+    trips later. They are absent on a draft, and ``settle_invoice`` ignores None rather
+    than blanking what an earlier settle recorded.
+    """
     transitions = result.get("status_transitions") or {}
     return {
         "status": result.get("status") or "draft",
         "total": result.get("total"),
         "issued_at": _moment(transitions.get("finalized_at") or result.get("created")),
         "paid_at": _moment(transitions.get("paid_at")),
+        "hosted_invoice_url": result.get("hosted_invoice_url"),
     }
+
+
+def _capture_payment_method(record, invoice_id: str) -> None:
+    """Record WHICH card paid this invoice, for the history. Never raises.
+
+    Deliberately a SEPARATE call made AFTER the charge, not an ``expand`` on ``pay()``.
+    The card here decorates a receipt; the pay call moves money. Folding an expand into
+    it would put a display nicety on the path that must not fail, and an API that
+    rejected the parameter would take the payment down with it. This one is wrapped, so
+    the worst case is the column stays null and the invoice list says "not recorded".
+
+    Only fills a blank — a re-settle must not overwrite the card that actually paid with
+    whatever is on the charge later.
+    """
+    if record is None or getattr(record, "payment_method", None):
+        return
+    try:
+        from blueprints.subscription.services import store
+        from blueprints.subscription.services.stripe_client import (
+            payment_method_display,
+        )
+
+        invoice = get_stripe().Invoice.retrieve(invoice_id, expand=["charge"])
+        charge = invoice.get("charge")
+        if not isinstance(charge, dict):
+            return
+        card = (charge.get("payment_method_details") or {}).get("card") or {}
+        brand, last4 = card.get("brand"), card.get("last4")
+        label = None
+        if brand and last4:
+            label = f"{str(brand).title()} •••• {last4}"
+        else:
+            # A wallet (Link) exposes no card on the charge; name what it was instead.
+            shown = payment_method_display(charge.get("payment_method"))
+            label = shown.get("label") if shown else None
+        if label:
+            store.settle_invoice(record.id, payment_method=label)
+    except Exception:
+        logger.warning(
+            "billing: could not record which card paid invoice {} (display only)",
+            invoice_id,
+        )
 
 
 def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None,
@@ -276,6 +326,10 @@ def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None
         if finalized.get("status") == "open":
             finalized = stripe.Invoice.pay(draft["id"])
             _settle(record, **_record_of(finalized))
+        # After the money has moved and been recorded, never before: this is history for
+        # the invoice list and must not be able to affect the charge. See the function.
+        if finalized.get("status") == "paid":
+            _capture_payment_method(record, draft["id"])
         return finalized
     except Exception as exc:
         logger.exception(
@@ -307,10 +361,20 @@ def retry_invoice(invoice_id: str) -> tuple[bool, str | None]:
     try:
         invoice = stripe.Invoice.retrieve(invoice_id)
         if invoice.get("status") == "paid":
-            _settle(_local(invoice_id), **_record_of(invoice))
+            record = _local(invoice_id)
+            _settle(record, **_record_of(invoice))
+            _capture_payment_method(record, invoice_id)
             return True, None
         paid = stripe.Invoice.pay(invoice_id)
-        _settle(_local(invoice_id), **_record_of(paid))
+        record = _local(invoice_id)
+        _settle(record, **_record_of(paid))
+        # Recorded HERE as well as on the first charge, and this is the case that needs
+        # it most: a renewal that declined and later recovered was paid by a DIFFERENT
+        # card than the one that failed — replacing it is usually how it recovered. An
+        # invoice with no card against it is exactly the one somebody asks "what
+        # eventually paid this?" of.
+        if paid.get("status") == "paid":
+            _capture_payment_method(record, invoice_id)
         return paid.get("status") == "paid", None
     except Exception as exc:
         reason = getattr(exc, "user_message", None) or str(exc)

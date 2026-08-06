@@ -807,11 +807,15 @@ def settle_invoice(
     total=None,
     issued_at=None,
     paid_at=None,
+    payment_method=None,
+    hosted_invoice_url=None,
 ) -> SubscriptionInvoice | None:
     """Fill in what the processor said, once it has said it.
 
     Only the fields passed are touched: a settle that knows the status but not the paid
-    time must not blank a paid time already recorded.
+    time must not blank a paid time already recorded. That matters more for the three
+    display fields than for the rest — ``issue_invoice`` settles up to four times as an
+    invoice moves draft -> open -> paid, and the early calls know none of them.
     """
     record = db.session.get(SubscriptionInvoice, str(invoice_id))
     if record is None:
@@ -827,6 +831,10 @@ def settle_invoice(
         record.issued_at = issued_at
     if paid_at is not None:
         record.paid_at = paid_at
+    if payment_method is not None:
+        record.payment_method = _fits(payment_method, 100)
+    if hosted_invoice_url is not None:
+        record.hosted_invoice_url = _fits(hosted_invoice_url, 500)
     db.session.commit()
     return record
 

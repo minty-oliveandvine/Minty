@@ -110,6 +110,36 @@ def build_renewal(user_id, period: Period) -> Invoice | None:
     )
 
 
+def _extension_product(code) -> str:
+    """What to call ONE module on an extension line — the name the catalog sells it under.
+
+    This used to title-case the CODE, which is not a product name and only ever looked
+    like one by accident: "PETTY_CASH" happens to come out "Petty Cash", so the bug was
+    invisible until a Payment Request extension printed "Bill" — a word that appears
+    nowhere in the catalog, on an invoice whose other lines said "Payment Request".
+
+    Priced as a ONE-MODULE set rather than by the entity's whole set: the extension is
+    for the single module that was cancelled, and the bundle name would claim the
+    customer was charged for something they still hold. Falls back to the old title-cased
+    code (and logs) rather than failing a renewal over a label — a missing catalog row
+    must not stop the money being collected.
+    """
+    key = str(code or "").strip().upper()
+    try:
+        plan = store.billing_plan_for_codes([key])
+    except Exception:
+        plan = None
+        logger.exception("renewal: could not read the catalog name for {}", key)
+    if plan and plan.display_name:
+        return plan.display_name
+    logger.warning(
+        "renewal: no catalog name for module {}; naming the extension line after the "
+        "code instead",
+        key,
+    )
+    return key.title().replace("_", " ")
+
+
 def _pending_extension_lines(user_id, names: dict[str, str]) -> list[Line]:
     """Lines for cancel-extensions this payer owes but has not been billed for."""
     lines: list[Line] = []
@@ -120,7 +150,7 @@ def _pending_extension_lines(user_id, names: dict[str, str]) -> list[Line]:
             Line(
                 entity_id=entity_id,
                 entity_name=name,
-                product_name=f"{row.function_code.title().replace('_', ' ')} "
+                product_name=f"{_extension_product(row.function_code)} "
                              "(access after cancellation)",
                 amount=int(row.extension_amount or 0),
             )

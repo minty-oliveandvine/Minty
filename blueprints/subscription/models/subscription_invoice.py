@@ -62,6 +62,19 @@ class SubscriptionInvoice(db.Model):
     status = db.Column(db.String(20), nullable=False)
     memo = db.Column(db.String(500), nullable=True)
 
+    # WHICH CARD PAID IT — "Visa •••• 4242" — captured when the charge settled. A
+    # SNAPSHOT, for the same reason as entity_name above: the account's current default
+    # is a different question the moment a card is updated, and the invoice it would be
+    # wrong about first is a failed one. Display only; nothing decides anything on it.
+    payment_method = db.Column(db.String(100), nullable=True)
+    # Stripe's hosted page for this invoice — the PDF download and, while it is open, a
+    # way to pay it. Stored rather than fetched per row, so listing invoices is not N
+    # round trips. Null until the invoice is finalized; a draft has none.
+    #
+    # A CAPABILITY URL: its token is the authorisation, so it is served to the payer and
+    # never logged.
+    hosted_invoice_url = db.Column(db.String(500), nullable=True)
+
     # The double-billing guard. Nullable: a mid-period purchase has no natural key and
     # is guarded by the user waiting for the response instead.
     idempotency_key = db.Column(db.String(255), nullable=True)
