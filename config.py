@@ -20,4 +20,21 @@ SQLALCHEMY_RDS_DATABASE_URI = os.environ.get('RDS_DATABASE_URI')
 
 BREVO_EMAIL = os.environ.get('BREVO_EMAIL')
 
+# Public origin used to build links in outbound email — the same variable the
+# invitation email already reads (blueprints/invitation/services/invite.py), surfaced
+# through app.config so it can be overridden in tests.
+#
+# Set explicitly rather than derived: the billing emails are sent from `flask
+# subscriptions ...` CLI jobs, where there is no request to take a host from and
+# `url_for(_external=True)` quietly yields http://localhost — a link that is worse than
+# no link, because it looks real. Unset simply drops the buttons. e.g. https://app.minty.com
+PUBLIC_URL = os.environ.get('PUBLIC_URL')
+
 ENV = os.environ.get('ENV')
+
+# Stripe — the live source of truth for the subscription module. The secret key
+# authorizes API calls (server-side only); the webhook secret verifies incoming
+# events; the publishable key is safe to expose to the frontend.
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
+STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')

@@ -84,6 +84,7 @@ def register_blueprints(app):
         ("blueprints.admin", "admin_bp"),
         ("blueprints.file", "file_bp"),
         ("blueprints.api", "api_bp"),
+        ("blueprints.subscription", "subscription_bp"),
     ):
         _register_if_available(app, module_path, attr)
 

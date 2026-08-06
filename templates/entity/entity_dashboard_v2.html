@@ -178,6 +178,11 @@
       </div>
 
        <!-- Start New Report Modal -->
+      {# Subscription notice — once per entity per login. z-[60], above every other
+         overlay here (setupSettingsModal is z-50 and shows whenever Xero settings are
+         incomplete), so it is answered first and dismissing it reveals the rest. #}
+      {% include 'entity/partials/subscription_notice_modal.html' %}
+
        <div id="startNewReportModal" class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-30 p-4 hidden">
         <div class="bg-white rounded-lg p-4 sm:p-6 w-full max-w-sm sm:max-w-md max-h-[90vh] sm:max-h-[80vh] overflow-y-auto" style="min-width: 0;" onclick="event.stopPropagation()">
           <!-- Modal Header -->

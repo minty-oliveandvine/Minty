@@ -1,0 +1,478 @@
+"""Unit tests for APP-LEVEL trials.
+
+A trial creates no billing object at all: it's a row in ``entity_module_subscription``
+(phase=trial, trial_end = now + TRIAL_PERIOD_DAYS) plus an access-gate flip. Money is
+only involved when the trial ENDS, where the presence of a card — and of consent for
+THIS entity — decides convert vs expire (``convert_or_expire_due_trials``).
+
+Covers:
+* **Nothing billed on start** — no customer, no card, no charge is created.
+* **Once per module** — any existing trial/subscription row rejects a new trial.
+* **Trial end** — card + consent converts to paid via Minty's own invoice; anything
+  missing expires the trial and revokes access.
+
+NOTE: imports are done INSIDE each test. The conftest ``app`` fixture clears and
+re-imports project modules mid-session, so importing at call time keeps every
+reference mutually consistent.
+"""
+from __future__ import annotations
+
+# The price catalog is patched BY DOTTED PATH, not via an imported reference:
+# conftest re-imports project modules mid-session, so a module object captured at
+# import time is not the one the code under test ends up calling.
+_CATALOG = "blueprints.subscription.services.catalog"
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+UTC = timezone.utc
+
+# The anchor the in-house cases bill against, and a "now" inside that period. Pinned
+# because ``period_containing`` extrapolates from the anchor: left at real time, "now"
+# sits BEFORE the anchor and the payer is billed for a period they were never in.
+_ANCHOR = datetime(2027, 1, 8, 13, tzinfo=UTC)
+_NOW = datetime(2027, 1, 20, 13, tzinfo=UTC)
+_PERIOD_END = datetime(2027, 2, 8, 13, tzinfo=UTC)
+
+
+class _FakeEntity:
+    id = "e1"
+    name = "Acme"
+
+
+class _FakeUser:
+    id = "u1"
+    email = "u1@example.com"
+
+
+class _Row:
+    """Stand-in for an entity_module_subscription row.
+
+    Carries a SUBSET of the real model's columns — never anything the model lacks.
+    ``phase`` matters here: the trial-end job reads it to tell a running trial from a
+    CANCELLED one (which keeps its free days but must never convert).
+    """
+
+    def __init__(self, code="BILL", payer="u1", entity_id="e1", phase="trial",
+                 trial_end=None):
+        self.entity_id = entity_id
+        self.function_code = code
+        self.payer_user_id = payer
+        self.phase = phase
+        self.trial_end = trial_end
+        self.first_billed_at = None
+
+
+def _plan(code="BILL"):
+    from blueprints.subscription.services import catalog
+
+    return catalog.PlanView(
+        "fn_bill", code, code.title().replace("_", " "), 28000, "HKD", "month", 1, True
+    )
+
+
+class _Plan:
+    def __init__(self, amount):
+        self.amount = amount
+        self.display_name = "plan"
+        self.currency = "HKD"
+
+
+def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
+    """Wire the store, the biller and the access gate; return (checkout, calls).
+
+    ``anchor`` seeds the payer's billing cycle (None = never billed, so the conversion
+    anchors them). The anchor mock is STATEFUL: ``_bill_module_change_in_house`` writes
+    an anchor and immediately reads it back, so a mock that kept answering None would
+    make every first conversion look unbillable.
+    """
+    from blueprints.subscription.services import changes, checkout, store
+    from blueprints.subscription.services import clock as clock_mod
+
+    if now is not None:
+        monkeypatch.setattr(clock_mod, "now", lambda: now)
+
+    calls = {"writes": [], "access": [], "anchors": [], "charged": [],
+             "paid_through": []}
+    cycle = {"anchor": anchor}
+
+    monkeypatch.setattr(f"{_CATALOG}.plan_for_module", lambda code: _plan(code))
+    monkeypatch.setattr(store, "module_row", lambda eid, code: existing_row)
+    # Default these tests to a CONSENTED entity so they keep testing what they're about
+    # (conversion mechanics). The consent gate itself is covered separately.
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid: True)
+    monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
+    monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_1")
+    monkeypatch.setattr(checkout, "trial_payment_method", lambda cid: "pm_1")
+    monkeypatch.setattr(checkout, "_billed_codes_in_house", lambda eid: set())
+
+    monkeypatch.setattr(
+        store, "upsert_module_row",
+        lambda e, code, payer, **f: calls["writes"].append((e, code, payer, f))
+        or _Row(code, payer, e),
+    )
+    # Read back when aligning the entity's other active rows; no siblings unless a test
+    # says otherwise.
+    monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [])
+
+    def _start_cycle(uid, at, currency):
+        calls["anchors"].append((uid, at, currency))
+        cycle["anchor"] = at
+
+    monkeypatch.setattr(
+        store, "billing_cycle_for_user", lambda uid: (cycle["anchor"], "HKD")
+    )
+    monkeypatch.setattr(store, "start_billing_cycle", _start_cycle)
+    monkeypatch.setattr(
+        store, "set_paid_through",
+        lambda uid, until: calls["paid_through"].append((uid, until)),
+    )
+    monkeypatch.setattr(
+        store, "billing_plan_for_codes",
+        lambda codes: _Plan(40000 if len(set(codes)) > 1 else 28000),
+    )
+    monkeypatch.setattr(
+        changes, "issue_change",
+        lambda cid, eid, name, before, after, period, at: calls["charged"].append(
+            {"customer": cid, "entity": eid, "before": set(before), "after": set(after),
+             "start": period.start, "end": period.end}
+        ) or {"id": "in_1", "status": "paid" if paid else "open"},
+    )
+    monkeypatch.setattr(
+        checkout, "_set_module_access",
+        lambda eid, code, enabled: calls["access"].append((eid, code, enabled)),
+    )
+    return checkout, calls
+
+
+# --- starting a trial ---------------------------------------------------------
+
+
+def test_trial_start_bills_nothing_and_writes_the_row(monkeypatch):
+    checkout, calls = _setup(monkeypatch, now=_NOW)
+    from blueprints.subscription.services import changes
+
+    def _boom(*a, **k):
+        raise AssertionError("an app-level trial must not bill anything")
+
+    monkeypatch.setattr(changes, "issue_change", _boom)
+    monkeypatch.setattr(checkout, "create_setup_checkout_session", _boom)
+
+    result = checkout.start_module_trials(_FakeEntity(), _FakeUser(), ["BILL"])
+
+    assert result == ["BILL"]
+    entity_id, code, payer, fields = calls["writes"][0]
+    assert (entity_id, code, payer) == ("e1", "BILL", "u1")  # acting user is the payer
+    assert fields["phase"] == "trial"
+    # No ``trial_used`` / ``trial_start``: both were written here and read nowhere, and
+    # the schema no longer carries them. "Has this module been trialled" is answered by
+    # the row existing at all — which is exactly what start_module_trial checks, and is
+    # covered by test_trial_rejected_when_module_already_has_a_row below.
+    assert "trial_used" not in fields
+    assert "trial_start" not in fields
+    # Access runs to trial_end, which is TRIAL_PERIOD_DAYS out from now.
+    assert fields["app_access_until"] == fields["trial_end"]
+    assert fields["trial_end"] - _NOW == timedelta(days=checkout.TRIAL_PERIOD_DAYS)
+    assert calls["access"] == [("e1", "BILL", True)]  # module switched on
+
+
+def test_trial_rejected_when_module_already_has_a_row(monkeypatch):
+    """Once per module: any existing trial/subscription row disqualifies it."""
+    checkout, calls = _setup(monkeypatch, existing_row=_Row())
+
+    with pytest.raises(checkout.CheckoutError) as exc:
+        checkout.start_module_trials(_FakeEntity(), _FakeUser(), ["BILL"])
+
+    assert exc.value.status == 409
+    assert calls["writes"] == []
+    assert calls["access"] == []
+
+
+def test_start_trial_requires_codes(monkeypatch):
+    checkout, calls = _setup(monkeypatch)
+
+    with pytest.raises(checkout.CheckoutError):
+        checkout.start_module_trials(_FakeEntity(), _FakeUser(), [])
+
+
+def test_onboarding_finalize_starts_app_trials(monkeypatch):
+    checkout, calls = _setup(monkeypatch)
+    monkeypatch.setattr(
+        "blueprints.entity.services.modules.get_enabled_modules_for_entities",
+        lambda ids: {"e1": {"BILL"}},
+    )
+
+    created = checkout.start_trials_for_enabled_modules(_FakeEntity(), _FakeUser())
+
+    assert len(created) == 1
+    assert calls["writes"][0][1] == "BILL"
+    assert calls["access"] == [("e1", "BILL", True)]
+
+
+# --- ending a trial: converting -----------------------------------------------
+
+
+def test_conversion_is_collected_by_an_in_house_invoice(monkeypatch):
+    """A due trial with a card and consent converts, and the money is collected by
+    Minty's own invoice against the payer's period — there is no subscription."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result["converted"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert len(calls["charged"]) == 1
+    charge = calls["charged"][0]
+    assert charge["customer"] == "cus_1"
+    assert charge["after"] == {"BILL"}
+    assert (charge["start"], charge["end"]) == (_ANCHOR, _PERIOD_END)
+    # paid_through advances to the period end — that is what access is measured against.
+    assert calls["paid_through"] == [("u1", _PERIOD_END)]
+    # Phase moved off `trial` so a re-run can't convert twice, and the row is stamped as
+    # having been billed.
+    converted = [w for w in calls["writes"] if w[3].get("phase") == "active"]
+    assert converted and converted[-1][3]["first_billed_at"] == _NOW
+
+
+def test_two_modules_due_together_bill_as_one_change(monkeypatch):
+    """ONE invoice for ONE event. Both of an entity's modules ending together is a
+    single change to the bundle price — billing them row-by-row cut two invoices seconds
+    apart, the first charging a standalone price the customer never chose and the
+    second immediately crediting it back."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import store
+
+    rows = [_Row(code="PETTY_CASH"), _Row(code="BILL")]
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: rows)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    # ONE charge carrying BOTH codes -> one invoice.
+    assert len(calls["charged"]) == 1
+    assert calls["charged"][0]["after"] == {"BILL", "PETTY_CASH"}
+    assert result["expired"] == []
+    assert {entry["code"] for entry in result["converted"]} == {"BILL", "PETTY_CASH"}
+
+
+def test_conversion_records_the_payers_billing_anchor(monkeypatch):
+    """The anchor every future period is derived from, recorded the first time anything
+    is billed for the payer.
+
+    A payer with no anchor is anchored at the conversion moment, so this period starts
+    here and is charged in full rather than prorated against a period they were never
+    part of."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=None)
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    checkout.convert_or_expire_due_trials()
+
+    assert len(calls["anchors"]) == 1
+    user_id, anchor, currency = calls["anchors"][0]
+    assert (user_id, anchor) == ("u1", _NOW)
+    assert currency == "HKD"
+    # The period billed starts at the brand-new anchor, i.e. a full period from now.
+    assert calls["charged"][0]["start"] == _NOW
+
+
+def test_the_anchor_is_recorded_once_and_never_moved(monkeypatch):
+    """Moving it would retroactively redraw every past period, so a payer who already
+    has one is left alone — a second entity converting must not re-anchor them."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=datetime(2026, 9, 8, 13, tzinfo=UTC))
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    checkout.convert_or_expire_due_trials()
+
+    assert calls["anchors"] == []  # untouched
+
+
+def test_an_unpaid_in_house_invoice_expires_the_trial(monkeypatch):
+    """Same rule as a declined card: never hand over modules that were not paid for."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR, paid=False)
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result["converted"] == []
+    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert calls["access"] == [("e1", "BILL", False)]  # access revoked, not granted
+
+
+# --- ending a trial: expiring -------------------------------------------------
+
+
+def test_due_trial_without_a_card_expires_and_revokes_access(monkeypatch):
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import changes, store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row()])
+    monkeypatch.setattr(checkout, "trial_payment_method", lambda cid: None)  # no card
+
+    def _boom(*a, **k):
+        raise AssertionError("must not bill a trial with no card")
+
+    monkeypatch.setattr(changes, "issue_change", _boom)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert calls["writes"][-1][3]["phase"] == "expired"
+    assert calls["access"] == [("e1", "BILL", False)]  # access revoked
+
+
+def test_due_trial_expires_when_the_entity_never_consented_to_billing(monkeypatch):
+    """THE NO-CLICK CHARGE. The payer's card is shared across every entity they pay
+    for, so a card saved for entity #1 must NOT silently fund entity #2's trial
+    conversion — that would charge a customer who never once agreed to pay for that
+    entity, with no user action at all. Expire instead."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import changes, store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row()])
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid: False)  # never authorised
+
+    def _boom(*a, **k):
+        raise AssertionError("must not bill an entity the payer never authorised")
+
+    monkeypatch.setattr(changes, "issue_change", _boom)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert calls["writes"][-1][3]["phase"] == "expired"
+    assert calls["access"] == [("e1", "BILL", False)]
+
+
+def test_a_cancelled_trial_expires_instead_of_converting(monkeypatch):
+    """Cancelling a trial keeps its free days but must never turn into a charge — that
+    IS what cancelling means. Even with a card on file AND consent for the entity, a
+    cancelled trial expires at term end."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import changes, store
+
+    cancelled = _Row(phase="scheduled_cancel")
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [cancelled])
+
+    def _boom(*a, **k):
+        raise AssertionError("a cancelled trial must never be billed")
+
+    monkeypatch.setattr(changes, "issue_change", _boom)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert calls["writes"][-1][3]["phase"] == "expired"
+    assert calls["access"] == [("e1", "BILL", False)]  # free days used up, access ends
+
+
+def test_due_trial_without_a_customer_expires(monkeypatch):
+    """A payer who never added a card has no Stripe customer at all — expire, don't crash."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row()])
+    monkeypatch.setattr(store, "customer_id_for_user", lambda uid: None)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert calls["access"] == [("e1", "BILL", False)]
+
+
+def test_one_failing_entity_does_not_stop_the_rest(monkeypatch):
+    """The job is isolated per ENTITY — an entity bills as one change, so that's the
+    unit of work. One entity's failure must not strand every other entity's due trial."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import store
+
+    bad, good = _Row(code="BILL", entity_id="e1"), _Row(code="PETTY_CASH", entity_id="e2")
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [bad, good])
+
+    # The first entity blows up; the second must still be processed.
+    seen = {"n": 0}
+
+    def flaky(uid):
+        seen["n"] += 1
+        if seen["n"] == 1:
+            raise RuntimeError("billing down")
+        return None
+
+    monkeypatch.setattr(store, "customer_id_for_user", flaky)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result["expired"] == [{"entity_id": "e2", "code": "PETTY_CASH"}]
+
+
+# --- how a running trial presents ---------------------------------------------
+
+
+def test_module_card_surfaces_an_app_level_trial(app, monkeypatch):
+    """An app-level trial has no billing object behind it, so it must be surfaced from
+    the module ROW. It must show as trialing and be cancellable — the Cancel button
+    gates on ``can_cancel``, not on a subscription id it will never have."""
+    import blueprints.entity.services.modules as modules_mod
+    from blueprints.subscription.services import store
+
+    now = datetime.now(UTC)
+
+    class _Fn:
+        id = "fn_pc"
+        function_code = "PETTY_CASH"
+        function_name = "Petty Cash"
+        description = "d"
+        is_active = True
+
+    class _TrialRow:
+        entity_id = "e1"
+        function_code = "PETTY_CASH"
+        payer_user_id = "u1"
+        phase = "trial"
+        trial_end = now + timedelta(days=20)
+        app_access_until = now + timedelta(days=20)
+        first_billed_at = None
+
+    class _Query:
+        def filter(self, *a, **k):
+            return self
+
+        def all(self):
+            return [_Fn()]
+
+    class _Column:
+        """Stands in for the mapped column so ``.in_(...)`` builds without SQLAlchemy."""
+
+        def in_(self, _values):
+            return None
+
+    class _FakeEntityFunction:
+        query = _Query()
+        function_code = _Column()
+
+    monkeypatch.setattr(modules_mod, "EntityFunction", _FakeEntityFunction)
+    monkeypatch.setattr(modules_mod, "MODULE_CODES", ("PETTY_CASH",))
+    monkeypatch.setattr(modules_mod, "_entity_customer_id", lambda eid: None)
+    monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [_TrialRow()])
+    monkeypatch.setattr(store, "paid_through_for_user", lambda uid: None)
+    monkeypatch.setattr(f"{_CATALOG}.available_plans", lambda: [])
+    monkeypatch.setattr(
+        "blueprints.subscription.services.stripe_client.customer_default_payment_method",
+        lambda cid: None,
+    )
+
+    with app.app_context():
+        card = modules_mod.get_module_cards("e1")[0]
+
+    assert card["subscription_status"] == "trialing"  # surfaced from the row
+    assert card["is_subscribed"] is True
+    assert card["can_cancel"] is True  # the Cancel button appears
+    assert card["trial_eligible"] is False  # the trial is already used
+    assert card["needs_card"] is True  # no card -> it will expire, not convert

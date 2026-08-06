@@ -3,6 +3,7 @@
 import html
 import uuid
 from typing import Protocol
+from urllib.parse import quote
 
 import requests
 from flask import (current_app, flash, g, jsonify, redirect, render_template,
@@ -33,7 +34,8 @@ from services.auth.token_service import (auto_refresh_token,
                                          get_xero_token_user_for_entity,
                                          resolve_xero_token)
 from services.authz import (permission_denied, require_entity_access,
-                            require_module, require_permission)
+                            require_module, require_permission,
+                            require_subscription_payer)
 from services.helpers.xero_bridge import get_xero_data_dynamic
 from services.permission_policy import Permission, has_permission
 
@@ -1131,7 +1133,9 @@ def entity_settings_entity(org_id):
 def entity_settings_module(org_id):
     """Module settings tab. Shows the entity's module entitlements as cards
     with on/off toggles (PETTY_CASH, BILL)."""
-    from blueprints.entity.services.modules import (get_module_cards,
+    from blueprints.entity.services.modules import (build_subscription_panel,
+                                                    get_billing_anchor,
+                                                    get_module_cards,
                                                     get_subscription_summary)
 
     org = Entity.query.get_or_404(org_id)
@@ -1140,10 +1144,30 @@ def entity_settings_module(org_id):
 
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
+    billing_anchor = get_billing_anchor(org_id)
+    subscription_panel = build_subscription_panel(
+        module_cards, subscription_summary, billing_anchor
+    )
 
     # Only admins may change modules; everyone else views read-only.
+    #
+    # AND the payer. Permission says who may administer the entity; the payer is whose
+    # card every one of these buttons spends. A co-admin pressing Cancel, Pay now or
+    # Subscribe would move money belonging to someone who never saw the screen, so the
+    # actions are hidden for anyone else — and refused server-side by
+    # @require_subscription_payer, because hiding a button is not a permission.
+    from blueprints.subscription.services import store as sub_store
+
     can_manage_modules = has_permission(
         current_user, Permission.MODULE_MANAGE, org_id
+    ) and sub_store.may_manage_subscription(org_id, current_user.id)
+
+    # Who to name when the actions are hidden. None while the entity has no payer, which
+    # is the case any admin is allowed to act on.
+    payer_id = sub_store.payer_for_entity(org_id)
+    subscription_payer = (
+        User.query.get(str(payer_id)) if payer_id and str(payer_id) != str(current_user.id)
+        else None
     )
 
     from_param = request.args.get("from")
@@ -1159,81 +1183,672 @@ def entity_settings_module(org_id):
         entity_acronym=entity_acronym,
         module_cards=module_cards,
         subscription_summary=subscription_summary,
+        subscription_panel=subscription_panel,
+        billing_anchor=billing_anchor,
         can_manage_modules=can_manage_modules,
+        subscription_payer=subscription_payer,
+        # TEMPORARY, DEV ONLY. Gates the "add a payment method / confirm billing"
+        # banner, which exists to reach those two flows directly while the trial
+        # decision modal is being built — that modal is the customer-facing route to
+        # both. Same debug gate as the dashboard's ``?notice=1`` re-show, so it is off
+        # in production. Delete the banner and this flag once the modal is signed off.
+        dev_tools=bool(current_app.debug),
         bill_settings_url=billing_settings_app_url(
             org_id, org, current_user.id, from_bills=from_param == "bills"
         ),
     )
 
 
-@entity_bp.route("/entity/settings/module/<string:org_id>/toggle", methods=["POST"])
+
+
+@entity_bp.route("/entity/settings/module/<string:org_id>/checkout", methods=["POST"])
 @login_required
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
     entity_arg="org_id",
-    message="You do not have permission to change modules for this entity.",
+    message="You do not have permission to manage subscriptions for this entity.",
 )
-def entity_settings_module_toggle(org_id):
-    """Flip one module on/off for the entity. JSON in/out for the toggle UI."""
-    from blueprints.entity.services.modules import set_entity_module
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_checkout(org_id):
+    """Subscribe the entity to one or more modules — one paid subscription each.
 
-    payload = request.get_json(silent=True) or {}
-    code = (payload.get("code") or "").strip().upper()
-    enabled = bool(payload.get("enabled"))
-
-    # Returns {"modules": {PETTY_CASH: bool, BILL: bool}}; the client uses the
-    # full state to navigate to the correct shell, which re-renders the
-    # subscription summary server-side.
-    data, status = set_entity_module(org_id, code, enabled, actor="settings_ui")
-    return jsonify(data), status
-
-
-@entity_bp.route("/entity/settings/module/<string:org_id>/save", methods=["POST"])
-@login_required
-@require_entity_access(entity_arg="org_id")
-@require_permission(
-    Permission.MODULE_MANAGE,
-    entity_arg="org_id",
-    message="You do not have permission to change modules for this entity.",
-)
-def entity_settings_module_save(org_id):
-    """Apply the staged module on/off selections in one shot (the Save button).
-
-    Body: ``{"modules": {"PETTY_CASH": bool, "BILL": bool}}``. Each canonical
-    module is set to its requested state; returns the full resulting state so
-    the client can navigate to the correct shell.
+    Body: ``{"codes": ["BILL", ...]}`` (empty → auto-resolve the single unsubscribed
+    module). When the entity already has a saved card the subscriptions are created
+    immediately and the response is ``{"created": [codes]}`` (client reloads). When
+    no card is on file the response is ``{"url": <setup checkout url>}`` to capture
+    one first; the subscriptions are created on return (see ...checkout_complete).
     """
-    from blueprints.entity.services.modules import (MODULE_CODES,
-                                                    _enabled_state,
-                                                    set_entity_module)
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        start_modules_checkout,
+    )
 
+    org = Entity.query.get_or_404(org_id)
     payload = request.get_json(silent=True) or {}
-    desired = payload.get("modules")
-    if not isinstance(desired, dict):
-        return jsonify({"error": "A 'modules' object is required."}), 400
+    codes = payload.get("codes") or []
+    return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
+    # Setup checkout returns here so the subscriptions can be created once the card
+    # is saved; Stripe substitutes the real id for {CHECKOUT_SESSION_ID}.
+    complete_url = url_for(
+        "entity.entity_settings_module_checkout_complete", org_id=org_id, _external=True
+    ) + "?session_id={CHECKOUT_SESSION_ID}"
+    try:
+        result = start_modules_checkout(
+            org,
+            current_user,
+            success_url=complete_url,
+            cancel_url=return_url,
+            requested_codes=codes,
+        )
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module checkout failed for %s", org_id)
+        return (
+            jsonify({"error": "Could not start checkout. Please try again."}),
+            500,
+        )
+    if result.get("url"):
+        return jsonify({"url": result["url"]}), 200
+    if result.get("needs_confirmation"):
+        return jsonify({"needs_confirmation": result["needs_confirmation"]}), 200
+    return jsonify({"created": result.get("created", [])}), 200
 
-    # At least one module must stay active. Evaluate the resulting state
-    # (requested values overlaid on the current ones) so even a partial save
-    # can't leave the entity with no modules.
-    current = _enabled_state(org_id)
-    resulting = {
-        code
-        for code in MODULE_CODES
-        if (bool(desired[code]) if code in desired else current.get(code, False))
-    }
-    if not resulting:
-        return jsonify({"error": "At least one module must be active."}), 400
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/authorize-billing", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_authorize_billing(org_id):
+    """Authorise billing for this entity WITHOUT subscribing or charging.
+
+    Used by the trial banner. The module still has trial time left, so the outcome
+    should be "convert at term end" — not "charge now", which is what the subscribe
+    path would do (an app-level trial has no Stripe object, so it doesn't read as an
+    active subscription and paid checkout would happily bill it immediately).
+
+    Idempotent: consent is once per entity.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        authorize_entity_billing,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    try:
+        authorize_entity_billing(org, current_user)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module billing authorization failed for %s", org_id)
+        return (
+            jsonify({"error": "Could not confirm billing. Please try again."}),
+            500,
+        )
+    return jsonify({"ok": True}), 200
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/confirm-billing", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_confirm_billing(org_id):
+    """Record the payer's consent to bill THIS entity, then subscribe.
+
+    Body: ``{"codes": [...]}`` — the same codes the checkout call returned
+    ``needs_confirmation`` for. The payer has been shown the amount and the card and
+    accepted; consent is per entity and permanent, so later purchases on this entity go
+    straight through.
+
+    The codes are re-validated downstream (they came back from the client), so this
+    can still answer ``{"url": …}`` if the card disappeared in between.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        confirm_modules_checkout,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    codes = payload.get("codes") or []
+    return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
+    complete_url = url_for(
+        "entity.entity_settings_module_checkout_complete", org_id=org_id, _external=True
+    ) + "?session_id={CHECKOUT_SESSION_ID}"
+    try:
+        result = confirm_modules_checkout(
+            org,
+            current_user,
+            success_url=complete_url,
+            cancel_url=return_url,
+            requested_codes=codes,
+        )
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module billing confirmation failed for %s", org_id)
+        return (
+            jsonify({"error": "Could not complete the subscription. Please try again."}),
+            500,
+        )
+    if result.get("url"):
+        return jsonify({"url": result["url"]}), 200
+    return jsonify({"created": result.get("created", [])}), 200
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/checkout-complete", methods=["GET"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+def entity_settings_module_checkout_complete(org_id):
+    """Return target for the setup-mode checkout: create the paid subscriptions from
+    the saved card, then redirect back to the module settings page.
+
+    On failure the reason is carried back as a ``checkout_error`` query param so the
+    page can show it (instead of silently landing on an unchanged page)."""
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        complete_setup_checkout,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    session_id = (request.args.get("session_id") or "").strip()
+    # A card-only session (the "Add payment method" button with no customer yet) comes
+    # back here too, because saving the card is the same operation. It carries no
+    # modules_to_subscribe, so completing it correctly creates NOTHING — and reporting
+    # "the subscription wasn't created" for that would call a success a failure.
+    card_only = request.args.get("purpose") == "payment_method"
+    module_url = url_for("entity.entity_settings_module", org_id=org_id)
+    error_message = None
+    if session_id:
+        try:
+            created = complete_setup_checkout(org, current_user, session_id)
+            if not created and not card_only:
+                error_message = (
+                    "The subscription wasn't created. Please try again or check your "
+                    "payment method."
+                )
+        except CheckoutError as exc:
+            logger.exception(
+                "checkout-complete: failed to create subscriptions for %s", org_id
+            )
+            error_message = exc.message
+        except Exception:
+            logger.exception(
+                "checkout-complete: unexpected failure for %s", org_id
+            )
+            error_message = "Something went wrong finishing your subscription."
+    else:
+        error_message = "Checkout could not be completed (missing session)."
+    if error_message:
+        return redirect(f"{module_url}?checkout_error={quote(error_message)}")
+    return redirect(module_url)
+
+
+@entity_bp.route("/entity/settings/module/<string:org_id>/start-trial", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_start_trial(org_id):
+    """Start a card-free trial for one or more never-subscribed modules.
+
+    Body: ``{"codes": ["BILL", ...]}``. Each module must be trial-eligible (no
+    Stripe subscription history in any status); a module that already used its
+    trial is rejected (the UI offers paid checkout for those instead). Access is
+    granted immediately by enabling the module in entity_function_map; the
+    subscription webhook later reaffirms the same state. Returns the resulting
+    ``{"modules": {code: bool}}`` so the client can re-render.
+    """
+    from blueprints.entity.services.modules import set_entity_module
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        start_module_trials,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    codes = payload.get("codes") or []
+    try:
+        started = start_module_trials(org, current_user, codes)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
 
     data, status = {"modules": {}}, 200
-    for code in MODULE_CODES:
-        if code in desired:
-            data, status = set_entity_module(
-                org_id, code, bool(desired[code]), actor="settings_ui"
-            )
-            if status != 200:
-                return jsonify(data), status
+    for code in started:
+        data, status = set_entity_module(org_id, code, True, actor="subscription")
+        if status != 200:
+            return jsonify(data), status
     return jsonify(data), status
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/resume-preview", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_resume_preview(org_id):
+    """What resuming cancelled modules would charge — for the dialog. Writes nothing.
+
+    Body: ``{"codes": [...]}``. Resuming COLLECTS money up front when the cancellation's
+    extension was already invoiced, so this is the disclosure that action needs: it was
+    charging with no dialog at all before.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        preview_reinstate_modules,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    codes = [str(c).strip().upper() for c in (payload.get("codes") or []) if str(c).strip()]
+    if not codes:
+        return jsonify({"error": "codes are required"}), 400
+
+    try:
+        p = preview_reinstate_modules(org, current_user, codes)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module resume preview failed for %s", org_id)
+        return jsonify({"error": "Could not price that."}), 500
+
+    fmt = lambda d: d.strftime("%d %b %Y") if d else None  # noqa: E731
+    return (
+        jsonify(
+            {
+                **{
+                    k: v for k, v in p.items()
+                    if k not in ("covers_from", "covers_to", "trial_end")
+                },
+                "trial_end": fmt(p.get("trial_end")),
+                "covers_from": fmt(p.get("covers_from")),
+                "covers_to": fmt(p.get("covers_to")),
+                "covers_days": (
+                    round((p["covers_to"] - p["covers_from"]).total_seconds() / 86400)
+                    if p.get("covers_from") and p.get("covers_to")
+                    else None
+                ),
+            }
+        ),
+        200,
+    )
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/subscribe-preview", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_subscribe_preview(org_id):
+    """What subscribing would charge — for the confirmation dialog. Writes nothing.
+
+    Body: ``{"codes": ["PETTY_CASH", ...]}``. The figure is the one the purchase itself
+    will bill (``changes.build_change``), not a price list: an entity joining mid-period
+    pays for the days left in it, and a second module costs the difference to the bundle.
+
+    Same permission as the purchase it describes — it states what the payer would be
+    charged, so it is not more public than the charge.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        preview_subscribe_modules,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    codes = [str(c).strip().upper() for c in (payload.get("codes") or []) if str(c).strip()]
+    if not codes:
+        return jsonify({"error": "codes are required"}), 400
+
+    try:
+        return jsonify(preview_subscribe_modules(org, current_user, codes)), 200
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module subscribe preview failed for %s", org_id)
+        return jsonify({"error": "Could not price that subscription."}), 500
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/cancel-preview", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_cancel_preview(org_id):
+    """What cancelling this module would do — for the confirmation dialog. Writes nothing.
+
+    Body: ``{"code": "PETTY_CASH"}``. Returns the same shape ``preview_cancel_module``
+    produces, with dates pre-formatted for display::
+
+        {"kind": "paid", "access_until": "February 04, 2027",
+         "amount_formatted": "120.00", "currency": "HKD", "charged_now": false,
+         "remaining": ["BILL"], "remaining_amount": "280.00"}
+
+    Same permission as the cancel itself: it discloses what the payer would be billed,
+    so it is not more public than the action it describes.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        preview_cancel_module,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    code = (payload.get("code") or "").strip()
+    if not code:
+        return jsonify({"error": "code is required"}), 400
+    # The OTHER modules going in the same click. An extension is priced against everything
+    # leaving together, so a preview that doesn't know about its companions quotes each
+    # module as if it were leaving alone — more than twice what the invoice then collects.
+    also = [
+        str(c).strip().upper()
+        for c in (payload.get("also") or [])
+        if str(c).strip()
+    ]
+
+    try:
+        preview = preview_cancel_module(org, current_user, code, also)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+
+    access_end = preview.get("access_end")
+    return (
+        jsonify(
+            {
+                "kind": preview.get("kind"),
+                "access_until": access_end.strftime("%B %d, %Y") if access_end else None,
+                "access_days": preview.get("access_days"),
+                "amount_formatted": preview.get("amount_formatted"),
+                "currency": preview.get("currency"),
+                "charged_now": preview.get("charged_now", False),
+                "remaining": preview.get("remaining") or [],
+                "remaining_amount": preview.get("remaining_amount"),
+                # The whole cancellation as the invoice will state it: every module
+                # leaving together, under the name of the plan covering them, with the
+                # total. What the dialog quotes when more than one module is going.
+                "leaving_label": preview.get("leaving_label"),
+                "leaving_total_formatted": preview.get("leaving_total_formatted"),
+                "leaving_count": preview.get("leaving_count") or 0,
+                "error": preview.get("error"),
+            }
+        ),
+        200,
+    )
+
+
+@entity_bp.route("/entity/settings/module/<string:org_id>/retry-payment", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_retry_payment(org_id):
+    """Collect a past-due payer's outstanding invoice right now.
+
+    No body. Returns ``{"ok": bool, "status": ..., "message": ...}``.
+
+    Exists because saving a card does not itself settle anything: automatic retries run
+    on a 1/4/7/10/13-day schedule, so without this a customer fixes their card and then
+    sits locked out for up to three days with nothing to press.
+
+    Charges against the SAME budget and the same deadline as the scheduled run — see
+    ``dunning.retry_now``. Scoped to the entity's payer, so an admin of one company can
+    only ever settle the account that pays for it.
+    """
+    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services.dunning import retry_now
+
+    Entity.query.get_or_404(org_id)
+    payer_id = sub_store.payer_for_entity(org_id)
+    if not payer_id:
+        return jsonify({"error": "This entity has no billing account."}), 409
+
+    try:
+        result = retry_now(payer_id)
+    except Exception:
+        logger.exception("retry-payment: collection failed for entity %s", org_id)
+        return jsonify({"error": "We couldn't reach the card processor. Try again shortly."}), 502
+
+    status = result["status"]
+    messages = {
+        "paid": "Payment received — your subscription is active again.",
+        "no_card": "There's no card on file to charge. Add a payment method, then try again.",
+        "gave_up": "This subscription is past its payment deadline and has been closed.",
+        "nothing_owed": "Nothing is outstanding — your subscription is up to date.",
+    }
+    if status == "failed":
+        # The processor's own words when there are any: "insufficient funds" and "card
+        # expired" need different things from the customer, and collapsing both into
+        # "declined" tells them to do the same thing twice.
+        reason = (result.get("reason") or "").strip()
+        message = (
+            f"That card was declined: {reason}" if reason
+            else "That card was declined. Try a different payment method."
+        )
+    else:
+        message = messages.get(status, "Payment could not be completed.")
+
+    return (
+        jsonify(
+            {
+                "ok": status in ("paid", "nothing_owed"),
+                "status": status,
+                "message": message,
+            }
+        ),
+        200,
+    )
+
+
+@entity_bp.route("/entity/settings/module/<string:org_id>/cancel", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_cancel(org_id):
+    """Cancel ONE module.
+
+    Body: ``{"code": "PETTY_CASH", "reason": "too expensive"}``.
+
+    ``reason`` is the free text from the cancellation dialog and is entirely optional —
+    it is recorded, never required, and never changes the outcome.
+
+    Cancellation is per MODULE, not per subscription: the payer has one subscription and
+    the entity one line on it, so a subscription id no longer identifies a module.
+
+    * An **active paid** module cancels under the prorated rule — access until
+      max(period end, now + 30 days), the extra days billed at the module's marginal
+      price on the payer's next invoice. Returns ``{"ok": true, "access_until": "..."}``.
+    * An **app-level trial** simply stops (no Stripe object, no charge).
+    """
+    from blueprints.subscription.services.checkout import CheckoutError, cancel_module
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    code = (payload.get("code") or "").strip()
+    if not code:
+        return jsonify({"error": "code is required"}), 400
+
+    try:
+        result = cancel_module(org, current_user, code, reason=payload.get("reason"))
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+
+    access_end = result.get("access_end")
+    access_until = access_end.strftime("%B %d, %Y") if access_end else None
+    return jsonify({"ok": True, "access_until": access_until}), 200
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/payment-method", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_payment_method(org_id):
+    """Add or update the payer's card. Returns ``{"url": …}`` for the client to open.
+
+    TWO flows, because Stripe's portal cannot serve the first card:
+
+    * an existing customer goes to the billing PORTAL, deep-linked to the
+      payment-method form (``open_payment_method_update``);
+    * a payer with no Stripe customer yet goes to setup-mode CHECKOUT
+      (``start_payment_method_setup``), which passes ``customer_creation="always"``
+      so Stripe mints the customer when the card is actually saved.
+
+    Without the second branch this route answered "This entity has no billing account
+    yet" to exactly the people trying to open one — the portal needs a customer, and a
+    customer is only created by saving a card, which is what the button is for. The
+    same dead end left their trials unable to convert, since conversion resolves a
+    customer or expires the trial.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        open_payment_method_update,
+        start_payment_method_setup,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
+    try:
+        session = open_payment_method_update(org, return_url)
+    except CheckoutError:
+        # No customer to open a portal against — capture the first card instead.
+        # Completion runs through the SAME return route as a subscribe checkout; that
+        # handler saves the card and creates nothing when the session carries no
+        # modules_to_subscribe, which is exactly what a card-only session looks like.
+        complete_url = url_for(
+            "entity.entity_settings_module_checkout_complete",
+            org_id=org_id,
+            _external=True,
+        ) + "?purpose=payment_method&session_id={CHECKOUT_SESSION_ID}"
+        try:
+            session = start_payment_method_setup(
+                org, current_user, success_url=complete_url, cancel_url=return_url
+            )
+        except CheckoutError as exc:
+            return jsonify({"error": exc.message}), exc.status
+    return jsonify({"url": session.get("url")}), 200
+
+
+@entity_bp.route("/entity/settings/module/<string:org_id>/renew", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_renew(org_id):
+    """Reactivate a module scheduled to cancel — in-app, no portal.
+
+    Body: ``{"code": "PETTY_CASH"}``. Puts the module back on the entity's line and
+    reverses the extension charge (deleted if it never billed, credited if it did),
+    then the client refreshes. Returns ``{"ok": True}``.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        reactivate_module,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    code = (payload.get("code") or "").strip()
+    if not code:
+        return jsonify({"error": "code is required"}), 400
+    try:
+        reactivate_module(org, current_user, code)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    return jsonify({"ok": True}), 200
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/manage-billing", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_manage_billing(org_id):
+    """Open the Stripe portal for invoice history + payment-method management,
+    WITHOUT Stripe's own cancellation (cancellation uses the in-app prorated flow).
+
+    Returns ``{"url": <portal url>}`` for the client to redirect to.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        open_billing_management_portal,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
+    try:
+        session = open_billing_management_portal(org, return_url)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    return jsonify({"url": session.get("url")}), 200
 
 
 @entity_bp.route("/entity/contact/create", methods=["POST"])
