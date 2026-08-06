@@ -83,6 +83,11 @@ class EntityModuleSubscription(db.Model):
     # Null = nothing owed.
     extension_amount = db.Column(db.Integer, nullable=True)
 
+    # No ``cancel_reason``. Why the customer left is HISTORY — nothing here reads it to
+    # decide access or what to bill — so it belongs in ``subscription_audit_log``, which
+    # keeps one row per cancellation. Held here it would be state, and a module cancelled,
+    # renewed and cancelled again would overwrite the first reason with the second.
+
     # --- bookkeeping ---
     # No ``synced_at``: it recorded the last reconciliation against live Stripe for a
     # staleness check that was never built. Its only writer, ``store.mark_synced``, had

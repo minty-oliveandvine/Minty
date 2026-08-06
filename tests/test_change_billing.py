@@ -192,41 +192,76 @@ def test_an_already_invoiced_change_is_not_charged_again(monkeypatch):
 
 
 class _Row:
-    def __init__(self, code, phase="active"):
+    def __init__(self, code, phase="active", first_billed_at=datetime(2026, 7, 28, tzinfo=UTC)):
         self.function_code = code
         self.phase = phase
         self.payer_user_id = "u1"
+        # None = never charged for. It is what separates a cancelled PAID module (whose
+        # period is bought and paid for) from a cancelled TRIAL (which bought nothing).
+        self.first_billed_at = first_billed_at
+
+
+def _stub_rows(monkeypatch, rows, paid_through=datetime(2026, 8, 28, 13, tzinfo=UTC)):
+    """Module rows + the payer's paid-through, which _billed_codes_in_house needs to know
+    whether a module winding down is still inside the period it paid for."""
+    from blueprints.subscription.services import checkout, store
+
+    monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: rows)
+    monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
+    monkeypatch.setattr(checkout.clock, "now", lambda: datetime(2026, 8, 20, 13, tzinfo=UTC))
 
 
 def test_billed_codes_come_from_the_module_rows_not_stripe(monkeypatch):
     """The whole bug in one assertion: an entity on Petty Cash must not look empty."""
-    from blueprints.subscription.services import checkout, store
+    from blueprints.subscription.services import checkout
 
-    monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [_Row("petty_cash")])
+    _stub_rows(monkeypatch, [_Row("petty_cash")])
 
     assert checkout._billed_codes_in_house("e1") == {"PETTY_CASH"}
 
 
 def test_a_trialing_module_is_not_billed_yet_so_does_not_count(monkeypatch):
     """Counting it would price the change against a plan nobody is paying for."""
-    from blueprints.subscription.services import checkout, store
+    from blueprints.subscription.services import checkout
 
-    monkeypatch.setattr(
-        store, "module_rows_for_entity",
-        lambda eid: [_Row("PETTY_CASH", "active"), _Row("BILL", "trial")],
-    )
+    _stub_rows(monkeypatch, [_Row("PETTY_CASH", "active"), _Row("BILL", "trial")])
 
     assert checkout._billed_codes_in_house("e1") == {"PETTY_CASH"}
 
 
-def test_a_cancelling_module_does_not_count(monkeypatch):
-    """It is winding down and its marginal value has already been charged as an
-    extension. Matches what _cancel_module_in_house uses to price the other direction."""
-    from blueprints.subscription.services import checkout, store
+def test_a_cancelling_module_counts_while_its_paid_period_runs(monkeypatch):
+    """It is winding down, but the customer PAID for it to the period end — so for the
+    days before that end the line holds it, and adding a module is an upgrade to the
+    bundle rather than a fresh join. The re-price happens at the period end, on the
+    renewal, which is where the cancelled module actually leaves."""
+    from blueprints.subscription.services import checkout
 
-    monkeypatch.setattr(
-        store, "module_rows_for_entity",
-        lambda eid: [_Row("PETTY_CASH", "scheduled_cancel")],
+    _stub_rows(monkeypatch, [_Row("PETTY_CASH", "scheduled_cancel")])
+
+    assert checkout._billed_codes_in_house("e1") == {"PETTY_CASH"}
+
+
+def test_a_cancelling_module_stops_counting_once_its_period_ends(monkeypatch):
+    """Past paid_through it is gone: nothing covers those days, so a change priced then
+    must not credit or bundle against it."""
+    from blueprints.subscription.services import checkout
+
+    _stub_rows(
+        monkeypatch, [_Row("PETTY_CASH", "scheduled_cancel")],
+        paid_through=datetime(2026, 8, 19, 13, tzinfo=UTC),   # yesterday
+    )
+
+    assert checkout._billed_codes_in_house("e1") == set()
+
+
+def test_a_cancelled_trial_never_counts(monkeypatch):
+    """Winding down like the one above, but nothing was ever charged for it — there is no
+    covered period to price against, so counting it would discount against a plan the
+    customer has never paid a penny for."""
+    from blueprints.subscription.services import checkout
+
+    _stub_rows(
+        monkeypatch, [_Row("PETTY_CASH", "scheduled_cancel", first_billed_at=None)]
     )
 
     assert checkout._billed_codes_in_house("e1") == set()
@@ -235,11 +270,9 @@ def test_a_cancelling_module_does_not_count(monkeypatch):
 def test_a_past_due_module_still_counts(monkeypatch):
     """The money is owed, not written off. Treating it as unbilled would charge the new
     module's standalone price on top of a period already invoiced."""
-    from blueprints.subscription.services import checkout, store
+    from blueprints.subscription.services import checkout
 
-    monkeypatch.setattr(
-        store, "module_rows_for_entity", lambda eid: [_Row("PETTY_CASH", "past_due")]
-    )
+    _stub_rows(monkeypatch, [_Row("PETTY_CASH", "past_due")])
 
     assert checkout._billed_codes_in_house("e1") == {"PETTY_CASH"}
 

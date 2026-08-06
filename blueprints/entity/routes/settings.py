@@ -1187,6 +1187,12 @@ def entity_settings_module(org_id):
         billing_anchor=billing_anchor,
         can_manage_modules=can_manage_modules,
         subscription_payer=subscription_payer,
+        # TEMPORARY, DEV ONLY. Gates the "add a payment method / confirm billing"
+        # banner, which exists to reach those two flows directly while the trial
+        # decision modal is being built — that modal is the customer-facing route to
+        # both. Same debug gate as the dashboard's ``?notice=1`` re-show, so it is off
+        # in production. Delete the banner and this flag once the modal is signed off.
+        dev_tools=bool(current_app.debug),
         bill_settings_url=billing_settings_app_url(
             org_id, org, current_user.id, from_bills=from_param == "bills"
         ),
@@ -1442,6 +1448,106 @@ def entity_settings_module_start_trial(org_id):
 
 
 @entity_bp.route(
+    "/entity/settings/module/<string:org_id>/resume-preview", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_resume_preview(org_id):
+    """What resuming cancelled modules would charge — for the dialog. Writes nothing.
+
+    Body: ``{"codes": [...]}``. Resuming COLLECTS money up front when the cancellation's
+    extension was already invoiced, so this is the disclosure that action needs: it was
+    charging with no dialog at all before.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        preview_reinstate_modules,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    codes = [str(c).strip().upper() for c in (payload.get("codes") or []) if str(c).strip()]
+    if not codes:
+        return jsonify({"error": "codes are required"}), 400
+
+    try:
+        p = preview_reinstate_modules(org, current_user, codes)
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module resume preview failed for %s", org_id)
+        return jsonify({"error": "Could not price that."}), 500
+
+    fmt = lambda d: d.strftime("%d %b %Y") if d else None  # noqa: E731
+    return (
+        jsonify(
+            {
+                **{
+                    k: v for k, v in p.items()
+                    if k not in ("covers_from", "covers_to", "trial_end")
+                },
+                "trial_end": fmt(p.get("trial_end")),
+                "covers_from": fmt(p.get("covers_from")),
+                "covers_to": fmt(p.get("covers_to")),
+                "covers_days": (
+                    round((p["covers_to"] - p["covers_from"]).total_seconds() / 86400)
+                    if p.get("covers_from") and p.get("covers_to")
+                    else None
+                ),
+            }
+        ),
+        200,
+    )
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/subscribe-preview", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_subscribe_preview(org_id):
+    """What subscribing would charge — for the confirmation dialog. Writes nothing.
+
+    Body: ``{"codes": ["PETTY_CASH", ...]}``. The figure is the one the purchase itself
+    will bill (``changes.build_change``), not a price list: an entity joining mid-period
+    pays for the days left in it, and a second module costs the difference to the bundle.
+
+    Same permission as the purchase it describes — it states what the payer would be
+    charged, so it is not more public than the charge.
+    """
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        preview_subscribe_modules,
+    )
+
+    org = Entity.query.get_or_404(org_id)
+    payload = request.get_json(silent=True) or {}
+    codes = [str(c).strip().upper() for c in (payload.get("codes") or []) if str(c).strip()]
+    if not codes:
+        return jsonify({"error": "codes are required"}), 400
+
+    try:
+        return jsonify(preview_subscribe_modules(org, current_user, codes)), 200
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("module subscribe preview failed for %s", org_id)
+        return jsonify({"error": "Could not price that subscription."}), 500
+
+
+@entity_bp.route(
     "/entity/settings/module/<string:org_id>/cancel-preview", methods=["POST"]
 )
 @login_required
@@ -1475,9 +1581,17 @@ def entity_settings_module_cancel_preview(org_id):
     code = (payload.get("code") or "").strip()
     if not code:
         return jsonify({"error": "code is required"}), 400
+    # The OTHER modules going in the same click. An extension is priced against everything
+    # leaving together, so a preview that doesn't know about its companions quotes each
+    # module as if it were leaving alone — more than twice what the invoice then collects.
+    also = [
+        str(c).strip().upper()
+        for c in (payload.get("also") or [])
+        if str(c).strip()
+    ]
 
     try:
-        preview = preview_cancel_module(org, current_user, code)
+        preview = preview_cancel_module(org, current_user, code, also)
     except CheckoutError as exc:
         return jsonify({"error": exc.message}), exc.status
 
@@ -1487,11 +1601,18 @@ def entity_settings_module_cancel_preview(org_id):
             {
                 "kind": preview.get("kind"),
                 "access_until": access_end.strftime("%B %d, %Y") if access_end else None,
+                "access_days": preview.get("access_days"),
                 "amount_formatted": preview.get("amount_formatted"),
                 "currency": preview.get("currency"),
                 "charged_now": preview.get("charged_now", False),
                 "remaining": preview.get("remaining") or [],
                 "remaining_amount": preview.get("remaining_amount"),
+                # The whole cancellation as the invoice will state it: every module
+                # leaving together, under the name of the plan covering them, with the
+                # total. What the dialog quotes when more than one module is going.
+                "leaving_label": preview.get("leaving_label"),
+                "leaving_total_formatted": preview.get("leaving_total_formatted"),
+                "leaving_count": preview.get("leaving_count") or 0,
                 "error": preview.get("error"),
             }
         ),
@@ -1578,7 +1699,10 @@ def entity_settings_module_retry_payment(org_id):
 def entity_settings_module_cancel(org_id):
     """Cancel ONE module.
 
-    Body: ``{"code": "PETTY_CASH"}``.
+    Body: ``{"code": "PETTY_CASH", "reason": "too expensive"}``.
+
+    ``reason`` is the free text from the cancellation dialog and is entirely optional —
+    it is recorded, never required, and never changes the outcome.
 
     Cancellation is per MODULE, not per subscription: the payer has one subscription and
     the entity one line on it, so a subscription id no longer identifies a module.
@@ -1597,7 +1721,7 @@ def entity_settings_module_cancel(org_id):
         return jsonify({"error": "code is required"}), 400
 
     try:
-        result = cancel_module(org, current_user, code)
+        result = cancel_module(org, current_user, code, reason=payload.get("reason"))
     except CheckoutError as exc:
         return jsonify({"error": exc.message}), exc.status
 

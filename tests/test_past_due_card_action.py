@@ -88,26 +88,47 @@ def test_past_due_offers_payment_not_renew(app):
     assert "Pay by 7 Aug 2026 to keep access" in html
 
 
-def test_a_scheduled_cancellation_still_offers_renew(app):
-    """The other half of the shared flag must keep working."""
+def test_a_scheduled_cancellation_states_its_date_and_nothing_else(app):
+    """The other half of the shared flag: un-cancelling moved to the decision modal
+    (re-tick the module), so the card states the date and offers no action."""
     actions, html = _actions(app, [
         _card("PETTY_CASH", "Petty Cash", status="active",
               pending_cancel=True, access_end_long="12 Sep 2026"),
     ])
 
-    assert "renewSubscription" in actions
+    assert "renewSubscription" not in actions
     assert "addPaymentMethod" not in actions
-    assert "Renew subscription" in html
+    # Still usable, not continuing, and the date is the point — so it is a Cancelled pill
+    # and a red end date, not grey small print.
+    assert "Cancelled" in html
+    assert "ends 12 Sep 2026" in html
 
 
-def test_a_cancelled_trial_still_offers_keep_free_trial(app):
+def test_a_cancelled_trial_states_its_date_and_nothing_else(app):
     actions, html = _actions(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing",
               pending_cancel=True, trial_cancelled=True),
     ])
 
-    assert "renewSubscription" in actions
-    assert "Keep free trial" in html
+    assert "renewSubscription" not in actions
+    # A cancelled trial reads "Trial ending", not "Cancelled": nothing was bought, and
+    # it ends on its own trial date rather than a paid-through it never had.
+    assert "Trial ending" in html
+    assert "Cancelled" not in html
+    assert "ends 28 Jul 2026" in html
+
+
+def test_a_wound_down_entity_can_still_reach_the_modal(app):
+    """The panel button is the only way into the decision modal, and re-ticking there
+    is the only undo — so an entity with everything cancelled must still get one."""
+    from blueprints.entity.services import modules
+
+    cards = [_card("PETTY_CASH", "Petty Cash", status="active",
+                   pending_cancel=True, access_end_long="12 Sep 2026")]
+    panel = modules.build_subscription_panel(cards, SUMMARY, "28 Jun 2026")
+
+    assert panel["is_empty"] is True
+    assert panel["primary_action"] == "manage"
 
 
 def test_reactivate_refuses_past_due_with_a_useful_message(app, monkeypatch):

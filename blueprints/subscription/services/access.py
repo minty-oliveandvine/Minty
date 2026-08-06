@@ -221,6 +221,37 @@ def is_billing_forward(*, phase: str) -> bool:
     return phase in (PHASE_ACTIVE, PHASE_PAST_DUE)
 
 
+def is_covered_this_period(*, phase: str, first_billed_at, paid_through, now) -> bool:
+    """Whether the CURRENT period has already been paid for this module.
+
+    A fourth question, and the one that prices a mid-period change: what does the line
+    hold for the days being billed. It differs from ``is_billing_forward`` in exactly one
+    case — a module winding down. That module will not be charged again, so it is not
+    billing forward; but the customer paid for it through the period end, so until that
+    date it is on the line, and adding a second module to it is an upgrade to the bundle
+    rather than a fresh join. Petty Cash converting on 20 Aug beside a Payment Request
+    paid to 28 Aug costs the bundle margin for those 8 days, not its standalone price.
+
+    Two conditions keep that narrow:
+      * ``first_billed_at`` — a cancelled TRIAL is winding down too, and bought nothing.
+      * ``paid_through > now`` — past that date the module is simply gone, and the
+        re-price to whatever survives happens on the renewal.
+
+    Used for pricing a change INSIDE the period. Pricing access BEYOND it — the
+    cancellation extension — asks ``is_billing_forward`` instead, because there the
+    winding-down module is no longer on the line.
+    """
+    if is_billing_forward(phase=phase):
+        return True
+    return bool(
+        phase == PHASE_SCHEDULED_CANCEL
+        and first_billed_at is not None
+        and paid_through is not None
+        and now is not None
+        and paid_through > now
+    )
+
+
 def grants_access(now: datetime, **kwargs) -> bool:
     """Whether the module grants access at ``now``.
 

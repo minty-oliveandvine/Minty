@@ -121,6 +121,42 @@ def test_a_pending_cancel_is_off_the_invoice_but_its_extension_is_on_it(app):
     assert panel["next_invoice"]["includes_extension"] is True
 
 
+def test_a_cancellation_is_its_own_row_not_part_of_the_renewal(app):
+    """Same invoice, two different charges. "Renewal HKD 400" that is really 280 of
+    subscription plus 120 of cancellation is a figure the customer cannot check against
+    anything — so the list names each, and only ``next_invoice`` carries the total."""
+    panel = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
+              pending_cancel=True, ext="120"),
+        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+    ])
+
+    assert [(u["label"], u["amount"]) for u in panel["upcoming_charges"]] == [
+        ("Renewal", "HKD 280"),
+        ("Petty Cash cancellation", "HKD 120"),
+    ]
+    # The invoice itself still totals both — that fact did not change.
+    assert panel["next_invoice"]["amount"] == "HKD 400"
+
+
+def test_a_cancellation_survives_having_no_renewal_to_ride(app):
+    """92fb66f4: a trial beside a module winding down. Nothing of this entity renews, so
+    there was no renewal row to fold the extension into and the charge vanished from a
+    list titled "upcoming charges" — while remaining perfectly real."""
+    winding = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+                    pending_cancel=True, ext="62.89")
+    panel = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
+        winding,
+    ])
+
+    assert panel["next_invoice"] is None, "nothing of this entity is on the next run"
+    assert [(u["label"], u["date"]) for u in panel["upcoming_charges"]] == [
+        ("Petty Cash converts", "20 Aug 2026"),
+        ("Payment Request cancellation", "28 Aug 2026"),
+    ]
+
+
 def test_no_paid_module_means_no_next_invoice_date_to_quote(app):
     """Only trials: the payer's cycle may exist, but nothing of THIS entity is on the
     next run, and the trial rows carry the conversion dates instead."""
@@ -250,3 +286,102 @@ def test_trials_only_lists_the_conversions_and_no_renewal(app):
         "Payment Request converts",
     ]
     assert panel["next_invoice"] is None
+
+
+# --- which caption the panel's one button carries -------------------------------
+# Both captions open the same decision modal, so this is only about which question the
+# entity is being asked. The rule is NOT "is there a trial" and NOT "is there an anchor":
+# the anchor lives on the payer's account, so a payer already billed for another company
+# gives this one an anchor on day one, and a trial with a card and consent needs nothing
+# from the customer — it converts by itself.
+
+
+def test_subscribe_is_offered_only_when_billing_is_not_set_up(app):
+    """needs_card is "this trial will NOT convert as things stand" — no card, or this
+    company was never authorised for the saved one. That is the whole condition."""
+    panel = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="trialing", end=_AFTER, needs_card=True),
+    ])
+
+    assert panel["primary_action"] == "subscribe_stripe"
+
+
+def test_a_trial_that_will_convert_is_managed_not_subscribed(app):
+    """The regression this rule replaced: every trial said "Subscribe", including ones
+    with a card and consent already in place, where there is nothing to subscribe to."""
+    panel = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="trialing", end=_AFTER),
+    ])
+
+    assert panel["primary_action"] == "manage"
+
+
+def test_a_paid_entity_is_managed(app):
+    panel = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH),
+    ])
+
+    assert panel["primary_action"] == "manage"
+
+
+# --- how a cancellation is stated ----------------------------------------------
+
+
+def test_cancelling_the_bundle_is_one_notice_naming_the_plan(app):
+    """Cancelling a two-module bundle is ONE decision. Printing the same date under two
+    module names describes it as two, and neither line is the thing that happened."""
+    a = _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
+              pending_cancel=True)
+    b = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+              pending_cancel=True)
+    a["access_end_long"] = b["access_end_long"] = "19 Oct 2026"
+
+    panel = _panel(app, [a, b])
+
+    assert panel["winding_notices"] == [
+        {"label": "Super Minty", "date": "19 Oct 2026", "kind": "paid"}
+    ]
+
+
+def test_cancelling_one_module_names_that_module(app):
+    """The other half: one cancellation, and the plan is not what ended."""
+    a = _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
+              pending_cancel=True)
+    a["access_end_long"] = "19 Oct 2026"
+    b = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH)
+
+    panel = _panel(app, [a, b])
+
+    assert panel["winding_notices"] == [
+        {"label": "Petty Cash", "date": "19 Oct 2026", "kind": "paid"}
+    ]
+
+
+def test_past_due_is_never_called_cancelled(app):
+    """It carries the same winding-down flag but nothing was cancelled — dunning is still
+    retrying the charge. Saying "cancelled" to someone we are about to bill again is the
+    wrong error to make."""
+    past_due = _card("BILL", "Payment Request", status="past_due", end=_PAID_THROUGH,
+                     pending_cancel=True)
+    past_due["access_end_long"] = "7 Aug 2026"
+
+    panel = _panel(app, [_card("PETTY_CASH", "Petty Cash", status="active",
+                               end=_PAID_THROUGH), past_due])
+
+    assert panel["winding_notices"] == []
+
+
+def test_a_cancelled_trial_is_ending_not_cancelled(app):
+    """Nothing was bought and nothing ends early — the free days run to the date they
+    always would. Calling that "cancelled" describes a purchase that never happened."""
+    trial = _card("BILL", "Payment Request", status="trialing", end=_AFTER,
+                  pending_cancel=True)
+    trial["trial_cancelled"] = True
+    trial["access_end_long"] = "11 Sep 2026"
+
+    panel = _panel(app, [_card("PETTY_CASH", "Petty Cash", status="active",
+                               end=_PAID_THROUGH), trial])
+
+    assert panel["winding_notices"] == [
+        {"label": "Payment Request", "date": "11 Sep 2026", "kind": "trial"}
+    ]

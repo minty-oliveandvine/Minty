@@ -49,6 +49,10 @@ EXTENSION_STATES = (
 # --- Audit actions (subscription_audit_log.action) ----------------------------
 AUDIT_CANCEL = "cancel"
 AUDIT_UNCANCEL = "uncancel"
+# The subscription ENDED, as opposed to being cancelled: the days a cancellation bought,
+# or the grace a debt was allowed, finally ran out. Nobody clicks this one — it is the
+# access sweep recording a date passing (see ``checkout.terminate_lapsed_module``).
+AUDIT_TERMINATE = "terminate"
 
 # --- Audit outcomes (subscription_audit_log.outcome) --------------------------
 OUTCOME_SUCCEEDED = "succeeded"
