@@ -9,8 +9,10 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = "add_email_otp"            
-down_revision = "b8f3a2c1d4e5" 
+revision = "add_email_otp"
+# Was b8f3a2c1d4e5 (seed_modules_and_backfill); that pure data-seed migration moved to
+# the end of the chain, so this takes its old slot on top of a3c5e7f9b1d4.
+down_revision = "a3c5e7f9b1d4"
 branch_labels = None
 depends_on = None
 

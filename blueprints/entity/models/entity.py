@@ -36,6 +36,9 @@ class Entity(db.Model):
     period_lock_date = db.Column(db.Date, nullable=True)
     end_of_year_lock_date = db.Column(db.Date, nullable=True)
     xero_tenant_name = db.Column(db.String(255), nullable=True)
+    # NOTE: no stripe_customer_id column — the entity's Stripe customer is resolved
+    # live from Stripe via the customer's metadata.entity_id (see
+    # subscription.services.stripe_state.customer_id_for_entity).
     connected_by_user_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.user.id", ondelete="RESTRICT"),

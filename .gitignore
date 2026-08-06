@@ -14,16 +14,23 @@ app.log
 venv
 CLAUDE.md
 
-# Database dumps — these contain real customer data. Never commit them.
+# Runtime + test artifacts. None of these are source, and two of them were leaking
+# production data into the repo: a full pettycashv2 dump and the billing service logs.
+*.log
+*.log.zip
+*.sqlite
+
+# Database dumps — these contain real customer data. Never commit them. Once
+# committed a dump stays in history whether or not the file is later deleted.
 backups/
 *.dump
 *.sql.gz
 prod_*.dump
 local_before_restore_*.dump
+*.sql
+!scripts/*.sql
+!migrations/**/*.sql
 
 # Flask instance folder — generated PDFs/DOCX of real reports, temp files.
 # Never commit: these contain customer financial data.
 instance/
-
-# Rotated app logs
-*.log.zip
