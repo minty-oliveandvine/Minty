@@ -360,6 +360,56 @@ def test_a_cancel_extension_rides_the_next_invoice(monkeypatch):
     assert any("cancellation" in line.description for line in invoice.lines)
 
 
+def test_an_extension_line_is_named_from_the_catalog_not_from_the_code(monkeypatch):
+    """It used to title-case the module CODE. "PETTY_CASH" happens to come out "Petty
+    Cash", so the bug hid until a Payment Request extension printed "Bill" — a word the
+    catalog does not use — on an invoice whose other lines said "Payment Request".
+
+    Priced as a ONE-MODULE set: the extension is for the module that was cancelled, so
+    naming it after the entity's bundle would claim a charge for something still held.
+    """
+    from blueprints.subscription.services import store
+
+    renewals, calls = _wire(monkeypatch, extensions=[_Extension(code="BILL")])
+    asked: list[list[str]] = []
+
+    def _plan_for(codes):
+        codes = [str(c).upper() for c in codes]
+        asked.append(codes)
+        return {
+            ("BILL",): _Plan("Payment Request", 28000),
+            ("PETTY_CASH",): _Plan("Petty Cash", 28000),
+        }.get(tuple(sorted(codes)), _Plan())
+
+    monkeypatch.setattr(store, "billing_plan_for_codes", _plan_for)
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    _cid, invoice, _kw = calls["issued"][0]
+    extension = next(ln for ln in invoice.lines if "cancellation" in ln.description)
+    assert extension.product_name == "Payment Request (access after cancellation)"
+    assert "Bill (" not in extension.description
+    assert ["BILL"] in asked, "the extension is priced per module, not per bundle"
+
+
+def test_a_module_with_no_catalog_row_still_gets_billed(monkeypatch):
+    """A label must never cost a collection. Falls back to the old title-cased code."""
+    from blueprints.subscription.services import store
+
+    renewals, calls = _wire(monkeypatch, extensions=[_Extension(code="PETTY_CASH")])
+    monkeypatch.setattr(
+        store, "billing_plan_for_codes",
+        lambda codes: None if list(codes) == ["PETTY_CASH"] else _Plan(),
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    _cid, invoice, _kw = calls["issued"][0]
+    extension = next(ln for ln in invoice.lines if "cancellation" in ln.description)
+    assert extension.product_name == "Petty Cash (access after cancellation)"
+    assert invoice.total == 40000 + 4258
+
+
 def test_a_payer_whose_LAST_entity_was_cancelled_is_still_billed(monkeypatch):
     """The case this mechanism exists for. Nothing renews, so the payer has no billable
     modules at all — but they still owe the days they were promised. Filtering them out

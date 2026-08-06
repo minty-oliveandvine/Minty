@@ -404,8 +404,23 @@ def payment_method_display(payment_method_id: str | None) -> dict | None:
     """The card's brand + last4 for showing the payer what they're about to be charged
     on, or None if it can't be read.
 
-    Display only — never a billing decision. Returns e.g. ``{"brand": "visa",
-    "last4": "4242"}``.
+    Display only — never a billing decision. Returns e.g. ``{"type": "card", "brand":
+    "visa", "last4": "4242", "exp_month": 8, "exp_year": 2028, "expiry": "08/28",
+    "label": "Visa •••• 4242"}``.
+
+    The expiry is included because a card about to expire is the commonest reason a
+    renewal fails, and the billing page is where someone would go to fix it. ``expiry`` is
+    the pre-formatted MM/YY the UI prints; the raw parts are kept so a caller can compare
+    against a date without parsing it back.
+
+    NOT every payment method is a card. A payer who checked out through Stripe Link has a
+    ``link`` method with no ``card`` object at all, and this used to answer None for
+    them — so the one screen that says what will be charged said nothing. Those now come
+    back with the type and a ``label`` and empty card fields, because "Link" is a true
+    answer and blank is not.
+
+    ``brand`` and ``last4`` keep their exact previous meaning — a card's, or None — so
+    callers reading them are unaffected. ``label`` is the complete string to print.
     """
     if not payment_method_id:
         return None
@@ -419,9 +434,46 @@ def payment_method_display(payment_method_id: str | None) -> dict | None:
         )
         return None
     card = (pm or {}).get("card") or {}
-    if not card:
-        return None
-    return {"brand": card.get("brand"), "last4": card.get("last4")}
+    kind = (pm or {}).get("type") or ""
+    # Whoever the card is registered to. Stripe's own field, so the billing screen can
+    # show a cardholder rather than guessing it is the payer — they are often different
+    # people (a finance lead's card on a director's account).
+    cardholder = ((pm or {}).get("billing_details") or {}).get("name")
+
+    if card:
+        month, year = card.get("exp_month"), card.get("exp_year")
+        brand, last4 = card.get("brand"), card.get("last4")
+        return {
+            "type": "card",
+            "brand": brand,
+            "last4": last4,
+            "cardholder": cardholder,
+            "exp_month": month,
+            "exp_year": year,
+            "expiry": (
+                f"{int(month):02d}/{int(year) % 100:02d}" if month and year else None
+            ),
+            "label": " ".join(
+                p for p in [(brand or "card").title(), f"•••• {last4}" if last4 else ""]
+                if p
+            ),
+        }
+
+    if kind:
+        # A wallet — Link today. Stripe exposes no card object for it (the funding source
+        # is Link's business), so the honest answer is what it IS.
+        return {
+            "type": kind,
+            "brand": None,
+            "last4": None,
+            "cardholder": cardholder,
+            "exp_month": None,
+            "exp_year": None,
+            "expiry": None,
+            "label": kind.replace("_", " ").title(),
+        }
+
+    return None
 
 
 def create_billing_portal_session(

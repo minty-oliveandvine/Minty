@@ -465,6 +465,30 @@ def upgrade():
         # What the customer reads on the invoice (see renewals.renewal_memo).
         sa.Column("memo", sa.String(500), nullable=True),
 
+        # WHICH CARD PAID IT, as a display string ("Visa •••• 4242"). Captured at
+        # settle time and never re-derived, because the account's CURRENT default is a
+        # different question the moment anyone updates a card — and the invoice it would
+        # be wrong about first is a FAILED one, where which card was charged is the whole
+        # question. Display only: it is a snapshot for history, like entity_name, and no
+        # decision reads it. Null for invoices raised before this column existed, and for
+        # any Stripe read that did not come back.
+        sa.Column("payment_method", sa.String(100), nullable=True),
+
+        # Stripe's hosted page for this invoice. Stored rather than fetched on demand:
+        # rendering an invoice list should not be N Stripe round trips, and the URL is
+        # stable for the life of the invoice. Null until it is finalized — a draft has
+        # none.
+        #
+        # The page, not the PDF. Stripe exposes both; this one carries the PDF as a
+        # download AND, for an invoice still open, a way to pay it — which is exactly
+        # what the customer looking at a failed row needs. A second column holding the
+        # direct PDF would only ever be the weaker half of what this already reaches.
+        #
+        # A CAPABILITY URL: the query token is the authorisation, so anyone holding the
+        # link can read the invoice without signing in. Serve it to the payer, never log
+        # it.
+        sa.Column("hosted_invoice_url", sa.String(500), nullable=True),
+
         # The double-billing guard. Unique index below turns "we searched and didn't
         # find one" into "the database will not let us". Nullable, because a mid-period
         # purchase has no natural period key.

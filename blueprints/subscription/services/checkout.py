@@ -2451,15 +2451,19 @@ def _billing_portal_configuration() -> str:
     return configuration
 
 
-def open_payment_method_update(entity, return_url: str):
-    """Open the Stripe portal's add/update payment-method flow.
+def open_payment_method_update_for_customer(customer_id: str | None, return_url: str):
+    """Open the Stripe portal's add/update payment-method flow for a CUSTOMER.
+
+    The card is an account-level fact — one payer, one Stripe customer, one default
+    method — so this is the form the operation really takes. ``open_payment_method_update``
+    is the same thing reached from an entity, and the payer portal (which has no entity in
+    hand) calls this directly.
 
     Deep-links straight into the payment-method flow (not the portal home) with an
-    ``after_completion`` redirect, so the customer lands back on ``return_url`` as
-    soon as the card is saved. Raises ``CheckoutError`` if the entity has no Stripe
-    customer yet.
+    ``after_completion`` redirect, so the customer lands back on ``return_url`` as soon as
+    the card is saved. Raises ``CheckoutError`` when there is no customer yet: the portal
+    cannot mint one, and the first card has to come through setup-mode Checkout instead.
     """
-    customer_id = _customer_id_for_entity(entity.id)
     if not customer_id:
         raise CheckoutError("This entity has no billing account yet.", status=409)
     return create_billing_portal_session(
@@ -2476,6 +2480,18 @@ def open_payment_method_update(entity, return_url: str):
                 "redirect": {"return_url": return_url},
             },
         },
+    )
+
+
+def open_payment_method_update(entity, return_url: str):
+    """Open the add/update payment-method flow for the entity's payer.
+
+    Resolves entity -> payer -> customer and defers to
+    ``open_payment_method_update_for_customer``; the card does not belong to the entity,
+    it belongs to whoever pays for it.
+    """
+    return open_payment_method_update_for_customer(
+        _customer_id_for_entity(entity.id), return_url
     )
 
 
