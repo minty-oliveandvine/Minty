@@ -517,6 +517,23 @@
           </div>
         #}
 
+        <!-- Terms agreement. Starts unticked, always: a pre-ticked box is not
+             agreement, because the person has done nothing. Gating Verify on
+             it (not just Register) means no code is even sent until they have
+             agreed, so an account cannot begin without it.
+             The server checks this independently — see _terms_consent_for_signup. -->
+        <div class="auth-field auth-terms">
+          <label for="termsAccept" style="display:flex;gap:.5rem;align-items:flex-start;font-weight:400;">
+            <input type="checkbox" id="termsAccept" style="margin-top:.25rem;flex:none;" />
+            <span>
+              I agree to the
+              <a href="{{ url_for('legal.terms') }}" target="_blank" rel="noopener" class="auth-link">Terms of Use</a>
+              and
+              <a href="{{ url_for('legal.privacy') }}" target="_blank" rel="noopener" class="auth-link">Privacy Policy</a>.
+            </span>
+          </label>
+        </div>
+
         <!-- Disabled (gray) until a 6-digit OTP is entered; the actual code
              correctness is checked server-side on click. -->
         <button type="submit" class="auth-btn auth-btn-primary" id="submitBtn" disabled>Register</button>
@@ -665,6 +682,7 @@
     // ----------------------------------------------------------------------
     const REQUEST_CODE_URL = "{{ url_for('auth.email_request_code') }}";
     const VERIFY_CODE_URL = "{{ url_for('auth.email_verify_code') }}";
+    const TERMS_VERSION = "{{ terms_version }}";
     const OTP_TTL_SECONDS = 60;   // mirrors the server's OTP_EXPIRY_SECONDS
     const MAX_ATTEMPTS = 5;       // mirrors the server's MAX_OTP_ATTEMPTS
 
@@ -705,6 +723,7 @@
       const ready =
         Boolean(otpEmail) &&
         !codeExpired &&
+        termsAccepted() &&
         /^\d{6}$/.test((otpInput.value || "").trim());
       submitBtn.disabled = !ready;
     }
@@ -757,9 +776,17 @@
       );
     }
 
+    // The Terms tick box gates Verify exactly as a malformed email does: no
+    // code is sent until it is ticked, so an account cannot even begin without
+    // agreement. The binding check is still the server's.
+    const termsBox = document.querySelector("#termsAccept");
+    function termsAccepted() {
+      return Boolean(termsBox && termsBox.checked);
+    }
+
     function refreshVerifyButton() {
       const val = (fields.email.input.value || "").trim();
-      const ready = EMAIL_RE.test(val) && nameFieldsFilled();
+      const ready = EMAIL_RE.test(val) && nameFieldsFilled() && termsAccepted();
       // If the email changed away from the verified one, reset the OTP step.
       if (otpEmail && val.toLowerCase() !== otpEmail) {
         resetOtpStep();
@@ -792,6 +819,12 @@
     fields.email.input.addEventListener("input", refreshVerifyButton);
     fields.first_name.input.addEventListener("input", refreshVerifyButton);
     fields.last_name.input.addEventListener("input", refreshVerifyButton);
+    if (termsBox) {
+      termsBox.addEventListener("change", function () {
+        refreshVerifyButton();
+        refreshSubmitState();
+      });
+    }
     refreshVerifyButton();
 
     // --- Verify button: request an OTP for the typed email. ---
@@ -907,6 +940,11 @@
           code: code,
           first_name: fields.first_name.input.value.trim(),
           last_name: fields.last_name.input.value.trim(),
+          // The version is stamped by the server into the page, so the record
+          // names exactly the wording that was rendered above — not whatever
+          // happens to be live when this request lands.
+          terms_accepted: termsAccepted(),
+          terms_version: TERMS_VERSION,
         }),
       })
         .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })

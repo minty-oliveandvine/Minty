@@ -242,10 +242,18 @@ def create_app():
     from blueprints.entity.services.modules import (LOGIN_SID_SESSION_KEY,
                                                     NOTICE_SEEN_SESSION_KEY)
 
+    from blueprints.legal.services.gate import clear_session_agreement
+
     @user_logged_in.connect_via(app)
     def _reset_per_login_state(_sender, **_kwargs):
         session.pop(NOTICE_SEEN_SESSION_KEY, None)
         session[LOGIN_SID_SESSION_KEY] = uuid.uuid4().hex
+        # Terms acceptance is cached in the session for speed. It MUST be
+        # cleared here for exactly the reason described above: the cookie
+        # outlives logout, so without this a second person signing in on the
+        # same browser would inherit the first person's cached agreement and
+        # walk straight past the acceptance gate.
+        clear_session_agreement()
 
     csrf = CSRFProtect(app)
     # Cross-module sync endpoints from Module 2 (billing_backend) authenticate
@@ -346,6 +354,16 @@ def create_app():
     from cli.subscription_plans import plans_cli
     app.cli.add_command(subscriptions_cli)
     app.cli.add_command(plans_cli)
+
+    # Re-check every published legal document against its recorded fingerprint.
+    # A document edited in place silently invalidates every consent row that
+    # points at it, and the damage is only discovered when a record needs to be
+    # defended — years later. Checking at startup turns that into a log line on
+    # the deploy that caused it. Reported, not raised: a fingerprint mismatch
+    # must not take the whole app down, and the acceptance gate is what
+    # actually depends on this.
+    from legal.registry import verify_pinned_hashes
+    verify_pinned_hashes()
 
     return (
         app,

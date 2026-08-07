@@ -81,6 +81,8 @@ def test_register_otp_verify_creates_normal_approved_user(app, client, db_sessio
     req = client.post("/auth/email/request-code", json={"email": email})
     assert req.status_code == 200
 
+    from legal import registry
+
     verify = client.post(
         "/auth/email/verify-code",
         json={
@@ -88,6 +90,11 @@ def test_register_otp_verify_creates_normal_approved_user(app, client, db_sessio
             "code": sent["code"],
             "first_name": "New",
             "last_name": "User",
+            # Sign-up now refuses to create an account without an explicit
+            # agreement to the live Terms (REQUIRE_TERMS_AT_SIGNUP). The real
+            # clients send these; so does this test.
+            "terms_accepted": True,
+            "terms_version": registry.current_version(registry.TERMS),
         },
     )
     assert verify.status_code == 200
@@ -100,6 +107,52 @@ def test_register_otp_verify_creates_normal_approved_user(app, client, db_sessio
         assert created_user.system_role == User.SYSTEM_ROLE_NORMAL
         assert created_user.approved is True
         assert not hasattr(created_user, "company")
+
+        # The consent row lands in the same transaction as the account, so a
+        # successful sign-up always leaves both.
+        from blueprints.legal.services.consent import has_consent
+
+        assert has_consent(created_user.id) is True
+
+
+def test_register_otp_verify_refuses_without_terms_agreement(
+    app, client, db_session, monkeypatch
+):
+    """Phase 6: no agreement, no account.
+
+    The old request shape — no terms fields — is now rejected outright rather
+    than creating an account that the acceptance gate would have to catch later.
+    """
+    import blueprints.auth.services.email_auth as email_auth
+    from models.db import User
+
+    monkeypatch.setattr(email_auth, "_send_code_email", lambda *a, **k: True)
+    sent = {}
+    real_gen = email_auth.generate_otp
+
+    def _capture():
+        sent["code"] = real_gen()
+        return sent["code"]
+
+    monkeypatch.setattr(email_auth, "generate_otp", _capture)
+
+    email = "no.terms@test.com"
+    assert client.post("/auth/email/request-code", json={"email": email}).status_code == 200
+
+    verify = client.post(
+        "/auth/email/verify-code",
+        json={
+            "email": email,
+            "code": sent["code"],
+            "first_name": "No",
+            "last_name": "Terms",
+        },
+    )
+    assert verify.status_code == 400
+    assert "Terms of Use" in verify.get_json()["message"]
+
+    with app.app_context():
+        assert User.query.filter_by(email=email).first() is None
 
 
 def test_register_otp_verify_rejects_wrong_code(app, client, db_session, monkeypatch):

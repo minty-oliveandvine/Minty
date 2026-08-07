@@ -109,8 +109,16 @@ def _make_user(db):
 
 
 def _login(client, user_id: str) -> None:
+    from blueprints.legal.services.gate import TERMS_OK_SESSION_KEY
+    from legal import registry
+
     with client.session_transaction() as sess:
         sess["_user_id"] = user_id
+        # A logged-in user who has not accepted the Terms is redirected to
+        # /legal/accept by the acceptance gate — correctly, and for every
+        # product route. These tests are about Xero scopes, so the session
+        # carries the same "already agreed" marker a real accepted user has.
+        sess[TERMS_OK_SESSION_KEY] = registry.current_version(registry.TERMS)
 
 
 def _scopes_from_redirect(response) -> set[str]:
