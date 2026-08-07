@@ -1294,6 +1294,10 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
 
     now = clock.now()
     anchor, _currency = store.billing_cycle_for_user(payer_user_id)
+    # Whether this is the payer's FIRST charge, which is what decides below whether the
+    # account's cycle may be written. The anchor answers it without a second read: it is
+    # set once, here, and never moves again.
+    first_charge = anchor is None
     if anchor is None:
         # Nothing has ever been billed for this payer: the cycle starts now, so this
         # period is charged in full rather than prorated against a period they were
@@ -1345,7 +1349,22 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
         )
         return None
 
-    store.set_paid_through(payer_user_id, period.end)
+    # ESTABLISH the payer's cycle; never ADVANCE one that already exists.
+    #
+    # This charge covered ONE entity, but ``paid_through`` is the ACCOUNT's marker and
+    # ``renewals.due_renewals`` reads it to decide whether the payer owes anything at
+    # all. Moving it forward here announced that every OTHER entity on the account was
+    # settled for the new period too. A trial converting exactly on a period boundary
+    # therefore cancelled that day's renewal for its siblings, and they went unbilled
+    # for the month — silently, because a payer who is not due raises no invoice to
+    # notice the absence of. Only a renewal covers every entity, so only a renewal may
+    # move this.
+    #
+    # The first charge on a payer is the exception: they have no cycle yet, and
+    # ``due_renewals`` skips a NULL ``paid_through`` outright, so leaving it unset would
+    # mean the account never renewed at all.
+    if first_charge:
+        store.set_paid_through(payer_user_id, period.end)
     return period.end
 
 

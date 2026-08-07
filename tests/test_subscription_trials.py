@@ -229,12 +229,36 @@ def test_conversion_is_collected_by_an_in_house_invoice(monkeypatch):
     assert charge["customer"] == "cus_1"
     assert charge["after"] == {"BILL"}
     assert (charge["start"], charge["end"]) == (_ANCHOR, _PERIOD_END)
-    # paid_through advances to the period end — that is what access is measured against.
-    assert calls["paid_through"] == [("u1", _PERIOD_END)]
+    # The account's cycle is NOT touched. This charge covered one entity, and
+    # ``paid_through`` speaks for the whole payer: ``renewals.due_renewals`` reads it to
+    # decide whether the account owes anything, so moving it here told that run every
+    # OTHER entity was settled too and they went unbilled for the month. Only a renewal
+    # covers everyone, so only a renewal advances it. A payer whose FIRST charge this is
+    # still gets one written — see ``test_a_first_conversion_still_starts_the_cycle``.
+    assert calls["paid_through"] == []
     # Phase moved off `trial` so a re-run can't convert twice, and the row is stamped as
     # having been billed.
     converted = [w for w in calls["writes"] if w[3].get("phase") == "active"]
     assert converted and converted[-1][3]["first_billed_at"] == _NOW
+
+
+def test_a_first_conversion_still_starts_the_cycle(monkeypatch):
+    """The one case that may write ``paid_through``: a payer who has never been billed.
+
+    ``due_renewals`` skips a NULL ``paid_through`` outright, so if the first charge on an
+    account left it unset the account would never come due and would never renew — the
+    opposite failure to the one the rule exists to prevent.
+    """
+    from blueprints.subscription.services import store
+
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=None)
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    checkout.convert_or_expire_due_trials()
+
+    assert calls["anchors"], "a payer with no anchor should have had one written"
+    assert len(calls["paid_through"]) == 1
+    assert calls["paid_through"][0][0] == "u1"
 
 
 def test_two_modules_due_together_bill_as_one_change(monkeypatch):

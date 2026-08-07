@@ -19,7 +19,7 @@ TWO RULES THAT DECIDE THE AMOUNT, both already proven elsewhere:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -44,11 +44,45 @@ def _entity_names(entity_ids) -> dict[str, str]:
     return {str(e.id): (e.name or "").strip() or str(e.id) for e in rows}
 
 
-def billable_codes_by_entity(user_id) -> dict[str, set[str]]:
-    """{entity_id: {module codes}} this payer will be charged for next period."""
+def entities_billed_in(user_id, period: Period) -> set[str]:
+    """Entities already charged for ``period`` by something other than a renewal.
+
+    A purchase, a module change and a trial conversion all bill their own entity for the
+    period they land in — in full at the boundary, prorated inside it. Renewing that
+    entity for the same period would charge twice for the same days.
+
+    ``first_billed_at`` is the FIRST charge and never moves afterwards, so it falls
+    inside exactly one period: the one the entity started paying in, which is the one to
+    skip. Every later period has it in the past and renews normally.
+    """
+    billed = set()
+    for row in store.module_rows_for_payer(user_id):
+        at = getattr(row, "first_billed_at", None)
+        if at is None:
+            continue
+        # Rows read back from some drivers lose their tzinfo; comparing those against an
+        # aware period raises rather than answering, and an exception here would stop the
+        # payer being billed at all.
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if period.start <= at < period.end:
+            billed.add(str(row.entity_id))
+    return billed
+
+
+def billable_codes_by_entity(user_id, period: Period | None = None) -> dict[str, set[str]]:
+    """{entity_id: {module codes}} this payer will be charged for next period.
+
+    ``period`` drops the entities already charged for it — see ``entities_billed_in``.
+    Omitting it answers the looser question "is there anything on this account at all",
+    which is what ``due_renewals`` needs before a period has even been chosen.
+    """
+    already = entities_billed_in(user_id, period) if period is not None else set()
     by_entity: dict[str, set[str]] = {}
     for row in store.module_rows_for_payer(user_id):
         if not access.is_billing_forward(phase=row.phase):
+            continue
+        if str(row.entity_id) in already:
             continue
         by_entity.setdefault(str(row.entity_id), set()).add(
             row.function_code.upper()
@@ -70,7 +104,7 @@ def build_renewal(user_id, period: Period) -> Invoice | None:
     # NOT an early return on "nothing renewing": a payer whose last entity was
     # cancelled has no billable modules but may still owe a cancel-extension, and
     # bailing here would give those days away.
-    by_entity = billable_codes_by_entity(user_id)
+    by_entity = billable_codes_by_entity(user_id, period)
     names = _entity_names(by_entity.keys())
     entries: list[tuple[str, str, str, int]] = []
     currency = None
@@ -315,7 +349,18 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
             "currency": invoice.currency if invoice else None,
         }
         if invoice is None:
-            skipped.append({**entry, "reason": "nothing billable"})
+            # Two different nothings. "Nothing left on this account" leaves the cycle
+            # alone — advancing it would hand a lapsed payer free periods forever. "This
+            # period was already paid for, just not by a renewal" has to advance it: the
+            # entity that converted or bought on the boundary covered the period in its
+            # own invoice, and leaving ``paid_through`` behind would make the account
+            # permanently due, re-checked every day, and — once past the grace window —
+            # revoked for non-payment it had actually made.
+            if issue and entities_billed_in(user_id, period):
+                store.set_paid_through(user_id, period.end)
+                skipped.append({**entry, "reason": "already covered this period"})
+            else:
+                skipped.append({**entry, "reason": "nothing billable"})
             continue
         if not issue:
             planned.append(entry)
