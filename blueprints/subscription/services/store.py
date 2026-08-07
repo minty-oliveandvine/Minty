@@ -376,6 +376,33 @@ def module_rows_for_payer(user_id) -> list[EntityModuleSubscription]:
     )
 
 
+def entity_ids_with_billed_modules(user_id=None) -> set[str]:
+    """Entities holding a module in a phase that is BILLED, whatever their access says.
+
+    The access sweep's other population is "modules currently switched on", which can
+    only ever shrink. This one is read from the subscription rows instead, so a module
+    that was switched off while its account was past due is still visible to the sweep
+    once the account pays and its entitlement returns.
+
+    Phase alone, deliberately: ``access.is_paid_module`` also weighs ``first_billed_at``
+    to tell a cancelled paid module from a cancelled trial, but that is a per-row call
+    the sweep makes anyway. This only has to be a superset cheap enough to run daily.
+
+    ``user_id`` narrows it to one payer, for a caller reconciling a single account.
+    """
+    query = EntityModuleSubscription.query.filter(
+        EntityModuleSubscription.phase.in_(
+            (PHASE_ACTIVE, PHASE_PAST_DUE, PHASE_SCHEDULED_CANCEL)
+        )
+    )
+    if user_id is not None:
+        query = query.filter_by(payer_user_id=str(user_id))
+    return {
+        str(row.entity_id)
+        for row in query.with_entities(EntityModuleSubscription.entity_id).all()
+    }
+
+
 def set_payer_module_phase(user_id, *, from_phase: str, to_phase: str) -> int:
     """Move every one of a payer's module rows from one phase to another.
 
