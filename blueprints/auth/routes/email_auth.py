@@ -6,6 +6,8 @@ from sqlalchemy import func
 
 from blueprints.auth import auth_bp
 from blueprints.auth.models.email_otp import EmailOtp
+from blueprints.legal.models.terms_consent import (SOURCE_SIGNUP_INVITE,
+                                                   SOURCE_SIGNUP_OTP)
 from blueprints.auth.services.email_auth import (
     ERR_LOCKED,
     complete_email_signup,
@@ -90,6 +92,54 @@ def _validate_invite_for_email(invite_token: str, verified_email: str) -> str | 
     if invitation.email.strip().lower() != email:
         return "This invite went to a different account — mind signing in as that one?"
     return None
+
+
+def _terms_consent_for_signup(data: dict) -> tuple[str | None, str | None]:
+    """Resolve the Terms agreement carried by a sign-up request.
+
+    Returns `(version_to_record, error_message)`. `version_to_record` is None
+    when nothing should be recorded; `error_message` is set only when the
+    request must be refused outright.
+
+    Three cases, and the distinction matters:
+
+    * agreed to the live version  -> record it
+    * nothing sent                -> during rollout, allow (the acceptance gate
+                                     catches them at the next request); once
+                                     REQUIRE_TERMS_AT_SIGNUP is on, refuse
+    * agreed to a DIFFERENT version -> never recorded. Filing a record against
+                                     wording they did not see is worse than no
+                                     record, because it looks genuine. Treated
+                                     as "nothing sent".
+    """
+    from legal import registry
+
+    accepted = data.get("terms_accepted") is True
+    submitted_version = (data.get("terms_version") or "").strip()
+    live_version = registry.current_version(registry.TERMS)
+
+    if accepted and submitted_version == live_version:
+        return live_version, None
+
+    if accepted and submitted_version and submitted_version != live_version:
+        # The Terms moved between the page loading and the code being entered.
+        logger.warning(
+            f"Sign-up agreed to Terms {submitted_version!r} but {live_version!r} "
+            "is live; not recording."
+        )
+        if registry.REQUIRE_TERMS_AT_SIGNUP:
+            # Its own message: telling someone who just ticked the box that
+            # they must accept the Terms reads as a bug. They need to reload.
+            return None, (
+                "Our Terms of Use were updated while you were signing up. "
+                "Please refresh the page and read the new version."
+            )
+        return None, None
+
+    if registry.REQUIRE_TERMS_AT_SIGNUP:
+        return None, "You must accept the Terms of Use to create an account."
+
+    return None, None
 
 
 @auth_bp.route("/auth/email/check", methods=["POST"])
@@ -204,10 +254,15 @@ def email_verify_code():
                 ),
                 400,
             )
+        terms_version, terms_error = _terms_consent_for_signup(data)
+        if terms_error:
+            return jsonify({"status": "error", "message": terms_error}), 400
         new_user = _create_passwordless_user(
             email=(data.get("email") or "").strip().lower(),
             first_name=first_name,
             last_name=last_name,
+            consent_source=SOURCE_SIGNUP_INVITE if terms_version else None,
+            terms_version=terms_version,
         )
         if new_user is None:
             return (
@@ -238,10 +293,15 @@ def email_verify_code():
             ),
             404,
         )
+    terms_version, terms_error = _terms_consent_for_signup(data)
+    if terms_error:
+        return jsonify({"status": "error", "message": terms_error}), 400
     new_user = _create_passwordless_user(
         email=(data.get("email") or "").strip().lower(),
         first_name=first_name,
         last_name=last_name,
+        consent_source=SOURCE_SIGNUP_OTP if terms_version else None,
+        terms_version=terms_version,
     )
     if new_user is None:
         return (
@@ -259,18 +319,31 @@ def email_verify_code():
     )
 
 
-def _create_passwordless_user(email: str, first_name: str, last_name: str):
+def _create_passwordless_user(
+    email: str,
+    first_name: str,
+    last_name: str,
+    consent_source: str | None = None,
+    terms_version: str | None = None,
+):
     """Create a passwordless, Xero-less User row for someone who just verified
     their email via OTP — shared by the invite-accept and self-serve signup
     paths. The username is set to the email since the User model requires a
     unique non-null username. password is a hashed random string (never used —
-    login is OTP-only)."""
+    login is OTP-only).
+
+    When `consent_source` is given, the Terms consent row is written in the
+    SAME transaction as the User row. That is the point of doing it here rather
+    than in the caller: if either fails, neither is saved, so there is never an
+    account without an agreement nor an agreement without an account.
+    """
     import secrets
     import uuid
 
     from werkzeug.security import generate_password_hash
 
     from blueprints.auth.services.identity import resolve_user_by_email
+    from blueprints.legal.services.consent import record_consent
     from models.db import db
 
     try:
@@ -295,10 +368,26 @@ def _create_passwordless_user(email: str, first_name: str, last_name: str):
             approved=True,
         )
         db.session.add(user)
+
+        # Same transaction as the User row — see the docstring. `user.id` is
+        # assigned above rather than by the database, so no flush is needed to
+        # know it.
+        if consent_source:
+            record_consent(
+                user.id, source=consent_source, version=terms_version
+            )
+
         db.session.commit()
-        logger.info(f"Created passwordless User {user.id} for {email}")
+        logger.info(
+            f"Created passwordless User {user.id} for {email}"
+            + (f" with Terms consent ({consent_source})" if consent_source else "")
+        )
         return user
     except Exception as exc:
+        # The rollback matters now that two rows ride on this transaction: a
+        # half-written signup left pending would otherwise leak into whatever
+        # the next request does with this session.
+        db.session.rollback()
         logger.error(f"Failed to create passwordless User for {email}: {exc}")
         return None
 

@@ -89,3 +89,4 @@ Werkzeug==3.0.3
 wsproto==1.2.0
 WTForms==3.1.2
 xero_python==1.5.3
+stripe==15.4.0

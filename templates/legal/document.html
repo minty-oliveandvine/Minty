@@ -1,0 +1,69 @@
+{% extends 'base/layout.html' %}
+
+{% block title %}— {{ title }}{% endblock %}
+
+{% block styles %}
+<style>
+  .legal-page {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4rem;
+  }
+  .legal-meta {
+    font-size: 0.85rem;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+  .legal-notice {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+  .legal-body h1 { font-size: 1.75rem; margin: 0 0 1rem; }
+  .legal-body h2 { font-size: 1.15rem; margin: 2rem 0 0.6rem; }
+  .legal-body p  { margin: 0 0 0.8rem; line-height: 1.65; }
+  .legal-body ul { margin: 0 0 1rem 1.25rem; }
+  .legal-body li { margin-bottom: 0.35rem; line-height: 1.6; }
+  /* The fingerprint is shown so anyone holding a consent record can check it
+     against the page they are reading, without needing database access. */
+  .legal-hash {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e5e7eb;
+    font-size: 0.75rem;
+    color: #9ca3af;
+    word-break: break-all;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="legal-page">
+  <div class="legal-meta">
+    Version <strong>{{ document.version }}</strong>
+    {%- if document.effective_date %} · Effective {{ document.effective_date }}{% endif %}
+    {%- if not is_current %} · <strong>Superseded</strong> — this is an archived
+    version, kept so earlier agreements stay readable{% endif %}
+  </div>
+
+  {% if not document.is_pinned %}
+  <div class="legal-notice">
+    <strong>Draft.</strong> This wording is not final and its fingerprint has
+    not been pinned, so it must not be relied on outside local testing.
+  </div>
+  {% endif %}
+
+  <div class="legal-body">
+    {{ document.html | safe }}
+  </div>
+
+  <div class="legal-hash">
+    Document fingerprint (SHA-256): {{ document.sha256 }}
+  </div>
+</div>
+{% endblock %}
