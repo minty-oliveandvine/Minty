@@ -4,7 +4,10 @@
 rows. Nothing else closes the gate when a grace window lapses: the boundary is a
 DATE (``cancelled_at + 30d``, or ``paid_through + 15d`` for past_due) and no event
 fires when a date passes. This command reads each entity's rows and disables any
-module whose access has ended.
+module whose access has ended — and switches back on any whose entitlement has
+RETURNED, which is the same "no event fires" problem in the other direction: an
+account that pays off a past-due balance regains its entitlement without anything
+touching the access map.
 
 ``close-trials`` ends app-level trials whose term is up. A trial has no billing
 object at all, so nothing else notices it ending — this command is the ONLY thing
@@ -85,7 +88,8 @@ def close_trials_cmd(limit: int | None) -> None:
 
 @subscriptions_cli.command(
     "sweep-access",
-    help="Disable modules whose subscription access has lapsed past its grace window.",
+    help="Reconcile module access with the subscriptions: disable what has lapsed past "
+         "its grace window, restore what is entitled again.",
 )
 def sweep_access_cmd() -> None:
     summary = sweep_expired_module_access()
@@ -93,6 +97,13 @@ def sweep_access_cmd() -> None:
     click.echo(f"Disabled {len(disabled)} module(s) past their access grace.")
     for item in disabled:
         click.echo(f"  - {item['code']} (entity {item['entity_id']})")
+    # Restorations are printed even when there are none. A silent zero and a job that
+    # cannot restore at all look identical in a cron log, and telling those apart is the
+    # whole point of the line.
+    restored = summary.get("restored", [])
+    click.echo(f"Restored {len(restored)} module(s) whose entitlement returned.")
+    for item in restored:
+        click.echo(f"  + {item['code']} (entity {item['entity_id']})")
 
 
 @subscriptions_cli.command(

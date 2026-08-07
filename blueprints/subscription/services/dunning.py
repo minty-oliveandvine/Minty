@@ -215,6 +215,27 @@ def _settle_period(account, invoice) -> None:
     store.set_paid_through(account.user_id, period.end)
 
 
+def _restore_access(user_id) -> None:
+    """Switch this payer's modules back on now that the balance is settled.
+
+    ``_settle_period`` moves ``paid_through`` and ``end_dunning`` moves the phases, but
+    neither touches ``entity_function_map`` — and access is a separate write. Without
+    this the money is collected, the subscription reads active, and the customer is
+    still bounced off every page in it. The daily sweep would eventually notice, so this
+    is about WHEN: the customer who just paid to get back in should be back in.
+
+    Never raises. A recovery that collected the money is not undone because a follow-up
+    write failed; the sweep is the backstop, and a swallowed error here is visible in the
+    log rather than as a lost payment.
+    """
+    from blueprints.entity.services.modules import sweep_expired_module_access
+
+    try:
+        sweep_expired_module_access(payer_user_id=user_id)
+    except Exception:
+        logger.exception("dunning: could not restore access for payer {}", user_id)
+
+
 def collect_due(now, limit: int | None = None) -> dict:
     """Run one dunning cycle: retry what is due, give up on what is spent.
 
@@ -287,6 +308,7 @@ def collect_due(now, limit: int | None = None) -> dict:
                 # locked out until the next renewal run notices.
                 _settle_period(account, None)
                 store.end_dunning(user_id, status="active")
+                _restore_access(user_id)
                 recovered.append(entry)
                 continue
 
@@ -306,6 +328,7 @@ def collect_due(now, limit: int | None = None) -> dict:
                 # month of paying for nothing.
                 _settle_period(account, invoices[0])
                 store.end_dunning(user_id, status="active")
+                _restore_access(user_id)
                 recovered.append(entry)
         except Exception:
             logger.exception("dunning: cycle failed for payer {}", user_id)

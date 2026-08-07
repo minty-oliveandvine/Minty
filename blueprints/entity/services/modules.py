@@ -1850,9 +1850,14 @@ def set_entity_module(
     return _write_pairs(entity_id, {code: bool(enabled)}, actor=actor)
 
 
-def sweep_expired_module_access() -> dict:
+def sweep_expired_module_access(payer_user_id=None) -> dict:
     """Disable modules whose access has lapsed past its grace, and END the ones that are
     over.
+
+    ``payer_user_id`` narrows the whole pass to one billing account. The daily job runs
+    unscoped; a caller that has just changed one account's entitlement — dunning, on the
+    payment that clears an episode — passes its payer so the customer's access comes back
+    with the payment rather than at the next nightly run.
 
     Nothing fires at a grace boundary — not the past-due window measured from
     ``paid_through``, and not ``app_access_until`` (a cancelled module's paid
@@ -1886,8 +1891,15 @@ def sweep_expired_module_access() -> dict:
     the map and only starts the trials at finalize, so between those two calls an enabled
     module with no row is expected rather than broken.
 
+    Reconciles in BOTH directions. A module whose entitlement has come BACK — a past-due
+    account that paid, a dunning episode that recovered — is switched on again, because
+    nothing else does it either. Revocation used to be one-way: the sweep only looked at
+    modules that were currently on, so one it turned off left its candidate set for good
+    and the customer stayed locked out of a subscription still being charged for. See the
+    restore branch for why that direction is deliberately narrower than this one.
+
     Intended to run daily (``flask subscriptions sweep-access``). Returns
-    ``{"disabled": [{"entity_id", "code"}, ...]}``.
+    ``{"disabled": [{"entity_id", "code"}, ...], "restored": [...]}``.
     """
     from blueprints.subscription.services import access, checkout, clock, policy
     from blueprints.subscription.services import store as sub_store
@@ -1895,13 +1907,21 @@ def sweep_expired_module_access() -> dict:
 
     code_set = set(MODULE_CODES)
     disabled: list[dict] = []
+    restored: list[dict] = []
     now = clock.now()
     # One window for the whole sweep. Reading it per entity would let a mid-run edit
     # revoke access for the tail of the batch under a rule the head never saw.
     grace_days = policy.current().past_due_window_days
 
-    # Every entity with a module currently switched on — the only ones a sweep could
-    # need to switch off.
+    # Two populations, because this reconciles in BOTH directions.
+    #
+    # Entities with a module switched on are the only ones that could need switching
+    # off. On its own that set made the sweep a one-way ratchet: a module revoked here
+    # left the candidate set permanently, so nothing could ever switch it back on — and
+    # nothing else does. An account that went past due, then paid, stayed locked out of
+    # a subscription it was being charged for, which is precisely the recovery dunning
+    # exists to deliver. So entities holding a BILLED module are candidates too, however
+    # their access flag currently reads.
     module_fn_ids = [
         fn.id
         for fn in EntityFunction.query.filter(
@@ -1919,6 +1939,16 @@ def sweep_expired_module_access() -> dict:
         if module_fn_ids
         else set()
     )
+    if payer_user_id is None:
+        entity_ids |= sub_store.entity_ids_with_billed_modules()
+    else:
+        mine = {
+            str(row.entity_id)
+            for row in sub_store.module_rows_for_payer(payer_user_id)
+        }
+        entity_ids = (entity_ids & mine) | sub_store.entity_ids_with_billed_modules(
+            payer_user_id
+        )
 
     # Mid-onboarding entities are exempt (see docstring). Resolved in ONE query up
     # front rather than per entity, so a long sweep can't straddle a finalize and
@@ -1952,6 +1982,33 @@ def sweep_expired_module_access() -> dict:
             for code in code_set:
                 row = rows.get(code)
                 if not enabled.get(code):
+                    # Switched off while the subscription still entitles it. Restoring
+                    # is deliberately narrower than revoking: only a BILLED module, and
+                    # only on the same ``grants_access`` predicate that took it away.
+                    #
+                    # Requiring a row keeps the guarantee that access is a projection of
+                    # a subscription — a flag with nothing behind it is still revoked
+                    # above and is never invented here. Requiring the module to be BILLED
+                    # is what keeps this from fighting the customer: a paid module cannot
+                    # be switched off by hand at all (``set_entity_module`` refuses it),
+                    # so an off flag on one can only have come from this sweep. A trial
+                    # IS freely toggleable, so re-enabling one would silently overturn a
+                    # deliberate choice — and a live trial never loses access this way in
+                    # the first place, since its date does not depend on the billing
+                    # cycle. Terminal phases grant nothing and so are never restored.
+                    if row is not None and access.is_paid_module(
+                        phase=row.phase,
+                        has_been_billed=row.first_billed_at is not None,
+                    ) and access.grants_access(
+                        now,
+                        phase=row.phase,
+                        trial_end=row.trial_end,
+                        app_access_until=row.app_access_until,
+                        period_end=paid_through,
+                        past_due_grace_days=grace_days,
+                    ):
+                        set_entity_module(entity_id, code, True, actor="subscription")
+                        restored.append({"entity_id": entity_id, "code": code})
                     continue
                 # Switched on with nothing behind it — never subscribed, or a row
                 # deleted out from under the flag. Access is a projection; with no
@@ -1996,7 +2053,12 @@ def sweep_expired_module_access() -> dict:
     # having been bolted on.
     for item in disabled:
         item.pop("payer_user_id", None)
-    return {"disabled": disabled}
+    # Restorations are deliberately NOT mailed. The customer is told by the thing that
+    # caused them — the dunning "you're all settled" notice, the receipt for the payment
+    # that cleared the balance — and a second "your access is back" for the same event
+    # reads as a system talking to itself. A revocation has no such owner, which is why
+    # that one does send.
+    return {"disabled": disabled, "restored": restored}
 
 
 def _notify_access_revoked(disabled: list[dict]) -> None:
