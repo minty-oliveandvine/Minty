@@ -1,10 +1,12 @@
-"""Module 2's billing JWT ran out; ``billing-relogin`` sends the user to Minty's
-own landing page.
+"""Where Module 2 goes when its billing JWT runs out: Minty's landing page.
 
-The regression these cover: the route used to redirect to ``next`` on Minty's
-origin. ``next`` is a Module 2 path, so the payer portal's ``/profile`` landed on
-a 404 here — after the frontend had already cleared its cookie, which left every
-request on that stranded page failing with "you're signed out".
+The regression: Module 2 used to ask ``billing-relogin`` to return it to the page
+it was on, and that path — Module 2's, replayed on this origin — was a 404 here
+for the payer portal's ``/profile``. The frontend had already cleared its cookie
+by then, so every request on the stranded page failed with "you're signed out".
+
+Module 2 now navigates straight to ``/``. The route below survives only for
+browsers still running an older build, and it lands in the same place.
 """
 from __future__ import annotations
 
@@ -31,19 +33,8 @@ def _signed_in(monkeypatch, module_routes, *, authenticated=True):
     )
 
 
-def test_relogin_lands_on_minty_home(app, module_routes, monkeypatch):
-    """Signed in on this origin — ``auth.home`` forwards to the entity list."""
-    _signed_in(monkeypatch, module_routes)
-
-    with app.test_request_context("/billing-relogin"):
-        response = module_routes.billing_relogin()
-
-    assert response.status_code == 302
-    assert response.location == "/"
-
-
-def test_scoped_relogin_lands_in_the_same_place(app, module_routes, monkeypatch):
-    """Module 2 puts the entity in the path when it has one; it changes nothing."""
+def test_relogin_lands_on_the_minty_landing_page(app, module_routes, monkeypatch):
+    """``/`` forwards to ``/entity`` while the Flask session is alive."""
     _signed_in(monkeypatch, module_routes)
 
     with app.test_request_context(f"/entity/{ENTITY_ID}/billing-relogin"):
@@ -53,12 +44,12 @@ def test_scoped_relogin_lands_in_the_same_place(app, module_routes, monkeypatch)
     assert response.location == "/"
 
 
-def test_relogin_without_a_session_still_lands_on_home(app, module_routes, monkeypatch):
-    """``auth.home`` renders the login form when there is no session to reuse."""
+def test_relogin_without_a_session_lands_there_too(app, module_routes, monkeypatch):
+    """Same URL, and ``/`` renders the login form when there is no session."""
     _signed_in(monkeypatch, module_routes, authenticated=False)
 
-    with app.test_request_context("/billing-relogin"):
-        response = module_routes.billing_relogin()
+    with app.test_request_context(f"/entity/{ENTITY_ID}/billing-relogin"):
+        response = module_routes.billing_relogin(ENTITY_ID)
 
     assert response.status_code == 302
     assert response.location == "/"
@@ -72,8 +63,10 @@ def test_relogin_ignores_next_entirely(app, module_routes, monkeypatch, hostile)
     user was on, and not a URL that would make this an open redirect."""
     _signed_in(monkeypatch, module_routes)
 
-    with app.test_request_context(f"/billing-relogin?next={hostile}"):
-        response = module_routes.billing_relogin()
+    with app.test_request_context(
+        f"/entity/{ENTITY_ID}/billing-relogin?next={hostile}"
+    ):
+        response = module_routes.billing_relogin(ENTITY_ID)
 
     assert response.location == "/"
 

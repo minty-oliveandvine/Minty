@@ -12,11 +12,11 @@ Module 2 (the payment-request app) consumes the JWT, stores it in a cookie,
 and uses ``Authorization: Bearer <jwt>`` + ``X-Entity-Id`` for all calls to
 the billing backend. The backend verifies with the same shared ``SECRET_KEY``.
 
-Return path: Module 2 calls ``billing-relogin`` when its token expires. That
-route drops the user on Minty's landing page, where picking a company mints a
-fresh token through the handoff above. It does not try to restore the page they
-were on — that path belongs to Module 2's origin, and replaying it here is what
-used to 404.
+Return path: when its token expires, Module 2 sends the browser to ``/`` — this
+app's landing page, which forwards to ``/entity`` for a live session and to the
+login form otherwise. Picking a company there mints a fresh token through the
+handoff above. Module 2 does not ask to be returned to the page it was on: that
+path belongs to Module 2's origin, and replaying it here is what used to 404.
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -166,26 +166,23 @@ def module_reenter(entity_id):
         return redirect(url_for("auth.home"))
 
 
-@entity_bp.route("/billing-relogin")
 @entity_bp.route("/entity/<string:entity_id>/billing-relogin")
-def billing_relogin(entity_id: str = ""):
-    """Module 2's billing JWT ran out; send the user to Minty's landing page.
+def billing_relogin(entity_id: str):
+    """Legacy: Module 2 telling us its billing JWT ran out.
 
-    Called by ``lib/auth.ts redirectToLogin``, which has already cleared its own
-    cookie by the time the browser arrives here. ``auth.home`` covers both states
-    it can arrive in: a live Flask session lands on the entity list, an expired
-    one on the login form. Picking a company from there mints a fresh token
-    through the normal handoff, which is the same path a first visit takes.
+    Kept only for browsers running a Module 2 build from before the frontend
+    stopped calling this. Current builds go straight to ``/`` — this route never
+    did anything a plain redirect to the landing page couldn't, and being an
+    extra hop it could 404 on its own, which is precisely what it did.
 
-    It used to redirect to the ``next`` Module 2 sent — a path on Module 2's
+    It used to redirect to the ``next`` Module 2 sent: a path on Module 2's
     origin, replayed on this one. From the payer portal that was a 404 on
-    ``/profile``, reached with the cookie already gone, so every request on the
-    stranded page then failed with "you're signed out". ``next`` is ignored now;
-    nothing from the other origin decides where this route goes.
+    ``/profile``, reached with the cookie already cleared, so every request on
+    the stranded page then failed with "you're signed out". ``next`` is ignored
+    now — nothing from the other origin decides where this goes.
 
-    ``entity_id`` is accepted and unused — Module 2 puts it in the path when it
-    has one, and the entity-less form serves the unscoped profile handoff (Select
-    Company → My Profile). Both land in the same place.
+    ``entity_id`` is unused; the destination is the same either way. Delete this
+    once no deployed Module 2 build calls it.
     """
     if not current_user.is_authenticated:
         flash("Your session ran out. Mind logging back in?", "warning")
