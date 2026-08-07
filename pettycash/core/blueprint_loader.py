@@ -18,6 +18,7 @@ _EXPECTED_BLUEPRINTS = frozenset(
         "blueprints.user_management",
         "blueprints.xero",
         "blueprints.invitation",
+        "blueprints.legal",
     }
 )
 
@@ -81,6 +82,7 @@ def register_blueprints(app):
         ("blueprints.user_management", "user_management_bp"),
         ("blueprints.xero", "xero_bp"),
         ("blueprints.invitation", "invitation_bp"),
+        ("blueprints.legal", "legal_bp"),
         ("blueprints.admin", "admin_bp"),
         ("blueprints.file", "file_bp"),
         ("blueprints.api", "api_bp"),

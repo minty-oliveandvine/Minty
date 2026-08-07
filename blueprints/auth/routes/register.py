@@ -15,6 +15,8 @@ def register():
     # in). This route therefore no longer creates users on a plain form POST —
     # doing so would be an unverified-email bypass. A direct POST just re-renders
     # the page so the JS flow can run.
+    from legal import registry
+
     form = RegistrationForm()
     get_flashed_messages()
     return render_template(
@@ -23,6 +25,10 @@ def register():
         first_name=form.first_name.data,
         last_name=form.last_name.data,
         email=form.email.data,
+        # Stamped into the page so the consent record names the wording this
+        # person was actually shown, rather than whatever is live by the time
+        # they finish entering the code.
+        terms_version=registry.current_version(registry.TERMS),
     )
 
 
