@@ -186,6 +186,53 @@ def my_subscriber_options_api():
     return _cors(make_response(jsonify(payload), 200))
 
 
+@subscription_bp.route(
+    "/api/me/subscriptions/invite-admin", methods=["POST", "OPTIONS"]
+)
+def my_invite_admin_api():
+    """Invite someone into an entity as an admin. Body: ``{"entity": id, "email": …}``.
+
+    The ONLY write the payer portal performs against Minty's own tables, and it is
+    deliberately the smallest one on this screen: it adds a MEMBER, it does not move a
+    payer. Handing the bill over is a separate flow that has to survive the period already
+    paid for, and it is still switched off.
+
+    ``entity`` is checked, not trusted — ``invite_admin_to_entity`` refuses unless the
+    caller is that entity's payer AND holds ``USER_INVITE`` on it, and answers the same
+    message for "not your company" as for "no such company".
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        return _unauthorized("unauthorized")
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = str(payload.get("entity") or "").strip()
+    email = str(payload.get("email") or "").strip()
+    if not entity_id:
+        return _cors(make_response(jsonify({"error": "entity is required"}), 400))
+
+    from blueprints.subscription.services import portal
+
+    try:
+        ok, message = portal.invite_admin_to_entity(user_id, entity_id, email)
+    except Exception:
+        current_app.logger.exception(
+            "invite-admin failed for user %s entity %s", user_id, entity_id
+        )
+        return _cors(
+            make_response(jsonify({"error": "Could not send that invitation."}), 500)
+        )
+
+    if not ok:
+        # 422: the request was understood and refused for a stated reason the form shows
+        # against the field — already a member, already invited, not an address.
+        return _cors(make_response(jsonify({"error": message}), 422))
+    return _cors(make_response(jsonify({"ok": True, "message": message}), 200))
+
+
 @subscription_bp.route("/api/me/billing", methods=["GET", "OPTIONS"])
 def my_billing_api():
     """The caller's ONE billing account, and what each entity puts on it.

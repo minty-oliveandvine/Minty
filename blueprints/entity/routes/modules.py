@@ -12,10 +12,11 @@ Module 2 (the payment-request app) consumes the JWT, stores it in a cookie,
 and uses ``Authorization: Bearer <jwt>`` + ``X-Entity-Id`` for all calls to
 the billing backend. The backend verifies with the same shared ``SECRET_KEY``.
 
-Return path: Module 2 calls ``billing-relogin?next=…`` when its token expires.
-That route re-establishes the Flask session and then hands the user BACK to
-Module 2's ``/landing`` with a freshly minted JWT — ``next`` is a path on
-Module 2's origin, not this one, so redirecting to it here would 404.
+Return path: Module 2 calls ``billing-relogin`` when its token expires. That
+route drops the user on Minty's landing page, where picking a company mints a
+fresh token through the handoff above. It does not try to restore the page they
+were on — that path belongs to Module 2's origin, and replaying it here is what
+used to 404.
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -165,93 +166,32 @@ def module_reenter(entity_id):
         return redirect(url_for("auth.home"))
 
 
-def _relogin_landing_url(user_id, entity_id: str, next_path: str) -> str:
-    """Module 2's ``/landing`` carrying a fresh token, so its cookie is rebuilt.
-
-    Mirrors the outbound handoffs above rather than reusing one of them, because
-    the destination is whatever screen the user was already on — ``next`` comes
-    from Module 2 and has been through ``_safe_next``.
-
-    An entity the user can no longer reach downgrades to an unscoped token instead
-    of failing: the profile and portal screens are not entity-scoped and would
-    otherwise be unreachable because of a company that is none of their business.
-    """
-    org = Entity.query.filter(Entity.id == entity_id).first() if entity_id else None
-    if org is not None and not is_superuser(current_user):
-        member = UserEntity.query.filter(
-            UserEntity.user_id == str(user_id),
-            UserEntity.entity_id == str(entity_id),
-        ).first()
-        if not member:
-            org = None
-
-    if org is None:
-        token = _generate_module_token(
-            user_id, "", None, _resolve_user_entity_role(user_id, "")
-        )
-        return f"{_frontend_origin()}/landing?next={quote(next_path, safe='')}&token={token}"
-
-    token = _generate_module_token(
-        user_id,
-        entity_id,
-        org.xero_org_id,
-        _resolve_user_entity_role(user_id, entity_id),
-        billing_enabled=_is_module_enabled(entity_id, "BILL"),
-        petty_cash_enabled=_is_module_enabled(entity_id, "PETTY_CASH"),
-    )
-    return (
-        f"{_frontend_origin()}/landing"
-        f"?next={quote(next_path, safe='')}"
-        f"&entity_id={entity_id}&entity_name={quote(org.name or '', safe='')}"
-        f"&token={token}"
-    )
-
-
 @entity_bp.route("/billing-relogin")
 @entity_bp.route("/entity/<string:entity_id>/billing-relogin")
 def billing_relogin(entity_id: str = ""):
-    """Module 2 asking for a new billing JWT because the one it held ran out.
+    """Module 2's billing JWT ran out; send the user to Minty's landing page.
 
-    Called by ``lib/auth.ts redirectToLogin`` — with no token, since the token is
-    exactly what it no longer has. The Flask session on this origin outlives the
-    30-minute billing JWT, so the usual case is a signed-in user who simply needs
-    a fresh one minted.
+    Called by ``lib/auth.ts redirectToLogin``, which has already cleared its own
+    cookie by the time the browser arrives here. ``auth.home`` covers both states
+    it can arrive in: a live Flask session lands on the entity list, an expired
+    one on the login form. Picking a company from there mints a fresh token
+    through the normal handoff, which is the same path a first visit takes.
 
-    It used to redirect to ``next`` on THIS origin, which is Module 2's path, not
-    Minty's: from the payer portal that meant a 404 on ``/profile`` after the
-    cookie had already been cleared, and the user was stranded on a page whose
-    every request then failed. It now goes back through ``/landing``, which is
-    what rebuilds the cookie.
+    It used to redirect to the ``next`` Module 2 sent — a path on Module 2's
+    origin, replayed on this one. From the payer portal that was a 404 on
+    ``/profile``, reached with the cookie already gone, so every request on the
+    stranded page then failed with "you're signed out". ``next`` is ignored now;
+    nothing from the other origin decides where this route goes.
 
-    The entity-less form serves the unscoped profile handoff (Select Company →
-    My Profile), where there is no entity in the URL to relogin against.
+    ``entity_id`` is accepted and unused — Module 2 puts it in the path when it
+    has one, and the entity-less form serves the unscoped profile handoff (Select
+    Company → My Profile). Both land in the same place.
     """
-    next_path = _safe_next(
-        request.args.get("next", ""), "/module-selection" if entity_id else "/profile"
-    )
-
     if not current_user.is_authenticated:
-        token = request.args.get("token", "")
-        if not token:
-            flash("Your session ran out. Mind logging back in?", "warning")
-            return redirect(url_for("auth.home"))
-        try:
-            decoded = jwt.decode(
-                token, current_app.config.get("SECRET_KEY"), algorithms=["HS256"]
-            )
-            user = User.query.get(str(decoded.get("user_id") or ""))
-            if not user:
-                flash("Hmm, that name doesn't seem to be in my list.", "danger")
-                return redirect(url_for("auth.home"))
-            login_user(user)
-        except jwt.ExpiredSignatureError:
-            flash("Your session ran out. Mind logging back in?", "warning")
-            return redirect(url_for("auth.home"))
-        except (jwt.DecodeError, jwt.InvalidTokenError):
-            flash("Something's off with your session. Mind logging back in?", "warning")
-            return redirect(url_for("auth.home"))
-
-    return redirect(_relogin_landing_url(current_user.id, entity_id, next_path))
+        flash("Your session ran out. Mind logging back in?", "warning")
+    else:
+        flash("That session ran out - pick a company and I'll get you back in.", "warning")
+    return redirect(url_for("auth.home"))
 
 
 @entity_bp.route("/entity/<string:entity_id>/bills")
