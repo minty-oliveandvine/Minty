@@ -540,6 +540,76 @@ def build_subscriber_options(user_id, entity_id) -> dict | None:
     }
 
 
+def invite_admin_to_entity(user_id, entity_id, email: str) -> tuple[bool, str]:
+    """Invite ``email`` into the entity as an ADMIN. Returns ``(ok, message)``.
+
+    This is the "Invite someone new" half of Change subscriber, and it is ONLY the first
+    half. It gets a person into the company; it does not hand them the bill. Handing over
+    the bill needs a transfer that survives the period already paid for — see the note on
+    the Change-subscriber screen — and nothing here moves a payer.
+
+    The role is fixed at ADMIN and not a parameter. The screen exists to widen the list of
+    people who could take the subscription over, and only an admin can: every money route
+    carries ``Permission.MODULE_MANAGE`` on top of being the payer. Inviting a cashier
+    from here would add somebody who can never appear in the list they were invited to
+    join.
+
+    Two gates, and they answer different questions:
+
+    * the caller must be the PAYER for this entity — the same test that lets them read the
+      candidate list at all, so the screen and its action agree about who may use it;
+    * and must hold ``USER_INVITE`` on it, because this adds a MEMBER to a company. Being
+      the payer is a billing relationship and does not by itself confer the right to give
+      somebody access.
+
+    Everything about the invitation itself — the duplicate-member check, the pending-invite
+    check, expiry, the token — is ``invitation.services.invite.create_invitation``. There
+    is no second invite system here.
+    """
+    from blueprints.invitation.services.invite import (create_invitation,
+                                                       send_invitation_email)
+    from blueprints.subscription.services import store as sub_store
+    from services.permission_policy import Permission, has_permission
+
+    address = (email or "").strip()
+    if not address or " " in address or address.count("@") != 1 or not all(address.split("@")):
+        return False, "That doesn't look like an email address."
+
+    entity = Entity.query.get(str(entity_id)) if entity_id else None
+    if entity is None:
+        return False, "That company isn't on your billing account."
+
+    payer_id = sub_store.payer_for_entity(entity.id)
+    if payer_id is None or str(payer_id) != str(user_id):
+        # Same answer as an unknown entity. Telling the two apart would confirm an id to
+        # someone who should not be asking.
+        return False, "That company isn't on your billing account."
+
+    user = User.query.get(str(user_id))
+    if not has_permission(user, Permission.USER_INVITE, str(entity.id)):
+        return False, "You don't have permission to invite people to this company."
+
+    invitation, error = create_invitation(
+        entity_id=str(entity.id), email=address, role="admin", invited_by=str(user_id),
+    )
+    if invitation is None:
+        # create_invitation's messages are already customer-facing ("already a member",
+        # "an invitation is already pending"), so they pass through rather than being
+        # flattened into a generic failure.
+        return False, error or "That invitation couldn't be created."
+
+    # The row is the invitation; the email is how it is delivered. A send failure leaves a
+    # valid pending invite that can be resent from the entity's Users page, so it is
+    # reported rather than rolled back — deleting it would throw away a good record
+    # because SMTP hiccuped.
+    if not send_invitation_email(invitation):
+        return True, (
+            f"Invited {address} as an admin, but the email didn't send. "
+            "You can resend it from the company's Users page."
+        )
+    return True, f"Invited {address} as an admin of {entity.name}."
+
+
 # --- The Billing tab ---------------------------------------------------------
 #
 # ONE account, several entities. That asymmetry is the whole shape of this screen and it

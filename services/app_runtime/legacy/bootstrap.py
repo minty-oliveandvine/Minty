@@ -277,8 +277,10 @@ def create_app():
     # client would parse an HTML 200 as JSON. It authenticates on the bearer token and
     # takes no id from the request — the customer is resolved from the token's user —
     # so there is nothing a forged cross-site POST could aim at somebody else.
-    from blueprints.subscription.routes.portal import my_payment_method_api
+    from blueprints.subscription.routes.portal import (my_invite_admin_api,
+                                                       my_payment_method_api)
     csrf.exempt(my_payment_method_api)
+    csrf.exempt(my_invite_admin_api)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,
