@@ -25,12 +25,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-# Days after the FIRST failure at which each retry runs. Every three days, but starting
-# at day 1: most failures are transient — an expired card that has already been replaced,
-# or a temporary hold — so the first attempt stays immediate and recovers most of what is
-# recoverable. The even three-day spacing after it gives a customer who has to act time
-# to actually act, across the full 15-day window.
-RETRY_OFFSETS_DAYS: tuple[int, ...] = (1, 4, 7, 10, 13)
+# Days after the FIRST failure at which each retry runs. EVERY day from the first to the
+# thirteenth: most failures are transient — an expired card that has already been
+# replaced, or a temporary hold — and a daily attempt collects on the day the customer
+# fixes it rather than up to three days later, which is three more days of an account
+# reading as past due to everyone who looks at it.
+#
+# It stops at 13, not 15, because the schedule has to finish before the window does:
+# ``policy._dunning_pair`` rejects any list whose last retry leaves under two days to
+# settle, and falls back to the shipped default if it does. Those two quiet days at the
+# end are deliberate — automatic attempts have stopped, the customer has been told, and
+# they can still pay in the portal before access ends.
+RETRY_OFFSETS_DAYS: tuple[int, ...] = tuple(range(1, 14))
 
 MAX_ATTEMPTS = len(RETRY_OFFSETS_DAYS)
 

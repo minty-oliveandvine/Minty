@@ -32,10 +32,15 @@ class BillingPolicy(db.Model):
     # renewal, and when collection gives up. They must end together — see the migration.
     past_due_window_days = db.Column(db.Integer, nullable=False, server_default="15")
 
-    # Offsets from the FIRST failure, not gaps: "1,4,7,10,13" fires on days 1, 4, 7, 10
-    # and 13. The length is the attempt count, so adding an entry adds a charge attempt.
+    # Offsets from the FIRST failure, not gaps: "1,2,3,..." fires daily from day 1. The
+    # length is the attempt count, so adding an entry adds a charge attempt.
+    #
+    # The default stops at 13 against a 15-day window on purpose — ``policy._dunning_pair``
+    # refuses a schedule whose last retry leaves under two days to settle, so a longer
+    # list needs ``past_due_window_days`` widened with it or it is silently ignored.
     retry_offsets_days = db.Column(
-        db.String(100), nullable=False, server_default="1,4,7,10,13"
+        db.String(100), nullable=False,
+        server_default="1,2,3,4,5,6,7,8,9,10,11,12,13",
     )
 
     updated_at = db.Column(
