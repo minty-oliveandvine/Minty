@@ -458,9 +458,17 @@ def test_a_collected_extension_is_closed_out_so_it_cannot_ride_again(monkeypatch
     assert calls["marked"] == [["ext_9"]]
 
 
-def test_an_extension_is_not_closed_out_until_the_money_is_collected(monkeypatch):
-    """Marking on a failed charge drops the fee silently — the days were granted either
-    way, so it would never be billed again. Same rule as paid_through."""
+def test_an_extension_is_closed_out_by_the_invoice_that_CARRIES_it(monkeypatch):
+    """Raised, not paid — because a declined renewal is not an abandoned one.
+
+    This used to wait for payment, on the reasoning that marking a failed charge would
+    drop the fee silently. That holds only if nothing chases the invoice afterwards, and
+    dunning does: the same document, extension lines and all, is retried for the whole
+    past-due window. Leaving the rows pending meant that when dunning finally collected,
+    the NEXT renewal added them again and the customer paid for one cancellation twice.
+
+    ``paid_through`` still does not move — that one really does depend on the money.
+    """
     renewals, calls = _wire(
         monkeypatch,
         extensions=[_Extension()],
@@ -469,8 +477,29 @@ def test_an_extension_is_not_closed_out_until_the_money_is_collected(monkeypatch
 
     renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
+    assert calls["marked"] == [["ext_1"]]
+    assert calls["paid_through"] == []
+
+
+def test_nothing_is_closed_out_when_no_invoice_was_raised_at_all(monkeypatch):
+    """The one case that must still leave them pending.
+
+    Issuing threw, so there is no document carrying the extension and nothing to chase.
+    Closing it here would be the silent drop the old rule was written to prevent.
+    """
+    from blueprints.subscription.services import billing_gateway
+
+    renewals, calls = _wire(monkeypatch, extensions=[_Extension()])
+
+    def _boom(*a, **k):
+        raise RuntimeError("processor unreachable")
+
+    monkeypatch.setattr(billing_gateway, "issue_invoice", _boom)
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
     assert calls["marked"] == []
-    assert calls["paid_through"] == []                # and neither moved
+    assert calls["dunning"], "a failed issue should still start dunning"
 
 
 def test_an_adopted_invoice_still_closes_its_extensions(monkeypatch):
@@ -490,18 +519,24 @@ def test_an_adopted_invoice_still_closes_its_extensions(monkeypatch):
     assert result["skipped"][0]["reason"] == "already invoiced; adopted"
 
 
-def test_an_unpaid_adopted_invoice_leaves_the_extension_pending(monkeypatch):
-    """An invoice that exists but is not paid has collected nothing, so the extension is
-    still owed and must stay on the books."""
+def test_an_unpaid_adopted_invoice_ALSO_closes_its_extensions(monkeypatch):
+    """Owed is not the same as unbilled.
+
+    The extension is still owed — but it is owed ON the invoice that already carries it,
+    which dunning is chasing. Keeping it pending as well would bill it a second time on
+    the next period while the first copy was still being collected.
+    """
     renewals, calls = _wire(
         monkeypatch,
         extensions=[_Extension()],
         existing=_Record(status="open"),
     )
 
-    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
-    assert calls["marked"] == []
+    assert calls["marked"] == [["ext_1"]]
+    assert calls["paid_through"] == []                # unpaid, so the cycle stands still
+    assert result["skipped"][0]["reason"] == "already invoiced; unpaid"
 
 
 # --- an entity already charged for the period ----------------------------------

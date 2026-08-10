@@ -378,11 +378,12 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
             if status is not None:
                 # Charged on a previous run that failed to record it. Catching up costs
                 # nothing; re-issuing would bill the customer twice for one month.
+                # The extensions rode THAT invoice; leaving them pending would put them on
+                # the next one too. True whether or not it has been PAID yet — an unpaid
+                # one is being chased by dunning with those lines still on it.
+                store.mark_extensions_invoiced(extension_ids)
                 if status == "paid":
                     store.set_paid_through(user_id, period.end)
-                    # The extensions rode THAT invoice; leaving them pending would put
-                    # them on the next one too.
-                    store.mark_extensions_invoiced(extension_ids)
                     skipped.append({**entry, "reason": "already invoiced; adopted"})
                 else:
                     skipped.append({**entry, "reason": "already invoiced; unpaid"})
@@ -406,12 +407,22 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
                 # customer id came from in the first place.
                 payer_user_id=user_id,
             )
+            # Closed out because the invoice CARRYING them was raised — not because it
+            # was paid. An unpaid renewal is not a dropped charge: the invoice exists and
+            # dunning chases that same document, extension lines and all. Marking only on
+            # payment left them pending through the whole episode, so when dunning finally
+            # collected, the next renewal added them a SECOND time and the customer paid
+            # for the same cancellation twice.
+            #
+            # The trade is deliberate. If the account never recovers and dunning gives up,
+            # the extension is closed without being collected — but there is no next
+            # renewal on a closed account to collect it on either, so nothing is actually
+            # lost, and the alternative overcharges every customer who does recover.
+            # Skipped entirely when issuing raised, because then no invoice exists.
+            if result.get("id"):
+                store.mark_extensions_invoiced(extension_ids)
             if result.get("status") == "paid":
                 store.set_paid_through(user_id, period.end)
-                # Only now: the cancellation fee has actually been collected. Marking
-                # before would drop the charge if collection then failed, and the
-                # extension days were granted either way.
-                store.mark_extensions_invoiced(extension_ids)
                 issued.append({**entry, "invoice": result.get("id")})
             else:
                 store.begin_dunning(user_id, now)
