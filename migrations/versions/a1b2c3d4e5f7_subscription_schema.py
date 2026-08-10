@@ -125,7 +125,7 @@ POLICY_SEED = {
     "trial_days": 30,
     "paid_cancel_access_days": 30,
     "past_due_window_days": 15,
-    "retry_offsets_days": "1,4,7,10,13",
+    "retry_offsets_days": "1,2,3,4,5,6,7,8,9,10,11,12,13",
 }
 
 
@@ -342,13 +342,14 @@ def upgrade():
                   server_default="15"),
 
         # Days after the FIRST failure on which each retry fires — offsets, not gaps, so
-        # "1,4,7,10,13" is five retries on days 1, 4, 7, 10 and 13. The LENGTH is the
-        # attempt count (``dunning.MAX_ATTEMPTS``), so adding an entry adds a charge
-        # attempt.
+        # "1,2,3,..." is a retry every day from day 1. The LENGTH is the attempt count
+        # (``dunning.MAX_ATTEMPTS``), so adding an entry adds a charge attempt. Stops at
+        # 13 against a 15-day window because ``policy._dunning_pair`` rejects a schedule
+        # whose last retry leaves under two days to settle.
         # CSV rather than a Postgres array: the model layer is shared with a SQLite test
         # app, and a comma-separated list of small integers needs no dialect to read.
         sa.Column("retry_offsets_days", sa.String(100), nullable=False,
-                  server_default="1,4,7,10,13"),
+                  server_default="1,2,3,4,5,6,7,8,9,10,11,12,13"),
 
         sa.Column("updated_at", sa.DateTime(timezone=True),
                   server_default=sa.func.now(), nullable=False),
