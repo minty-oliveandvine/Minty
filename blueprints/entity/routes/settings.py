@@ -1662,6 +1662,14 @@ def entity_settings_module_retry_payment(org_id):
         "no_card": "There's no card on file to charge. Add a payment method, then try again.",
         "gave_up": "This subscription is past its payment deadline and has been closed.",
         "nothing_owed": "Nothing is outstanding — your subscription is up to date.",
+        # Deliberately not "nothing is outstanding": something is, and the customer can
+        # see it sitting Unpaid on the Invoices tab. It is simply not this period's, so
+        # paying it would take money and restore nothing — which is a conversation, not
+        # a button press. See ``dunning.retry_now``.
+        "older_debt_only": (
+            "There's nothing due for the current period. An earlier unpaid invoice is "
+            "still outstanding — contact us and we'll sort it out with you."
+        ),
     }
     if status == "failed":
         # The processor's own words when there are any: "insufficient funds" and "card

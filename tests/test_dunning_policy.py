@@ -360,6 +360,87 @@ def test_a_failed_retry_advances_nothing(monkeypatch):
     assert calls["ended"] == []          # stays in dunning
 
 
+# --- Collecting is not recovering ----------------------------------------------------
+#
+# Every give-up leaves its unpaid renewal open on purpose, so a payer who lapses and later
+# comes back carries a landmine: an old invoice that is not the period they are behind on.
+# Dunning charges the OLDEST, which is right for collections and wrong for entitlement —
+# the account is only recovered when the CURRENT period is settled.
+
+# A renewal for the period BEFORE the one the cycle is on — an abandoned give-up bill.
+STALE_INV = {"id": "in_stale", "metadata": {"renewal_key": "renewal-u1-20270208"}}
+
+
+def test_paying_a_STALE_renewal_collects_without_recovering(monkeypatch):
+    """The bug this guards: some invoice was paid, so the episode ended and access came
+    back — while the period the customer is actually behind on stayed unpaid. They were
+    told they were settled and were locked out again by the next access sweep.
+
+    Both are open, which is the real shape of it: the give-up left ``in_stale`` behind,
+    a reinstatement moved the cycle on, and the renewal that failed raised ``in_r``.
+    """
+    account = _Account(started=day(0), attempts=0, paid_through=PAID_TO, anchor=ANCHOR)
+    dunning, calls = _wire_runner(
+        monkeypatch, account=account, invoices=[STALE_INV, RENEWAL_INV]
+    )
+
+    result = dunning.collect_due(day(1))
+
+    assert calls["retried"] == ["in_stale"]      # policy still chases the oldest debt
+    assert calls["paid_through"] == []           # it buys no period
+    assert calls["ended"] == []                  # and it does not end the episode
+    assert [e["user_id"] for e in result["collected"]] == ["u1"]
+    assert result["recovered"] == []
+
+
+def test_an_UNCOLLECTABLE_stale_debt_cannot_lock_a_settled_payer_out(monkeypatch):
+    """The rule is "the current period is settled", NOT "nothing is open" — and the
+    difference is the whole design. Here the only thing outstanding is an abandoned bill
+    from an earlier give-up: the period being dunned is not among the open invoices, so it
+    was paid somewhere this code cannot see. Requiring an empty list would keep this payer
+    past due forever over a debt nobody is collecting."""
+    account = _Account(started=day(0), attempts=0, paid_through=PAID_TO, anchor=ANCHOR)
+    dunning, calls = _wire_runner(monkeypatch, account=account, invoices=[STALE_INV])
+
+    result = dunning.collect_due(day(1))
+
+    assert calls["ended"] == [("u1", "active")]
+    assert [e["user_id"] for e in result["recovered"]] == ["u1"]
+    # Still buys no period: the invoice that paid belongs to one that ended long ago.
+    assert calls["paid_through"] == []
+
+
+def test_a_collected_payer_is_not_emailed_that_the_retry_FAILED(monkeypatch):
+    """Their card was just debited. "Your payment failed" is false, and "you're all
+    settled" is false too — so neither is sent, and the past-due state keeps saying what
+    is still owed."""
+    from blueprints.subscription.services import notify
+
+    account = _Account(started=day(0), attempts=0, paid_through=PAID_TO, anchor=ANCHOR)
+    dunning, _ = _wire_runner(
+        monkeypatch, account=account, invoices=[STALE_INV, RENEWAL_INV]
+    )
+    sent: list = []
+    monkeypatch.setattr(notify, "notify_many", lambda events: sent.extend(events))
+
+    dunning.collect_due(day(1))
+
+    assert [event for event in sent if event[1] == notify.DUNNING_RETRY_FAILED] == []
+    assert [event for event in sent if event[1] == notify.PAYMENT_RECOVERED] == []
+
+
+def test_a_stale_renewal_never_advances_the_CURRENT_period(monkeypatch):
+    """``_settle_period`` gated on "is this a renewal", not on WHICH period's. So a May
+    bill settling while the cycle sat in August advanced August — a free month bought
+    with a payment for a period that had already ended."""
+    account = _Account(started=day(0), attempts=0, paid_through=PAID_TO, anchor=ANCHOR)
+    dunning, calls = _wire_runner(monkeypatch, account=account, invoices=[STALE_INV])
+
+    dunning.collect_due(day(1))
+
+    assert calls["paid_through"] == []
+
+
 def test_giving_up_does_not_advance_the_cycle(monkeypatch):
     """The debt is real and unpaid. Advancing would record them as entitled to a period
     nobody paid for."""

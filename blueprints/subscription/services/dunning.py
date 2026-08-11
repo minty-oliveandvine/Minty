@@ -210,7 +210,8 @@ def _settle_period(account, invoice) -> None:
             account.user_id,
         )
         return
-    if not (invoice.get("metadata") or {}).get("renewal_key"):
+    paid_key = (invoice.get("metadata") or {}).get("renewal_key")
+    if not paid_key:
         return
 
     anchor = account.anchor_at
@@ -218,7 +219,82 @@ def _settle_period(account, invoice) -> None:
     if anchor is None or paid_through is None:
         return
     period = renewals.next_period(anchor, paid_through)
+    # The key must name THIS period, not merely be a renewal key. Both are renewals when
+    # a payer carries stale debt — a give-up leaves its unpaid renewal open, and a later
+    # reinstatement moves ``paid_through`` past it — so an invoice for May settling while
+    # the cycle sits in August would advance August, handing over a free month for a bill
+    # belonging to a period that ended long ago. Chained renewals still advance one at a
+    # time, because the oldest unpaid period IS the one this computes.
+    if paid_key != renewals.period_key(account.user_id, period):
+        logger.info(
+            "dunning: payer {} paid {} which covers an earlier period; leaving "
+            "paid_through at {}",
+            account.user_id, invoice.get("id"), paid_through,
+        )
+        return
     store.set_paid_through(account.user_id, period.end)
+
+
+def _current_period_key(account) -> str | None:
+    """The ``renewal_key`` of the invoice for the period this payer is behind on.
+
+    None when the account has never been billed (no anchor or no ``paid_through``), which
+    is also the answer to "which invoice recovers them" — there is no period to recover.
+    Callers fall back to the oldest open invoice in that case; a payer with no billing
+    history has no stale renewal for the fallback to pick up by mistake.
+    """
+    from blueprints.subscription.services import renewals
+
+    anchor = account.anchor_at
+    paid_through = account.paid_through
+    if anchor is None or paid_through is None:
+        return None
+    return renewals.period_key(
+        account.user_id, renewals.next_period(anchor, paid_through)
+    )
+
+
+def _current_period_invoice(invoices: list[dict], key: str | None) -> dict | None:
+    """The open invoice for the CURRENT period, or None if none of them is.
+
+    The one question that decides whether a payment recovers the subscription. Paying the
+    oldest open invoice is not recovery when the oldest is a give-up's abandoned renewal
+    or a mid-period change — the customer is told they are settled, gets access back, and
+    the period they are actually behind on stays unpaid.
+    """
+    if not key:
+        return None
+    for invoice in invoices:
+        if ((invoice.get("metadata") or {}).get("renewal_key")) == key:
+            return invoice
+    return None
+
+
+def _manual_target(invoices: list[dict], key: str | None) -> dict | None:
+    """Which invoice a customer pressing Pay now should be charged for.
+
+    In order:
+
+    1. the CURRENT period's renewal — what they are behind on, and the only thing that
+       gives them their service back;
+    2. failing that, the oldest open invoice that is not a renewal for some OTHER period.
+       A mid-period change or a reinstatement carries no ``renewal_key`` and is a real
+       debt the customer can settle whenever they like; refusing to take it would be the
+       old "no outstanding payment" bug wearing a new hat;
+    3. None when everything open is a renewal for a period that is not theirs to fix —
+       an abandoned give-up bill. Charging it takes money and restores nothing, so the
+       caller reports it instead.
+    """
+    current = _current_period_invoice(invoices, key)
+    if current is not None:
+        return current
+    for invoice in invoices:
+        renewal_key = (invoice.get("metadata") or {}).get("renewal_key")
+        # No key at all => not a renewal => not stale debt. With no current key to
+        # compare against there is nothing to call stale either.
+        if not renewal_key or not key:
+            return invoice
+    return None
 
 
 def _restore_access(user_id) -> None:
@@ -234,6 +310,13 @@ def _restore_access(user_id) -> None:
     write failed; the sweep is the backstop, and a swallowed error here is visible in the
     log rather than as a lost payment.
     """
+    # ``logger`` is imported per-function throughout this module, and this one used to
+    # rely on a module-level name that does not exist — so the except branch raised
+    # NameError and the "never raises" contract held only while nothing went wrong.
+    # Inside ``collect_due`` that surfaced as "cycle failed" on an account whose money had
+    # already been collected; on the manual path there is no outer try to hide it.
+    from loguru import logger
+
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     try:
@@ -245,7 +328,13 @@ def _restore_access(user_id) -> None:
 def collect_due(now, limit: int | None = None) -> dict:
     """Run one dunning cycle: retry what is due, give up on what is spent.
 
-    Returns ``{"retried": [...], "recovered": [...], "given_up": [...]}``.
+    Returns ``{"retried": [...], "recovered": [...], "collected": [...],
+    "given_up": [...]}``.
+
+    ``collected`` is the fourth outcome and the one that is easy to miss: the charge went
+    through, but on an invoice that is not the period the payer is behind on, so the
+    subscription is NOT recovered and the account stays in dunning. Money in, episode
+    open — see the recovery branch below.
 
     Safe to run repeatedly and at any cadence. ``should_attempt_now`` gates on the
     schedule rather than on when this last ran, so an hourly job and a daily one produce
@@ -265,6 +354,7 @@ def collect_due(now, limit: int | None = None) -> dict:
 
     retried: list[dict] = []
     recovered: list[dict] = []
+    collected: list[dict] = []
     given_up: list[dict] = []
 
     accounts = store.accounts_in_dunning()
@@ -318,12 +408,18 @@ def collect_due(now, limit: int | None = None) -> dict:
                 recovered.append(entry)
                 continue
 
+            # Which invoice would actually recover this payer, decided BEFORE the charge:
+            # afterwards the paid one is gone from the processor's open list and the
+            # question cannot be asked again.
+            current = _current_period_invoice(invoices, _current_period_key(account))
+
             # The attempt is counted BEFORE it runs. If this process dies mid-retry the
             # slot is spent rather than replayed, which is the safe direction: a
             # double-charge is far worse than a skipped retry.
             store.record_dunning_attempt(user_id)
-            paid, reason = billing_gateway.retry_invoice(invoices[0]["id"])
-            entry["invoice"] = invoices[0]["id"]
+            target = invoices[0]
+            paid, reason = billing_gateway.retry_invoice(target["id"])
+            entry["invoice"] = target["id"]
             entry["reason"] = reason
             retried.append(entry)
 
@@ -332,10 +428,30 @@ def collect_due(now, limit: int | None = None) -> dict:
                 # for. Without it the money is collected and they stay unentitled until
                 # the next monthly run adopts the invoice by its idempotency key — a
                 # month of paying for nothing.
-                _settle_period(account, invoices[0])
-                store.end_dunning(user_id, status="active")
-                _restore_access(user_id)
-                recovered.append(entry)
+                _settle_period(account, target)
+                # Collecting is not recovering. The oldest open invoice is what policy
+                # charges, but the episode ends and access comes back only when the
+                # CURRENT period is settled — otherwise a returning customer pays a
+                # months-old bill, is told they are up to date, and is locked out again
+                # by the next access sweep.
+                #
+                # ``current is None`` means nothing open belongs to the period they are
+                # behind on: it was settled somewhere this code cannot see, so this IS
+                # recovery. The alternative rule — recover only when NO invoice is open —
+                # would let one uncollectable stale debt lock a paying customer out for
+                # good.
+                if current is None or current["id"] == target["id"]:
+                    store.end_dunning(user_id, status="active")
+                    _restore_access(user_id)
+                    recovered.append(entry)
+                else:
+                    entry["_collected"] = True
+                    collected.append(entry)
+                    logger.info(
+                        "dunning: payer {} paid stale invoice {}; current period {} "
+                        "still open, staying in dunning",
+                        user_id, target["id"], current["id"],
+                    )
         except Exception:
             logger.exception("dunning: cycle failed for payer {}", user_id)
 
@@ -344,7 +460,12 @@ def collect_due(now, limit: int | None = None) -> dict:
     # "failed again" notice moments before the "you're all settled" one.
     _notify_dunning(retried, recovered, given_up)
 
-    return {"retried": retried, "recovered": recovered, "given_up": given_up}
+    return {
+        "retried": retried,
+        "recovered": recovered,
+        "collected": collected,
+        "given_up": given_up,
+    }
 
 
 def _notify_dunning(retried: list[dict], recovered: list[dict],
@@ -366,6 +487,14 @@ def _notify_dunning(retried: list[dict], recovered: list[dict],
     for entry in retried:
         if entry["user_id"] in settled:
             continue
+        # Charged successfully, but on an invoice that did not recover the subscription
+        # (see the ``collected`` branch in ``collect_due``). Neither notice fits: "your
+        # payment failed" is false to someone whose card was just debited, and "you're
+        # all settled" is false to someone still past due. The processor's own receipt
+        # covers the charge, and the past-due state keeps saying what is still owed, so
+        # this sends nothing rather than something wrong.
+        if entry.get("_collected"):
+            continue
         events.append(
             (entry["user_id"], notify.DUNNING_RETRY_FAILED,
              f"{entry['_episode']}:{entry['attempts']}", entry)
@@ -384,6 +513,7 @@ def _notify_dunning(retried: list[dict], recovered: list[dict],
     # reports. Dropped here so the documented return shape stays what it was.
     for entry in (*retried, *recovered, *given_up):
         entry.pop("_episode", None)
+        entry.pop("_collected", None)
 
 
 def retry_now(user_id) -> dict:
@@ -394,6 +524,12 @@ def retry_now(user_id) -> dict:
     every hour. It has no business standing between a customer who has just fixed their
     card and the debt they are trying to settle — without this they save a card and then
     wait up to two days for a slot, still locked out, with no way to say "try it now".
+
+    And one thing more: WHICH invoice it charges. The scheduled run takes the oldest open
+    one, because collections chase the oldest debt. This takes the CURRENT period's — the
+    customer pressed a button to restore their service, and settling a bill for a period
+    that ended months ago does not restore anything. If the only thing open is older debt
+    it reports ``older_debt_only`` and charges nothing.
 
     Everything else is deliberately identical, and calls the same helpers, so a manual
     collection and a scheduled one cannot end in different states:
@@ -423,6 +559,8 @@ def retry_now(user_id) -> dict:
         no_card         nothing on file to charge; no attempt is spent on it
         gave_up         past the deadline; dunning closed rather than charged
         nothing_owed    no open invoice at all, so there is nothing to collect
+        older_debt_only something is open, but nothing for the current period — no
+                        attempt is spent, and ``invoice`` names the old debt
     """
     from loguru import logger
 
@@ -465,19 +603,41 @@ def retry_now(user_id) -> dict:
         return {"status": "nothing_owed", "attempts": attempts,
                 "invoice": None, "reason": None}
 
+    # THE CURRENT PERIOD, not the oldest debt. This is the one place the manual path
+    # deliberately differs from the scheduled one, and the customer's intent is the
+    # reason: they pressed a button to get their service back, and paying off a bill for
+    # a period that ended months ago does not do that. The scheduled run may still chase
+    # the oldest — that is a collections decision — but nobody chooses it by clicking.
+    #
+    # No key means the payer has never been billed, so there is no stale renewal to pick
+    # up by mistake and the single open invoice is what they came to pay.
+    key = _current_period_key(account)
+    target = _manual_target(invoices, key)
+    if target is None:
+        # Something IS open, but nothing for the period they are behind on — an
+        # abandoned renewal from a give-up, or a mid-period charge. Charging it would
+        # take money and restore nothing, so it is reported rather than collected: the
+        # decision to pursue old debt is not one a Pay-now button gets to make.
+        logger.info(
+            "dunning: payer {} pressed Pay now with only older debt open ({})",
+            user_id, invoices[0]["id"],
+        )
+        return {"status": "older_debt_only", "attempts": attempts,
+                "invoice": invoices[0]["id"], "reason": None}
+
     # No card => the charge CANNOT succeed, so it must not be attempted. Counting a slot
     # for it would spend the retry budget on a guaranteed decline, and every press would
     # spend another — the customer's actual next step is to add a card, which is the
     # button beside this one.
     if not customer_default_payment_method(account.stripe_customer_id):
         return {"status": "no_card", "attempts": attempts,
-                "invoice": invoices[0]["id"], "reason": None}
+                "invoice": target["id"], "reason": None}
 
     # Counted BEFORE it runs, exactly as the scheduled path does: if this request dies
     # mid-retry the slot is spent rather than replayed. A double-charge is far worse
     # than a skipped retry.
     attempts = store.record_dunning_attempt(user_id)
-    invoice_id = invoices[0]["id"]
+    invoice_id = target["id"]
     paid, reason = billing_gateway.retry_invoice(invoice_id)
     logger.info(
         "dunning: manual retry for payer {} invoice {} -> {} ({})",
@@ -485,11 +645,18 @@ def retry_now(user_id) -> dict:
     )
 
     if paid:
-        _settle_period(account, invoices[0])
+        _settle_period(account, target)
         # Only ends collection if it was running; a payer who paid an open invoice
         # without ever being dunned has nothing to clear.
         if started is not None:
             store.end_dunning(user_id, status="active")
+        # Explicitly, and NOT only via ``end_dunning``. That call flips the module phase
+        # back from past_due, but it is skipped entirely when there is no stamp — so a
+        # payer with a real unpaid invoice and no dunning record (the case this function
+        # goes out of its way to serve) paid, and was left switched off until the nightly
+        # sweep. The scheduled path has always done this; the manual one only appeared to,
+        # because dunning was normally running by the time anyone pressed the button.
+        _restore_access(user_id)
         return {"status": "paid", "attempts": attempts,
                 "invoice": invoice_id, "reason": reason}
 

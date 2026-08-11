@@ -244,3 +244,83 @@ def test_no_billing_account_is_not_an_error(app, monkeypatch):
     with app.app_context():
         assert dunning.retry_now("u1")["status"] == "nothing_owed"
     assert calls["retried"] == []
+
+
+# --- WHICH invoice the button charges -------------------------------------------------
+#
+# The one place the manual path diverges from the scheduled one. The cron chases the
+# oldest debt because that is what collections does; a customer pressing Pay now is
+# buying their service back, and a bill for a period that ended months ago does not sell
+# it to them. Every give-up leaves such a bill behind, so this is the normal case for a
+# returning customer, not an exotic one.
+
+# _Account: anchor 2027-01-08, paid_through 2027-02-08 => the current period starts
+# 2027-02-08 (``renewals.period_key`` is derived from the period START).
+CURRENT_INV = {"id": "in_now", "metadata": {"renewal_key": "renewal-u1-20270208"}}
+STALE_INV = {"id": "in_old", "metadata": {"renewal_key": "renewal-u1-20261208"}}
+
+
+def test_it_charges_the_CURRENT_period_not_the_oldest_open_invoice(app, monkeypatch):
+    """Oldest first is what ``open_invoices`` returns and what the cron takes. Taking it
+    here charged an abandoned bill, reported "your subscription is active again", and
+    left the period they pressed the button about still unpaid."""
+    dunning, calls = _wire(
+        app, monkeypatch, account=_Account(), invoices=[STALE_INV, CURRENT_INV]
+    )
+
+    with app.app_context():
+        result = dunning.retry_now("u1")
+
+    assert result["status"] == "paid"
+    assert calls["retried"] == ["in_now"]
+    assert result["invoice"] == "in_now"
+
+
+def test_only_older_debt_is_reported_rather_than_charged(app, monkeypatch):
+    """Nothing open belongs to the current period — the give-up case. Charging it would
+    take money and restore nothing, and whether to pursue lapsed debt is not a decision a
+    Pay-now button gets to make. No attempt is spent on it either."""
+    dunning, calls = _wire(app, monkeypatch, account=_Account(), invoices=[STALE_INV])
+
+    with app.app_context():
+        result = dunning.retry_now("u1")
+
+    assert result["status"] == "older_debt_only"
+    assert result["invoice"] == "in_old"      # named, so support can see what is meant
+    assert calls["retried"] == []
+    assert calls["attempts"] == 0
+    assert calls["ended"] == []
+
+
+def test_a_mid_period_charge_is_still_collectable(app, monkeypatch):
+    """A change or reinstatement invoice carries no ``renewal_key``, so it is not a stale
+    renewal — it is a real debt the customer can settle. Refusing it would be the old
+    "no outstanding payment" bug in new clothes."""
+    change = {"id": "in_c", "metadata": {"change_key": "change-e1-x"}}
+    dunning, calls = _wire(
+        app, monkeypatch, account=_Account(), invoices=[STALE_INV, change]
+    )
+
+    with app.app_context():
+        result = dunning.retry_now("u1")
+
+    assert result["status"] == "paid"
+    assert calls["retried"] == ["in_c"]
+
+
+def test_a_successful_manual_payment_switches_the_modules_back_on(app, monkeypatch):
+    """``end_dunning`` flips the phase, but it is skipped when there is no stamp — the
+    exact case this function exists to serve. So the payer paid and stayed switched off
+    until the nightly sweep. The scheduled path always restored access explicitly; this
+    one only appeared to, because dunning was usually running by the time anyone clicked.
+    """
+    restored: list = []
+    dunning, _ = _wire(
+        app, monkeypatch, account=_Account(started=None), invoices=[CURRENT_INV]
+    )
+    monkeypatch.setattr(dunning, "_restore_access", lambda uid: restored.append(uid))
+
+    with app.app_context():
+        assert dunning.retry_now("u1")["status"] == "paid"
+
+    assert restored == ["u1"]
