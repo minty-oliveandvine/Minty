@@ -330,6 +330,111 @@ def test_an_unpaid_in_house_invoice_expires_the_trial(monkeypatch):
     assert calls["access"] == [("e1", "BILL", False)]  # access revoked, not granted
 
 
+def test_an_unpaid_conversion_invoice_is_VOIDED_not_left_open(monkeypatch):
+    """Withdraw the bill along with the modules.
+
+    Leaving it open bills the customer for a module explicitly not granted — the row's
+    ``first_billed_at`` stays NULL, so the system's own record says no charge happened,
+    beside an open document saying one did. And it does not just sit there: dunning
+    chases the payer's OLDEST open invoice, so a later episode retries this first, for a
+    trial that expired months earlier and can never be granted again.
+    """
+    from blueprints.subscription.services import billing_gateway, store
+
+    checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR, paid=False)
+    voided: list[str] = []
+    monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert voided == ["in_1"]
+    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+
+
+def test_a_DECLINED_card_voids_its_conversion_invoice(monkeypatch):
+    """The path a real decline takes, and the one the first fix missed.
+
+    ``Invoice.pay`` RAISES on a decline rather than returning an unpaid invoice, so the
+    status check never sees one — the whole thing arrives as a ``BillingError``. By then
+    the invoice is finalized and open, which is why the error carries its id.
+
+    Fixing only the returned-status branch left the live orphan untouched: a replay of
+    the give-up scenario still ended with 243.87 sitting open against a trial that had
+    expired and could never be granted.
+    """
+    from blueprints.subscription.services import billing_gateway, changes, store
+
+    checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    voided: list[str] = []
+
+    def _declined(*_a, **_k):
+        raise billing_gateway.BillingError("card declined", invoice_id="in_declined")
+
+    monkeypatch.setattr(changes, "issue_change", _declined)
+    monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert voided == ["in_declined"]
+    assert result["converted"] == []
+    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+
+
+def test_a_failure_with_no_invoice_raised_voids_nothing(monkeypatch):
+    """``Invoice.create`` itself failing leaves no document, so there is nothing to
+    withdraw — and calling void with None would be an error of its own."""
+    from blueprints.subscription.services import billing_gateway, changes, store
+
+    checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    voided: list[str] = []
+
+    def _exploded(*_a, **_k):
+        raise billing_gateway.BillingError("processor unreachable")  # no invoice_id
+
+    monkeypatch.setattr(changes, "issue_change", _exploded)
+    monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert voided == []
+    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+
+
+def test_a_void_that_fails_still_expires_the_trial(monkeypatch):
+    """The refusal has already happened; a failed void must not turn it into a crash."""
+    from blueprints.subscription.services import billing_gateway, store
+
+    checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR, paid=False)
+
+    def _boom(_iid):
+        raise RuntimeError("processor unreachable")
+
+    monkeypatch.setattr(billing_gateway, "void_invoice", _boom)
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+
+
+def test_a_PAID_conversion_voids_nothing(monkeypatch):
+    """The guard is on the failure path only — a successful charge must be left alone."""
+    from blueprints.subscription.services import billing_gateway, store
+
+    checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)  # paid=True
+    voided: list[str] = []
+    monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert voided == []
+    assert result["converted"] == [{"entity_id": "e1", "code": "BILL"}]
+
+
 # --- ending a trial: expiring -------------------------------------------------
 
 

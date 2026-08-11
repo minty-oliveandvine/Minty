@@ -1002,6 +1002,11 @@ def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict
     in the safe direction: this runs days earlier, so a card saved in between turns a
     warned trial into a quiet one, never the reverse.
 
+    Warns about the next ``days_before`` days, not the single day exactly that far out.
+    Run daily that re-matches each trial on each of those days and the email log dedupes
+    all but the first — which is the price of surviving a day the job does not run. See
+    the window below for why that trade is worth making.
+
     Returns ``{"warned": [...], "skipped": [...]}``. Idempotent by the email log — the
     dedupe key is the entity, module set and trial-end date, so re-running warns nobody
     twice even if the daily window is widened or the job is run by hand.
@@ -1021,9 +1026,31 @@ def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict
     # at 08:10 UTC and was silently skipped. Day-aligned, the windows tile whatever time
     # the job runs, and a second run the same day re-derives the SAME window (which the
     # email log then dedupes) instead of a shifted one.
-    target = (now + timedelta(days=days_before)).astimezone(timezone.utc).date()
-    start = datetime(target.year, target.month, target.day, tzinfo=timezone.utc)
-    end = start + timedelta(days=1)
+    # THE NEXT ``days_before`` DAYS, not the single day exactly that far out. The tiling
+    # above is only perfect while the job runs every day, and a day it does not run is a
+    # hole nothing ever revisits — no watermark, no backlog. The trials whose tile fell in
+    # that hole are never warned at all, and this is the one notice that arrives while the
+    # customer can still prevent the lapse, so losing it costs them the module.
+    #
+    # Re-matching is what the day-aligned window was written to avoid, and the objection
+    # was fair: it makes the email log load-bearing rather than a backstop. But that log
+    # is durable, indexed, and already load-bearing for the renewal and dunning notices,
+    # and its key here is the entity, module set and trial-end DATE — so a trial scanned
+    # on three consecutive days is still mailed exactly once.
+    #
+    # It bounds itself. An outage of up to ``days_before`` is covered completely (with
+    # less notice than intended, which is the point); a longer one loses only trials that
+    # ENDED while it was down, and those are not warnable — ``convert_or_expire_due_trials``
+    # has already sent them the expiry notice.
+    #
+    # Starts TOMORROW, not today. ``notify-trial-ending`` runs before ``close-trials`` on
+    # the same schedule, so including today would mail "your trial ends soon" minutes
+    # before "your trial has ended" — two contradictory notices about one trial.
+    today = now.astimezone(timezone.utc).date()
+    start = datetime(
+        today.year, today.month, today.day, tzinfo=timezone.utc
+    ) + timedelta(days=1)
+    end = start + timedelta(days=days_before)
 
     warned: list[dict] = []
     skipped: list[dict] = []
@@ -1273,6 +1300,42 @@ def _billed_codes_in_house(entity_id) -> set[str]:
     }
 
 
+def _void_unpaid_conversion(invoice_id, entity_id) -> None:
+    """Withdraw a conversion invoice the customer is not getting the module for.
+
+    Refusing to grant and leaving the invoice open bills them for something explicitly
+    not given — the row's ``first_billed_at`` stays NULL, which is this code recording
+    that no real charge happened, beside an open document saying one did.
+
+    It does not merely sit there. ``dunning.collect_due`` chases the payer's OLDEST open
+    invoice, so on any later episode this is the first thing retried, for a module whose
+    row has since gone ``expired`` — terminal, and never to be granted.
+
+    Reached from BOTH failure paths, which look different and are the same event: a
+    declined card RAISES out of ``Invoice.pay``, while a non-paid status is returned.
+    Only the first happens in practice, and fixing only the second is how this bug
+    survived its first fix.
+
+    Never raises. The refusal has already happened; a void that cannot be completed must
+    not turn it into a crash the caller reads as something worse.
+    """
+    if not invoice_id:
+        return
+    from blueprints.subscription.services import billing_gateway
+
+    try:
+        billing_gateway.void_invoice(invoice_id)
+        logger.info(
+            "trial: voided unpaid conversion invoice {} for entity {}",
+            invoice_id, entity_id,
+        )
+    except Exception:
+        logger.exception(
+            "trial: could not void the unpaid conversion invoice {} for entity {}",
+            invoice_id, entity_id,
+        )
+
+
 def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
                                  current, codes):
     """Bill a module change from Minty's own arithmetic. Returns the new paid-through.
@@ -1288,7 +1351,7 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
     (280.00). A later entity joining an existing payer is prorated against the anchor
     already recorded (373.33). Both figures were verified against Stripe before cutover.
     """
-    from blueprints.subscription.services import changes
+    from blueprints.subscription.services import billing_gateway, changes
     from blueprints.subscription.services.billing import period_containing
     from models.db import Entity
 
@@ -1332,10 +1395,16 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
         invoice = changes.issue_change(
             customer_id, entity_id, name, current, current | codes, period, now
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "trial: could not bill the conversion for {} {} in-house", entity_id, codes
         )
+        # THE path a declined card actually takes. ``Invoice.pay`` raises rather than
+        # returning an unpaid invoice, and by then the document is finalized and OPEN —
+        # so the branch below, which reads a returned status, never sees a decline at all.
+        # Without this the customer keeps a bill for a module this function is in the
+        # middle of refusing them.
+        _void_unpaid_conversion(getattr(exc, "invoice_id", None), entity_id)
         return None
 
     # A None invoice means nothing was owed (already at this price), which is a success:
@@ -1347,6 +1416,17 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
             entity_id,
             invoice.get("status"),
         )
+        # Withdraw the bill as well as the modules. Refusing to grant and leaving the
+        # invoice open charges the customer for something they were explicitly not given
+        # — the row's own ``first_billed_at`` stays NULL, which is this code recording
+        # that no real charge happened, beside an open document that says one did.
+        #
+        # It does not simply sit there, either. ``dunning.collect_due`` chases the
+        # payer's OLDEST open invoice, so on any later episode this is the first thing
+        # retried, for a module whose row has since gone ``expired`` — terminal, never
+        # to be granted. A customer would pay for a trial that lapsed months earlier.
+        #
+        _void_unpaid_conversion(invoice.get("id"), entity_id)
         return None
 
     # ESTABLISH the payer's cycle; never ADVANCE one that already exists.

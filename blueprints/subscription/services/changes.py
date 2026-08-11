@@ -152,6 +152,18 @@ def issue_change(customer_id: str, entity_id, entity_name: str, before_codes,
 
     key = change_key(entity_id, at, after_codes)
     existing = billing_gateway.find_invoice_by_metadata(customer_id, "change_key", key)
+    # A VOIDED invoice is not evidence of a charge — it is evidence of one withdrawn.
+    # A failed conversion voids its invoice (see ``_bill_module_change_in_house``), and
+    # treating that as "already invoiced" would make the next genuine attempt at the same
+    # change return the dead document and collect nothing, while the caller reads success
+    # and hands over the module.
+    if existing is not None and (existing.get("status") or "") in ("void", "deleted"):
+        logger.info(
+            "change: {} was invoiced as {} and voided; charging again",
+            key,
+            existing.get("id"),
+        )
+        existing = None
     if existing is not None:
         logger.info(
             "change: {} was already invoiced as {}; not charging again",

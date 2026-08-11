@@ -714,3 +714,69 @@ def test_a_cancelled_trial_is_not_warned_about(app, db_session):
 
         start = now + timedelta(days=3)
         assert store.trials_ending_between(start, start + timedelta(days=1)) == []
+
+
+def test_a_trial_whose_tile_was_MISSED_is_still_warned(app, db_session, monkeypatch):
+    """A day the job does not run must not cost a customer their only actionable notice.
+
+    The window used to be the single calendar day exactly ``days_before`` out. Run daily
+    those tile perfectly — but there is no watermark and no backlog, so a day the job is
+    down is a hole nothing ever revisits, and the trials whose tile fell in it are never
+    warned at all. Their first news is the module going dark.
+
+    Here the job misses 17 Aug and runs on the 18th. Under the old window the 18th looks
+    for trials ending 21 Aug and never sees this one; under the current window it catches
+    it with two days' notice instead of three.
+    """
+    from blueprints.subscription.services import checkout
+    from models.db import EntityModuleSubscription
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        db_session.session.add(EntityModuleSubscription(
+            id=str(uuid.uuid4()),
+            entity_id="e_missed",
+            function_code="BILL",
+            payer_user_id=payer,
+            phase="trial",
+            trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
+        ))
+        db_session.session.commit()
+
+        # 17 Aug never ran. This is the 18th.
+        monkeypatch.setattr(
+            checkout.clock, "now", lambda: datetime(2026, 8, 18, 8, 10, tzinfo=UTC)
+        )
+        result = checkout.notify_trials_ending(days_before=3)
+
+        assert [w["entity_id"] for w in result["warned"]] == ["e_missed"]
+
+
+def test_a_trial_ending_TODAY_is_left_to_the_trial_end_job(app, db_session, monkeypatch):
+    """The window starts tomorrow.
+
+    ``notify-trial-ending`` runs before ``close-trials`` on the same schedule, so warning
+    about a trial ending today would mail "your trial ends soon" minutes before "your
+    trial has ended" — two contradictory notices about one trial on one day.
+    """
+    from blueprints.subscription.services import checkout
+    from models.db import EntityModuleSubscription
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        db_session.session.add(EntityModuleSubscription(
+            id=str(uuid.uuid4()),
+            entity_id="e_today",
+            function_code="BILL",
+            payer_user_id=payer,
+            phase="trial",
+            trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
+        ))
+        db_session.session.commit()
+
+        monkeypatch.setattr(
+            checkout.clock, "now", lambda: datetime(2026, 8, 20, 1, 0, tzinfo=UTC)
+        )
+        result = checkout.notify_trials_ending(days_before=3)
+
+        assert result["warned"] == []
