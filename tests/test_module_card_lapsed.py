@@ -285,10 +285,10 @@ def test_the_closing_card_is_the_running_trial_card_plus_one_line(app):
     assert "bg-[#1F2937]" in closing
     assert "active" in closing
     # The ONLY difference is the added line.
-    assert "trial ending soon - finalising" in closing
-    assert "trial ending soon - finalising" not in running
+    assert "trial ended- finalising" in closing
+    assert "trial ended- finalising" not in running
     assert closing.replace(
-        '<p class="text-xs text-gray-500">trial ending soon - finalising</p>\n        ', ""
+        '<p class="text-xs text-gray-500">trial ended- finalising</p>\n        ', ""
     ).split() == running.split()
 
     # And none of the endings it is not: no "used up" copy, nothing to cancel, no offer to
@@ -304,4 +304,4 @@ def test_the_closing_card_still_warns_when_it_will_not_convert(app):
     drop the notice at the moment it matters most."""
     closing = _render(app, _trial_card(trial_closing=True, needs_card=True))
     assert "won't convert" in closing
-    assert "trial ending soon - finalising" in closing
+    assert "trial ended- finalising" in closing
