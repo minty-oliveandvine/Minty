@@ -26,23 +26,40 @@ nothing — it is the one job here that exists purely to send email, and the onl
 notification in the system that reaches the customer while they can still prevent the
 lapse rather than after it.
 
-Those five are intended to run daily (cron / Task Scheduler / a scheduled cloud agent):
+Those five run daily. ``run-daily`` is the pass that runs them, in order, and it is what
+the in-process scheduler calls — see ``services/app_runtime/scheduler.py``. The individual
+commands below remain for running ONE job by hand:
 
+    flask subscriptions run-daily --issue
+
+    # or, one at a time:
     flask subscriptions notify-trial-ending
     flask subscriptions close-trials
-    flask subscriptions sweep-access
     flask subscriptions run-renewals --issue
     flask subscriptions retry-dunning
+    flask subscriptions sweep-access
 
 Order matters on a shared schedule: close-trials before run-renewals, so a trial that
-converted today is billed by today's run rather than waiting a month; retry-dunning last,
-so a renewal that fails this morning enters dunning before the retry pass looks at it.
+converted today is billed by today's run rather than waiting a month; retry-dunning after
+run-renewals, so a renewal that fails this morning enters dunning before the retry pass
+looks at it.
 
-close-trials must also precede sweep-access, and now for a second reason. It always had
-to run first so a converting trial was not swept as lapsed mid-conversion; with email
-wired up it is also what keeps an expired trial from being announced twice — the trial
-job revokes access itself and sends the "trial has ended" notice, so those modules are
-already off by the time the sweep runs and never enter its "access revoked" batch.
+SWEEP-ACCESS RUNS LAST, and this list used to put it third. The sweep judges a paid
+module by the payer's ``paid_through``, and ``run-renewals`` is the only thing that
+advances it — so running the sweep first meant a payer whose period had just elapsed was
+``active`` with a past ``paid_through``, failed ``access.grants_access``, and had their
+modules revoked seconds before the renewal step billed them for the new period. Nothing
+re-syncs the map after a successful renewal (only dunning does, on recovery), so access
+returned only on the next day's run: every payer, every renewal, charged and locked out
+for a day. Running it last, the sweep sees settled state — renewed payers keep access,
+genuinely failed ones sit in the past-due grace, and dunning's recoveries are restored in
+the same run.
+
+close-trials must still precede sweep-access, which running it last satisfies. It always
+had to, so a converting trial was not swept as lapsed mid-conversion; with email wired up
+it is also what keeps an expired trial from being announced twice — the trial job revokes
+access itself and sends the "trial has ended" notice, so those modules are already off by
+the time the sweep runs and never enter its "access revoked" batch.
 
 Email is a side effect of these jobs, never their purpose: every send is deduped in
 ``subscription_email_log`` and every failure is swallowed, so a mail outage degrades
@@ -62,6 +79,84 @@ from flask.cli import AppGroup
 from blueprints.entity.services.modules import sweep_expired_module_access
 
 subscriptions_cli = AppGroup("subscriptions", help="Subscription maintenance.")
+
+
+@subscriptions_cli.command(
+    "run-daily",
+    help="Run a subscription pass: --mode full is all five jobs, light is the hourly "
+         "two. Use --issue to let the renewal step charge.",
+)
+@click.option(
+    "--issue",
+    is_flag=True,
+    default=False,
+    help="Let the RENEWAL step charge. Without it that one step only reports. It does "
+         "not make the pass read-only - see the command's help text.",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["full", "light"]),
+    default="full",
+    show_default=True,
+    help="full = all five jobs. light = close-trials, run-renewals, and a sweep narrowed "
+         "to the payers they touched (what the scheduler runs every non-full hour).",
+)
+@click.option(
+    "--days-before",
+    type=int,
+    default=None,
+    help="Trial-ending warning window, in days. Default: the pass's own default.",
+)
+def run_daily_cmd(issue: bool, mode: str, days_before: int | None) -> None:
+    """The pass the scheduler runs, runnable by hand.
+
+    THIS IS NOT A DRY RUN WITHOUT ``--issue``, and the flag name is inherited from
+    ``run-renewals`` where it does mean that. Here it gates ONE of the five jobs. The
+    other four always do their real work, and one of them spends money: ``close-trials``
+    converts a due trial to paid, which cuts an invoice and charges the card on file.
+    Trials also expire, access is revoked and restored, and dunning retries declined
+    invoices — all of it for real, with or without the flag.
+
+    Withholding ``--issue`` is therefore worth doing (it is the largest, least reversible
+    step) but it is not a way to preview the pass. To see what tonight will bill without
+    touching anything, run ``run-renewals`` on its own.
+
+    Safe to run while the scheduler is mid-pass — it takes the same advisory lock, and
+    reports that it did nothing rather than interleaving with the pass already running.
+    """
+    from blueprints.subscription.services import clock, daily
+
+    kwargs = {} if days_before is None else {"days_before": days_before}
+    with daily.daily_lock() as acquired:
+        if not acquired:
+            click.echo("A pass is already running elsewhere. Nothing done.")
+            return
+        result = daily.run_daily(clock.now(), issue=issue, mode=mode, **kwargs)
+
+    if not issue:
+        click.echo(
+            "No --issue: the renewal step only reported. The other four jobs ran for "
+            "real, and close-trials charges converting trials."
+        )
+    for entry in result["jobs"]:
+        if entry.get("skipped"):
+            click.echo(f"  skipped {entry['job']}: {entry['reason']}")
+        elif entry["ok"]:
+            counts = ", ".join(
+                f"{key} {len(value) if isinstance(value, (list, tuple, set, dict)) else value}"
+                for key, value in sorted((entry["summary"] or {}).items())
+            )
+            click.echo(f"  ok      {entry['job']}: {counts or 'nothing to do'}")
+        else:
+            click.echo(f"  FAILED  {entry['job']}: {entry['error']}")
+    if result["behind"]:
+        # The one thing a summary of counts cannot show: these payers were billed for a
+        # period and are STILL due, so tomorrow's pass charges them again.
+        click.echo(
+            f"  {len(result['behind'])} payer(s) more than one period behind; they will "
+            f"be billed again tomorrow: {', '.join(result['behind'])}"
+        )
+    click.echo("Daily pass complete." if result["ok"] else "Daily pass FINISHED WITH ERRORS.")
 
 
 @subscriptions_cli.command(
@@ -301,6 +396,6 @@ def reconcile_customers_cmd(repair: bool) -> None:
         # Not repairable here on purpose: picking one would silently strand whatever
         # card and history sit on the other.
         click.echo(
-            "Ambiguous payers need a manual merge in Stripe — pick the customer holding "
+            "Ambiguous payers need a manual merge in Stripe - pick the customer holding "
             "the live card, move any others' history onto it, and clear their stamp."
         )

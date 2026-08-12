@@ -367,6 +367,19 @@ def create_app():
     from legal.registry import verify_pinned_hashes
     verify_pinned_hashes()
 
+    # The daily subscription pass. Nothing else ends a trial or advances
+    # ``paid_through``, and Minty has no worker process to put a timer in, so it
+    # runs in here. Started last, after the CLI and the blueprints, so a failure
+    # to schedule cannot stop the app coming up — a web service that serves
+    # nobody is worse than one that bills nobody. No-op unless
+    # SUBSCRIPTION_SCHEDULER_ENABLED is set, which is why importing this app in a
+    # test or a shell schedules nothing.
+    from services.app_runtime.scheduler import start_scheduler
+    try:
+        start_scheduler(app)
+    except Exception:
+        logger.exception("scheduler: could not start the daily subscription pass")
+
     return (
         app,
         db,
