@@ -398,6 +398,25 @@ def get_module_cards(entity_id: str) -> list[dict]:
         # must side with the gate.
         has_access = bool(access_state.get(code))
 
+        # THE WINDOW BETWEEN THE TERM ENDING AND THE JOB CLOSING IT OUT.
+        #
+        # ``trial_end`` passes unattended. Until the subscription pass runs, the row is
+        # still ``phase = trial`` while ``granted`` has already gone false — so the card
+        # dropped out of "trialing", failed the paid branch too, and landed on
+        # ``trial_expired``: it told a customer their free trial was used up while the
+        # gate was still letting them work, and while a trial with a card and consent was
+        # in fact about to CONVERT. Premature, and for the converting case the opposite of
+        # what was coming.
+        #
+        # Bounded by construction, which is what makes it safe to show. It needs the gate
+        # to still say yes, and the next pass ends it either way — close-trials converts
+        # or expires the row, and failing that the sweep revokes access because
+        # ``grants_access`` is already false. A scheduler that stopped cannot leave a card
+        # stuck here; it resolves to the honest ``trial_expired`` as soon as anything runs.
+        app_trial_closing = bool(
+            row is not None and phase == PHASE_TRIAL and not granted and has_access
+        )
+
         # Trial eligibility: a module this entity has NEVER held. The trial is
         # once-per-module, so ANY history disqualifies it - including a lapsed one - and
         # those go through paid checkout instead. The row existing at all IS that
@@ -419,6 +438,10 @@ def get_module_cards(entity_id: str) -> list[dict]:
             and never_billed
             and getattr(row, "trial_end", None) is not None
             and not granted
+            # Not yet: the term is up but the pass has not closed it out, and the customer
+            # is still working inside the module. Calling that "expired" is a guess about
+            # an outcome that has not been decided — see ``app_trial_closing``.
+            and not app_trial_closing
         )
 
         plan = plans_by_code.get(code.upper())
@@ -465,6 +488,17 @@ def get_module_cards(entity_id: str) -> list[dict]:
         # button — the card claiming a subscription the request gate would refuse.
         if app_trial:
             subscription_status = "trialing"
+            period_end = getattr(row, "trial_end", None)
+        elif app_trial_closing:
+            # Deliberately NOT "trialing": the term really is over, and saying otherwise
+            # would put a future date on a trial that has already ended. Its own status
+            # instead, so the page can say the one thing that is true whichever way this
+            # resolves — the trial has ended and the outcome is being settled.
+            #
+            # Named ``trial_closing`` and not ``trial_ending`` because that name is taken:
+            # ``_NOTICE_ORDER`` uses ``trial_ending`` for the "ends in a few days" warning,
+            # which is the opposite end of the trial and still has time to act on.
+            subscription_status = "trial_closing"
             period_end = getattr(row, "trial_end", None)
         elif granted and phase in (PHASE_ACTIVE, PHASE_PAST_DUE, PHASE_SCHEDULED_CANCEL):
             subscription_status = "past_due" if phase == PHASE_PAST_DUE else "active"

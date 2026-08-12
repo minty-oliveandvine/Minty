@@ -350,7 +350,7 @@ def _log_renewal_backlog(now: datetime, result: dict) -> list[str]:
     if behind:
         logger.warning(
             "subscriptions: {} payer(s) are still due after this pass and will be billed "
-            "again tomorrow — they are more than one period behind: {}",
+            "again tomorrow - they are more than one period behind: {}",
             len(behind),
             ", ".join(behind),
         )
@@ -438,7 +438,7 @@ def run_daily(
     ok = not failed_jobs
     log = logger.info if ok else logger.error
     log(
-        "subscriptions: {} pass finished — {}/{} step(s) ok, issue={}{}",
+        "subscriptions: {} pass finished - {}/{} step(s) ok, issue={}{}",
         mode,
         len(steps) - len(failed_jobs),
         len(steps),

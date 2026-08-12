@@ -178,7 +178,10 @@
          nothing was cancelled — the renewal failed and dunning is still retrying. It
          prices and cancels like a paid module, so it keeps that state, and the badge
          below is what tells them apart. #}
-      {% set state = 'paid' if c.subscription_status == 'past_due' else ('winding' if c.pending_cancel else ('trial' if c.subscription_status == 'trialing' else ('paid' if c.subscription_status == 'active' else 'available'))) %}
+      {# trial_closing rides with trialing: it IS a trial, just past its term and waiting
+         on the pass. Letting it fall through to 'available' would restyle the row as
+         something the customer could start, on a module they are currently using. #}
+      {% set state = 'paid' if c.subscription_status == 'past_due' else ('winding' if c.pending_cancel else ('trial' if c.subscription_status in ['trialing', 'trial_closing'] else ('paid' if c.subscription_status == 'active' else 'available'))) %}
       <label data-keep-row data-row-state="{{ state }}"
              class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 transition-colors hover:bg-gray-50">
         <span class="min-w-0">

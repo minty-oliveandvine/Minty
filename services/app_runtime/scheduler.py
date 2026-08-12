@@ -180,7 +180,7 @@ def start_scheduler(app):
         )
     scheduler.start()
     logger.info(
-        "scheduler: subscription passes {} {} — full pass at {:02d}:00, billing live",
+        "scheduler: subscription passes {} {} - full pass at {:02d}:00, billing live",
         "hourly" if light else "daily only",
         timezone,
         full_hour,
