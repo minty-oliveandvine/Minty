@@ -139,10 +139,7 @@
        part company until the sweep repairs it — so this branch stays on the rows, while
        card.trial_eligible is what accounts for access. Otherwise a module switched on
        with no row behind it offered "Start free trial" to someone already inside it. #}
-    {# trial_closing counts as ON: the term is up but the job has not closed it out, and
-       the request gate is still letting them in. This badge answers "can I use this right
-       now", so the honest answer is yes until something actually revokes it. #}
-    {% set is_on = card.subscription_status in ['trialing', 'active', 'past_due', 'trial_closing'] %}
+    {% set is_on = card.subscription_status in ['trialing', 'active', 'past_due'] %}
     <div class="flex items-start gap-4 rounded-2xl border border-gray-200/70 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
       <!-- Illustration -->
       <div class="shrink-0 w-20 h-20 rounded-xl border border-gray-100 bg-white flex items-center justify-center overflow-hidden">
@@ -164,16 +161,7 @@
         {% if card.subscription_status == 'past_due' %}
         <span class="text-sm font-semibold text-red-500">payment due</span>
         {% elif is_on %}
-        <div class="text-right">
-          <span class="text-sm font-semibold text-[#2FBFC7]">active</span>
-          {# The trial's term has passed and the pass has not run yet. Saying only "active"
-             would imply the trial is still running; saying "expired" would announce an
-             outcome nobody has decided. This states what is actually true of both the
-             converting and the expiring case. #}
-          {% if card.subscription_status == 'trial_closing' %}
-          <p class="text-xs text-gray-500">trial ended - finalising</p>
-          {% endif %}
-        </div>
+        <span class="text-sm font-semibold text-[#2FBFC7]">active</span>
         {% else %}
         {# "not active" alone reads as "never had this", which leaves the customer
            wondering why the action beside it is Subscribe rather than a free trial. The
@@ -259,6 +247,13 @@
         <span class="inline-block bg-[#1F2937] text-white text-xs font-semibold px-3.5 py-1.5 rounded-full shadow-sm whitespace-nowrap">
           Free trial{% if card.period_end_short %} · ends {{ card.period_end_short }}{% endif %}
         </span>
+        {# The term is up and the subscription pass has not closed it out yet. A LABEL and
+           nothing else: the card stays a running trial everywhere else, because the state
+           lasts under an hour, the customer can do nothing about it, and it resolves on
+           its own. #}
+        {% if card.trial_closing %}
+        <p class="text-xs text-gray-500">trial ending soon - finalising</p>
+        {% endif %}
         {# A trial that will NOT convert looks exactly like one that will, and the
            difference is a deadline the customer can miss. needs_card says which: no card
            at all, or a card this company was never authorised for. #}
@@ -267,16 +262,6 @@
           {% if card.needs_consent_only %}won't convert — confirm billing{% else %}won't convert — add a card{% endif %}
         </p>
         {% endif %}
-
-        {# The term is up and the pass is about to convert or expire it. Its own branch,
-           placed BEFORE the is_on one, so this never offers "Cancel Subscription" — there
-           is nothing settled to cancel, and a trial is dropped by unticking it in the
-           decision modal rather than cancelled per module anyway. No action at all is the
-           honest offer for a state that resolves itself within the hour. #}
-        {% elif card.subscription_status == 'trial_closing' %}
-        <span class="inline-block bg-gray-100 text-gray-700 text-xs font-semibold px-3.5 py-1.5 rounded-full whitespace-nowrap">
-          Free trial ended · finalising
-        </span>
 
         {# Live PAID module: cancel in-app (prorated), access continues until
            paid-through. Unlike a trial — which is dropped by unticking it in the decision
@@ -332,11 +317,7 @@
      and what can be staged for a trial (eligible + not yet enabled). #}
   {% set ns = namespace(enabled=[], stageable=[]) %}
   {% for c in module_cards or [] %}
-    {# trial_closing stays in the enabled set. It is a trial mid-resolution, and whichever
-       way it goes the panel showed it here a minute ago — dropping it out for the hour it
-       takes the pass to run would make the total flicker for no reason the customer could
-       see. #}
-    {% if c.subscription_status in ['trialing', 'active', 'past_due', 'trial_closing'] and not c.pending_cancel %}
+    {% if c.subscription_status in ['trialing', 'active', 'past_due'] and not c.pending_cancel %}
       {% set ns.enabled = ns.enabled + [{'code': c.code, 'name': c.name, 'amount': c.amount | float}] %}
     {% elif c.trial_eligible %}
       {% set ns.stageable = ns.stageable + [c] %}

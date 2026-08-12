@@ -217,6 +217,29 @@ def test_a_trial_past_its_end_date_is_not_announced(notices):
     assert result["items"] == []
 
 
+def test_a_trial_still_being_closed_out_keeps_its_notice(notices):
+    """The one exception, and it does not contradict the rule above.
+
+    ``trial_closing`` means the term has passed but the subscription pass has not closed
+    the trial out yet and the customer still has access — a window of under an hour. The
+    notice carries "the first charge is coming, on this date", so dropping it here would
+    remove that message in the final minutes before the charge, which is when it is most
+    worth having on screen. It would also make the page visibly rearrange itself for a
+    state nobody can act on.
+
+    The card above has no ``trial_closing`` flag at all, which is what keeps a genuinely
+    stale trial silent.
+    """
+    past = datetime.now(UTC) - timedelta(minutes=20)
+    result = notices(
+        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
+               period_end=past, period_end_long="12 Aug 2026", trial_closing=True)]
+    )
+
+    assert [i["kind"] for i in result["items"]] == ["trial_ending"]
+    assert result["items"][0]["title"] == "Petty Cash is on a free trial"
+
+
 def test_the_window_can_be_restored(notices, monkeypatch):
     """TRIAL_ENDING_SOON_DAYS = int goes back to warning only near the end."""
     monkeypatch.setattr(
