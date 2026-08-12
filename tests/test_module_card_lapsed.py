@@ -198,12 +198,19 @@ def test_a_trial_past_its_term_is_closing_not_expired(app, monkeypatch):
     card = _card(
         app, monkeypatch, paid_through=None, row=_TrialRow(), has_access=True
     )
-    assert card["subscription_status"] == "trial_closing"
+    # STILL "trialing", deliberately. Everything downstream — the panel's enabled set, the
+    # notices, the badge, the row styling — asks that question, and answering differently
+    # would rearrange the page around a state nobody can act on. The difference is carried
+    # by a flag used for one label and nothing else.
+    assert card["subscription_status"] == "trialing"
+    assert card["trial_closing"] is True
     # Not "expired": nothing has decided yet, and the module still opens.
     assert card["trial_expired"] is False
     assert card["has_access"] is True
     # Not offered as a fresh trial either — they are inside it.
     assert card["trial_eligible"] is False
+    # The pill's date survives, so the card reads exactly as it did an hour ago.
+    assert card["period_end_short"] is not None
 
 
 def test_a_trial_past_its_term_with_access_gone_is_expired(app, monkeypatch):
@@ -218,6 +225,7 @@ def test_a_trial_past_its_term_with_access_gone_is_expired(app, monkeypatch):
         app, monkeypatch, paid_through=None, row=_TrialRow(), has_access=False
     )
     assert card["subscription_status"] is None
+    assert card["trial_closing"] is False
     assert card["trial_expired"] is True
 
 
@@ -234,29 +242,66 @@ def test_a_running_trial_is_untouched(app, monkeypatch):
     assert card["trial_expired"] is False
 
 
-def test_the_closing_card_reads_active_and_offers_no_cancel(app):
-    """What the customer sees. It works, so the badge says so; the outcome is pending, so
-    nothing is offered to act on."""
+def _render(app, card):
     from flask import render_template
 
-    card = {
-        "code": "PETTY_CASH", "name": "Petty Cash", "description": "", "image": "x.png",
-        "learn_more": "#", "subscription_status": "trial_closing", "amount": 280,
-        "pending_cancel": False, "trial_cancelled": False, "trial_eligible": False,
-        "trial_expired": False, "needs_card": False, "needs_consent_only": False,
-        "period_end_long": None, "period_end_short": None, "access_end_long": None,
-        "has_access": True,
-    }
     with app.test_request_context():
         html = render_template(
             "entity/partials/module_subscription_section.html",
             module_cards=[card], subscription_summary=None, subscription_panel=None,
             org=type("O", (), {"id": "e1", "name": "Co"})(), can_manage_modules=True,
         )
-    cards_html = html.split("<aside", 1)[0]
-    assert "active" in cards_html
-    assert "trial ended - finalising" in cards_html
-    assert "free trial expired" not in cards_html
-    # Nothing settled to cancel, and no trial to start.
-    assert "Cancel Subscription" not in cards_html
-    assert "Start free trial" not in cards_html
+    # Split at the panel: its hidden staged-cart button is captioned "Start free trial"
+    # until renderCart relabels it, so a whole-page search would always match.
+    return html.split("<aside", 1)[0]
+
+
+def _trial_card(**overrides):
+    card = {
+        "code": "PETTY_CASH", "name": "Petty Cash", "description": "", "image": "x.png",
+        "learn_more": "#", "subscription_status": "trialing", "amount": 280,
+        "pending_cancel": False, "trial_cancelled": False, "trial_eligible": False,
+        "trial_expired": False, "needs_card": False, "needs_consent_only": False,
+        "period_end_long": None, "period_end_short": "15 Aug", "access_end_long": None,
+        "has_access": True, "trial_closing": False,
+    }
+    card.update(overrides)
+    return card
+
+
+def test_the_closing_card_is_the_running_trial_card_plus_one_line(app):
+    """The transition must not rearrange the page.
+
+    It lasts under an hour, the customer can do nothing about it, and it resolves by
+    itself — so the card keeps the black trial pill and everything around it, and gains a
+    single line. An earlier version restyled it into a grey "ended" pill, which read as a
+    lapsed module on something the request gate was still letting them use.
+    """
+    running = _render(app, _trial_card())
+    closing = _render(app, _trial_card(trial_closing=True))
+
+    # The pill survives, date and all.
+    assert "Free trial · ends 15 Aug" in closing
+    assert "bg-[#1F2937]" in closing
+    assert "active" in closing
+    # The ONLY difference is the added line.
+    assert "trial ending soon - finalising" in closing
+    assert "trial ending soon - finalising" not in running
+    assert closing.replace(
+        '<p class="text-xs text-gray-500">trial ending soon - finalising</p>\n        ', ""
+    ).split() == running.split()
+
+    # And none of the endings it is not: no "used up" copy, nothing to cancel, no offer to
+    # start the trial they are already inside.
+    assert "free trial expired" not in closing
+    assert "Cancel Subscription" not in closing
+    assert "Start free trial" not in closing
+
+
+def test_the_closing_card_still_warns_when_it_will_not_convert(app):
+    """``needs_card`` outlives the term. A trial with no card is about to expire, and that
+    warning is the last thing the customer can act on — losing it in the transition would
+    drop the notice at the moment it matters most."""
+    closing = _render(app, _trial_card(trial_closing=True, needs_card=True))
+    assert "won't convert" in closing
+    assert "trial ending soon - finalising" in closing

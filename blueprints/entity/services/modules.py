@@ -416,6 +416,13 @@ def get_module_cards(entity_id: str) -> list[dict]:
         app_trial_closing = bool(
             row is not None and phase == PHASE_TRIAL and not granted and has_access
         )
+        # Folded into ``app_trial`` rather than given a status of its own. Everything
+        # downstream — the panel's enabled set, the notices, the badge, the row styling —
+        # asks "is this trialing", and answering differently for the hour before the pass
+        # runs would rearrange the whole page around a state the customer cannot act on and
+        # which resolves by itself. It IS still a trial: nothing has closed it out. The
+        # closing flag is carried separately and used for exactly one thing, a label.
+        app_trial = app_trial or app_trial_closing
 
         # Trial eligibility: a module this entity has NEVER held. The trial is
         # once-per-module, so ANY history disqualifies it - including a lapsed one - and
@@ -489,17 +496,6 @@ def get_module_cards(entity_id: str) -> list[dict]:
         if app_trial:
             subscription_status = "trialing"
             period_end = getattr(row, "trial_end", None)
-        elif app_trial_closing:
-            # Deliberately NOT "trialing": the term really is over, and saying otherwise
-            # would put a future date on a trial that has already ended. Its own status
-            # instead, so the page can say the one thing that is true whichever way this
-            # resolves — the trial has ended and the outcome is being settled.
-            #
-            # Named ``trial_closing`` and not ``trial_ending`` because that name is taken:
-            # ``_NOTICE_ORDER`` uses ``trial_ending`` for the "ends in a few days" warning,
-            # which is the opposite end of the trial and still has time to act on.
-            subscription_status = "trial_closing"
-            period_end = getattr(row, "trial_end", None)
         elif granted and phase in (PHASE_ACTIVE, PHASE_PAST_DUE, PHASE_SCHEDULED_CANCEL):
             subscription_status = "past_due" if phase == PHASE_PAST_DUE else "active"
             period_end = paid_through
@@ -524,6 +520,11 @@ def get_module_cards(entity_id: str) -> list[dict]:
                     row is not None and access.is_subscribed(phase=phase)
                 ),
                 "trial_eligible": trial_eligible,
+                # The term is up and the pass has not closed it out yet. Presentation
+                # ONLY: the card is otherwise a running trial in every respect, and this
+                # adds a line saying the outcome is being settled. Never gate behaviour on
+                # it — see where it is set.
+                "trial_closing": app_trial_closing,
                 # Held a trial, used it up, never paid: the card says "free trial
                 # expired" under its status so "not active" is not the whole story.
                 "trial_expired": trial_expired,
@@ -1591,8 +1592,15 @@ def build_subscription_notices(entity_id: str, user_id) -> dict:
         ):
             # Still >= 0 even with no window: a trial past its end date is not
             # "ending", it has ended, and the sweep is what speaks next.
+            #
+            # ``trial_closing`` is the one exception, and it is not a contradiction of
+            # that rule: it means the term has passed but nothing has closed the trial
+            # out YET and the customer still has access. Dropping the notice there would
+            # take the "first charge is coming, on this date" message away in the final
+            # hour before the charge — the moment it is most worth having on screen — and
+            # would make the panel visibly rearrange itself for a state nobody can act on.
             days_left = (period_end - now).days
-            if days_left >= 0 and (
+            if (days_left >= 0 or card.get("trial_closing")) and (
                 TRIAL_ENDING_SOON_DAYS is None
                 or days_left <= TRIAL_ENDING_SOON_DAYS
             ):
