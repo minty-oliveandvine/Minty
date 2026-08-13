@@ -170,6 +170,18 @@ def test_deleting_membership_role_removes_membership_without_changing_system_rol
 
     monkeypatch.setattr(roles_routes, "UserEntity", FakeUserEntity)
     monkeypatch.setattr(roles_routes, "db", SimpleNamespace(session=session))
+    # Deleting a membership now runs three guards it never used to (rank, the
+    # subscription payer, the last admin) — see tests/test_membership_removal_guards.py,
+    # which is where they are exercised. This test is about what a PERMITTED removal
+    # does to the system role, so they are waved through: a cashier trips neither the
+    # rank nor the last-admin check on its own, and the payer lookup would otherwise
+    # reach the real subscription store.
+    monkeypatch.setattr(
+        roles_routes, "can_manage_role_assignment_for_entity", lambda *_a, **_k: True
+    )
+    monkeypatch.setattr(
+        roles_routes, "check_not_subscription_payer_or_error", lambda *_a, **_k: None
+    )
 
     with app.test_request_context(
         "/minty/api/users/target-user/role",

@@ -22,7 +22,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flask import g, has_app_context
 from loguru import logger
+
+# Per-request memo for ``available_plans``. Same shape and lifetime as ``policy.current``
+# and ``money.decimal_places`` — cached on ``g``, so it is per-request and thread-safe.
+#
+# Building the list costs TWO queries (``EntityFunction.query.all()`` plus
+# ``active_billing_plans``), and ``plan_for_module`` rebuilt the whole thing to answer for
+# one code — inside a per-row loop in the trial-conversion job, among others. The catalog
+# is a price list: it does not change while a request is in flight, and a daily pass runs
+# against one snapshot of it by design rather than by accident.
+_G_PLANS_KEY = "_subscription_available_plans"
 
 
 @dataclass(frozen=True)
@@ -114,7 +125,24 @@ def available_plans() -> list[PlanView]:
 
     Bundles are excluded on purpose: a bundle is not something a customer picks off a
     list, it is what two modules cost together. ``bundle_plan`` answers that separately.
+
+    Memoized for the request — see ``_G_PLANS_KEY``. The returned list is SHARED, so
+    callers must not mutate it; every one of them either iterates it or builds a dict
+    from it, and ``sorted`` below already hands back a fresh list each build.
     """
+    if has_app_context():
+        cached = getattr(g, _G_PLANS_KEY, None)
+        if cached is not None:
+            return cached
+
+    plans = _build_available_plans()
+    if has_app_context():
+        setattr(g, _G_PLANS_KEY, plans)
+    return plans
+
+
+def _build_available_plans() -> list[PlanView]:
+    """The uncached build. Split out so the memo above stays one readable branch."""
     ids = _function_ids()
     plans = []
     for plan in _single_plans():
