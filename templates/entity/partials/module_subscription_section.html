@@ -14,11 +14,15 @@
    a trial to convert — no card, or this company never authorised the saved one — and
    "Manage subscription" otherwise, including a trial that will convert on its own.
 
-   Cancelling and un-cancelling live in that modal: unticking a module drops it and
-   re-ticking a cancelled one keeps it, which is why a trialing or winding-down card
-   shows only its status. The exception is a LIVE PAID module, which keeps its own
-   Cancel on the card — both routes run the same preview and the same confirmation, so
-   the terms are identical either way. #}
+   Cancelling and un-cancelling live in that modal: unticking a PAID module drops it and
+   re-ticking a cancelled one keeps it, which is why a winding-down card shows only its
+   status. The exception is a LIVE PAID module, which keeps its own Cancel on the card —
+   both routes run the same preview and the same confirmation, so the terms are identical
+   either way.
+
+   A RUNNING TRIAL CANNOT BE CANCELLED FROM THE UI at all: not from its card, and not from
+   the modal, where its row is locked on. The server-side cancellation still exists and a
+   trial cancelled by other means still renders here as winding down. #}
 
 {# Two different reasons the actions can be missing, and they need different sentences.
    "Only admins can change modules" to someone who IS an admin but is not the payer reads
@@ -248,10 +252,9 @@
         {% endif %}
 
         {# Running free trial: the dark trial pill and nothing else. There is deliberately
-           no Cancel here — a trial is cancelled by UNTICKING the module in the trial
-           decision modal ("Subscribe to Minty" in the panel), so the choice of what to
-           keep and what to drop is made once, against the price of the resulting plan,
-           instead of module by module with no view of the total. #}
+           no Cancel here, and none in the decision modal either — cancelling a free trial
+           is not offered anywhere in the UI. A trial that is not wanted simply is not
+           given a card, and it expires on its own date at no cost. #}
         {% elif card.subscription_status == 'trialing' %}
         <span class="inline-block bg-[#1F2937] text-white text-xs font-semibold px-3.5 py-1.5 rounded-full shadow-sm whitespace-nowrap">
           Free trial{% if card.period_end_short %} · ends {{ card.period_end_short }}{% endif %}
@@ -477,9 +480,9 @@
       <div data-panel-primary>
         {# Both actions open the SAME subscription decision modal — the panel's button is
            only a difference of caption. It does not go to Stripe from here: the modal is
-           where modules are kept or dropped, and Continue there cancels what was unticked
-           and takes any kept trial through checkout (card capture, or billing
-           confirmation when a card is already saved).
+           where PAID modules are kept or dropped, and Continue there cancels what was
+           unticked and takes any trial through checkout (card capture, or billing
+           confirmation when a card is already saved). A trial cannot be dropped there.
 
            The Stripe billing PORTAL is a different thing and is not here: it is the
            dev-only button in the banner above. #}

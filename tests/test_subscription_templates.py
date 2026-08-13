@@ -92,9 +92,26 @@ def _render_trial(app, **overrides):
         )
 
 
+def _paid_card(code, name):
+    """The same card, once the trial has converted and it is being billed."""
+    card = _trial_card(code, name)
+    card.update({"subscription_status": "active", "needs_card": False})
+    return card
+
+
+def _keep_input(scripts, code):
+    """The decision modal's <input> for one module."""
+    import re
+
+    for tag in re.findall(r"<input[^>]*>", scripts):
+        if f'data-keep-code="{code}"' in tag:
+            return tag
+    raise AssertionError(f"no decision-modal row rendered for {code}")
+
+
 def test_trial_is_decided_in_the_modal_not_on_the_cards(app):
-    """A running trial offers no per-card Cancel: it is kept or dropped by ticking
-    it in the trial decision modal, which the panel's button opens."""
+    """A running trial offers no per-card Cancel: what it still needs — a card, this
+    company's consent — is settled in the decision modal the panel's button opens."""
     section, scripts = _render_trial(app)
 
     # Nothing on the card cancels the trial any more.
@@ -102,10 +119,47 @@ def test_trial_is_decided_in_the_modal_not_on_the_cards(app):
     # The panel's primary action opens the modal instead of jumping to checkout.
     assert "openSubscriptionDecision" in section
     assert "Subscribe to Minty" in section
-    # And the modal carries one tickable row per trialing module.
+    # And the modal carries one row per trialing module.
     assert 'data-keep-code="PETTY_CASH"' in scripts
     assert 'data-keep-code="BILL"' in scripts
     assert scripts.count('data-keep-state="trial"') == 2
+
+
+def test_a_running_trial_cannot_be_cancelled_from_the_ui(app):
+    """There is no route to cancelling a free trial: not the module card, and not the
+    decision modal, where the row is LOCKED ON.
+
+    Disabled rather than removed. The modal's job is to state what the entity has, and
+    dropping the trial row would leave a trial-only entity staring at an empty list. A
+    disabled box still reports ``checked`` to every reader in the script, so the kept-trial
+    path — card capture, billing consent — is untouched by this.
+    """
+    section, scripts = _render_trial(app)
+
+    for code in ("PETTY_CASH", "BILL"):
+        tag = _keep_input(scripts, code)
+        assert "disabled" in tag, f"{code}'s trial row must not be untickable"
+        assert "checked" in tag, f"{code} is live, so its row stays ticked"
+
+    # The copy that reached the removed wiring is gone with it. Matched as the JS string
+    # literal — single-quoted, as everything in this file is — so the comment recording
+    # what was removed does not itself trip the assertion.
+    assert "'Cancel free trial'" not in scripts
+    assert "cancelSubscription" not in section
+
+
+def test_a_paid_module_is_still_droppable_in_the_modal(app):
+    """The other half, and the reason the lock is per-row rather than on the modal: a
+    paid module is cancelled exactly as before, priced and confirmed against what
+    remains."""
+    _section, scripts = _render_trial(
+        app, module_cards=[_paid_card("PETTY_CASH", "Petty Cash")]
+    )
+
+    tag = _keep_input(scripts, "PETTY_CASH")
+    assert "disabled" not in tag
+    assert "checked" in tag
+    assert 'data-keep-state="paid"' in tag
 
 
 def test_manage_opens_the_same_modal_not_the_portal(app):
