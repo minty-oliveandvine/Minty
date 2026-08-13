@@ -710,6 +710,21 @@ def entity_settings_users(org_id):
             .all()
         )
 
+        # Who pays for this entity. NOT a role and not derivable from one — it is one
+        # person's financial relationship, recorded per entity — so it cannot be read off
+        # the ``role`` column beside it and has to be looked up separately.
+        #
+        # It is on this page because "who can change our modules" is answered by BOTH
+        # columns at once: MODULE_MANAGE needs admin rank, and may_manage_subscription
+        # needs the payer, so the one person who can is the admin carrying this tag. With
+        # only the role shown, every admin here looked equally able to, and the ones who
+        # are not the payer found the buttons missing with nothing on the page to explain
+        # why. Compared as a string because the id may arrive as a UUID.
+        from blueprints.subscription.services import store as sub_store
+
+        payer_id = sub_store.payer_for_entity(org_id)
+        subscriber_id = str(payer_id) if payer_id else None
+
         entity_acronym = ""
         if org and org.name:
             words = org.name.split()
@@ -749,6 +764,7 @@ def entity_settings_users(org_id):
             ),
             users=users,
             entity_acronym=entity_acronym,
+            subscriber_id=subscriber_id,
             roles=roles,
             entity_user_role_options=entity_user_role_options,
             bills_settings_query=bills_settings_query,
