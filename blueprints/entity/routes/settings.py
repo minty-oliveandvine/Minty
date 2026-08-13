@@ -666,6 +666,81 @@ def entity_settings(entity_id=None):
     )
 
 
+def _signed_in_members(org_id):
+    """(rows, member_count) for an entity's Users tab.
+
+    ``rows`` is the members signed in right now — logging out takes you off the
+    list, signing back in returns you to it; see services/user_presence.py for how
+    that is decided. ``member_count`` is everyone approved, signed in or not, which
+    is what lets the empty state tell "nobody has been invited yet" apart from
+    "everyone is signed out": the first needs an invite, the second needs nothing.
+
+    Shared by the page and by the poll behind it so the two cannot drift into
+    disagreeing about who is present.
+    """
+    from services.user_presence import is_signed_in_clause
+
+    member_query = (
+        db.session.query(User, UserEntity.role)
+        .join(UserEntity, User.id == UserEntity.user_id)
+        .filter(UserEntity.entity_id == org_id, UserEntity.approved)
+    )
+    return member_query.filter(is_signed_in_clause()).all(), member_query.count()
+
+
+@entity_bp.route("/entity/settings/users/<string:org_id>/presence", methods=["GET"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.USER_VIEW_ALL,
+    entity_arg="org_id",
+    message="You do not have permission to view all users for this entity.",
+)
+def entity_settings_users_presence(org_id):
+    """Just the user rows, for the Users tab to poll.
+
+    Same permission gate as the page itself — the fragment shows exactly what the
+    page shows, so anything less would be a way around it.
+
+    Returns rendered HTML rather than JSON rows on purpose: the markup stays
+    defined once, in settings_users_rows.html, instead of being duplicated in
+    JavaScript where the two copies would drift apart.
+
+    Note this endpoint is listed in pettycash/core/hooks.py as one that does NOT
+    count as user activity. A tab left open on this page polls all night, and
+    treating that as presence would keep whoever left it open on the list forever —
+    which is the exact thing last_seen_at exists to prevent.
+    """
+    users, member_count = _signed_in_members(org_id)
+    from blueprints.subscription.services import store as sub_store
+
+    payer_id = sub_store.payer_for_entity(org_id)
+    return jsonify(
+        {
+            "count": len(users),
+            # EVERY value the page passes has to be passed here too. The poll
+            # replaces the rows wholesale every 20 seconds, so anything missing
+            # does not merely render wrong once — it renders correctly on load and
+            # then disappears, which reads as a ghost rather than a bug.
+            "html": render_template(
+                "entity/settings_users_rows.html",
+                users=users,
+                member_count=member_count,
+                subscriber_id=str(payer_id) if payer_id else None,
+                can_edit_users=has_permission(
+                    current_user, Permission.USER_ROLE_ASSIGN, org_id
+                ),
+                can_remove_users=has_permission(
+                    current_user, Permission.USER_ROLE_DELETE, org_id
+                ),
+                is_view_only=not has_permission(
+                    current_user, Permission.USER_INVITE, org_id
+                ),
+            ),
+        }
+    )
+
+
 @entity_bp.route("/entity/settings/users/<string:org_id>", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="org_id")
@@ -702,13 +777,7 @@ def entity_settings_users(org_id):
                     _sync_err,
                 )
 
-        # Get users associated with this entity
-        users = (
-            db.session.query(User, UserEntity.role)
-            .join(UserEntity, User.id == UserEntity.user_id)
-            .filter(UserEntity.entity_id == org_id, UserEntity.approved)
-            .all()
-        )
+        users, member_count = _signed_in_members(org_id)
 
         # Who pays for this entity. NOT a role and not derivable from one — it is one
         # person's financial relationship, recorded per entity — so it cannot be read off
@@ -763,6 +832,7 @@ def entity_settings_users(org_id):
                 org_id, org, current_user.id, from_bills=from_origin == "bills"
             ),
             users=users,
+            member_count=member_count,
             entity_acronym=entity_acronym,
             subscriber_id=subscriber_id,
             roles=roles,
