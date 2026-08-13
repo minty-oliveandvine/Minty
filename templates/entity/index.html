@@ -120,19 +120,57 @@
             </div>
           </div>
           {% for org in organizations %}
-            <a class="entity-item bg-white w-full h-[48px] py-[16px] px-[8px] flex justify-between items-center border border-[#f6f6f8] rounded-[12px] text-[#1f2937] font-[600] hover:bg-gray-50 transition-colors shadow-md hover-lift" data-name="{{ org.name }}" href="{{ url_for('entity.module_selector', entity_id=org.id) if org.id else url_for('entity.entity_list') }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
-              <div class="flex items-center gap-2 min-w-0">
-                <span class="truncate">{{ org.name }}</span>
-                {% if org.status == 'onboarding' %}
-                <span class="flex-shrink-0 text-[11px] font-medium text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">In progress</span>
-                {% endif %}
-              </div>
-              <div>
-                <svg class="hover-slide" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M10.8234 9.99945L6.98561 13.8395L8.07324 14.9434L13.0142 9.99945L8.07324 5.05555L6.98561 6.15938L10.8234 9.99945Z" fill="#1F2937"/>
-                </svg>
-              </div>
-            </a>
+            {# entity-item + data-name stay on this wrapper, not the <a>: the
+               search filter toggles `hidden` on .entity-item, and the status
+               pill must hide along with the card it labels. #}
+            <div class="entity-item relative" data-name="{{ org.name }}">
+              {% if org.status == 'onboarding' %}
+              {# Onboarding never finished — pill floats over the card's top
+                 edge. The gap-4 on the list container leaves room for it. #}
+              <span class="absolute -top-2 left-3 z-10 text-[11px] font-medium text-[#1FA9B1] bg-[#E6F9FA] rounded-full px-2.5 py-0.5 shadow-sm">Setup in progress</span>
+              {% endif %}
+              <a class="bg-white w-full min-h-[56px] py-3 px-4 flex justify-between items-center gap-2 border border-[#f6f6f8] rounded-[12px] text-[#1f2937] font-[600] hover:bg-gray-50 transition-colors shadow-md hover-lift" href="{{ url_for('entity.module_selector', entity_id=org.id) if org.id else url_for('entity.entity_list') }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+                <span class="truncate flex-1 min-w-0 text-[17px]">{{ org.name }}</span>
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                  {# One badge per module the entity actually has. The resolver
+                     behind org.modules is fail-closed, so a badge here means
+                     the module is genuinely switched on. #}
+                  {% if 'PETTY_CASH' in org.modules %}
+                  <span class="inline-flex items-center justify-center w-7 h-7 rounded-full" style="background-color:#FFF3D6;" title="Petty Cash" aria-label="Petty Cash module">
+                    <img src="{{ url_for('static', filename='img/cash_reg.webp') }}" alt="" class="w-4 h-4 object-contain">
+                  </span>
+                  {% endif %}
+                  {% if 'BILL' in org.modules %}
+                  <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[#2563EB]" style="background-color:#DBEAFE;" title="Bills" aria-label="Bills module">
+                    <svg class="w-4 h-4" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M200-280v-280h80v280h-80Zm240 0v-280h80v280h-80ZM80-120v-80h800v80H80Zm600-160v-280h80v280h-80ZM80-640v-60l400-220 400 220v60H80Zm178-80h444-444Zm0 0h444L480-841 258-720Z"/></svg>
+                  </span>
+                  {% endif %}
+                  {# Last logged in. Filled clock + hover tooltip when we know;
+                     greyed clock when the entity has never been opened since
+                     this shipped. We don't guess a date we don't have. #}
+                  {% if org.last_accessed_display %}
+                  <span class="group relative inline-flex">
+                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-500 text-white" aria-label="Last opened {{ org.last_accessed_display }}{{ ' by ' ~ org.last_accessed_by if org.last_accessed_by }}">
+                      <svg class="w-4 h-4" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="m612-292 56-56-148-148v-184h-80v216l172 172ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>
+                    </span>
+                    <span class="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-right shadow-md z-20">
+                      <span class="block text-[12px] text-gray-500 leading-snug">{{ org.last_accessed_display }}</span>
+                      {% if org.last_accessed_by %}
+                      <span class="block text-[12px] text-gray-500 leading-snug">By {{ org.last_accessed_by }}</span>
+                      {% endif %}
+                    </span>
+                  </span>
+                  {% else %}
+                  <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-200 text-gray-400" title="Not opened yet" aria-label="Not opened yet">
+                    <svg class="w-4 h-4" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="m612-292 56-56-148-148v-184h-80v216l172 172ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>
+                  </span>
+                  {% endif %}
+                  <svg class="hover-slide" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10.8234 9.99945L6.98561 13.8395L8.07324 14.9434L13.0142 9.99945L8.07324 5.05555L6.98561 6.15938L10.8234 9.99945Z" fill="#1F2937"/>
+                  </svg>
+                </div>
+              </a>
+            </div>
           {% endfor %}
           <p id="noCompanyResults" class="hidden text-center text-sm text-gray-400 py-4">No companies found.</p>
           </div>
