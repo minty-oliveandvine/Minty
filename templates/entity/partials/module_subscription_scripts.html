@@ -135,20 +135,24 @@
    TWO variants of the same list, picked by what the entity actually has:
 
      * trial — "We're glad with your decision!". Only live modules are listed, ticked.
-       Unticking cancels that trial; Continue then asks for whatever the kept trials
-       still need (a card, or billing consent) so they convert instead of expiring.
+       Continue asks for whatever the kept trials still need (a card, or billing consent)
+       so they convert instead of expiring.
      * paid  — "Change your modules". Adds the modules the entity does NOT have, so the
        list is add-or-remove, and Save changes applies both directions.
 
    What each row does when it is ticked / unticked is decided by data-keep-state:
 
-     trial     ticked → needs card or consent   unticked → stop converting (free, silent)
+     trial     ticked → needs card or consent   CANNOT BE UNTICKED (box is disabled)
      paid      ticked → nothing (already on)    unticked → prorated cancel, priced+confirmed
      available ticked → subscribe (charged)     unticked → nothing
      winding   ticked → renew                   unticked → nothing
 
-   Which is why a trialing card no longer carries its own Cancel: the choice is made
-   here, priced against the plan it produces, instead of module by module.
+   CANCELLING A FREE TRIAL IS NOT OFFERED IN THE UI. It was this modal's untick, and
+   nothing else — the module cards never carried it — so removing the untick removes the
+   only route to it. The server-side cancellation is untouched
+   (``entity_settings_module_cancel`` still accepts a trialing module, and the scheduler
+   and support tooling still reach it); a trial cancelled by any of those still shows up
+   here as a winding row, and re-ticking it is how it is kept.
 
    z-[95] — deliberately BELOW the blocking loader (100) and the billing confirm dialog
    (110), because it stays open while the decision is applied: the loader has to cover
@@ -179,8 +183,16 @@
          prices and cancels like a paid module, so it keeps that state, and the badge
          below is what tells them apart. #}
       {% set state = 'paid' if c.subscription_status == 'past_due' else ('winding' if c.pending_cancel else ('trial' if c.subscription_status == 'trialing' else ('paid' if c.subscription_status == 'active' else 'available'))) %}
+      {# A RUNNING TRIAL IS LOCKED ON. Cancelling a free trial is not offered anywhere in
+         the UI, so its tick cannot be cleared and its row is not a click target — a box
+         that unticks and then does nothing would be worse than no box at all. The row
+         still renders, because the modal's job is to state what the entity has.
+
+         Only the wiring is gone. ``entity_settings_module_cancel`` still cancels a trial
+         server-side, and a trial that IS already cancelled keeps its normal winding-down
+         row here — re-ticking it is the undo, and this is the only place that offers it. #}
       <label data-keep-row data-row-state="{{ state }}"
-             class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 transition-colors hover:bg-gray-50">
+             class="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 transition-colors {% if state != 'trial' %}cursor-pointer hover:bg-gray-50{% endif %}">
         <span class="min-w-0">
           <span class="flex items-center gap-2">
             <span class="text-sm font-semibold text-gray-900">{{ c.name }}</span>
@@ -209,6 +221,10 @@
           <span class="mt-0.5 block text-xs text-gray-500" data-keep-detail></span>
         </span>
         <input type="checkbox" {% if state in ['trial', 'paid'] %}checked{% endif %}
+               {# Locked, not hidden — see the row comment. A disabled box still reports
+                  ``checked`` to every reader below, so a kept trial still reaches the
+                  card / consent step that makes it convert. #}
+               {% if state == 'trial' %}disabled{% endif %}
                data-keep-code="{{ c.code }}"
                data-keep-name="{{ c.name }}"
                data-keep-amount="{{ c.amount }}"
@@ -877,9 +893,12 @@
   // unticked, then take any kept TRIALS through checkout (card capture, or billing
   // confirmation on a saved card). Kept paid modules are already subscribed.
   //
-  // This is the only way to cancel a trial now; the module cards no longer offer it, so
-  // dropping a module is always priced against what remains rather than being a bare
-  // "are you sure".
+  // Dropping a PAID module is always priced against what remains rather than being a bare
+  // "are you sure" — which is why the module cards no longer carry their own Cancel.
+  //
+  // A trial cannot be dropped here at all: its row is locked on. Cancelling a free trial
+  // has no UI route, by design; the backend call still exists for the scheduler and for
+  // support.
   const subModal = document.getElementById('subDecisionModal');
 
   function subRows() {
@@ -1040,8 +1059,10 @@
       // entity whose modules are already winding down there is nothing to cancel — the
       // list is there to restore one — and "your subscription will be cancelled" would
       // describe the opposite of what the button does.
+      // Only paid modules can be dropped here — a trial's box is disabled, so an unticked
+      // row is never a trial.
       const removing = rows.filter(function (r) { return !r.checked; }).map(subItem)
-        .filter(function (i) { return i.state === 'trial' || i.state === 'paid'; });
+        .filter(function (i) { return i.state === 'paid'; });
       if (!removing.length) {
         const resumable = rows.map(subItem)
           .filter(function (i) { return i.state === 'winding'; });
@@ -1052,24 +1073,18 @@
         btn.textContent = paid ? 'Save changes' : 'Continue';
         return;
       }
-      // The two kinds end differently: a trial just stops, a paid module runs to the end
-      // of what was paid for and can put the extra days on the next invoice. The exact
-      // figures come from the server's preview when the button is pressed — this only
-      // has to say which of the two is about to happen.
-      const anyPaid = removing.some(function (i) { return i.state === 'paid'; });
+      // Always the paid wording now. This used to branch on whether a trial or a paid
+      // module was being dropped, and the trial half ("Cancel free trial", "your free
+      // trial runs to … and then stops") is gone with the wiring that reached it.
+      //
+      // A paid module runs to the end of what was paid for and can put the extra days on
+      // the next invoice; the exact figures come from the server's preview when the
+      // button is pressed, so this only has to say that it is about to happen.
       planEl.textContent = 'Nothing kept';
-      if (anyPaid) {
-        noteEl.textContent = 'Your subscription will be cancelled. You keep access for '
-          + 'what you have already paid for — the exact date, and anything still owed, '
-          + 'is shown before it is applied.';
-        btn.textContent = 'Cancel subscription';
-      } else {
-        noteEl.textContent = endsOn
-          ? 'Your free trial runs to ' + endsOn + ' and then stops. Nothing is charged, '
-            + 'and you can subscribe again from the module cards.'
-          : 'Your free trial will not convert. Nothing is charged.';
-        btn.textContent = 'Cancel free trial';
-      }
+      noteEl.textContent = 'Your subscription will be cancelled. You keep access for '
+        + 'what you have already paid for — the exact date, and anything still owed, '
+        + 'is shown before it is applied.';
+      btn.textContent = 'Cancel subscription';
       return;
     }
 
@@ -1147,10 +1162,14 @@
           + (turnOff ? ' on ' + turnOff : '') + '.'
         : !trialVariant
           ? 'Add or remove modules — changes apply at your next payment date.'
+          // Neither line invites unticking any more: a running trial cannot be dropped
+          // here, so "tick the ones you want to keep" described a choice the list no
+          // longer offers. What IS still being asked is whether the trial converts, which
+          // is what Continue settles.
           : running.length
             ? 'Your free trial covers ' + planFor(running).name
-              + (endsOn ? ' until ' + endsOn : '') + '. Tick the modules you want to keep.'
-            : 'Tick a module to keep it — anything left unticked stops when the free trial ends.';
+              + (endsOn ? ' until ' + endsOn : '') + '.'
+            : 'Your free trial is running. Continue to set up billing so it converts.';
     renderSubDecision();
     subModal.classList.remove('hidden');
   };
@@ -1213,11 +1232,14 @@
     const ticked = rows.filter(function (r) { return r.checked; }).map(subItem);
     const unticked = rows.filter(function (r) { return !r.checked; }).map(subItem);
 
-    // Unticking something live REMOVES it; ticking something that is not live ADDS it.
+    // Unticking a PAID module removes it; ticking something that is not live ADDS it.
     // Everything else — a kept paid module, an untouched available one — is a no-op.
-    const remove = unticked.filter(function (i) {
-      return i.state === 'trial' || i.state === 'paid';
-    });
+    //
+    // Trials are absent by construction: their boxes are disabled, so they cannot be
+    // unticked. The filter names only 'paid' anyway rather than relying on that, so a
+    // trial can never reach the cancel endpoint from this modal even if a row were
+    // re-enabled by hand.
+    const remove = unticked.filter(function (i) { return i.state === 'paid'; });
     const add = ticked.filter(function (i) { return i.state === 'available'; });
     const renew = ticked.filter(function (i) { return i.state === 'winding'; });
     const keptTrials = ticked.filter(function (i) { return i.state === 'trial'; });
@@ -1501,8 +1523,8 @@
   }
 
   // Cancel ONE module from its own card (by code — the payer's subscription covers
-  // several, so a subscription id no longer identifies one). Only PAID modules still
-  // offer this; a trial is dropped by unticking it in the decision modal.
+  // several, so a subscription id no longer identifies one). Only PAID modules offer
+  // this, and nothing in the UI cancels a TRIAL — see the decision modal's header.
   //
   // Confirms FIRST, against a server-computed preview: cancelling can put money on the
   // next invoice and always changes when access ends, and neither was stated anywhere
