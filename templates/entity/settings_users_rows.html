@@ -10,7 +10,11 @@
    entity_settings_users_presence for the poll, both from the same query, so the
    two can never disagree about who is signed in.
 
-   Needs: users, is_view_only, member_count. #}
+   Needs: users, member_count, is_view_only, subscriber_id, can_edit_users,
+   can_remove_users. EVERY caller must pass all six. A caller that forgets one
+   does not fail — Jinja renders undefined as empty — it silently drops the
+   subscriber tag or hides a button, and on the poll that shows up as UI which
+   appears on load and vanishes twenty seconds later. #}
 {% for user, role in users %}
 <div class="{% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} rounded-lg shadow-sm p-4">
   <div class="flex items-center justify-between">
@@ -22,12 +26,28 @@
         <div class="flex items-center space-x-2 flex-wrap">
           <h3 class="font-semibold text-gray-900 text-[10px] sm:text-base truncate">{{ user.first_name }} {{ user.last_name }}</h3>
           <span class="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#EEFBFB] text-[#54D3DA] text-[10px] sm:text-xs font-medium rounded-full flex-shrink-0" data-role="{{ role|lower }}">{{ role|lower|replace('_', ' ')|title }}</span>
+          {# SECOND tag, not a second role. The subscriber is who pays for this
+             company, which is a separate fact from their role — and the two are
+             read TOGETHER: changing modules needs admin rank AND the payer, so
+             the only person who can is the admin wearing both. Same teal as the
+             role tag, deliberately: the pair reads as one line about this
+             person rather than two competing labels. #}
+          {% if subscriber_id and user.id|string == subscriber_id %}
+          <span class="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#EEFBFB] text-[#54D3DA] text-[10px] sm:text-xs font-medium rounded-full flex-shrink-0"
+                data-subscriber
+                title="Billing for this company is on this person's card. Only they can change its modules, and only if they are an admin.">Subscriber</span>
+          {% endif %}
         </div>
         <p class="text-[10px] sm:text-sm text-gray-500 truncate">{{ user.username }}</p>
       </div>
     </div>
     <div class="flex items-center space-x-2">
-      {% if not is_view_only %}
+      {# ONE FLAG PER BUTTON, because the two endpoints behind them are not
+         guarded alike: editing needs USER_ROLE_ASSIGN (min shop manager) and
+         removing needs USER_ROLE_DELETE (min accountant). Both used to hang off
+         ``is_view_only``, which asks about INVITING — so a shop manager was
+         offered a remove button that the API answers with a 403. #}
+      {% if can_edit_users %}
       <button class="p-1.5 sm:p-2 text-gray-400 hover:text-[#54D3DA] transition-colors"
               onclick="openEditUserModal('{{ user.id }}', '{{ user.first_name }}', '{{ user.last_name }}', '{{ user.username }}', '{{ role|lower }}')"
               title="Edit user">
@@ -35,6 +55,8 @@
           <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-12.15 12.15a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32L19.513 8.2Z" />
         </svg>
       </button>
+      {% endif %}
+      {% if can_remove_users %}
       <button class="p-1.5 sm:p-2 text-gray-400 hover:text-red-500 transition-colors"
               onclick="openDeleteUserModal('{{ user.id }}', '{{ user.first_name }} {{ user.last_name }}')"
               title="Remove user">

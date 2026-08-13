@@ -712,13 +712,27 @@ def entity_settings_users_presence(org_id):
     which is the exact thing last_seen_at exists to prevent.
     """
     users, member_count = _signed_in_members(org_id)
+    from blueprints.subscription.services import store as sub_store
+
+    payer_id = sub_store.payer_for_entity(org_id)
     return jsonify(
         {
             "count": len(users),
+            # EVERY value the page passes has to be passed here too. The poll
+            # replaces the rows wholesale every 20 seconds, so anything missing
+            # does not merely render wrong once — it renders correctly on load and
+            # then disappears, which reads as a ghost rather than a bug.
             "html": render_template(
                 "entity/settings_users_rows.html",
                 users=users,
                 member_count=member_count,
+                subscriber_id=str(payer_id) if payer_id else None,
+                can_edit_users=has_permission(
+                    current_user, Permission.USER_ROLE_ASSIGN, org_id
+                ),
+                can_remove_users=has_permission(
+                    current_user, Permission.USER_ROLE_DELETE, org_id
+                ),
                 is_view_only=not has_permission(
                     current_user, Permission.USER_INVITE, org_id
                 ),
@@ -765,6 +779,21 @@ def entity_settings_users(org_id):
 
         users, member_count = _signed_in_members(org_id)
 
+        # Who pays for this entity. NOT a role and not derivable from one — it is one
+        # person's financial relationship, recorded per entity — so it cannot be read off
+        # the ``role`` column beside it and has to be looked up separately.
+        #
+        # It is on this page because "who can change our modules" is answered by BOTH
+        # columns at once: MODULE_MANAGE needs admin rank, and may_manage_subscription
+        # needs the payer, so the one person who can is the admin carrying this tag. With
+        # only the role shown, every admin here looked equally able to, and the ones who
+        # are not the payer found the buttons missing with nothing on the page to explain
+        # why. Compared as a string because the id may arrive as a UUID.
+        from blueprints.subscription.services import store as sub_store
+
+        payer_id = sub_store.payer_for_entity(org_id)
+        subscriber_id = str(payer_id) if payer_id else None
+
         entity_acronym = ""
         if org and org.name:
             words = org.name.split()
@@ -805,11 +834,31 @@ def entity_settings_users(org_id):
             users=users,
             member_count=member_count,
             entity_acronym=entity_acronym,
+            subscriber_id=subscriber_id,
             roles=roles,
             entity_user_role_options=entity_user_role_options,
             bills_settings_query=bills_settings_query,
+            # THREE flags, because this page offers three actions behind three different
+            # permissions — and it used to gate all of them on one.
+            #
+            # ``is_view_only`` is about INVITING, which is what it has always meant: it
+            # drives the floating add-user button and the page's read-only styling.
+            #
+            # The per-row buttons are the ones that were wrong. Remove posts to
+            # ``delete_user_role``, which requires USER_ROLE_DELETE (min ACCOUNTANT),
+            # while this flag asks about USER_INVITE (min SHOP_MANAGER) — so a shop
+            # manager was shown a remove button that the API answers with a 403. Each
+            # button now asks about the permission its own endpoint enforces, and edit
+            # gets the same treatment even though its floor happens to match today,
+            # because "happens to match" is not a reason to ask the wrong question.
             is_view_only=not has_permission(
                 current_user, Permission.USER_INVITE, org_id
+            ),
+            can_edit_users=has_permission(
+                current_user, Permission.USER_ROLE_ASSIGN, org_id
+            ),
+            can_remove_users=has_permission(
+                current_user, Permission.USER_ROLE_DELETE, org_id
             ),
         )
     except Exception as e:

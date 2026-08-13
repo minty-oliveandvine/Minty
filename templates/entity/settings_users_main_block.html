@@ -56,9 +56,14 @@
            loadPendingInvitations() and would be wiped by every poll if they shared
            the swapped element. #}
         <div class="space-y-3">
+          {# The poll URL is optional. Live refresh is an enhancement on top of a list
+             that is already correct the moment it renders, so this block must not
+             hard-require ``org`` just to draw itself — anything rendering it for the
+             rows alone (the subscriber-tag tests do) would otherwise die on an
+             undefined. With no URL the script simply never starts polling. #}
           <div id="userListRows"
                class="space-y-3"
-               data-presence-url="{{ url_for('entity.entity_settings_users_presence', org_id=org.id) }}">
+               {% if org is defined and org %}data-presence-url="{{ url_for('entity.entity_settings_users_presence', org_id=org.id) }}"{% endif %}>
             {% include 'entity/settings_users_rows.html' %}
           </div>
 
