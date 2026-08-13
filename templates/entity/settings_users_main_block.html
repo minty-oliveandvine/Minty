@@ -61,6 +61,17 @@
                   <div class="flex items-center space-x-2 flex-wrap">
                     <h3 class="font-semibold text-gray-900 text-[10px] sm:text-base truncate">{{ user.first_name }} {{ user.last_name }}</h3>
                     <span class="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#EEFBFB] text-[#54D3DA] text-[10px] sm:text-xs font-medium rounded-full flex-shrink-0" data-role="{{ role|lower }}">{{ role|lower|replace('_', ' ')|title }}</span>
+                    {# SECOND tag, not a second role. The subscriber is who pays for this
+                       company, which is a separate fact from their role — and the two are
+                       read TOGETHER: changing modules needs admin rank AND the payer, so
+                       the only person who can is the admin wearing both. Same teal as the
+                       role tag, deliberately: the pair reads as one line about this
+                       person rather than two competing labels. #}
+                    {% if subscriber_id and user.id|string == subscriber_id %}
+                    <span class="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#EEFBFB] text-[#54D3DA] text-[10px] sm:text-xs font-medium rounded-full flex-shrink-0"
+                          data-subscriber
+                          title="Billing for this company is on this person's card. Only they can change its modules, and only if they are an admin.">Subscriber</span>
+                    {% endif %}
                   </div>
                   <p class="text-[10px] sm:text-sm text-gray-500 truncate">{{ user.username }}</p>
                 </div>
