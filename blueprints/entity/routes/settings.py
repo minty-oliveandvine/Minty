@@ -1137,7 +1137,8 @@ def entity_settings_module(org_id):
                                                     get_billing_anchor,
                                                     get_module_cards,
                                                     get_next_payment_date,
-                                                    get_subscription_summary)
+                                                    get_subscription_summary,
+                                                    next_payment_from_panel)
 
     org = Entity.query.get_or_404(org_id)
 
@@ -1145,13 +1146,19 @@ def entity_settings_module(org_id):
 
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
-    # Two different dates. The anchor is never shown — it only answers "has this payer
-    # ever been billed", which is what puts the panel in its paid rather than its trial
-    # mode. What the page DISPLAYS is the same cycle projected to its next boundary.
+    # Never shown. The anchor only answers "has this payer ever been billed", which is
+    # what puts the panel in its paid rather than its trial mode.
     billing_anchor = get_billing_anchor(org_id)
-    next_payment_date = get_next_payment_date(org_id)
     subscription_panel = build_subscription_panel(
         module_cards, subscription_summary, billing_anchor
+    )
+    # The date on the card at the top of the page, and it is READ OFF THE PANEL rather
+    # than computed beside it — the card and the list below it were two answers to one
+    # question, and they disagreed whenever anything other than the renewal came first.
+    # The payer's projected cycle is only the fallback, for an entity with nothing
+    # scheduled at all.
+    next_payment_date = (
+        next_payment_from_panel(subscription_panel) or get_next_payment_date(org_id)
     )
 
     # Only admins may change modules; everyone else views read-only.

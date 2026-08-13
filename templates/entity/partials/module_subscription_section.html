@@ -35,9 +35,11 @@
   {%- endif %}
 </p>
 
-{# The next payment date — the one date every entity is billed on, projected to its next
-   occurrence by get_next_payment_date. "To Be Decided" until the first charge starts the
-   cycle (an app-level trial has no cycle, so there is no date to name). #}
+{# The next payment date — the date of the first charge in the panel's own "Upcoming
+   charges" list, so this card and that list cannot name different days (see
+   next_payment_from_panel). Falls back to the payer's projected cycle when this entity
+   has nothing scheduled, and reads "To Be Decided" when there is no cycle either — an
+   app-level trial has never been charged, so there is no date to name. #}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-2xl border border-gray-200/70 bg-white px-4 py-3.5 shadow-sm">
   <div class="flex items-center gap-3 min-w-0">
     {# Two-tone calendar: red header band, dark outlined body, dark rings above it. Not
@@ -55,7 +57,13 @@
       <p class="text-[15px] font-bold leading-tight text-gray-900">{{ next_payment_date or 'To Be Decided' }}</p>
     </div>
   </div>
-  <p class="max-w-[17rem] text-xs leading-snug text-gray-500 sm:text-right">All entities are billed on this date each month.</p>
+  {# "All entities are billed on this date each month" stopped being true when the date
+     started coming from the upcoming-charges list: the next charge can be a one-off — a
+     trial converting, or the extra days on a cancellation — which belongs to THIS company
+     alone and recurs nothing. The shared cycle is still worth stating, since it is why
+     every company this payer holds shows the same renewal date, so the claim is kept and
+     narrowed to the renewals it was always about. #}
+  <p class="max-w-[17rem] text-xs leading-snug text-gray-500 sm:text-right">Your next charge for this company — renewals share one date across every company you pay for.</p>
 </div>
 
 {# ONE page-level trial nudge, not one per module — the thing that needs fixing (a
