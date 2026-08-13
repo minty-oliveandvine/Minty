@@ -25,7 +25,7 @@ def _user(uid, first="Ada", last="Lovelace"):
     )()
 
 
-def _render(app, users, subscriber_id=None):
+def _render(app, users, subscriber_id=None, can_edit=True, can_remove=True):
     """The shared users block, as both the Petty Cash and Bills pages include it."""
     from flask import render_template
 
@@ -35,6 +35,8 @@ def _render(app, users, subscriber_id=None):
             users=users,
             subscriber_id=subscriber_id,
             is_view_only=False,
+            can_edit_users=can_edit,
+            can_remove_users=can_remove,
         )
 
 
@@ -89,6 +91,27 @@ def test_the_tag_is_the_payer_not_the_rank(app):
     assert "Subscriber" in ada
     assert "Cashier" in ada, "the role tag stays — the two are separate facts"
     assert "Subscriber" not in _row_for(html, "Grace")
+
+
+def test_each_row_button_follows_its_own_endpoints_permission(app):
+    """Edit and Remove post to endpoints guarded differently — USER_ROLE_ASSIGN (min shop
+    manager) and USER_ROLE_DELETE (min accountant). Both used to hang off ``is_view_only``,
+    which asks about INVITING, so a shop manager was shown a Remove button that the API
+    answers with a 403."""
+    users = [(_user("u1", "Ada"), "admin")]
+
+    both = _render(app, users)
+    assert "openEditUserModal" in both
+    assert "openDeleteUserModal" in both
+
+    # A shop manager: may edit, may not remove.
+    edit_only = _render(app, users, can_remove=False)
+    assert "openEditUserModal" in edit_only
+    assert "openDeleteUserModal" not in edit_only
+
+    neither = _render(app, users, can_edit=False, can_remove=False)
+    assert "openEditUserModal" not in neither
+    assert "openDeleteUserModal" not in neither
 
 
 def test_the_id_comparison_survives_a_uuid(app):
