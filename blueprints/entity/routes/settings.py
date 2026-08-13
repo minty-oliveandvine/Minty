@@ -768,8 +768,27 @@ def entity_settings_users(org_id):
             roles=roles,
             entity_user_role_options=entity_user_role_options,
             bills_settings_query=bills_settings_query,
+            # THREE flags, because this page offers three actions behind three different
+            # permissions — and it used to gate all of them on one.
+            #
+            # ``is_view_only`` is about INVITING, which is what it has always meant: it
+            # drives the floating add-user button and the page's read-only styling.
+            #
+            # The per-row buttons are the ones that were wrong. Remove posts to
+            # ``delete_user_role``, which requires USER_ROLE_DELETE (min ACCOUNTANT),
+            # while this flag asks about USER_INVITE (min SHOP_MANAGER) — so a shop
+            # manager was shown a remove button that the API answers with a 403. Each
+            # button now asks about the permission its own endpoint enforces, and edit
+            # gets the same treatment even though its floor happens to match today,
+            # because "happens to match" is not a reason to ask the wrong question.
             is_view_only=not has_permission(
                 current_user, Permission.USER_INVITE, org_id
+            ),
+            can_edit_users=has_permission(
+                current_user, Permission.USER_ROLE_ASSIGN, org_id
+            ),
+            can_remove_users=has_permission(
+                current_user, Permission.USER_ROLE_DELETE, org_id
             ),
         )
     except Exception as e:

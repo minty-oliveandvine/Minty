@@ -6,7 +6,10 @@ from flask_login import current_user, login_required, logout_user
 from blueprints.user_management import user_management_bp
 from blueprints.user_management.services.roles import (
     check_can_manage_membership_or_error,
+    check_not_last_admin_or_error,
+    check_not_subscription_payer_or_error,
     check_role_assignment_or_error,
+    check_role_change_or_error,
     find_membership_or_error,
 )
 from models.db import User, UserEntity, db
@@ -86,6 +89,13 @@ def update_user_details(user_id):
         )
         if error is not None:
             return error
+        # Losing admin reaches the same broken states removal does, so this route is
+        # guarded too — otherwise "demote then delete" walks straight around the DELETE.
+        error = check_role_change_or_error(
+            membership.role, new_role, user_id, entity_id, model=UserEntity
+        )
+        if error is not None:
+            return error
         membership.role = new_role
 
     db.session.commit()
@@ -157,6 +167,16 @@ def update_user_role(user_id):
     if error is not None:
         return error
 
+    # The payer must stay an admin, and the last admin must stay an admin — both for the
+    # same reason the DELETE refuses them. Self-demotion is the case this was asked for
+    # and it needs no special handling: the rule is about the ROLE being given up, so it
+    # reads the same whoever is pressing the button.
+    error = check_role_change_or_error(
+        membership.role, new_role, user_id, entity_id, model=UserEntity
+    )
+    if error is not None:
+        return error
+
     membership.role = new_role
 
     db.session.commit()
@@ -196,6 +216,41 @@ def delete_user_role(user_id):
         )
 
     membership, error = find_membership_or_error(user_id, entity_id, model=UserEntity)
+    if error is not None:
+        return error
+
+    # THREE guards, and none of them was here. Removing a membership was the only
+    # destructive action on this table that ran no check beyond the route permission —
+    # while ``update_user_role``, which merely CHANGES a role, ran two.
+    #
+    # Ordered by what each answers: may you act on this person at all, then the two
+    # invariants that deleting would break. The payer comes before the last-admin count
+    # because it is the more actionable of the two — moving the subscription is a
+    # prerequisite either way, and it is the one that costs money while it is wrong.
+
+    # 1. Rank. USER_ROLE_DELETE's floor is ACCOUNTANT, so without this an accountant
+    #    could delete an admin outright — an action they cannot perform through the
+    #    weaker route of demoting that admin first. Same policy the PATCH uses, so the
+    #    two agree about who may touch whom.
+    error = check_can_manage_membership_or_error(
+        membership.role,
+        entity_id,
+        user=current_user,
+        policy=can_manage_role_assignment_for_entity,
+    )
+    if error is not None:
+        return error
+
+    # 2. The payer's card outlives their membership — see the check for what that
+    #    strands. Applies to everyone, self-removal included.
+    error = check_not_subscription_payer_or_error(user_id, entity_id)
+    if error is not None:
+        return error
+
+    # 3. An entity with no admin cannot be administered, and cannot appoint one.
+    error = check_not_last_admin_or_error(
+        membership.role, user_id, entity_id, model=UserEntity
+    )
     if error is not None:
         return error
 
