@@ -13,7 +13,42 @@ from __future__ import annotations
 import os
 
 import stripe
-from flask import current_app
+from flask import current_app, g, has_app_context
+
+# Per-request memo for ``customer_default_payment_method``. Same shape and lifetime as
+# ``policy.current`` / ``money.decimal_places`` / ``clock.now`` — cached on the app-context
+# global ``g``, so it is per-request and thread-safe (each context has its own ``g``).
+#
+# It is here because "does this customer have a card" is a NETWORK round trip, and it was
+# being made on every module-settings render, on the payer portal, and once per entity per
+# login on the dashboard — synchronously, in front of the response. The answer cannot
+# change while a request is in flight except by our own write, and that write invalidates
+# it (see ``set_customer_default_payment_method``).
+_G_DEFAULT_PM_KEY = "_stripe_default_payment_methods"
+
+
+def _default_pm_cache() -> dict | None:
+    """The request's memo, or None outside an app context (CLI, worker, import time)."""
+    if not has_app_context():
+        return None
+    cache = getattr(g, _G_DEFAULT_PM_KEY, None)
+    if cache is None:
+        cache = {}
+        setattr(g, _G_DEFAULT_PM_KEY, cache)
+    return cache
+
+
+def forget_default_payment_method(customer_id: str | None) -> None:
+    """Drop the memoized answer for one customer, after their card on file changed.
+
+    Without this the memo is a correctness bug, not just a stale read: paid checkout
+    captures a card and then asks whether one is on file to decide if it may subscribe
+    directly (``checkout._has_payment_method``). Answering from a memo taken BEFORE the
+    capture would send the payer back to capture a card they just saved.
+    """
+    cache = _default_pm_cache()
+    if cache is not None and customer_id:
+        cache.pop(str(customer_id), None)
 
 
 def _config_value(key: str) -> str | None:
@@ -333,10 +368,14 @@ def retrieve_checkout_session(session_id: str):
 
 def set_customer_default_payment_method(customer_id: str, payment_method_id: str):
     """Make ``payment_method_id`` the customer's default for invoices."""
-    return get_stripe().Customer.modify(
+    result = get_stripe().Customer.modify(
         customer_id,
         invoice_settings={"default_payment_method": payment_method_id},
     )
+    # The memo below now holds a stale "no card" for this customer, and the very next
+    # thing checkout does is ask whether one is on file.
+    forget_default_payment_method(customer_id)
+    return result
 
 
 def set_customer_identity(
@@ -388,15 +427,28 @@ def customer_default_payment_method(customer_id: str | None) -> str | None:
 
     Used to decide whether paid checkout can create subscriptions directly (a card
     is on file) or must first capture one via a setup-mode Checkout.
+
+    MEMOIZED FOR THE REQUEST. The Stripe round trip behind this was on the render path of
+    every module-settings page — and ``get_module_cards`` is not the only caller in a
+    request. ``None`` is cached like any other answer: "this payer has no card" is the
+    common case on a trial and the one worth not asking twice.
     """
     if not customer_id:
         return None
+
+    cache = _default_pm_cache()
+    key = str(customer_id)
+    if cache is not None and key in cache:
+        return cache[key]
+
     customer = retrieve_customer(customer_id)
-    if not customer:
-        return None
-    pm = (customer.get("invoice_settings") or {}).get("default_payment_method")
-    if isinstance(pm, dict):
-        pm = pm.get("id")
+    pm = None
+    if customer:
+        pm = (customer.get("invoice_settings") or {}).get("default_payment_method")
+        if isinstance(pm, dict):
+            pm = pm.get("id")
+    if cache is not None:
+        cache[key] = pm
     return pm
 
 
