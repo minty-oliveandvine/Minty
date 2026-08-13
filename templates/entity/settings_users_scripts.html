@@ -572,20 +572,28 @@
        setTimeout(() => { closeFilterToast(); }, 4000);
      }
 
+     // The role filter currently applied, so the live refresh can re-apply it to
+     // rows it has just swapped in — those are new elements and know nothing
+     // about a filter the viewer chose before they arrived.
+     let currentRoleFilter = null;
+
      // User filtering function
      function filterUsers(role) {
-       const userCards = document.querySelectorAll('.space-y-3 > div');
+       currentRoleFilter = role;
+       // Scoped to the rows container, not '.space-y-3 > div': the pending
+       // invitations block is a sibling of that container and is not a user row.
+       const userCards = document.querySelectorAll('#userListRows > div');
        let visibleCount = 0;
-       
+
        userCards.forEach(card => {
          // Skip the empty state div if it exists
          if (card.classList.contains('text-center')) {
            return;
          }
-         
+
          const roleSpan = card.querySelector('span[data-role]');
          const userRole = roleSpan ? roleSpan.getAttribute('data-role') : '';
-         
+
          if (role === null || userRole === role) {
            card.style.display = 'block';
            visibleCount++;
@@ -593,17 +601,77 @@
            card.style.display = 'none';
          }
        });
-       
+
        // Update user count display
        updateUserCount(visibleCount);
      }
-     
+
      function updateUserCount(count) {
-       const countElement = document.querySelector('.text-sm.text-gray-500');
+       const countElement = document.getElementById('signedInCount');
        if (countElement) {
-         countElement.textContent = `${count} user${count !== 1 ? 's' : ''}`;
+         // Matches the server-rendered wording — the list is who is signed in, not
+         // who is a member, and the two counts are different numbers.
+         countElement.textContent = `${count} signed in`;
        }
      }
+
+     // ── Live refresh of the signed-in list ───────────────────────────────
+     //
+     // Polling, not websockets. The underlying data cannot change faster than this
+     // anyway: presence is refreshed at most once a minute per user, and an
+     // abandoned browser takes the full idle window to drop off. A push channel
+     // would add a long-lived connection per viewer — and a worker to hold it —
+     // to deliver the same information no sooner.
+     (function () {
+       const container = document.getElementById('userListRows');
+       if (!container || typeof fetch !== 'function') return;
+
+       const url = container.getAttribute('data-presence-url');
+       if (!url) return;
+
+       const POLL_MS = 20000;
+       let timer = null;
+       let inFlight = false;
+
+       function poll() {
+         // document.hidden: a backgrounded tab is not being read, so nothing is
+         // gained by refreshing it. It catches up on the visibilitychange below.
+         if (inFlight || document.hidden) return;
+         inFlight = true;
+         fetch(url, {
+           headers: { 'X-Requested-With': 'XMLHttpRequest' },
+           credentials: 'same-origin',
+         })
+           .then(function (res) { return res.ok ? res.json() : null; })
+           .then(function (data) {
+             if (!data || typeof data.html !== 'string') return;
+             container.innerHTML = data.html;
+             // Re-applies the filter AND refreshes the count in one call.
+             filterUsers(currentRoleFilter);
+           })
+           .catch(function () {
+             // Offline, or a session that has expired. Either way the next tick
+             // tries again; a failed refresh must not blank the list.
+           })
+           .finally(function () { inFlight = false; });
+       }
+
+       function start() { if (!timer) timer = setInterval(poll, POLL_MS); }
+       function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+       document.addEventListener('visibilitychange', function () {
+         if (document.hidden) {
+           stop();
+         } else {
+           // Refresh immediately on return — coming back to a stale list is the
+           // moment the staleness is most obvious.
+           poll();
+           start();
+         }
+       });
+
+       start();
+     })();
 
      // ── Edit User Modal ──────────────────────────────────────────────
      function openEditUserModal(userId, firstName, lastName, email, role) {

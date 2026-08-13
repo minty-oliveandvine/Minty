@@ -56,6 +56,14 @@ class User(UserMixin, db.Model):
     token_created_at = db.Column(
         db.TIMESTAMP, nullable=True, default=lambda: datetime.now(tz)
     )
+    # Sign-in presence, read by Settings > Users (see services/user_presence.py).
+    # `signed_in_at` is the intent — stamped at login, cleared at logout, from
+    # either module. `last_seen_at` is the backstop for the browser that is simply
+    # closed, which sends no logout at all and would otherwise leave the person
+    # listed as signed in forever. Both are naive HK-local, matching every other
+    # TIMESTAMP on this table.
+    signed_in_at = db.Column(db.TIMESTAMP, nullable=True)
+    last_seen_at = db.Column(db.TIMESTAMP, nullable=True)
 
     @classmethod
     def normalize_system_role(cls, system_role: str | None) -> str:
