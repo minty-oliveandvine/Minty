@@ -305,3 +305,51 @@ def test_the_closing_card_still_warns_when_it_will_not_convert(app):
     closing = _render(app, _trial_card(trial_closing=True, needs_card=True))
     assert "won't convert" in closing
     assert "trial ended- finalising" in closing
+
+
+def test_a_long_stale_trial_is_expired_not_closing(app, monkeypatch):
+    """The bound that production needed, and the regression that found it.
+
+    ``trial_closing`` was first written as "phase is trial, access is still on", justified
+    as self-limiting because the next pass resolves it within the hour. That holds only
+    where the pass RUNS. With no scheduler — production, until it is enabled there — a
+    trial keeps its phase and its access indefinitely, so the unbounded version matched
+    every stale trial forever.
+
+    The visible damage was not the card. ``needs_card`` is ``app_trial and not
+    will_convert``, so folding closing into ``app_trial`` switched it on for every stale
+    trial, and the settings banner swapped from the billing-portal text to a nudge quoting
+    a deadline weeks in the past.
+    """
+    card = _card(
+        app,
+        monkeypatch,
+        paid_through=None,
+        row=_TrialRow(ended_ago=timedelta(days=21)),
+        has_access=True,  # nothing ever revoked it, because nothing ran
+    )
+    assert card["trial_closing"] is False
+    assert card["subscription_status"] is None
+    assert card["trial_expired"] is True
+    # The one that displaced the banner.
+    assert card["needs_card"] is False
+
+
+def test_the_closing_window_is_wide_enough_for_a_missed_pass(app, monkeypatch):
+    """A pass that was skipped by a deploy must not flip the card to "expired".
+
+    The window has to absorb an outage of a few hours without the customer seeing their
+    trial declared over while they are still working inside it.
+    """
+    import blueprints.entity.services.modules as modules_mod
+
+    assert modules_mod.TRIAL_CLOSING_WINDOW >= timedelta(hours=3)
+    card = _card(
+        app,
+        monkeypatch,
+        paid_through=None,
+        row=_TrialRow(ended_ago=timedelta(hours=4)),
+        has_access=True,
+    )
+    assert card["trial_closing"] is True
+    assert card["trial_expired"] is False

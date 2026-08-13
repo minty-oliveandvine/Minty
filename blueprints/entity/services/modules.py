@@ -24,7 +24,7 @@ an unambiguous DB record.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Mapping
 
@@ -38,6 +38,16 @@ from models.db import EntityFunction, EntityFunctionMap, db
 MODULE_PETTY_CASH = "PETTY_CASH"
 MODULE_BILL = "BILL"
 MODULE_CODES: tuple[str, ...] = (MODULE_PETTY_CASH, MODULE_BILL)
+
+# How long after ``trial_end`` a trial the subscription pass has not closed out yet still
+# presents as a trial being finalised rather than as one that expired.
+#
+# Six hours against an hourly pass: wide enough to cover a missed run, a deploy, or a host
+# that was busy, and far too narrow to cover an environment where nothing runs at all.
+# That second half is the point. Without a bound, every stale trial on a system with no
+# scheduler matches forever — which is precisely what production is until the scheduler is
+# enabled there.
+TRIAL_CLOSING_WINDOW = timedelta(hours=6)
 
 # What the multi-module plan is called on screen. The catalog row carries its own
 # display_name and that wins; this is the fallback for a catalog that has no bundle
@@ -413,8 +423,30 @@ def get_module_cards(entity_id: str) -> list[dict]:
         # or expires the row, and failing that the sweep revokes access because
         # ``grants_access`` is already false. A scheduler that stopped cannot leave a card
         # stuck here; it resolves to the honest ``trial_expired`` as soon as anything runs.
+        _trial_end = getattr(row, "trial_end", None)
         app_trial_closing = bool(
-            row is not None and phase == PHASE_TRIAL and not granted and has_access
+            row is not None
+            and phase == PHASE_TRIAL
+            and not granted
+            and has_access
+            # BOUNDED BY TIME, and this is the whole safety of the state.
+            #
+            # It was first written as "phase is trial, access is still on" and justified
+            # as self-limiting: the next pass converts or expires the row within the hour,
+            # so it could not persist. That is only true where the pass RUNS. On an
+            # environment with no scheduler — which production was, and which any
+            # environment becomes the moment the scheduler is off — a trial past its term
+            # keeps its phase and its access indefinitely, and the unbounded version
+            # matched every one of them, forever: a trial that ended three weeks ago
+            # rendered as a running trial with a past date, and ``needs_card`` turned on
+            # with it, which displaced the billing-portal banner with a nudge quoting a
+            # deadline in the past.
+            #
+            # So the window is explicit. Past it, the trial is not "being closed out", it
+            # is simply over and nothing came for it — which is what ``trial_expired`` has
+            # always said.
+            and _trial_end is not None
+            and (now - _trial_end) <= TRIAL_CLOSING_WINDOW
         )
         # Folded into ``app_trial`` rather than given a status of its own. Everything
         # downstream — the panel's enabled set, the notices, the badge, the row styling —
@@ -795,6 +827,43 @@ def get_billing_anchor(entity_id: str) -> str | None:
     return _fmt_day_month_year(anchor) if anchor else None
 
 
+def get_next_payment_date(entity_id: str) -> str | None:
+    """The payer's NEXT billing date, formatted for display, or None if there is no cycle.
+
+    What the settings page shows. The anchor itself is the wrong thing to put in front of
+    a customer: it is the ORIGINAL first-charge date and never moves, so a payer anchored
+    in July still reads "28 Jul 2026" in August — a date in the past, labelled as when
+    they will be billed. This projects the same cycle forward instead.
+
+    Derived from the anchor rather than from ``paid_through`` so the month-end clamp is
+    the same one the renewal runner bills on (``period_containing``: 31 Jan → 28 Feb →
+    back to 31 Mar), and so it can never quote a date that has already gone —
+    ``period_containing`` returns the period ``now`` is inside, whose END is by
+    construction still ahead.
+
+    None while the entity is only on an app-level trial: no charge has happened, so there
+    is no cycle to project and nothing honest to name. The page shows that as
+    "To Be Decided", same as before.
+    """
+    from blueprints.subscription.services import clock
+    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services.billing import period_containing
+
+    payer_id = sub_store.payer_for_entity(entity_id)
+    if not payer_id:
+        return None
+    anchor, _currency = sub_store.billing_cycle_for_user(payer_id)
+    if not anchor:
+        return None
+    try:
+        return _fmt_day_month_year(period_containing(anchor, clock.now()).end)
+    except Exception:
+        # A date on a card must never cost anyone the page — the panel below it carries
+        # the same information per module.
+        logger.exception("modules: could not project the next payment date for {}", entity_id)
+        return None
+
+
 def _forecast_conversion_charges(entity_id, payer_id, billed_now, cards) -> dict[str, int]:
     """{code: minor units} actually charged ON each converting trial's date.
 
@@ -1031,7 +1100,9 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
     they're trialing or paid — the trial panel has to preview the price the trial will
     convert to. The billing anchor decides the mode: no anchor yet ⇒ still on trial
     ("Subscribe to Minty", "first charge … on <trial end>"); anchor set ⇒ paid
-    ("Manage subscription", "Billed …/mo · anchor <date>").
+    ("Manage subscription", "Billed …/mo · next payment <date>"). ``anchor_display`` is
+    only ever read as that switch — the anchor is a past date and is never shown; the
+    footer names ``next_invoice_on``, the date the cycle actually bills next.
 
     ALWAYS returns a panel. With nothing enabled it returns an ``is_empty`` one that
     still names every module and prices the total at zero, rather than None — the panel
@@ -1422,9 +1493,13 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
                 f"on {first_charge_on}."
             )
     else:
+        # The date named here is the one the cycle NEXT bills, not the anchor: the anchor
+        # is the first charge and never moves, so it reads as a past date beside a
+        # forward-looking sentence. Absent when nothing renews (every paid module winding
+        # down), and then the line just states the rate.
         footer = (
-            f"Billed {total_fmt}/mo · anchor {anchor_display}."
-            if anchor_display
+            f"Billed {total_fmt}/mo · next payment {next_invoice_on}."
+            if next_invoice_on
             else f"Billed {total_fmt}/mo."
         )
 

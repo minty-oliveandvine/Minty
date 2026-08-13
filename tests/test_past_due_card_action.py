@@ -67,7 +67,7 @@ def _actions(app, cards):
             "entity/partials/module_subscription_section.html"
         ).render(
             module_cards=cards, subscription_summary=SUMMARY,
-            subscription_panel=panel, billing_anchor="28 Jun 2026",
+            subscription_panel=panel, next_payment_date="28 Jun 2026",
             org=type("O", (), {"id": "e1", "name": "Company"})(),
             can_manage_modules=True,
         )
