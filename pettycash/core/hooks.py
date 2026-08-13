@@ -5,13 +5,21 @@ import time
 
 from flask import (flash, has_request_context, jsonify, redirect,
                    render_template, request, session, url_for)
-from flask_login import current_user, user_logged_in
+from flask_login import current_user, user_logged_in, user_logged_out
 from flask_wtf.csrf import CSRFError
 from loguru import logger
 
 from models.db import Entity
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token, token_expired)
+from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
+                                    mark_signed_out, refresh_presence)
+
+# Requests the browser makes on its own, which say nothing about whether a person
+# is still there. The Users tab polls for the signed-in list every 20 seconds, so
+# a tab left open overnight would otherwise refresh its owner's presence all night
+# and keep them listed forever — defeating the whole point of last_seen_at.
+PRESENCE_INERT_ENDPOINTS = frozenset({"entity.entity_settings_users_presence"})
 
 
 def init_app(app, db):
@@ -301,6 +309,20 @@ def init_app(app, db):
         # a previous login would make the very next request look idle and log
         # the user straight back out.
         session["last_activity"] = time.time()
+        # Same signal puts the user back on Settings > Users. Hooked here rather
+        # than in login.py because every sign-in path — password, Xero callback,
+        # OTP, invitation accept — reaches login_user(), and only this signal
+        # sees all of them.
+        session["presence_seen_at"] = time.time()
+        mark_signed_in(user)
+
+    @user_logged_out.connect_via(app)
+    def _clear_presence_on_logout(sender, user, **extra):
+        # Fires from logout_user(), so /logout, the Xero logout and the idle
+        # backstop all take the user off Settings > Users without each having to
+        # remember to.
+        session.pop("presence_seen_at", None)
+        mark_signed_out(user)
 
     @app.before_request
     def before_request_middleware():
@@ -327,10 +349,34 @@ def init_app(app, db):
                 return redirect(url_for("auth.home"))
 
             if current_user.is_authenticated:
+                _refresh_presence()
                 ensure_valid_token(current_user, application=app)
         except Exception:
             logger.exception(
                 "Error validating/refreshing Xero token in before_request")
+
+    def _refresh_presence():
+        """Keep the signed-in user on Settings > Users, at most once a minute.
+
+        The throttle marker lives in the session, so it costs no read: a burst of
+        requests writes one row, and a browser closed mid-session simply stops
+        refreshing and ages out of the presence window on its own.
+
+        A session with no marker is either brand new or predates this feature, and
+        both want the same thing — write immediately, so the person appears on the
+        list on their very next page rather than a minute into it.
+        """
+        try:
+            if request.endpoint in PRESENCE_INERT_ENDPOINTS:
+                return
+            last = session.get("presence_seen_at")
+            now_ts = time.time()
+            if last and (now_ts - float(last)) < SEEN_REFRESH_SECONDS:
+                return
+            session["presence_seen_at"] = now_ts
+            refresh_presence(current_user)
+        except Exception:
+            logger.exception("Failed to refresh sign-in presence")
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error):

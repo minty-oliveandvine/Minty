@@ -363,6 +363,13 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "entity_settings_users",
             "USER_VIEW_ALL",
         ),
+        # The poll behind the Users tab serves the same rows as the page above, so
+        # it has to be gated the same way — otherwise it is a way around that page.
+        (
+            "blueprints/entity/routes/settings.py",
+            "entity_settings_users_presence",
+            "USER_VIEW_ALL",
+        ),
         (
             "blueprints/entity/routes/settings.py",
             "entity_settings_module",

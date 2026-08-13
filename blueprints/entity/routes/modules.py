@@ -32,6 +32,7 @@ from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity, db, tz)
 from services.permission_policy import Role, is_superuser
+from services.user_presence import resume_presence
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -106,6 +107,12 @@ def module_selector(entity_id):
 
     # Access granted — record this open as the entity's latest "last login".
     record_entity_access(entity_id, current_user.id)
+
+    # ...and put the user back on this entity's signed-in list. Every route into
+    # an entity comes through here (the entity list links each card to this page),
+    # so this is the one place that reliably means "I am going in". Ordinary page
+    # loads must NOT do this — see resume_presence for why.
+    resume_presence(current_user)
 
     # Superusers viewing an entity they aren't a member of get a view-only
     # super_admin role in the JWT so Module 2 can identify them.

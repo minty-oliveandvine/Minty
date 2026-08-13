@@ -1,0 +1,69 @@
+{# The signed-in user rows, on their own so they can be re-rendered alone.
+
+   Settings > Users polls for changes (see the live-refresh block in
+   settings_users_scripts.html) and swaps this fragment in. Keeping it a partial
+   rather than rebuilding rows in JavaScript means there is exactly one definition
+   of what a user row looks like — a JS copy would drift from this one the first
+   time either changed.
+
+   Rendered by entity_settings_users for the full page and by
+   entity_settings_users_presence for the poll, both from the same query, so the
+   two can never disagree about who is signed in.
+
+   Needs: users, is_view_only, member_count. #}
+{% for user, role in users %}
+<div class="{% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} rounded-lg shadow-sm p-4">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center space-x-4">
+      <div class="w-10 h-10 bg-[#54D3DA] rounded-full flex items-center justify-center">
+        <span class="text-white font-medium text-sm">{{ user.first_name[0] }}{{ user.last_name[0] }}</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center space-x-2 flex-wrap">
+          <h3 class="font-semibold text-gray-900 text-[10px] sm:text-base truncate">{{ user.first_name }} {{ user.last_name }}</h3>
+          <span class="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#EEFBFB] text-[#54D3DA] text-[10px] sm:text-xs font-medium rounded-full flex-shrink-0" data-role="{{ role|lower }}">{{ role|lower|replace('_', ' ')|title }}</span>
+        </div>
+        <p class="text-[10px] sm:text-sm text-gray-500 truncate">{{ user.username }}</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-2">
+      {% if not is_view_only %}
+      <button class="p-1.5 sm:p-2 text-gray-400 hover:text-[#54D3DA] transition-colors"
+              onclick="openEditUserModal('{{ user.id }}', '{{ user.first_name }}', '{{ user.last_name }}', '{{ user.username }}', '{{ role|lower }}')"
+              title="Edit user">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 sm:w-5 sm:h-5">
+          <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-12.15 12.15a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32L19.513 8.2Z" />
+        </svg>
+      </button>
+      <button class="p-1.5 sm:p-2 text-gray-400 hover:text-red-500 transition-colors"
+              onclick="openDeleteUserModal('{{ user.id }}', '{{ user.first_name }} {{ user.last_name }}')"
+              title="Remove user">
+        <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 sm:w-4 sm:h-4">
+          <path d="M11.7497 3.50003H15.5V5.00013H13.9996V14.75C13.9996 14.96 13.9274 15.1375 13.7824 15.2825C13.6375 15.4275 13.4601 15.5 13.2501 15.5H2.74994C2.53994 15.5 2.36258 15.4275 2.21759 15.2825C2.0726 15.1375 2.00038 14.96 2.00038 14.75V5.00013H0.5V3.50003H4.25031V1.2502C4.25031 1.04021 4.32253 0.862556 4.46752 0.717527C4.61252 0.5725 4.78988 0.5 4.99987 0.5H11.0001C11.2101 0.5 11.3875 0.5725 11.5325 0.717527C11.6775 0.862556 11.7497 1.04021 11.7497 1.2502V3.50003ZM12.4999 5.00013H3.50013V14.0001H12.4999V5.00013ZM5.75006 7.25011H7.24981V11.7501H5.75006V7.25011ZM8.75019 7.25011H10.2499V11.7501H8.75019V7.25011ZM5.75006 2.00009V3.50003H10.2499V2.00009H5.75006Z" fill="currentColor"/>
+        </svg>
+      </button>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% if users|length == 0 %}
+<div class="{% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} rounded-lg p-8 shadow-sm text-center">
+  <div class="text-gray-400 mb-4">
+    <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+    </svg>
+  </div>
+  {# Two different empty states. An entity with members but nobody online
+     needs no action — telling that admin to "invite your first user" would
+     be plainly wrong. #}
+  {% if member_count %}
+  <h3 class="text-lg font-medium text-gray-900 mb-2">No one's signed in right now</h3>
+  <p class="text-gray-500 mb-4">This list shows who's currently signed in. Your {{ member_count }} team member{% if member_count != 1 %}s{% endif %} will appear here when they log back in.</p>
+  {% else %}
+  <h3 class="text-lg font-medium text-gray-900 mb-2">No users found</h3>
+  <p class="text-gray-500 mb-4">Get started by inviting your first user to this organization.</p>
+  {% endif %}
+</div>
+{% endif %}
