@@ -6,10 +6,13 @@ the day after the first renewal it is a date in the past sitting under a label t
 promises a future one. On 13 Aug the page told a paying customer they are billed on
 28 Jul.
 
-``modules.get_next_payment_date`` projects the same cycle to the boundary ``now`` is
-inside, through the SAME ``billing.period_containing`` the renewal runner bills on — so
-the date on the card and the day the money leaves cannot be computed two ways, month-end
-clamp included.
+Two functions answer it, in that order:
+
+``next_payment_from_panel`` reads the first row of the panel's own upcoming charges, so
+the card and the list under it cannot name different days. ``get_next_payment_date`` is
+the fallback for an entity with nothing scheduled, projecting the payer's cycle to the
+boundary ``now`` is inside through the SAME ``billing.period_containing`` the renewal
+runner bills on — month-end clamp included.
 
 The anchor is still read; it is just never shown. ``get_billing_anchor`` survives as the
 panel's mode switch ("has this payer ever been billed"), which is a different question
@@ -114,6 +117,73 @@ def test_an_entity_with_no_payer_has_no_date(app, monkeypatch):
                     now=datetime(2026, 8, 13, 9, tzinfo=UTC))
 
     assert modules.get_next_payment_date("e1") is None
+
+
+# --- what the card reads off the panel ------------------------------------------
+#
+# The card's real source. The projection above is only what it falls back to.
+
+
+def _panel(*rows):
+    return {"upcoming_charges": list(rows)}
+
+
+def _row(label, date, *, overdue=False):
+    return {"at": None, "date": date, "label": label, "amount": "HKD 280",
+            "overdue": overdue, "note": None}
+
+
+def test_the_card_names_the_first_charge_not_the_renewal(app):
+    """The disagreement this replaced. A trial converting on the 20th is charged eight
+    days before the renewal on the 28th, and the card — computed from the payer's cycle,
+    which knows nothing about conversions — named the 28th as the next payment."""
+    from blueprints.entity.services import modules
+
+    panel = _panel(
+        _row("Petty Cash converts", "20 Aug 2026"),
+        _row("Renewal", "28 Aug 2026"),
+    )
+
+    assert modules.next_payment_from_panel(panel) == "20 Aug 2026"
+
+
+def test_an_overdue_charge_is_not_named_as_the_next_payment(app):
+    """``past_due`` carries a ``paid_through`` already behind us, so the earliest row can
+    be a PAST date — the exact thing this card was rewritten to stop showing, and with
+    none of the red that makes the panel's own "Renewal — overdue" legible as arrears.
+    The next date that is genuinely ahead is named instead."""
+    from blueprints.entity.services import modules
+
+    panel = _panel(
+        _row("Renewal", "28 Jul 2026", overdue=True),
+        _row("Petty Cash converts", "20 Aug 2026"),
+    )
+
+    assert modules.next_payment_from_panel(panel) == "20 Aug 2026"
+
+
+def test_nothing_scheduled_falls_through_to_the_projection(app):
+    """A trial that will not convert, or every module cancelled: the panel has no charge
+    to point at, and the caller drops to the payer's projected cycle."""
+    from blueprints.entity.services import modules
+
+    assert modules.next_payment_from_panel(_panel()) is None
+    assert modules.next_payment_from_panel(None) is None
+    # An overdue-only panel is "nothing ahead", not "the overdue date".
+    assert modules.next_payment_from_panel(
+        _panel(_row("Renewal", "28 Jul 2026", overdue=True))
+    ) is None
+
+
+def test_a_row_with_no_date_is_skipped_not_returned_blank(app):
+    """An extension on a module whose period end never made it onto the card sorts last
+    and carries no date. Returning it would blank the card."""
+    from blueprints.entity.services import modules
+
+    panel = _panel(_row("Petty Cash cancellation", None),
+                   _row("Renewal", "28 Aug 2026"))
+
+    assert modules.next_payment_from_panel(panel) == "28 Aug 2026"
 
 
 def test_a_broken_projection_does_not_cost_the_page(app, monkeypatch):

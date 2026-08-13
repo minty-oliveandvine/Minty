@@ -827,13 +827,40 @@ def get_billing_anchor(entity_id: str) -> str | None:
     return _fmt_day_month_year(anchor) if anchor else None
 
 
+def next_payment_from_panel(panel: dict | None) -> str | None:
+    """The date of the panel's next actual charge, or None if it has none scheduled.
+
+    THE FIRST ROW of ``upcoming_charges``, which is already sorted on the raw datetime.
+    The card at the top of the settings page and the list in the panel below it were two
+    separate answers to "when am I next charged", computed from different sources, and
+    they disagreed whenever anything but the renewal came first: a trial converting on the
+    20th is charged eight days before the renewal on the 28th, and the card named the 28th
+    — the SECOND charge — as the next one. Reading the card off the list makes that
+    impossible rather than merely unlikely.
+
+    OVERDUE ROWS ARE SKIPPED. ``past_due`` carries a ``paid_through`` that is already
+    behind us, so the earliest row can be a date in the PAST — which under the words "Next
+    payment date" is exactly the bug this card was rewritten to fix, and with none of the
+    red that makes the panel's own "Renewal — overdue" line legible as arrears. The debt
+    is stated there, properly, rather than silently here.
+
+    None when nothing is scheduled — a trial that will not convert, or every module
+    cancelled. The caller falls back to :func:`get_next_payment_date`.
+    """
+    for row in (panel or {}).get("upcoming_charges") or []:
+        if row.get("date") and not row.get("overdue"):
+            return row["date"]
+    return None
+
+
 def get_next_payment_date(entity_id: str) -> str | None:
     """The payer's NEXT billing date, formatted for display, or None if there is no cycle.
 
-    What the settings page shows. The anchor itself is the wrong thing to put in front of
-    a customer: it is the ORIGINAL first-charge date and never moves, so a payer anchored
-    in July still reads "28 Jul 2026" in August — a date in the past, labelled as when
-    they will be billed. This projects the same cycle forward instead.
+    The FALLBACK behind :func:`next_payment_from_panel` — what the settings card shows for
+    an entity with no charge of its own scheduled. The anchor itself is the wrong thing to
+    put in front of a customer: it is the ORIGINAL first-charge date and never moves, so a
+    payer anchored in July still reads "28 Jul 2026" in August — a date in the past,
+    labelled as when they will be billed. This projects the same cycle forward instead.
 
     Derived from the anchor rather than from ``paid_through`` so the month-end clamp is
     the same one the renewal runner bills on (``period_containing``: 31 Jan → 28 Feb →
