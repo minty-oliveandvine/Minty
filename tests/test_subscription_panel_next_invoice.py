@@ -288,6 +288,103 @@ def test_trials_only_lists_the_conversions_and_no_renewal(app):
     assert panel["next_invoice"] is None
 
 
+def test_a_whole_bundle_converting_on_one_day_is_one_row(app):
+    """Two modules converting together are billed as the BUNDLE, so they are one row.
+
+    The per-module forecasts are computed sequentially: the first conversion anchors the
+    cycle and carries a full period (280), the second is the net of the change into the
+    bundle (120). Only their sum is a figure the customer will ever see — the invoice says
+    400 — so two rows asked them to reconcile a 280 and a 120 that appear nowhere.
+    """
+    a = _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE)
+    b = _card("BILL", "Payment Request", status="trialing", end=_BEFORE)
+    a["conversion_charge"] = Decimal("280")
+    b["conversion_charge"] = Decimal("120")
+
+    panel = _panel(app, [a, b])
+
+    assert [(u["label"], u["date"], u["amount"]) for u in panel["upcoming_charges"]] == [
+        ("Super Minty converts", "20 Aug 2026", "HKD 400"),
+    ]
+
+
+def test_conversions_on_different_days_stay_separate(app):
+    """The grouping is per DAY. Trials a fortnight apart convert a fortnight apart, and
+    collapsing them would name money on a date it is not taken."""
+    a = _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE)
+    b = _card("BILL", "Payment Request", status="trialing", end=_AFTER)
+    a["conversion_charge"] = Decimal("280")
+    b["conversion_charge"] = Decimal("120")
+
+    panel = _panel(app, [a, b])
+
+    assert [(u["label"], u["amount"]) for u in panel["upcoming_charges"]] == [
+        ("Petty Cash converts", "HKD 280"),
+        ("Payment Request converts", "HKD 120"),
+    ]
+
+
+def test_a_same_day_conversion_that_is_not_the_bundle_keeps_its_module_name(app):
+    """One module converting beside a paid one is not a bundle purchase — it is that
+    module, and the row says so. Only a day whose conversions are EXACTLY the bundle's
+    codes is renamed."""
+    trial = _card("PETTY_CASH", "Petty Cash", status="trialing", end=_PAID_THROUGH)
+    trial["conversion_charge"] = Decimal("280")
+
+    panel = _panel(app, [
+        trial,
+        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+    ])
+
+    assert ("Petty Cash converts", "HKD 280") in [
+        (u["label"], u["amount"]) for u in panel["upcoming_charges"]
+    ]
+
+
+# --- what the panel says in words ----------------------------------------------
+
+
+def test_a_paying_panel_has_no_footer(app):
+    """It read "Billed HKD 400/mo · next payment 28 Aug 2026" and said nothing new: the
+    rate is the Total row directly above it, and the date is the card at the top of the
+    page. The template drops the paragraph entirely rather than printing an empty one."""
+    panel = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH),
+    ])
+
+    assert panel["footer"] == ""
+
+
+def test_the_states_that_do_have_something_to_say_keep_their_footer(app):
+    """The trial footer names when the first charge lands and the empty one states that
+    nothing is billed — neither fact appears anywhere else on the panel."""
+    trial = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
+    ], anchor=None)
+    empty = _panel(app, [_card("PETTY_CASH", "Petty Cash")])
+
+    assert "free trial" in trial["footer"]
+    assert empty["footer"] == "No modules enabled — nothing will be billed."
+
+
+def test_the_bundle_note_never_quotes_a_per_module_price(app):
+    """It used to append "vs HKD 280 each" once billing had started — a per-module price
+    for a plan nobody is billed per module on. The saving beside it already carries the
+    comparison, and the note now reads the same trialing or paid."""
+    paid = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH),
+        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+    ])
+    trialing = _panel(app, [
+        _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
+        _card("BILL", "Payment Request", status="trialing", end=_BEFORE),
+    ], anchor=None)
+
+    assert paid["note"] == "Super Minty price — save HKD 160"
+    assert paid["note"] == trialing["note"]
+    assert "each" not in paid["note"]
+
+
 # --- which caption the panel's one button carries -------------------------------
 # Both captions open the same decision modal, so this is only about which question the
 # entity is being asked. The rule is NOT "is there a trial" and NOT "is there an anchor":

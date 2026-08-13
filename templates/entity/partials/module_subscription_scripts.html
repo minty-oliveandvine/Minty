@@ -1019,10 +1019,14 @@
       const label = DETAIL[it.state];
       const suffix = label && it.until ? ' · ' + label + ' ' + it.until : '';
       // A trial that will not convert reads identically to one that will, and the
-      // difference is a deadline that can be missed. ``needs`` says which is missing.
-      const gap = it.state === 'trial' && it.needs !== 'none'
-        ? (it.needs === 'consent' ? ' · won’t convert, confirm billing'
-                                  : ' · won’t convert, add a card')
+      // difference is a deadline that can be missed — so the missing card is called out.
+      //
+      // The consent case is NOT, matching the module card: "confirm billing" named an
+      // action the customer has no button for on this page, and this modal is itself
+      // where a kept trial goes through billing confirmation, so the row would be telling
+      // them to do the thing they are already doing.
+      const gap = it.state === 'trial' && it.needs === 'card'
+        ? ' · won’t convert, add a card'
         : '';
       el.textContent = fmtMoney(plan.sym, it.amount) + '/mo' + suffix + gap;
     });
