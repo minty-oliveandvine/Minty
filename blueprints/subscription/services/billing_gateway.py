@@ -39,11 +39,22 @@ from blueprints.subscription.services.stripe_client import get_stripe
 
 
 class BillingError(Exception):
-    """Collection failed. Carries a customer-safe message where Stripe gave one."""
+    """Collection failed. Carries a customer-safe message where Stripe gave one.
 
-    def __init__(self, message: str, *, user_message: str | None = None):
+    ``invoice_id`` is the document that was raised before the failure, when there was
+    one. A decline arrives as an exception from ``Invoice.pay``, by which point the
+    invoice is finalized and OPEN — so the caller has to be told what exists in order to
+    decide what to do with it. Those decisions differ: a declined renewal keeps its
+    invoice, because dunning chases exactly that document; a declined conversion must
+    withdraw its own, because nothing was granted. Only the caller knows which it is,
+    which is why this is reported rather than acted on here.
+    """
+
+    def __init__(self, message: str, *, user_message: str | None = None,
+                 invoice_id: str | None = None):
         super().__init__(message)
         self.user_message = user_message
+        self.invoice_id = invoice_id
 
 
 def find_invoice_by_metadata(customer_id: str, key: str, value: str) -> dict | None:
@@ -273,6 +284,9 @@ def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None
     record = _reserve(customer_id, invoice, lines, memo, idempotency_key, payer_user_id)
 
     stripe = get_stripe()
+    # Bound before the try so the failure path can name the document it left behind: a
+    # decline raises from ``Invoice.pay`` with the invoice already finalized and open.
+    draft = None
     try:
         options = {"idempotency_key": idempotency_key} if idempotency_key else {}
         draft = stripe.Invoice.create(
@@ -339,6 +353,7 @@ def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None
         raise BillingError(
             f"could not issue invoice for {customer_id}",
             user_message=getattr(exc, "user_message", None),
+            invoice_id=(draft or {}).get("id"),
         ) from exc
 
 
@@ -397,11 +412,20 @@ def open_invoices(customer_id: str) -> list[dict]:
 
 
 def void_invoice(invoice_id: str) -> None:
-    """Void a finalized invoice, or delete it if still a draft.
+    """Void a finalized invoice, or delete it if still a draft. Mirrors it locally.
 
     Finalized invoices cannot be deleted — only voided — and neither their lines nor
     their memo can be edited afterwards. So anything needing correction has to be caught
     while it is still a draft.
+
+    The LOCAL row is marked too, and that is not bookkeeping. ``dunning.collect_due``
+    chases whatever the processor still reports as open, and the invoice list, the
+    revenue figures and ``_already_invoiced`` all read the local row — so voiding in one
+    place only would leave a document that is dead to Stripe and live to Minty.
+
+    The row is kept rather than deleted. ``discard_invoice`` exists for a reservation the
+    processor never saw; this one WAS raised, and may well have been seen by the customer
+    before it was withdrawn. That is history, not a mistake to erase.
     """
     stripe = get_stripe()
     invoice = stripe.Invoice.retrieve(invoice_id)
@@ -409,3 +433,4 @@ def void_invoice(invoice_id: str) -> None:
         stripe.Invoice.delete(invoice_id)
     else:
         stripe.Invoice.void_invoice(invoice_id)
+    _settle(_local(invoice_id), status="void")

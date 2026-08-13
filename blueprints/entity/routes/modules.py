@@ -30,8 +30,37 @@ from flask_login import current_user, login_required, login_user
 from blueprints.entity import entity_bp
 from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
-                       UserEntity)
+                       UserEntity, db, tz)
 from services.permission_policy import Role, is_superuser
+
+
+def record_entity_access(entity_id: str, user_id: str) -> None:
+    """Stamp who last opened this entity and when (team-wide last login).
+
+    Drives the "last logged in" clock on the Select Company card. Best-effort by
+    design: a failure here must never block entry into the entity, so it rolls
+    back and logs rather than raising. Call only after the access check passes —
+    a rejected visit is not an access.
+    """
+    try:
+        updated = Entity.query.filter(Entity.id == entity_id).update(
+            {
+                # datetime.now(tz), not datetime.now(): the column is a naive
+                # TIMESTAMP and every other timestamp in this app is stored as
+                # Hong Kong wall time. A bare now() on a UTC host would render
+                # the card 8 hours behind.
+                "last_accessed_at": datetime.now(tz),
+                "last_accessed_by_user_id": user_id,
+            },
+            synchronize_session=False,
+        )
+        if updated:
+            db.session.commit()
+    except Exception as exc:  # noqa: BLE001 - never block entity entry
+        db.session.rollback()
+        current_app.logger.warning(
+            f"Failed to record entity access for {entity_id}: {exc}"
+        )
 
 
 @entity_bp.route("/entity/<string:entity_id>/modules")
@@ -74,6 +103,9 @@ def module_selector(entity_id):
     if not user_entity and not _user_is_superuser:
         flash("Hmm, it looks like you don't have permission to look there.", "danger")
         return redirect(url_for("entity.entity_list"))
+
+    # Access granted — record this open as the entity's latest "last login".
+    record_entity_access(entity_id, current_user.id)
 
     # Superusers viewing an entity they aren't a member of get a view-only
     # super_admin role in the JWT so Module 2 can identify them.

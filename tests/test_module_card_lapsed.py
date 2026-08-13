@@ -71,14 +71,39 @@ class _PaidRow:
         self.first_billed_at = datetime.now(UTC) - timedelta(days=60)
 
 
-def _card(app, monkeypatch, *, paid_through):
+class _TrialRow:
+    """A trial whose term has passed and that no pass has closed out yet.
+
+    Nothing has been billed, the phase is still ``trial`` because only ``close-trials``
+    rewrites it, and ``app_access_until`` was stamped equal to ``trial_end`` when the trial
+    started — so the date rules already say access is over while the gate has not been
+    told.
+    """
+
+    entity_id = "e1"
+    function_code = "PETTY_CASH"
+    payer_user_id = "u1"
+    phase = "trial"
+    extension_amount = None
+    extension_state = None
+    first_billed_at = None
+
+    def __init__(self, *, ended_ago=timedelta(minutes=20)):
+        self.trial_end = datetime.now(UTC) - ended_ago
+        self.app_access_until = self.trial_end
+
+
+def _card(app, monkeypatch, *, paid_through, row=None, has_access=False):
     import blueprints.entity.services.modules as modules_mod
     from blueprints.subscription.services import store
 
     monkeypatch.setattr(modules_mod, "EntityFunction", _FakeEntityFunction)
     monkeypatch.setattr(modules_mod, "MODULE_CODES", ("PETTY_CASH",))
     monkeypatch.setattr(modules_mod, "_entity_customer_id", lambda eid: None)
-    monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [_PaidRow()])
+    monkeypatch.setattr(modules_mod, "_enabled_state",
+                        lambda eid: {"PETTY_CASH": has_access})
+    monkeypatch.setattr(store, "module_rows_for_entity",
+                        lambda eid: [row if row is not None else _PaidRow()])
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
     monkeypatch.setattr(f"{_CATALOG}.available_plans", lambda: [])
     monkeypatch.setattr(
@@ -159,3 +184,172 @@ def test_a_used_up_trial_says_so_under_not_active(app, monkeypatch):
             org=type("O", (), {"id": "e1", "name": "Co"})(), can_manage_modules=True,
         )
     assert "free trial expired" not in html
+
+
+def test_a_trial_past_its_term_is_closing_not_expired(app, monkeypatch):
+    """The window between the term ending and the pass closing it out.
+
+    ``trial_end`` passes unattended, so until the subscription pass runs the row is still
+    ``phase = trial`` while the date rules have already gone false. The card used to fall
+    straight through to ``trial_expired`` and tell the customer their free trial was used
+    up — while the request gate was still letting them work, and while a trial with a card
+    and consent was about to CONVERT rather than expire.
+    """
+    card = _card(
+        app, monkeypatch, paid_through=None, row=_TrialRow(), has_access=True
+    )
+    # STILL "trialing", deliberately. Everything downstream — the panel's enabled set, the
+    # notices, the badge, the row styling — asks that question, and answering differently
+    # would rearrange the page around a state nobody can act on. The difference is carried
+    # by a flag used for one label and nothing else.
+    assert card["subscription_status"] == "trialing"
+    assert card["trial_closing"] is True
+    # Not "expired": nothing has decided yet, and the module still opens.
+    assert card["trial_expired"] is False
+    assert card["has_access"] is True
+    # Not offered as a fresh trial either — they are inside it.
+    assert card["trial_eligible"] is False
+    # The pill's date survives, so the card reads exactly as it did an hour ago.
+    assert card["period_end_short"] is not None
+
+
+def test_a_trial_past_its_term_with_access_gone_is_expired(app, monkeypatch):
+    """The bound on the transitional state.
+
+    It needs the gate to still say yes. Once anything reconciles — close-trials expiring
+    the row, or the sweep revoking a module whose ``grants_access`` is already false — the
+    card must go back to telling the plain truth. Without this, a scheduler that stopped
+    would leave "finalising" on screen forever.
+    """
+    card = _card(
+        app, monkeypatch, paid_through=None, row=_TrialRow(), has_access=False
+    )
+    assert card["subscription_status"] is None
+    assert card["trial_closing"] is False
+    assert card["trial_expired"] is True
+
+
+def test_a_running_trial_is_untouched(app, monkeypatch):
+    """The new state must not swallow trials that are simply still running."""
+    card = _card(
+        app,
+        monkeypatch,
+        paid_through=None,
+        row=_TrialRow(ended_ago=timedelta(days=-3)),  # ends in three days
+        has_access=True,
+    )
+    assert card["subscription_status"] == "trialing"
+    assert card["trial_expired"] is False
+
+
+def _render(app, card):
+    from flask import render_template
+
+    with app.test_request_context():
+        html = render_template(
+            "entity/partials/module_subscription_section.html",
+            module_cards=[card], subscription_summary=None, subscription_panel=None,
+            org=type("O", (), {"id": "e1", "name": "Co"})(), can_manage_modules=True,
+        )
+    # Split at the panel: its hidden staged-cart button is captioned "Start free trial"
+    # until renderCart relabels it, so a whole-page search would always match.
+    return html.split("<aside", 1)[0]
+
+
+def _trial_card(**overrides):
+    card = {
+        "code": "PETTY_CASH", "name": "Petty Cash", "description": "", "image": "x.png",
+        "learn_more": "#", "subscription_status": "trialing", "amount": 280,
+        "pending_cancel": False, "trial_cancelled": False, "trial_eligible": False,
+        "trial_expired": False, "needs_card": False, "needs_consent_only": False,
+        "period_end_long": None, "period_end_short": "15 Aug", "access_end_long": None,
+        "has_access": True, "trial_closing": False,
+    }
+    card.update(overrides)
+    return card
+
+
+def test_the_closing_card_is_the_running_trial_card_plus_one_line(app):
+    """The transition must not rearrange the page.
+
+    It lasts under an hour, the customer can do nothing about it, and it resolves by
+    itself — so the card keeps the black trial pill and everything around it, and gains a
+    single line. An earlier version restyled it into a grey "ended" pill, which read as a
+    lapsed module on something the request gate was still letting them use.
+    """
+    running = _render(app, _trial_card())
+    closing = _render(app, _trial_card(trial_closing=True))
+
+    # The pill survives, date and all.
+    assert "Free trial · ends 15 Aug" in closing
+    assert "bg-[#1F2937]" in closing
+    assert "active" in closing
+    # The ONLY difference is the added line.
+    assert "trial ended- finalising" in closing
+    assert "trial ended- finalising" not in running
+    assert closing.replace(
+        '<p class="text-xs text-gray-500">trial ended- finalising</p>\n        ', ""
+    ).split() == running.split()
+
+    # And none of the endings it is not: no "used up" copy, nothing to cancel, no offer to
+    # start the trial they are already inside.
+    assert "free trial expired" not in closing
+    assert "Cancel Subscription" not in closing
+    assert "Start free trial" not in closing
+
+
+def test_the_closing_card_still_warns_when_it_will_not_convert(app):
+    """``needs_card`` outlives the term. A trial with no card is about to expire, and that
+    warning is the last thing the customer can act on — losing it in the transition would
+    drop the notice at the moment it matters most."""
+    closing = _render(app, _trial_card(trial_closing=True, needs_card=True))
+    assert "won't convert" in closing
+    assert "trial ended- finalising" in closing
+
+
+def test_a_long_stale_trial_is_expired_not_closing(app, monkeypatch):
+    """The bound that production needed, and the regression that found it.
+
+    ``trial_closing`` was first written as "phase is trial, access is still on", justified
+    as self-limiting because the next pass resolves it within the hour. That holds only
+    where the pass RUNS. With no scheduler — production, until it is enabled there — a
+    trial keeps its phase and its access indefinitely, so the unbounded version matched
+    every stale trial forever.
+
+    The visible damage was not the card. ``needs_card`` is ``app_trial and not
+    will_convert``, so folding closing into ``app_trial`` switched it on for every stale
+    trial, and the settings banner swapped from the billing-portal text to a nudge quoting
+    a deadline weeks in the past.
+    """
+    card = _card(
+        app,
+        monkeypatch,
+        paid_through=None,
+        row=_TrialRow(ended_ago=timedelta(days=21)),
+        has_access=True,  # nothing ever revoked it, because nothing ran
+    )
+    assert card["trial_closing"] is False
+    assert card["subscription_status"] is None
+    assert card["trial_expired"] is True
+    # The one that displaced the banner.
+    assert card["needs_card"] is False
+
+
+def test_the_closing_window_is_wide_enough_for_a_missed_pass(app, monkeypatch):
+    """A pass that was skipped by a deploy must not flip the card to "expired".
+
+    The window has to absorb an outage of a few hours without the customer seeing their
+    trial declared over while they are still working inside it.
+    """
+    import blueprints.entity.services.modules as modules_mod
+
+    assert modules_mod.TRIAL_CLOSING_WINDOW >= timedelta(hours=3)
+    card = _card(
+        app,
+        monkeypatch,
+        paid_through=None,
+        row=_TrialRow(ended_ago=timedelta(hours=4)),
+        has_access=True,
+    )
+    assert card["trial_closing"] is True
+    assert card["trial_expired"] is False

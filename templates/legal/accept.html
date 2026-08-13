@@ -27,7 +27,20 @@
   .accept-doc ul { margin: 0 0 0.9rem 1.2rem; }
   .accept-doc li { margin-bottom: 0.3rem; line-height: 1.55; font-size: 0.92rem; }
   .accept-check { display: flex; gap: 0.6rem; align-items: flex-start; margin-bottom: 1.25rem; }
-  .accept-check input { margin-top: 0.25rem; width: 1.05rem; height: 1.05rem; flex: none; }
+  .accept-check input {
+    margin-top: 0.25rem; width: 1.05rem; height: 1.05rem; flex: none;
+    accent-color: #36c3b4;
+  }
+  /* main.css sets a { text-decoration: none; color: var(--textColor) } globally,
+     which renders these as plain body text. Restore link styling so the two
+     documents are visibly reachable from the agreement line. */
+  .accept-check a {
+    color: #0f7a6e;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .accept-check a:hover { color: #36c3b4; }
   .accept-actions { display: flex; align-items: center; gap: 1rem; }
   .accept-btn {
     background: #047857; color: #fff; border: 0; border-radius: 6px;
