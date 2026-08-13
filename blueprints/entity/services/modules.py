@@ -1240,8 +1240,10 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
             # still needs one whenever there is something to decide:
             #   * a module winding down — re-ticking it is the undo, and withholding the
             #     button would leave a cancellation with no way back;
-            #   * a module that could be bought — an entity whose trials are spent has
-            #     nothing enabled and nothing cancelled, and this is its way back in.
+            #   * a module that could be taken up — an entity whose trials are spent has
+            #     nothing enabled and nothing cancelled, and this is its way back in. The
+            #     modal lists untried modules too; ticking one starts its free trial
+            #     rather than buying it, so this button is right either way.
             # Only a company with no modules at all in the catalog gets no action.
             "primary_action": (
                 "manage"

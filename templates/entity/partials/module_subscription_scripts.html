@@ -144,7 +144,9 @@
 
      trial     ticked → needs card or consent   CANNOT BE UNTICKED (box is disabled)
      paid      ticked → nothing (already on)    unticked → prorated cancel, priced+confirmed
-     available ticked → subscribe (charged)     unticked → nothing
+     available ticked → START ITS FREE TRIAL     unticked → nothing
+               ...while one is still available. Only a module with no free days left —
+                  a spent trial, a lapsed paid subscription — is subscribed and charged.
      winding   ticked → renew                   unticked → nothing
 
    CANCELLING A FREE TRIAL IS NOT OFFERED IN THE UI. It was this modal's untick, and
@@ -225,6 +227,12 @@
                   ``checked`` to every reader below, so a kept trial still reaches the
                   card / consent step that makes it convert. #}
                {% if state == 'trial' %}disabled{% endif %}
+               {# NEVER HELD THIS MODULE, so a free trial is still available for it.
+                  ``applySubVariant`` hides these rows entirely: this modal only charges,
+                  and charging for a module the entity could still trial for free is a
+                  worse deal reached by a different click than the module card offers for
+                  the same module. Starting it belongs to that card. #}
+               data-keep-trial-eligible="{{ '1' if c.trial_eligible else '' }}"
                data-keep-code="{{ c.code }}"
                data-keep-name="{{ c.name }}"
                data-keep-amount="{{ c.amount }}"
@@ -921,6 +929,8 @@
       // has none), 'consent' (a card, but this company was never authorised for it), or
       // 'none' (it converts on its own). Server-computed — see get_module_cards.
       needs: input.dataset.keepNeeds || 'none',
+      // Never held, so a free trial is still available for it — see applySubVariant.
+      trialEligible: input.dataset.keepTrialEligible === '1',
     };
   }
 
@@ -968,10 +978,14 @@
     subModal.dataset.variant = variant;
 
     // The trial variant hides only what the entity does NOT have: offering "add Payment
-    // Request" beside "keep your Petty Cash trial" would be two decisions in one list,
-    // and the module cards already own starting a second trial. Modules winding down
-    // stay in BOTH variants — re-ticking one is how a cancellation is undone, and it is
-    // the only way, since the cards no longer carry Renew / Keep free trial.
+    // Request" beside "keep your Petty Cash trial" would be two decisions in one list.
+    // Modules winding down stay in BOTH variants — re-ticking one is how a cancellation is
+    // undone, and it is the only way, since the cards no longer carry Renew.
+    //
+    // An available row STAYS in the paid variant whether or not its free trial is intact.
+    // What differs is what ticking it does, not whether it is listed — see
+    // commitSubDecision: a module with its trial unused starts that trial, and only one
+    // with no free days left is charged for.
     subRows().forEach(function (r) {
       const row = r.closest('[data-keep-row]');
       row.classList.toggle('hidden', !paid && subItem(r).state === 'available');
@@ -1035,6 +1049,14 @@
           + (it.until ? ' · active until ' + it.until : '');
         return;
       }
+      // An untried module reads as what ticking it will DO — start the free trial — with
+      // the price it converts to after. Printing a bare "HK$280/mo" beside it, which is
+      // what every other row means by that, said the customer was about to be charged.
+      if (it.state === 'available' && it.trialEligible) {
+        el.textContent = 'Free trial · ' + fmtMoney(plan.sym, it.amount)
+          + '/mo when it ends';
+        return;
+      }
       const label = DETAIL[it.state];
       const suffix = label && it.until ? ' · ' + label + ' ' + it.until : '';
       // A trial that will not convert reads identically to one that will, and the
@@ -1095,9 +1117,21 @@
     // A kept trial has not started billing yet, so the date that matters is when it
     // converts. On a paying entity what the customer needs to know is when a change
     // takes effect, which is the payment date they are already on.
+    //
+    // ...unless a NEW free trial is being started here, which is the one thing on a paying
+    // panel that is not charged. Saying "cancelling applies at your next payment date"
+    // over that decision answers a question nobody asked and leaves the actual one — am I
+    // paying for this today — unanswered. The plan line above still shows the monthly
+    // rate, so this says when it starts applying.
+    const startingTrial = kept.some(function (i) {
+      return i.state === 'available' && i.trialEligible;
+    });
     noteEl.textContent = paid
-      ? 'Cancelling a module applies at your next payment date'
-        + (until ? ' (' + until + ')' : '') + '.' + saving
+      ? (startingTrial
+          ? 'Starts as a free trial — nothing is charged for it today, and it joins '
+            + 'your bill when the trial ends.'
+          : 'Cancelling a module applies at your next payment date'
+            + (until ? ' (' + until + ')' : '') + '.') + saving
       : (keptTrial
           ? 'Billing starts when your free trial ends' + (endsOn ? ' (' + endsOn + ')' : '') + '.'
           : 'Billed monthly' + (nextPayment ? ', next payment ' + nextPayment : '') + '.') + saving;
@@ -1240,7 +1274,24 @@
     // trial can never reach the cancel endpoint from this modal even if a row were
     // re-enabled by hand.
     const remove = unticked.filter(function (i) { return i.state === 'paid'; });
-    const add = ticked.filter(function (i) { return i.state === 'available'; });
+
+    // TICKING AN UNTRIED MODULE STARTS ITS FREE TRIAL — it does not buy it.
+    //
+    // Both kinds of "available" ran through checkout and were charged, so a module the
+    // entity had never held was sold here while its own card, on the same page, offered
+    // the same module free for thirty days. One module, two routes, two prices, and which
+    // one the customer paid depended on where they happened to click.
+    //
+    // ``trialEligible`` is the card's own flag (``row is None and not has_access``), so
+    // the two routes now agree by construction rather than by both being kept in step.
+    // Only a module with no free days left — a spent trial, a lapsed paid subscription —
+    // is a genuine purchase, and that is the only one that still reaches checkout.
+    const startTrials = ticked.filter(function (i) {
+      return i.state === 'available' && i.trialEligible;
+    });
+    const add = ticked.filter(function (i) {
+      return i.state === 'available' && !i.trialEligible;
+    });
     const renew = ticked.filter(function (i) { return i.state === 'winding'; });
     const keptTrials = ticked.filter(function (i) { return i.state === 'trial'; });
 
@@ -1351,9 +1402,28 @@
       if (outcome === 'declined') return restore();
     }
 
-    // Adding a module IS a purchase, so it goes through the ordinary checkout — which
-    // may redirect to Stripe or raise the first-charge confirmation. Last, for the same
-    // reason removals were first.
+    // Free trials BEFORE checkout, for the same reason removals came first: doCheckout can
+    // redirect to Stripe, and a redirect part-way through would leave the trials unstarted
+    // with the page gone. Nothing is charged here, so there is no price to confirm — the
+    // modal already said what this does, and a dialog over a free action trains people to
+    // click through the ones that cost money. Same endpoint and same shape as the module
+    // cards' own "Start free trial" (see commitCart).
+    if (startTrials.length) {
+      showBlockingLoader('Starting your free trial…');
+      try {
+        await postJson(
+          "{{ url_for('entity.entity_settings_module_start_trial', org_id=org.id) }}",
+          { codes: startTrials.map(function (i) { return i.code; }) }
+        );
+      } catch (err) {
+        notifyError(err.message || 'Could not start free trial.');
+        return restore();
+      }
+    }
+
+    // Adding a module the entity has already used its trial on IS a purchase, so it goes
+    // through the ordinary checkout — which may redirect to Stripe or raise the
+    // first-charge confirmation. Last, for the same reason removals were first.
     if (add.length) {
       restore();
       await doCheckout(add.map(function (i) { return i.code; }), btn);

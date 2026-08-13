@@ -421,6 +421,33 @@ def test_a_paid_entity_is_managed(app):
     assert panel["primary_action"] == "manage"
 
 
+def test_an_empty_panel_still_offers_a_way_in(app):
+    """Nothing enabled, nothing cancelled — the modal is how a module is taken up again,
+    whether that is a free trial it has never used or a purchase of one it has."""
+    fresh = _card("PETTY_CASH", "Petty Cash")
+    fresh["trial_eligible"] = True
+
+    assert _panel(app, [fresh])["primary_action"] == "subscribe_stripe"
+
+    spent = _card("PETTY_CASH", "Petty Cash")
+    spent["trial_eligible"] = False
+
+    assert _panel(app, [spent])["primary_action"] == "subscribe_stripe"
+
+
+def test_a_cancellation_reaches_manage_not_subscribe(app):
+    """Re-ticking a cancelled module is the only undo, so it takes precedence over the
+    "take something up" caption."""
+    winding = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+                    pending_cancel=True)
+    winding["access_end_long"] = "12 Sep 2026"
+
+    panel = _panel(app, [winding, _card("PETTY_CASH", "Petty Cash")])
+
+    assert panel["is_empty"] is True
+    assert panel["primary_action"] == "manage"
+
+
 # --- how a cancellation is stated ----------------------------------------------
 
 
