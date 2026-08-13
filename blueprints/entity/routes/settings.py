@@ -1136,6 +1136,7 @@ def entity_settings_module(org_id):
     from blueprints.entity.services.modules import (build_subscription_panel,
                                                     get_billing_anchor,
                                                     get_module_cards,
+                                                    get_next_payment_date,
                                                     get_subscription_summary)
 
     org = Entity.query.get_or_404(org_id)
@@ -1144,7 +1145,11 @@ def entity_settings_module(org_id):
 
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
+    # Two different dates. The anchor is never shown — it only answers "has this payer
+    # ever been billed", which is what puts the panel in its paid rather than its trial
+    # mode. What the page DISPLAYS is the same cycle projected to its next boundary.
     billing_anchor = get_billing_anchor(org_id)
+    next_payment_date = get_next_payment_date(org_id)
     subscription_panel = build_subscription_panel(
         module_cards, subscription_summary, billing_anchor
     )
@@ -1184,7 +1189,7 @@ def entity_settings_module(org_id):
         module_cards=module_cards,
         subscription_summary=subscription_summary,
         subscription_panel=subscription_panel,
-        billing_anchor=billing_anchor,
+        next_payment_date=next_payment_date,
         can_manage_modules=can_manage_modules,
         subscription_payer=subscription_payer,
         # TEMPORARY, DEV ONLY. Gates the "add a payment method / confirm billing"

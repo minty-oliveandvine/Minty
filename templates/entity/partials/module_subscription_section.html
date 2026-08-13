@@ -1,9 +1,9 @@
 {# Module cards + "Your subscription" panel, shared by settings_module.html and
    settings_module_bills_ui.html. Data comes from entity.services.modules:
    get_module_cards (cards), get_subscription_summary (bundle/prices) and
-   build_subscription_panel (the panel model), plus get_billing_anchor. Both parent
+   build_subscription_panel (the panel model), plus get_next_payment_date. Both parent
    templates pass the same context (module_cards, subscription_summary,
-   subscription_panel, billing_anchor, org, can_manage_modules).
+   subscription_panel, next_payment_date, org, can_manage_modules).
 
    Module access is driven entirely by the module subscription state; each card's
    action (open trial, subscribe) acts on that directly — there is no on/off toggle.
@@ -35,8 +35,9 @@
   {%- endif %}
 </p>
 
-{# Payment anchor — the one date every entity is billed on. "To Be Decided" until the
-   first charge pins it (an app-level trial has no cycle). #}
+{# The next payment date — the one date every entity is billed on, projected to its next
+   occurrence by get_next_payment_date. "To Be Decided" until the first charge starts the
+   cycle (an app-level trial has no cycle, so there is no date to name). #}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-2xl border border-gray-200/70 bg-white px-4 py-3.5 shadow-sm">
   <div class="flex items-center gap-3 min-w-0">
     {# Two-tone calendar: red header band, dark outlined body, dark rings above it. Not
@@ -50,11 +51,11 @@
       </svg>
     </span>
     <div class="min-w-0">
-      <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Payment anchor date</p>
-      <p class="text-[15px] font-bold leading-tight text-gray-900">{{ billing_anchor or 'To Be Decided' }}</p>
+      <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Next payment date</p>
+      <p class="text-[15px] font-bold leading-tight text-gray-900">{{ next_payment_date or 'To Be Decided' }}</p>
     </div>
   </div>
-  <p class="max-w-[17rem] text-xs leading-snug text-gray-500 sm:text-right">All entities are billed on this date — set by your first payment.</p>
+  <p class="max-w-[17rem] text-xs leading-snug text-gray-500 sm:text-right">All entities are billed on this date each month.</p>
 </div>
 
 {# ONE page-level trial nudge, not one per module — the thing that needs fixing (a

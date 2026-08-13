@@ -158,7 +158,7 @@
 {% set trial_end = ((module_cards or []) | selectattr('subscription_status', 'equalto', 'trialing') | map(attribute='period_end_long') | select | first) %}
 <div id="subDecisionModal"
      data-trial-end="{{ trial_end or '' }}"
-     data-anchor="{{ billing_anchor or '' }}"
+     data-next-payment="{{ next_payment_date or '' }}"
      class="fixed inset-0 bg-black bg-opacity-40 z-[95] hidden flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="subDecisionTitle">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
@@ -994,12 +994,14 @@
     const kept = rows.filter(function (r) { return r.checked; }).map(subItem);
     const plan = planFor(kept.length ? kept : items);
     const endsOn = subModal.dataset.trialEnd || '';
-    const anchor = subModal.dataset.anchor || '';
+    const nextPayment = subModal.dataset.nextPayment || '';
     const keptTrial = kept.some(function (i) { return i.state === 'trial'; });
     // What a cancellation here would be measured against: the paid period the entity is
-    // already inside, else the payer's anchor.
+    // already inside, else the payer's next payment date. That fallback used to be the
+    // ANCHOR, which is the first-charge date and stays put — so the sentence "applies at
+    // your next payment date (28 Jul 2026)" could name a date already gone.
     const until = (items.filter(function (i) { return i.state === 'paid' && i.until; })
-                        .map(function (i) { return i.until; })[0]) || anchor;
+                        .map(function (i) { return i.until; })[0]) || nextPayment;
 
     const DETAIL = { trial: 'trial ends', paid: 'active until', available: '' };
     rows.forEach(function (r) {
@@ -1079,7 +1081,7 @@
         + (until ? ' (' + until + ')' : '') + '.' + saving
       : (keptTrial
           ? 'Billing starts when your free trial ends' + (endsOn ? ' (' + endsOn + ')' : '') + '.'
-          : 'Billed monthly' + (anchor ? ' on ' + anchor : '') + '.') + saving;
+          : 'Billed monthly' + (nextPayment ? ', next payment ' + nextPayment : '') + '.') + saving;
     btn.textContent = paid ? 'Save changes' : 'Continue';
   }
 
