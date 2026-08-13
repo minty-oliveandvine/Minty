@@ -1,9 +1,9 @@
 {# Module cards + "Your subscription" panel, shared by settings_module.html and
    settings_module_bills_ui.html. Data comes from entity.services.modules:
    get_module_cards (cards), get_subscription_summary (bundle/prices) and
-   build_subscription_panel (the panel model), plus get_billing_anchor. Both parent
+   build_subscription_panel (the panel model), plus get_next_payment_date. Both parent
    templates pass the same context (module_cards, subscription_summary,
-   subscription_panel, billing_anchor, org, can_manage_modules).
+   subscription_panel, next_payment_date, org, can_manage_modules).
 
    Module access is driven entirely by the module subscription state; each card's
    action (open trial, subscribe) acts on that directly — there is no on/off toggle.
@@ -14,11 +14,15 @@
    a trial to convert — no card, or this company never authorised the saved one — and
    "Manage subscription" otherwise, including a trial that will convert on its own.
 
-   Cancelling and un-cancelling live in that modal: unticking a module drops it and
-   re-ticking a cancelled one keeps it, which is why a trialing or winding-down card
-   shows only its status. The exception is a LIVE PAID module, which keeps its own
-   Cancel on the card — both routes run the same preview and the same confirmation, so
-   the terms are identical either way. #}
+   Cancelling and un-cancelling live in that modal: unticking a PAID module drops it and
+   re-ticking a cancelled one keeps it, which is why a winding-down card shows only its
+   status. The exception is a LIVE PAID module, which keeps its own Cancel on the card —
+   both routes run the same preview and the same confirmation, so the terms are identical
+   either way.
+
+   A RUNNING TRIAL CANNOT BE CANCELLED FROM THE UI at all: not from its card, and not from
+   the modal, where its row is locked on. The server-side cancellation still exists and a
+   trial cancelled by other means still renders here as winding down. #}
 
 {# Two different reasons the actions can be missing, and they need different sentences.
    "Only admins can change modules" to someone who IS an admin but is not the payer reads
@@ -35,8 +39,11 @@
   {%- endif %}
 </p>
 
-{# Payment anchor — the one date every entity is billed on. "To Be Decided" until the
-   first charge pins it (an app-level trial has no cycle). #}
+{# The next payment date — the date of the first charge in the panel's own "Upcoming
+   charges" list, so this card and that list cannot name different days (see
+   next_payment_from_panel). Falls back to the payer's projected cycle when this entity
+   has nothing scheduled, and reads "To Be Decided" when there is no cycle either — an
+   app-level trial has never been charged, so there is no date to name. #}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-2xl border border-gray-200/70 bg-white px-4 py-3.5 shadow-sm">
   <div class="flex items-center gap-3 min-w-0">
     {# Two-tone calendar: red header band, dark outlined body, dark rings above it. Not
@@ -50,11 +57,17 @@
       </svg>
     </span>
     <div class="min-w-0">
-      <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Payment anchor date</p>
-      <p class="text-[15px] font-bold leading-tight text-gray-900">{{ billing_anchor or 'To Be Decided' }}</p>
+      <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">Next payment date</p>
+      <p class="text-[15px] font-bold leading-tight text-gray-900">{{ next_payment_date or 'To Be Decided' }}</p>
     </div>
   </div>
-  <p class="max-w-[17rem] text-xs leading-snug text-gray-500 sm:text-right">All entities are billed on this date — set by your first payment.</p>
+  {# "All entities are billed on this date each month" stopped being true when the date
+     started coming from the upcoming-charges list: the next charge can be a one-off — a
+     trial converting, or the extra days on a cancellation — which belongs to THIS company
+     alone and recurs nothing. The shared cycle is still worth stating, since it is why
+     every company this payer holds shows the same renewal date, so the claim is kept and
+     narrowed to the renewals it was always about. #}
+  <p class="max-w-[17rem] text-xs leading-snug text-gray-500 sm:text-right">Your next charge for this company — renewals share one date across every company you pay for.</p>
 </div>
 
 {# ONE page-level trial nudge, not one per module — the thing that needs fixing (a
@@ -239,21 +252,31 @@
         {% endif %}
 
         {# Running free trial: the dark trial pill and nothing else. There is deliberately
-           no Cancel here — a trial is cancelled by UNTICKING the module in the trial
-           decision modal ("Subscribe to Minty" in the panel), so the choice of what to
-           keep and what to drop is made once, against the price of the resulting plan,
-           instead of module by module with no view of the total. #}
+           no Cancel here, and none in the decision modal either — cancelling a free trial
+           is not offered anywhere in the UI. A trial that is not wanted simply is not
+           given a card, and it expires on its own date at no cost. #}
         {% elif card.subscription_status == 'trialing' %}
         <span class="inline-block bg-[#1F2937] text-white text-xs font-semibold px-3.5 py-1.5 rounded-full shadow-sm whitespace-nowrap">
           Free trial{% if card.period_end_short %} · ends {{ card.period_end_short }}{% endif %}
         </span>
+        {# The term is up and the subscription pass has not closed it out yet. A LABEL and
+           nothing else: the card stays a running trial everywhere else, because the state
+           lasts under an hour, the customer can do nothing about it, and it resolves on
+           its own. #}
+        {% if card.trial_closing %}
+        <p class="text-xs text-gray-500">trial ended- finalising</p>
+        {% endif %}
         {# A trial that will NOT convert looks exactly like one that will, and the
-           difference is a deadline the customer can miss. needs_card says which: no card
-           at all, or a card this company was never authorised for. #}
-        {% if card.needs_card %}
-        <p class="text-xs font-medium text-amber-700">
-          {% if card.needs_consent_only %}won't convert — confirm billing{% else %}won't convert — add a card{% endif %}
-        </p>
+           difference is a deadline the customer can miss.
+
+           ONLY the no-card case is warned about here. The other reason a trial won't
+           convert — a saved card this company was never authorised for — used to read
+           "won't convert — confirm billing", which names an action with no customer-facing
+           button on this page: confirming billing lives in the decision modal and in a
+           dev-only banner. A warning whose instruction cannot be followed is worse than
+           the panel's own account of the trial. #}
+        {% if card.needs_card and not card.needs_consent_only %}
+        <p class="text-xs font-medium text-amber-700">won't convert — add a card</p>
         {% endif %}
 
         {# Live PAID module: cancel in-app (prorated), access continues until
@@ -442,7 +465,10 @@
       </div>
       {% endif %}
 
-      {% if panel %}
+      {# Only when there is something to say. A paying panel has no footer — the rate is
+         the Total row above and the date is the card at the top of the page — and an
+         empty paragraph would still carry its top margin. #}
+      {% if panel and panel.footer %}
       <p data-panel-footer class="text-xs text-gray-500 mt-3">{{ panel.footer }}</p>
       {% endif %}
 
@@ -454,9 +480,9 @@
       <div data-panel-primary>
         {# Both actions open the SAME subscription decision modal — the panel's button is
            only a difference of caption. It does not go to Stripe from here: the modal is
-           where modules are kept or dropped, and Continue there cancels what was unticked
-           and takes any kept trial through checkout (card capture, or billing
-           confirmation when a card is already saved).
+           where PAID modules are kept or dropped, and Continue there cancels what was
+           unticked and takes any trial through checkout (card capture, or billing
+           confirmation when a card is already saved). A trial cannot be dropped there.
 
            The Stripe billing PORTAL is a different thing and is not here: it is the
            dev-only button in the banner above. #}

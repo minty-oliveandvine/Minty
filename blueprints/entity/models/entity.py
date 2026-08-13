@@ -33,6 +33,17 @@ class Entity(db.Model):
     onboarding_saved_step = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
     last_connected_at = db.Column(db.TIMESTAMP, nullable=True)
+    # Team-wide "last logged in" shown on the Select Company card: when this
+    # entity was last opened, and by whom. Written on entity open (see
+    # blueprints.entity.routes.modules.record_entity_access). Entity-level, not
+    # per-user, so the card shows who last touched the company — including
+    # superuser visits, which have no user_entity row.
+    last_accessed_at = db.Column(db.TIMESTAMP, nullable=True)
+    last_accessed_by_user_id = db.Column(
+        db.String(36),
+        db.ForeignKey("pettycashv2.user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     period_lock_date = db.Column(db.Date, nullable=True)
     end_of_year_lock_date = db.Column(db.Date, nullable=True)
     xero_tenant_name = db.Column(db.String(255), nullable=True)

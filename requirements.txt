@@ -1,4 +1,5 @@
 alembic==1.13.2
+APScheduler==3.11.0
 attrs==25.3.0
 babel==2.17.0
 bcrypt==4.2.0
@@ -79,6 +80,7 @@ trio==0.30.0
 trio-websocket==0.12.2
 typing_extensions==4.14.1
 tzdata==2024.1
+tzlocal==5.4.4
 ua-parser==1.0.1
 ua-parser-builtins==0.18.0.post1
 urllib3==2.5.0

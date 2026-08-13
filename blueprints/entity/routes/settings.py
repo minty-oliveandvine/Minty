@@ -1136,7 +1136,9 @@ def entity_settings_module(org_id):
     from blueprints.entity.services.modules import (build_subscription_panel,
                                                     get_billing_anchor,
                                                     get_module_cards,
-                                                    get_subscription_summary)
+                                                    get_next_payment_date,
+                                                    get_subscription_summary,
+                                                    next_payment_from_panel)
 
     org = Entity.query.get_or_404(org_id)
 
@@ -1144,9 +1146,19 @@ def entity_settings_module(org_id):
 
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
+    # Never shown. The anchor only answers "has this payer ever been billed", which is
+    # what puts the panel in its paid rather than its trial mode.
     billing_anchor = get_billing_anchor(org_id)
     subscription_panel = build_subscription_panel(
         module_cards, subscription_summary, billing_anchor
+    )
+    # The date on the card at the top of the page, and it is READ OFF THE PANEL rather
+    # than computed beside it — the card and the list below it were two answers to one
+    # question, and they disagreed whenever anything other than the renewal came first.
+    # The payer's projected cycle is only the fallback, for an entity with nothing
+    # scheduled at all.
+    next_payment_date = (
+        next_payment_from_panel(subscription_panel) or get_next_payment_date(org_id)
     )
 
     # Only admins may change modules; everyone else views read-only.
@@ -1184,7 +1196,7 @@ def entity_settings_module(org_id):
         module_cards=module_cards,
         subscription_summary=subscription_summary,
         subscription_panel=subscription_panel,
-        billing_anchor=billing_anchor,
+        next_payment_date=next_payment_date,
         can_manage_modules=can_manage_modules,
         subscription_payer=subscription_payer,
         # TEMPORARY, DEV ONLY. Gates the "add a payment method / confirm billing"
@@ -1662,6 +1674,14 @@ def entity_settings_module_retry_payment(org_id):
         "no_card": "There's no card on file to charge. Add a payment method, then try again.",
         "gave_up": "This subscription is past its payment deadline and has been closed.",
         "nothing_owed": "Nothing is outstanding — your subscription is up to date.",
+        # Deliberately not "nothing is outstanding": something is, and the customer can
+        # see it sitting Unpaid on the Invoices tab. It is simply not this period's, so
+        # paying it would take money and restore nothing — which is a conversation, not
+        # a button press. See ``dunning.retry_now``.
+        "older_debt_only": (
+            "There's nothing due for the current period. An earlier unpaid invoice is "
+            "still outstanding — contact us and we'll sort it out with you."
+        ),
     }
     if status == "failed":
         # The processor's own words when there are any: "insufficient funds" and "card

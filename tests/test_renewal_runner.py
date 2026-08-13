@@ -458,9 +458,17 @@ def test_a_collected_extension_is_closed_out_so_it_cannot_ride_again(monkeypatch
     assert calls["marked"] == [["ext_9"]]
 
 
-def test_an_extension_is_not_closed_out_until_the_money_is_collected(monkeypatch):
-    """Marking on a failed charge drops the fee silently — the days were granted either
-    way, so it would never be billed again. Same rule as paid_through."""
+def test_an_extension_is_closed_out_by_the_invoice_that_CARRIES_it(monkeypatch):
+    """Raised, not paid — because a declined renewal is not an abandoned one.
+
+    This used to wait for payment, on the reasoning that marking a failed charge would
+    drop the fee silently. That holds only if nothing chases the invoice afterwards, and
+    dunning does: the same document, extension lines and all, is retried for the whole
+    past-due window. Leaving the rows pending meant that when dunning finally collected,
+    the NEXT renewal added them again and the customer paid for one cancellation twice.
+
+    ``paid_through`` still does not move — that one really does depend on the money.
+    """
     renewals, calls = _wire(
         monkeypatch,
         extensions=[_Extension()],
@@ -469,8 +477,29 @@ def test_an_extension_is_not_closed_out_until_the_money_is_collected(monkeypatch
 
     renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
+    assert calls["marked"] == [["ext_1"]]
+    assert calls["paid_through"] == []
+
+
+def test_nothing_is_closed_out_when_no_invoice_was_raised_at_all(monkeypatch):
+    """The one case that must still leave them pending.
+
+    Issuing threw, so there is no document carrying the extension and nothing to chase.
+    Closing it here would be the silent drop the old rule was written to prevent.
+    """
+    from blueprints.subscription.services import billing_gateway
+
+    renewals, calls = _wire(monkeypatch, extensions=[_Extension()])
+
+    def _boom(*a, **k):
+        raise RuntimeError("processor unreachable")
+
+    monkeypatch.setattr(billing_gateway, "issue_invoice", _boom)
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
     assert calls["marked"] == []
-    assert calls["paid_through"] == []                # and neither moved
+    assert calls["dunning"], "a failed issue should still start dunning"
 
 
 def test_an_adopted_invoice_still_closes_its_extensions(monkeypatch):
@@ -490,15 +519,115 @@ def test_an_adopted_invoice_still_closes_its_extensions(monkeypatch):
     assert result["skipped"][0]["reason"] == "already invoiced; adopted"
 
 
-def test_an_unpaid_adopted_invoice_leaves_the_extension_pending(monkeypatch):
-    """An invoice that exists but is not paid has collected nothing, so the extension is
-    still owed and must stay on the books."""
+def test_an_unpaid_adopted_invoice_ALSO_closes_its_extensions(monkeypatch):
+    """Owed is not the same as unbilled.
+
+    The extension is still owed — but it is owed ON the invoice that already carries it,
+    which dunning is chasing. Keeping it pending as well would bill it a second time on
+    the next period while the first copy was still being collected.
+    """
     renewals, calls = _wire(
         monkeypatch,
         extensions=[_Extension()],
         existing=_Record(status="open"),
     )
 
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["marked"] == [["ext_1"]]
+    assert calls["paid_through"] == []                # unpaid, so the cycle stands still
+    assert result["skipped"][0]["reason"] == "already invoiced; unpaid"
+
+
+# --- an entity already charged for the period ----------------------------------
+#
+# A purchase or a trial conversion landing ON a period boundary bills its own entity for
+# the whole of that period. The renewal for the same period must therefore skip THAT
+# entity — and only that one. Getting either half wrong costs real money: re-billing it
+# charges twice for the same days, and skipping the account wholesale (which is what
+# advancing ``paid_through`` from the conversion used to do) leaves every sibling unbilled
+# for the month, silently, because a payer who is not due raises no invoice to miss.
+
+
+class _BilledRow(_Row):
+    def __init__(self, entity_id="e1", code="BILL", phase="active", first_billed_at=None):
+        super().__init__(entity_id, code, phase)
+        self.first_billed_at = first_billed_at
+
+
+def test_an_entity_billed_inside_the_period_is_not_renewed_for_it_again(monkeypatch):
+    """It already paid for these days in its own invoice."""
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_BilledRow(entity_id="e1", first_billed_at=PAID_THROUGH)],
+    )
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["issued"] == [], "the entity was charged twice for one period"
+    assert result["skipped"][0]["reason"] == "already covered this period"
+
+
+def test_its_SIBLINGS_are_still_billed_for_that_period(monkeypatch):
+    """The bug this pair exists for.
+
+    One entity converting on the boundary must not settle the account. Steady Co went a
+    full month unbilled because a sibling's conversion advanced ``paid_through`` and the
+    renewal then found the payer not due at all.
+    """
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[
+            _BilledRow(entity_id="converted", first_billed_at=PAID_THROUGH),
+            _BilledRow(entity_id="sibling", first_billed_at=ANCHOR),
+        ],
+    )
+
     renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
-    assert calls["marked"] == []
+    assert len(calls["issued"]) == 1
+    invoice = calls["issued"][0][1]
+    assert [line.entity_id for line in invoice.lines] == ["sibling"]
+
+
+def test_a_period_covered_by_someone_elses_invoice_still_advances_the_cycle(monkeypatch):
+    """Otherwise the account is due forever and eventually lapses for non-payment.
+
+    Nothing is billable, but the period IS paid for. Leaving ``paid_through`` behind
+    would re-check the account every day and, past the grace window, revoke access over
+    money that was collected.
+    """
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_BilledRow(entity_id="e1", first_billed_at=PAID_THROUGH)],
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["paid_through"] == [("u1", datetime(2027, 3, 8, 13, tzinfo=UTC))]
+
+
+def test_an_account_with_nothing_left_does_not_advance(monkeypatch):
+    """"Nothing billable" and "already covered" are different nothings.
+
+    A payer whose modules have all lapsed must not have their cycle rolled forward, or
+    they collect free periods for as long as the job runs.
+    """
+    renewals, calls = _wire(monkeypatch, rows=[_BilledRow(phase="expired")])
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["paid_through"] == []
+    assert calls["issued"] == []
+
+
+def test_a_past_period_does_not_exempt_an_entity_forever(monkeypatch):
+    """``first_billed_at`` falls inside exactly one period; later ones renew normally."""
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_BilledRow(entity_id="e1", first_billed_at=ANCHOR - timedelta(days=400))],
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert len(calls["issued"]) == 1

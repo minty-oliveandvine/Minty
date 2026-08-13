@@ -24,7 +24,7 @@ an unambiguous DB record.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Mapping
 
@@ -38,6 +38,16 @@ from models.db import EntityFunction, EntityFunctionMap, db
 MODULE_PETTY_CASH = "PETTY_CASH"
 MODULE_BILL = "BILL"
 MODULE_CODES: tuple[str, ...] = (MODULE_PETTY_CASH, MODULE_BILL)
+
+# How long after ``trial_end`` a trial the subscription pass has not closed out yet still
+# presents as a trial being finalised rather than as one that expired.
+#
+# Six hours against an hourly pass: wide enough to cover a missed run, a deploy, or a host
+# that was busy, and far too narrow to cover an environment where nothing runs at all.
+# That second half is the point. Without a bound, every stale trial on a system with no
+# scheduler matches forever — which is precisely what production is until the scheduler is
+# enabled there.
+TRIAL_CLOSING_WINDOW = timedelta(hours=6)
 
 # What the multi-module plan is called on screen. The catalog row carries its own
 # display_name and that wins; this is the fallback for a catalog that has no bundle
@@ -398,6 +408,54 @@ def get_module_cards(entity_id: str) -> list[dict]:
         # must side with the gate.
         has_access = bool(access_state.get(code))
 
+        # THE WINDOW BETWEEN THE TERM ENDING AND THE JOB CLOSING IT OUT.
+        #
+        # ``trial_end`` passes unattended. Until the subscription pass runs, the row is
+        # still ``phase = trial`` while ``granted`` has already gone false — so the card
+        # dropped out of "trialing", failed the paid branch too, and landed on
+        # ``trial_expired``: it told a customer their free trial was used up while the
+        # gate was still letting them work, and while a trial with a card and consent was
+        # in fact about to CONVERT. Premature, and for the converting case the opposite of
+        # what was coming.
+        #
+        # Bounded by construction, which is what makes it safe to show. It needs the gate
+        # to still say yes, and the next pass ends it either way — close-trials converts
+        # or expires the row, and failing that the sweep revokes access because
+        # ``grants_access`` is already false. A scheduler that stopped cannot leave a card
+        # stuck here; it resolves to the honest ``trial_expired`` as soon as anything runs.
+        _trial_end = getattr(row, "trial_end", None)
+        app_trial_closing = bool(
+            row is not None
+            and phase == PHASE_TRIAL
+            and not granted
+            and has_access
+            # BOUNDED BY TIME, and this is the whole safety of the state.
+            #
+            # It was first written as "phase is trial, access is still on" and justified
+            # as self-limiting: the next pass converts or expires the row within the hour,
+            # so it could not persist. That is only true where the pass RUNS. On an
+            # environment with no scheduler — which production was, and which any
+            # environment becomes the moment the scheduler is off — a trial past its term
+            # keeps its phase and its access indefinitely, and the unbounded version
+            # matched every one of them, forever: a trial that ended three weeks ago
+            # rendered as a running trial with a past date, and ``needs_card`` turned on
+            # with it, which displaced the billing-portal banner with a nudge quoting a
+            # deadline in the past.
+            #
+            # So the window is explicit. Past it, the trial is not "being closed out", it
+            # is simply over and nothing came for it — which is what ``trial_expired`` has
+            # always said.
+            and _trial_end is not None
+            and (now - _trial_end) <= TRIAL_CLOSING_WINDOW
+        )
+        # Folded into ``app_trial`` rather than given a status of its own. Everything
+        # downstream — the panel's enabled set, the notices, the badge, the row styling —
+        # asks "is this trialing", and answering differently for the hour before the pass
+        # runs would rearrange the whole page around a state the customer cannot act on and
+        # which resolves by itself. It IS still a trial: nothing has closed it out. The
+        # closing flag is carried separately and used for exactly one thing, a label.
+        app_trial = app_trial or app_trial_closing
+
         # Trial eligibility: a module this entity has NEVER held. The trial is
         # once-per-module, so ANY history disqualifies it - including a lapsed one - and
         # those go through paid checkout instead. The row existing at all IS that
@@ -419,6 +477,10 @@ def get_module_cards(entity_id: str) -> list[dict]:
             and never_billed
             and getattr(row, "trial_end", None) is not None
             and not granted
+            # Not yet: the term is up but the pass has not closed it out, and the customer
+            # is still working inside the module. Calling that "expired" is a guess about
+            # an outcome that has not been decided — see ``app_trial_closing``.
+            and not app_trial_closing
         )
 
         plan = plans_by_code.get(code.upper())
@@ -490,6 +552,11 @@ def get_module_cards(entity_id: str) -> list[dict]:
                     row is not None and access.is_subscribed(phase=phase)
                 ),
                 "trial_eligible": trial_eligible,
+                # The term is up and the pass has not closed it out yet. Presentation
+                # ONLY: the card is otherwise a running trial in every respect, and this
+                # adds a line saying the outcome is being settled. Never gate behaviour on
+                # it — see where it is set.
+                "trial_closing": app_trial_closing,
                 # Held a trial, used it up, never paid: the card says "free trial
                 # expired" under its status so "not active" is not the whole story.
                 "trial_expired": trial_expired,
@@ -760,6 +827,70 @@ def get_billing_anchor(entity_id: str) -> str | None:
     return _fmt_day_month_year(anchor) if anchor else None
 
 
+def next_payment_from_panel(panel: dict | None) -> str | None:
+    """The date of the panel's next actual charge, or None if it has none scheduled.
+
+    THE FIRST ROW of ``upcoming_charges``, which is already sorted on the raw datetime.
+    The card at the top of the settings page and the list in the panel below it were two
+    separate answers to "when am I next charged", computed from different sources, and
+    they disagreed whenever anything but the renewal came first: a trial converting on the
+    20th is charged eight days before the renewal on the 28th, and the card named the 28th
+    — the SECOND charge — as the next one. Reading the card off the list makes that
+    impossible rather than merely unlikely.
+
+    OVERDUE ROWS ARE SKIPPED. ``past_due`` carries a ``paid_through`` that is already
+    behind us, so the earliest row can be a date in the PAST — which under the words "Next
+    payment date" is exactly the bug this card was rewritten to fix, and with none of the
+    red that makes the panel's own "Renewal — overdue" line legible as arrears. The debt
+    is stated there, properly, rather than silently here.
+
+    None when nothing is scheduled — a trial that will not convert, or every module
+    cancelled. The caller falls back to :func:`get_next_payment_date`.
+    """
+    for row in (panel or {}).get("upcoming_charges") or []:
+        if row.get("date") and not row.get("overdue"):
+            return row["date"]
+    return None
+
+
+def get_next_payment_date(entity_id: str) -> str | None:
+    """The payer's NEXT billing date, formatted for display, or None if there is no cycle.
+
+    The FALLBACK behind :func:`next_payment_from_panel` — what the settings card shows for
+    an entity with no charge of its own scheduled. The anchor itself is the wrong thing to
+    put in front of a customer: it is the ORIGINAL first-charge date and never moves, so a
+    payer anchored in July still reads "28 Jul 2026" in August — a date in the past,
+    labelled as when they will be billed. This projects the same cycle forward instead.
+
+    Derived from the anchor rather than from ``paid_through`` so the month-end clamp is
+    the same one the renewal runner bills on (``period_containing``: 31 Jan → 28 Feb →
+    back to 31 Mar), and so it can never quote a date that has already gone —
+    ``period_containing`` returns the period ``now`` is inside, whose END is by
+    construction still ahead.
+
+    None while the entity is only on an app-level trial: no charge has happened, so there
+    is no cycle to project and nothing honest to name. The page shows that as
+    "To Be Decided", same as before.
+    """
+    from blueprints.subscription.services import clock
+    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services.billing import period_containing
+
+    payer_id = sub_store.payer_for_entity(entity_id)
+    if not payer_id:
+        return None
+    anchor, _currency = sub_store.billing_cycle_for_user(payer_id)
+    if not anchor:
+        return None
+    try:
+        return _fmt_day_month_year(period_containing(anchor, clock.now()).end)
+    except Exception:
+        # A date on a card must never cost anyone the page — the panel below it carries
+        # the same information per module.
+        logger.exception("modules: could not project the next payment date for {}", entity_id)
+        return None
+
+
 def _forecast_conversion_charges(entity_id, payer_id, billed_now, cards) -> dict[str, int]:
     """{code: minor units} actually charged ON each converting trial's date.
 
@@ -996,7 +1127,9 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
     they're trialing or paid — the trial panel has to preview the price the trial will
     convert to. The billing anchor decides the mode: no anchor yet ⇒ still on trial
     ("Subscribe to Minty", "first charge … on <trial end>"); anchor set ⇒ paid
-    ("Manage subscription", "Billed …/mo · anchor <date>").
+    ("Manage subscription", "Billed …/mo · next payment <date>"). ``anchor_display`` is
+    only ever read as that switch — the anchor is a past date and is never shown; the
+    footer names ``next_invoice_on``, the date the cycle actually bills next.
 
     ALWAYS returns a panel. With nothing enabled it returns an ``is_empty`` one that
     still names every module and prices the total at zero, rather than None — the panel
@@ -1171,12 +1304,13 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
             )
 
     # The highlighted context line — what the price actually is, in plain words.
+    #
+    # The bundle line reads the same whether trialing or paid. It used to append "vs
+    # HK$280 each" once billing had started, which quoted a per-module price for a plan
+    # nobody is billed per module on — and the saving beside it already carries the
+    # comparison.
     if is_bundle:
-        if state == "trialing":
-            note = f"{bundle_name} price — save {fmt(saving)}"
-        else:
-            each = fmt(enabled[0]["amount"])
-            note = f"{bundle_name} price — save {fmt(saving)} vs {each} each."
+        note = f"{bundle_name} price — save {fmt(saving)}"
     else:
         module = enabled[0]
         price = fmt(module["amount"])
@@ -1299,20 +1433,47 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
     # Non-converting trials are absent by construction — nothing is charged for a trial
     # that expires, so it is not an upcoming charge. It still appears in the footer,
     # which is where "add a card or lose this" belongs.
-    upcoming_charges = [
-        {
-            "at": c["period_end"],
-            "date": c.get("period_end_long"),
-            "label": f"{c['name']} converts",
-            "amount": fmt(c.get("conversion_charge") or Decimal(0)),
-            "overdue": False,
-            "note": None,
-        }
-        for c in enabled
-        if c.get("subscription_status") == "trialing"
-        and not c.get("needs_card")
-        and c.get("period_end")
-    ]
+    #
+    # GROUPED BY DAY, and a day whose conversions are exactly the bundle is ONE row naming
+    # the plan. Two modules converting together are billed as the bundle, not as two
+    # modules: the forecasts are computed sequentially, so the first carries a full period
+    # (280) and the second the net of the change into the bundle (120), and only their SUM
+    # (400) is a number the customer will recognise. Printed as two rows they had to add
+    # up a 280 and a 120 that appear nowhere on the invoice to check the 400 that does.
+    # Same rule the cancellation rows already follow (_extension_charges).
+    converting_by_day: dict = {}
+    for card in enabled:
+        if (
+            card.get("subscription_status") == "trialing"
+            and not card.get("needs_card")
+            and card.get("period_end")
+        ):
+            converting_by_day.setdefault(card["period_end"], []).append(card)
+
+    upcoming_charges = []
+    for at, same_day_cards in converting_by_day.items():
+        day_codes = sorted((c["code"] or "").upper() for c in same_day_cards)
+        day_amount = sum(
+            (c.get("conversion_charge") or Decimal(0) for c in same_day_cards), Decimal(0)
+        )
+        if bundle_codes and len(same_day_cards) > 1 and day_codes == bundle_codes:
+            rows = [(bundle_name, day_amount)]
+        else:
+            rows = [
+                (c["name"], c.get("conversion_charge") or Decimal(0))
+                for c in same_day_cards
+            ]
+        upcoming_charges.extend(
+            {
+                "at": at,
+                "date": same_day_cards[0].get("period_end_long"),
+                "label": f"{label} converts",
+                "amount": fmt(amount),
+                "overdue": False,
+                "note": None,
+            }
+            for label, amount in rows
+        )
     # The renewal quotes the RECURRING figure only. Any cancel-extension riding the same
     # invoice is listed beside it as its own row, so each line is one thing the customer
     # can recognise; ``next_invoice`` still carries the combined total, because that is
@@ -1387,11 +1548,15 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
                 f"on {first_charge_on}."
             )
     else:
-        footer = (
-            f"Billed {total_fmt}/mo · anchor {anchor_display}."
-            if anchor_display
-            else f"Billed {total_fmt}/mo."
-        )
+        # NO FOOTER once billing has started — both halves of the old sentence are now
+        # said better elsewhere on the page. "Billed HK$400/mo" repeated the Total row
+        # directly above it, and "· next payment 28 Aug 2026" repeated the date card at
+        # the top of the page, which is where a customer looks for it. The template skips
+        # the paragraph entirely rather than printing an empty one.
+        #
+        # The trial and empty states keep theirs: those say something no other element
+        # on the panel does (when the first charge lands, or that nothing is billed).
+        footer = ""
 
     return {
         "state": state,
@@ -1557,8 +1722,15 @@ def build_subscription_notices(entity_id: str, user_id) -> dict:
         ):
             # Still >= 0 even with no window: a trial past its end date is not
             # "ending", it has ended, and the sweep is what speaks next.
+            #
+            # ``trial_closing`` is the one exception, and it is not a contradiction of
+            # that rule: it means the term has passed but nothing has closed the trial
+            # out YET and the customer still has access. Dropping the notice there would
+            # take the "first charge is coming, on this date" message away in the final
+            # hour before the charge — the moment it is most worth having on screen — and
+            # would make the panel visibly rearrange itself for a state nobody can act on.
             days_left = (period_end - now).days
-            if days_left >= 0 and (
+            if (days_left >= 0 or card.get("trial_closing")) and (
                 TRIAL_ENDING_SOON_DAYS is None
                 or days_left <= TRIAL_ENDING_SOON_DAYS
             ):
@@ -1850,9 +2022,14 @@ def set_entity_module(
     return _write_pairs(entity_id, {code: bool(enabled)}, actor=actor)
 
 
-def sweep_expired_module_access() -> dict:
+def sweep_expired_module_access(payer_user_id=None) -> dict:
     """Disable modules whose access has lapsed past its grace, and END the ones that are
     over.
+
+    ``payer_user_id`` narrows the whole pass to one billing account. The daily job runs
+    unscoped; a caller that has just changed one account's entitlement — dunning, on the
+    payment that clears an episode — passes its payer so the customer's access comes back
+    with the payment rather than at the next nightly run.
 
     Nothing fires at a grace boundary — not the past-due window measured from
     ``paid_through``, and not ``app_access_until`` (a cancelled module's paid
@@ -1886,8 +2063,15 @@ def sweep_expired_module_access() -> dict:
     the map and only starts the trials at finalize, so between those two calls an enabled
     module with no row is expected rather than broken.
 
+    Reconciles in BOTH directions. A module whose entitlement has come BACK — a past-due
+    account that paid, a dunning episode that recovered — is switched on again, because
+    nothing else does it either. Revocation used to be one-way: the sweep only looked at
+    modules that were currently on, so one it turned off left its candidate set for good
+    and the customer stayed locked out of a subscription still being charged for. See the
+    restore branch for why that direction is deliberately narrower than this one.
+
     Intended to run daily (``flask subscriptions sweep-access``). Returns
-    ``{"disabled": [{"entity_id", "code"}, ...]}``.
+    ``{"disabled": [{"entity_id", "code"}, ...], "restored": [...]}``.
     """
     from blueprints.subscription.services import access, checkout, clock, policy
     from blueprints.subscription.services import store as sub_store
@@ -1895,13 +2079,21 @@ def sweep_expired_module_access() -> dict:
 
     code_set = set(MODULE_CODES)
     disabled: list[dict] = []
+    restored: list[dict] = []
     now = clock.now()
     # One window for the whole sweep. Reading it per entity would let a mid-run edit
     # revoke access for the tail of the batch under a rule the head never saw.
     grace_days = policy.current().past_due_window_days
 
-    # Every entity with a module currently switched on — the only ones a sweep could
-    # need to switch off.
+    # Two populations, because this reconciles in BOTH directions.
+    #
+    # Entities with a module switched on are the only ones that could need switching
+    # off. On its own that set made the sweep a one-way ratchet: a module revoked here
+    # left the candidate set permanently, so nothing could ever switch it back on — and
+    # nothing else does. An account that went past due, then paid, stayed locked out of
+    # a subscription it was being charged for, which is precisely the recovery dunning
+    # exists to deliver. So entities holding a BILLED module are candidates too, however
+    # their access flag currently reads.
     module_fn_ids = [
         fn.id
         for fn in EntityFunction.query.filter(
@@ -1919,6 +2111,16 @@ def sweep_expired_module_access() -> dict:
         if module_fn_ids
         else set()
     )
+    if payer_user_id is None:
+        entity_ids |= sub_store.entity_ids_with_billed_modules()
+    else:
+        mine = {
+            str(row.entity_id)
+            for row in sub_store.module_rows_for_payer(payer_user_id)
+        }
+        entity_ids = (entity_ids & mine) | sub_store.entity_ids_with_billed_modules(
+            payer_user_id
+        )
 
     # Mid-onboarding entities are exempt (see docstring). Resolved in ONE query up
     # front rather than per entity, so a long sweep can't straddle a finalize and
@@ -1952,6 +2154,33 @@ def sweep_expired_module_access() -> dict:
             for code in code_set:
                 row = rows.get(code)
                 if not enabled.get(code):
+                    # Switched off while the subscription still entitles it. Restoring
+                    # is deliberately narrower than revoking: only a BILLED module, and
+                    # only on the same ``grants_access`` predicate that took it away.
+                    #
+                    # Requiring a row keeps the guarantee that access is a projection of
+                    # a subscription — a flag with nothing behind it is still revoked
+                    # above and is never invented here. Requiring the module to be BILLED
+                    # is what keeps this from fighting the customer: a paid module cannot
+                    # be switched off by hand at all (``set_entity_module`` refuses it),
+                    # so an off flag on one can only have come from this sweep. A trial
+                    # IS freely toggleable, so re-enabling one would silently overturn a
+                    # deliberate choice — and a live trial never loses access this way in
+                    # the first place, since its date does not depend on the billing
+                    # cycle. Terminal phases grant nothing and so are never restored.
+                    if row is not None and access.is_paid_module(
+                        phase=row.phase,
+                        has_been_billed=row.first_billed_at is not None,
+                    ) and access.grants_access(
+                        now,
+                        phase=row.phase,
+                        trial_end=row.trial_end,
+                        app_access_until=row.app_access_until,
+                        period_end=paid_through,
+                        past_due_grace_days=grace_days,
+                    ):
+                        set_entity_module(entity_id, code, True, actor="subscription")
+                        restored.append({"entity_id": entity_id, "code": code})
                     continue
                 # Switched on with nothing behind it — never subscribed, or a row
                 # deleted out from under the flag. Access is a projection; with no
@@ -1996,7 +2225,12 @@ def sweep_expired_module_access() -> dict:
     # having been bolted on.
     for item in disabled:
         item.pop("payer_user_id", None)
-    return {"disabled": disabled}
+    # Restorations are deliberately NOT mailed. The customer is told by the thing that
+    # caused them — the dunning "you're all settled" notice, the receipt for the payment
+    # that cleared the balance — and a second "your access is back" for the same event
+    # reads as a system talking to itself. A revocation has no such owner, which is why
+    # that one does send.
+    return {"disabled": disabled, "restored": restored}
 
 
 def _notify_access_revoked(disabled: list[dict]) -> None:

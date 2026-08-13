@@ -380,6 +380,38 @@
       font-size: 14px;
       color: var(--auth-ink-2);
     }
+    /* Ties with .auth-field label (0,1,1) and wins on order. */
+    .auth-terms label {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: var(--auth-ink-2);
+      cursor: pointer;
+    }
+    /* .auth-field input above sets width:100% plus text-input padding, border
+       and background on EVERY input in the group — including this checkbox,
+       which then eats the whole row and squeezes the label text into a narrow
+       wrapping column. Specificity (0,2,1) beats .auth-field input (0,1,1). */
+    .auth-terms input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      flex: none;
+      margin: 2px 0 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: none;
+      box-shadow: none;
+      accent-color: var(--auth-accent);
+      cursor: pointer;
+    }
+    .auth-terms input[type="checkbox"]:focus {
+      border: 0;
+      box-shadow: none;
+    }
     .auth-link {
       color: var(--auth-accent-ink);
       font-weight: 600;
@@ -523,8 +555,8 @@
              agreed, so an account cannot begin without it.
              The server checks this independently — see _terms_consent_for_signup. -->
         <div class="auth-field auth-terms">
-          <label for="termsAccept" style="display:flex;gap:.5rem;align-items:flex-start;font-weight:400;">
-            <input type="checkbox" id="termsAccept" style="margin-top:.25rem;flex:none;" />
+          <label for="termsAccept">
+            <input type="checkbox" id="termsAccept" />
             <span>
               I agree to the
               <a href="{{ url_for('legal.terms') }}" target="_blank" rel="noopener" class="auth-link">Terms of Use</a>
