@@ -1277,12 +1277,13 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
             )
 
     # The highlighted context line — what the price actually is, in plain words.
+    #
+    # The bundle line reads the same whether trialing or paid. It used to append "vs
+    # HK$280 each" once billing had started, which quoted a per-module price for a plan
+    # nobody is billed per module on — and the saving beside it already carries the
+    # comparison.
     if is_bundle:
-        if state == "trialing":
-            note = f"{bundle_name} price — save {fmt(saving)}"
-        else:
-            each = fmt(enabled[0]["amount"])
-            note = f"{bundle_name} price — save {fmt(saving)} vs {each} each."
+        note = f"{bundle_name} price — save {fmt(saving)}"
     else:
         module = enabled[0]
         price = fmt(module["amount"])
@@ -1405,20 +1406,47 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
     # Non-converting trials are absent by construction — nothing is charged for a trial
     # that expires, so it is not an upcoming charge. It still appears in the footer,
     # which is where "add a card or lose this" belongs.
-    upcoming_charges = [
-        {
-            "at": c["period_end"],
-            "date": c.get("period_end_long"),
-            "label": f"{c['name']} converts",
-            "amount": fmt(c.get("conversion_charge") or Decimal(0)),
-            "overdue": False,
-            "note": None,
-        }
-        for c in enabled
-        if c.get("subscription_status") == "trialing"
-        and not c.get("needs_card")
-        and c.get("period_end")
-    ]
+    #
+    # GROUPED BY DAY, and a day whose conversions are exactly the bundle is ONE row naming
+    # the plan. Two modules converting together are billed as the bundle, not as two
+    # modules: the forecasts are computed sequentially, so the first carries a full period
+    # (280) and the second the net of the change into the bundle (120), and only their SUM
+    # (400) is a number the customer will recognise. Printed as two rows they had to add
+    # up a 280 and a 120 that appear nowhere on the invoice to check the 400 that does.
+    # Same rule the cancellation rows already follow (_extension_charges).
+    converting_by_day: dict = {}
+    for card in enabled:
+        if (
+            card.get("subscription_status") == "trialing"
+            and not card.get("needs_card")
+            and card.get("period_end")
+        ):
+            converting_by_day.setdefault(card["period_end"], []).append(card)
+
+    upcoming_charges = []
+    for at, same_day_cards in converting_by_day.items():
+        day_codes = sorted((c["code"] or "").upper() for c in same_day_cards)
+        day_amount = sum(
+            (c.get("conversion_charge") or Decimal(0) for c in same_day_cards), Decimal(0)
+        )
+        if bundle_codes and len(same_day_cards) > 1 and day_codes == bundle_codes:
+            rows = [(bundle_name, day_amount)]
+        else:
+            rows = [
+                (c["name"], c.get("conversion_charge") or Decimal(0))
+                for c in same_day_cards
+            ]
+        upcoming_charges.extend(
+            {
+                "at": at,
+                "date": same_day_cards[0].get("period_end_long"),
+                "label": f"{label} converts",
+                "amount": fmt(amount),
+                "overdue": False,
+                "note": None,
+            }
+            for label, amount in rows
+        )
     # The renewal quotes the RECURRING figure only. Any cancel-extension riding the same
     # invoice is listed beside it as its own row, so each line is one thing the customer
     # can recognise; ``next_invoice`` still carries the combined total, because that is
@@ -1493,15 +1521,15 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
                 f"on {first_charge_on}."
             )
     else:
-        # The date named here is the one the cycle NEXT bills, not the anchor: the anchor
-        # is the first charge and never moves, so it reads as a past date beside a
-        # forward-looking sentence. Absent when nothing renews (every paid module winding
-        # down), and then the line just states the rate.
-        footer = (
-            f"Billed {total_fmt}/mo · next payment {next_invoice_on}."
-            if next_invoice_on
-            else f"Billed {total_fmt}/mo."
-        )
+        # NO FOOTER once billing has started — both halves of the old sentence are now
+        # said better elsewhere on the page. "Billed HK$400/mo" repeated the Total row
+        # directly above it, and "· next payment 28 Aug 2026" repeated the date card at
+        # the top of the page, which is where a customer looks for it. The template skips
+        # the paragraph entirely rather than printing an empty one.
+        #
+        # The trial and empty states keep theirs: those say something no other element
+        # on the panel does (when the first charge lands, or that nothing is billed).
+        footer = ""
 
     return {
         "state": state,

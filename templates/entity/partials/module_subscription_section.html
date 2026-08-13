@@ -256,12 +256,16 @@
         <p class="text-xs text-gray-500">trial ended- finalising</p>
         {% endif %}
         {# A trial that will NOT convert looks exactly like one that will, and the
-           difference is a deadline the customer can miss. needs_card says which: no card
-           at all, or a card this company was never authorised for. #}
-        {% if card.needs_card %}
-        <p class="text-xs font-medium text-amber-700">
-          {% if card.needs_consent_only %}won't convert — confirm billing{% else %}won't convert — add a card{% endif %}
-        </p>
+           difference is a deadline the customer can miss.
+
+           ONLY the no-card case is warned about here. The other reason a trial won't
+           convert — a saved card this company was never authorised for — used to read
+           "won't convert — confirm billing", which names an action with no customer-facing
+           button on this page: confirming billing lives in the decision modal and in a
+           dev-only banner. A warning whose instruction cannot be followed is worse than
+           the panel's own account of the trial. #}
+        {% if card.needs_card and not card.needs_consent_only %}
+        <p class="text-xs font-medium text-amber-700">won't convert — add a card</p>
         {% endif %}
 
         {# Live PAID module: cancel in-app (prorated), access continues until
@@ -450,7 +454,10 @@
       </div>
       {% endif %}
 
-      {% if panel %}
+      {# Only when there is something to say. A paying panel has no footer — the rate is
+         the Total row above and the date is the card at the top of the page — and an
+         empty paragraph would still carry its top margin. #}
+      {% if panel and panel.footer %}
       <p data-panel-footer class="text-xs text-gray-500 mt-3">{{ panel.footer }}</p>
       {% endif %}
 
