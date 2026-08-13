@@ -8,10 +8,12 @@ from flask import (current_app, flash, redirect, render_template, request,
 from flask_login import current_user, login_required
 from loguru import logger
 from sqlalchemy import func, or_
+from sqlalchemy.orm import aliased
 
 from blueprints.entity import entity_bp
 from blueprints.entity.services.modules import (build_subscription_notices,
-                                                claim_subscription_notice)
+                                                claim_subscription_notice,
+                                                get_enabled_modules_for_entities)
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
 from blueprints.shared.entity_display import build_entity_acronym
@@ -27,29 +29,74 @@ from services.authz import (permission_denied, require_entity_access,
 from services.permission_policy import Permission, has_permission, is_superuser
 
 
+def _format_last_accessed(dt):
+    """Render a last-login timestamp like "9 Jun 5:42 PM".
+
+    Built without strftime's %-d / %-I, which are glibc extensions and raise on
+    Windows, so this renders identically on a dev box and on the server.
+    """
+    if not dt:
+        return None
+    return f"{dt.day} {dt.strftime('%b')} {dt.strftime('%I:%M %p').lstrip('0')}"
+
+
 @entity_bp.route("/entity")
 @login_required
 def entity_list():
+    # Who last opened each entity — outer-joined so entities that have never
+    # been opened (last_accessed_by_user_id IS NULL) still come back.
+    accessor = aliased(User)
+    base_query = (
+        db.session.query(
+            Entity.id,
+            Entity.name,
+            Entity.status,
+            Entity.last_accessed_at,
+            accessor.first_name,
+            accessor.last_name,
+        )
+        .outerjoin(accessor, Entity.last_accessed_by_user_id == accessor.id)
+        .filter(or_(Entity.status.is_(None), Entity.status != "deleted"))
+        # "Setup in progress" floats to the top so a half-finished entity is
+        # the first thing seen, then most-recently-opened first. Never-opened
+        # entities sort last rather than first, which is what NULLS LAST buys.
+        .order_by(
+            (Entity.status == "onboarding").desc(),
+            Entity.last_accessed_at.desc().nulls_last(),
+        )
+    )
     if is_superuser(current_user):
         # Superusers see every non-deleted entity, even those they have no
         # user_entity row on (they enter read-only on those).
-        organizations = (
-            Entity.query
-            .filter(or_(Entity.status.is_(None), Entity.status != "deleted"))
-            .with_entities(Entity.id, Entity.name, Entity.status)
-            .all()
-        )
+        rows = base_query.all()
     else:
-        organizations = (
-            UserEntity.query.join(Entity, UserEntity.entity_id == Entity.id)
+        rows = (
+            base_query.join(UserEntity, UserEntity.entity_id == Entity.id)
             .filter(UserEntity.user_id == current_user.id)
-            .filter(or_(Entity.status.is_(None), Entity.status != "deleted"))
-            .with_entities(Entity.id, Entity.name, Entity.status)
             .all()
         )
-    if not organizations:
-        logger.info(f"Entity list is empty: {organizations}")
+    if not rows:
+        logger.info("Entity list is empty")
         return render_template("entity/entity_list_empty.html")
+
+    # Which module icons each card shows. This resolver is fail-closed (no
+    # entity_function_map row means OFF), which is what we want here — a module
+    # icon is a claim that the module is paid for and usable.
+    modules_by_entity = get_enabled_modules_for_entities([r.id for r in rows])
+
+    organizations = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "status": r.status,
+            "modules": modules_by_entity.get(r.id, set()),
+            "last_accessed_display": _format_last_accessed(r.last_accessed_at),
+            "last_accessed_by": (
+                f"{r.first_name or ''} {r.last_name or ''}".strip() or None
+            ),
+        }
+        for r in rows
+    ]
     return render_template("entity/index.html", organizations=organizations)
 
 
