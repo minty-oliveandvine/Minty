@@ -148,6 +148,64 @@ def test_a_running_trial_cannot_be_cancelled_from_the_ui(app):
     assert "cancelSubscription" not in section
 
 
+def _untried_card(code, name):
+    """A module this entity has never held — its free trial is still available."""
+    card = _trial_card(code, name)
+    card.update({
+        "subscription_status": None, "trial_eligible": True, "needs_card": False,
+        "period_end_short": None, "period_end_long": None,
+    })
+    return card
+
+
+def _spent_card(code, name):
+    """Held a trial, used it up, never paid. No free days left, so it IS sellable."""
+    card = _untried_card(code, name)
+    card["trial_eligible"] = False
+    return card
+
+
+def test_an_untried_module_is_marked_as_still_having_its_trial(app):
+    """The reported bug. "Manage subscription" charged for a module the entity had never
+    held, while that module's own card — on the same page — offered the same module free
+    for 30 days. One module, two routes, two prices.
+
+    The row now carries the card's own ``trial_eligible``, so ``commitSubDecision`` sends
+    it to the trial endpoint instead of checkout. Marking it here rather than re-deriving
+    eligibility in JS is what makes the two routes agree by construction.
+    """
+    _section, scripts = _render_trial(
+        app, module_cards=[_untried_card("PETTY_CASH", "Petty Cash")]
+    )
+
+    tag = _keep_input(scripts, "PETTY_CASH")
+    assert 'data-keep-state="available"' in tag
+    assert 'data-keep-trial-eligible="1"' in tag
+
+
+def test_a_module_whose_trial_is_spent_is_still_a_purchase(app):
+    """The other half, and the reason this is not "never charge for an available row": a
+    spent trial or a lapsed paid module has no free days left, so taking it up again is a
+    genuine purchase and still goes through checkout."""
+    _section, scripts = _render_trial(
+        app, module_cards=[_spent_card("PETTY_CASH", "Petty Cash")]
+    )
+
+    tag = _keep_input(scripts, "PETTY_CASH")
+    assert 'data-keep-state="available"' in tag
+    assert 'data-keep-trial-eligible=""' in tag
+
+
+def test_the_modal_can_reach_the_trial_endpoint_at_all(app):
+    """The route the fix depends on. Without this url_for the trial branch would post to
+    the wrong place — and the failure would look like "nothing happened"."""
+    _section, scripts = _render_trial(
+        app, module_cards=[_untried_card("PETTY_CASH", "Petty Cash")]
+    )
+
+    assert "/start-trial" in scripts or "start_trial" in scripts
+
+
 def test_a_paid_module_is_still_droppable_in_the_modal(app):
     """The other half, and the reason the lock is per-row rather than on the modal: a
     paid module is cancelled exactly as before, priced and confirmed against what
