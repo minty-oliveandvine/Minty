@@ -610,51 +610,6 @@ def invite_admin_to_entity(user_id, entity_id, email: str) -> tuple[bool, str]:
     return True, f"Invited {address} as an admin of {entity.name}."
 
 
-# --- The Billing tab ---------------------------------------------------------
-#
-# ONE account, several entities. That asymmetry is the whole shape of this screen and it
-# is not a simplification: ``user_stripe_customer`` holds one row per payer carrying one
-# currency, one anchor, one ``paid_through`` and one dunning clock, and the card lives on
-# that one Stripe customer. ``billing_gateway.issue_invoice(customer_id, ...)`` charges
-# the CUSTOMER, and ``renewals`` builds a single invoice per payer with a line per
-# entity — so there is exactly one card in play, however many companies are on the bill.
-#
-# A card saved PER ENTITY has no home and nothing that would charge it. It would also not
-# stop at storage: different cards mean different payment outcomes per entity, which means
-# a per-entity ``paid_through`` — the per-row copy that was deliberately removed because
-# it drifted between one payer's entities (see ``access.access_end``).
-#
-# So the account facts are stated once, at account level, and the table below says what
-# each entity contributes to that one bill.
-
-BILLING_STATUS_ACTIVE = "active"
-BILLING_STATUS_PAST_DUE = "past_due"
-BILLING_STATUS_TRIAL = "trial"
-BILLING_STATUS_NONE = "none"
-
-BILLING_STATUS_LABELS = {
-    BILLING_STATUS_ACTIVE: "Active",
-    BILLING_STATUS_PAST_DUE: "Past due",
-    BILLING_STATUS_TRIAL: "Free trial",
-    BILLING_STATUS_NONE: "Not billing",
-}
-
-
-def _plan_for(codes) -> tuple[str | None, str | None]:
-    """``(display_name, plan_code)`` for a module SET, or ``(None, None)``.
-
-    Keyed by the set rather than summed per module, because the bundle IS the discount —
-    ``billing_plan_for_codes`` owns that rule and returns None when the catalog cannot
-    express the combination, which must read as "no plan" rather than as a total.
-    """
-    from blueprints.subscription.services import store as sub_store
-
-    if not codes:
-        return None, None
-    plan = sub_store.billing_plan_for_codes(sorted(codes))
-    return (plan.display_name, plan.code) if plan else (None, None)
-
-
 # --- The Invoices tab --------------------------------------------------------
 #
 # One invoice per payer per period, with a LINE per entity — so "invoices for an entity"
@@ -680,7 +635,14 @@ INVOICE_STATUS_LABELS = {
 
 
 def _money(amount_minor, currency_code) -> str:
-    """"HK$400.00" — symbol from ``currency_info``, never hardcoded."""
+    """"HK$400.00", or "HKD 400.00" — symbol from ``currency_info``, never hardcoded.
+
+    A CODE is spaced off the number, a GLYPH is not. Same rule and the same one-line test
+    as ``modules._fmt_money`` (and the onboarding app's ``money()``), because it exists for
+    the same reason: ``currency_info`` records no symbol for plenty of currencies, the
+    lookup falls back to the bare code, and the Invoices column then read "HKD57.54" —
+    which scans as one token rather than a currency and an amount.
+    """
     from blueprints.entity.models.currency_info import CurrencyInfo
     from blueprints.subscription.services import money
 
@@ -694,7 +656,8 @@ def _money(amount_minor, currency_code) -> str:
         except Exception:
             db.session.rollback()
             symbol = currency_code.upper()
-    return f"{symbol}{money.format_minor(amount_minor, currency_code)}"
+    space = " " if symbol[-1:].isalpha() else ""
+    return f"{symbol}{space}{money.format_minor(amount_minor, currency_code)}"
 
 
 def _reference(invoice) -> str:
@@ -971,201 +934,4 @@ def build_payer_invoices(
         "page": page,
         "pages": pages,
         "per_page": per_page,
-    }
-
-
-def billing_form_options() -> dict:
-    """The dropdown contents for the billing-account form.
-
-    Sourced from the registries rather than hardcoded in the client: ``country_info`` and
-    ``currency_info`` are seeded with the full ISO lists and narrowed by ``is_active`` to
-    what this deployment actually operates in, and ``billing_plan`` is the price catalog.
-    A list typed into the frontend would drift from all three the first time one changed —
-    and would offer a customer a country or a plan that cannot be billed.
-    """
-    from blueprints.entity.models.currency_info import CurrencyInfo
-    from blueprints.subscription.services import store as sub_store
-
-    countries, currencies, plans = [], [], []
-    try:
-        countries = [
-            {"code": c.country_code, "name": c.country_name_en or c.country_code}
-            for c in CountryInfo.query.filter(CountryInfo.is_active.is_(True))
-            .order_by(CountryInfo.display_order, CountryInfo.country_name_en)
-            .all()
-        ]
-    except Exception:
-        db.session.rollback()
-        logger.exception("portal: could not read the country registry")
-
-    try:
-        currencies = [
-            {"code": (c.currency_code or "").upper(), "name": c.currency_name}
-            for c in CurrencyInfo.query.filter(CurrencyInfo.is_active.is_(True))
-            .order_by(CurrencyInfo.currency_name)
-            .all()
-            if c.currency_code
-        ]
-    except Exception:
-        db.session.rollback()
-        logger.exception("portal: could not read the currency registry")
-
-    try:
-        plans = [
-            {
-                "code": p.code,
-                "name": p.display_name,
-                "currency": (p.currency or "").upper(),
-            }
-            for p in sub_store.active_billing_plans()
-        ]
-    except Exception:
-        db.session.rollback()
-        logger.exception("portal: could not read the plan catalog")
-
-    return {
-        "countries": countries,
-        "currencies": currencies,
-        "plans": plans,
-        # The same vocabulary the table badges use, so a form and a row cannot disagree.
-        "statuses": [
-            {"value": value, "label": label}
-            for value, label in BILLING_STATUS_LABELS.items()
-        ],
-    }
-
-
-def build_payer_billing(user_id) -> dict:
-    """The payer's ONE billing account, and what each of their entities puts on it.
-
-    Read-only. Adding or replacing a card stays in the Stripe flows — this states what is
-    on file so somebody can see an expiry coming before a renewal fails on it.
-    """
-    from blueprints.subscription.services import access, clock, policy
-    from blueprints.subscription.services import store as sub_store
-    from blueprints.subscription.services.stripe_client import (
-        customer_default_payment_method, payment_method_display)
-
-    payer = User.query.get(str(user_id))
-    rows = sub_store.module_rows_for_payer(user_id)
-    mapping = sub_store.customer_mapping_for_user(user_id)
-
-    now = clock.now()
-    grace_days = policy.current().past_due_window_days
-    paid_through = sub_store.paid_through_for_user(user_id)
-    anchor_at, currency = sub_store.billing_cycle_for_user(user_id)
-    in_dunning = bool(getattr(mapping, "dunning_started_at", None))
-
-    # Best-effort: the card is a Stripe read and the page must not die with it. A missing
-    # card renders as "no payment method", which is a real state anyway (an app-level
-    # trial never captured one).
-    card = None
-    try:
-        card = payment_method_display(
-            customer_default_payment_method(
-                getattr(mapping, "stripe_customer_id", None)
-            )
-        )
-    except Exception:
-        logger.exception("portal: could not read the card for payer {}", user_id)
-
-    by_entity: dict[str, dict] = {}
-    for row in rows:
-        by_entity.setdefault(str(row.entity_id), {})[
-            (row.function_code or "").upper()
-        ] = row
-
-    entities = (
-        Entity.query.filter(Entity.id.in_(list(by_entity))).all() if by_entity else []
-    )
-    countries = _country_names(getattr(e, "country_code", None) for e in entities)
-
-    items: list[dict] = []
-    for entity in entities:
-        entity_rows = by_entity.get(str(entity.id), {})
-
-        billing_forward, trialing = set(), set()
-        for code, row in entity_rows.items():
-            phase = getattr(row, "phase", None) or ""
-            if access.is_billing_forward(phase=phase):
-                billing_forward.add(code)
-                continue
-            granted = access.grants_access(
-                now,
-                phase=phase,
-                trial_end=getattr(row, "trial_end", None),
-                app_access_until=getattr(row, "app_access_until", None),
-                period_end=paid_through,
-                past_due_grace_days=grace_days,
-            )
-            if granted and phase == PHASE_TRIAL:
-                trialing.add(code)
-
-        # The plan named is the one being CHARGED where there is one. A trial has no
-        # charge yet, so its row names the plan it would convert to — otherwise a trialing
-        # company shows a blank where the reader expects to learn what it will cost.
-        if billing_forward:
-            plan_name, plan_code = _plan_for(billing_forward)
-            status = (
-                BILLING_STATUS_PAST_DUE if in_dunning else BILLING_STATUS_ACTIVE
-            )
-        elif trialing:
-            plan_name, plan_code = _plan_for(trialing)
-            status = BILLING_STATUS_TRIAL
-        else:
-            plan_name, plan_code = None, None
-            status = BILLING_STATUS_NONE
-
-        items.append(
-            {
-                "entity_id": str(entity.id),
-                "entity_name": entity.name or "",
-                "country_code": getattr(entity, "country_code", None),
-                "country": countries.get(
-                    getattr(entity, "country_code", None) or "",
-                    getattr(entity, "country_code", None) or "",
-                ),
-                "plan": plan_name,
-                "plan_code": plan_code,
-                "status": status,
-                "status_label": BILLING_STATUS_LABELS[status],
-                "settings_path": f"/entity/settings/module/{entity.id}",
-            }
-        )
-
-    items.sort(key=lambda i: (i["entity_name"] or "").lower())
-
-    if in_dunning:
-        account_status = BILLING_STATUS_PAST_DUE
-    elif any(i["status"] == BILLING_STATUS_ACTIVE for i in items):
-        account_status = BILLING_STATUS_ACTIVE
-    elif any(i["status"] == BILLING_STATUS_TRIAL for i in items):
-        account_status = BILLING_STATUS_TRIAL
-    else:
-        account_status = BILLING_STATUS_NONE
-
-    return {
-        "account": {
-            # None until something has actually been charged — an app-level trial creates
-            # no anchor, so "no billing yet" is a state this page has to be able to show.
-            "has_account": mapping is not None,
-            "name": " ".join(
-                p
-                for p in [
-                    (getattr(payer, "first_name", "") or "").strip(),
-                    (getattr(payer, "last_name", "") or "").strip(),
-                ]
-                if p
-            ),
-            "email": (getattr(payer, "email", "") or "").strip(),
-            "currency": (currency or "").upper() or None,
-            "anchor": _fmt(anchor_at),
-            "next_billing": _fmt(paid_through),
-            "next_billing_iso": _iso(paid_through),
-            "card": card,
-            "status": account_status,
-            "status_label": BILLING_STATUS_LABELS[account_status],
-        },
-        "entities": items,
-        "total": len(items),
     }
