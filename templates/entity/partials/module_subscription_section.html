@@ -153,7 +153,12 @@
        card.trial_eligible is what accounts for access. Otherwise a module switched on
        with no row behind it offered "Start free trial" to someone already inside it. #}
     {% set is_on = card.subscription_status in ['trialing', 'active', 'past_due'] %}
-    <div class="flex items-start gap-4 rounded-2xl border border-gray-200/70 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+    {# WRAPS, and the status column below is what wraps. Three columns on one line only
+       works while the middle one can have the leftovers: the illustration is a fixed
+       80px and the status column is shrink-0 around pills that are whitespace-nowrap —
+       "Free trial · ends 12 Sep" alone is ~200px — so on a phone the description was
+       left with about 60px and rendered one word per line down the whole card. #}
+    <div class="flex flex-wrap items-start gap-4 rounded-2xl border border-gray-200/70 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
       <!-- Illustration -->
       <div class="shrink-0 w-20 h-20 rounded-xl border border-gray-100 bg-white flex items-center justify-center overflow-hidden">
         <img src="{{ url_for('static', filename=card.image) }}" alt="{{ card.name }}" class="w-full h-full object-contain" />
@@ -167,7 +172,30 @@
       </div>
 
       <!-- Status + action -->
-      <div class="shrink-0 flex flex-col items-end gap-2 pt-0.5 text-right">
+      {# ``w-full`` below ``sm`` is what forces the wrap: a 100% basis cannot share a line,
+         so the illustration and the description keep row one to themselves and the status
+         and its buttons get row two in full. From ``sm`` up it goes back to the narrow
+         right-hand column the desktop layout is built around.
+
+         On that row the STATUS sits left and everything else — the pills, the buttons, the
+         dates — packs right. ``mr-auto`` on the first child is what does it, rather than
+         ``justify-between``: the branches below put anywhere from one to four children in
+         here (past due alone has a status, two buttons and a deadline), and
+         ``justify-between`` would spread those four evenly across the row instead of
+         keeping them together. An auto margin on the first child absorbs all the free
+         space whatever the count.
+
+         ``justify-end`` is what keeps that true after a WRAP. The auto margin only acts on
+         the line its child is on, so a note pushed to a second line — "valid until 28 Aug
+         2026" under the status and the Cancel button, which is what a narrow phone does to
+         the active card — had nothing positioning it and fell back to the left. Packing
+         each line to the end puts every wrapped note under the pills it belongs with,
+         while the first line still splits because of the auto margin.
+
+         The ``sm:`` resets are not optional. The column turns vertical there, where
+         ``mr-auto`` would fight ``items-end`` and drag the status back to the left edge,
+         and ``justify-end`` would start addressing the vertical axis. #}
+      <div class="w-full shrink-0 flex flex-row flex-wrap items-center justify-end gap-2 pt-0.5 text-right [&>*:first-child]:mr-auto sm:w-auto sm:flex-col sm:items-end sm:justify-start sm:[&>*:first-child]:mr-0">
         {# Status badge — "can I use this right now". Whether it CONTINUES is a separate
            question, answered by the Cancelled pill below, so a cancelled trial and a
            cancelled paid module both read "active" here: they are, until their date. #}
@@ -180,7 +208,7 @@
            wondering why the action beside it is Subscribe rather than a free trial. The
            second line is the missing half: the trial was held and used up. Grouped in
            one div so it sits under the status rather than taking the column's gap. #}
-        <div class="text-right">
+        <div class="text-left sm:text-right">
           <span class="text-sm font-semibold text-[#F97362]">not active</span>
           {% if card.trial_expired %}
           <p class="text-xs text-gray-500">free trial expired</p>
