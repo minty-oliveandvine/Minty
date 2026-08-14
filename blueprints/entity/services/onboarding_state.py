@@ -286,6 +286,12 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
             # (labels come from the registries).
             "country": entity.country_code or "",
             "currency": entity.currency_id or "",
+            # Optional Step 1 contact details. Always present in the response
+            # (as "" when unset) so the wizard can tell "the server has no
+            # value" from "the server didn't send the field" — its rehydration
+            # keys off presence, since an empty value is legitimate here.
+            "phone": entity.contact_phone or "",
+            "email": entity.business_email or "",
         },
         "modules": modules,
         "xero": xero,

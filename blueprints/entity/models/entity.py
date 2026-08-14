@@ -19,7 +19,12 @@ class Entity(db.Model):
     minimum_qty = db.Column(db.Integer)
     deposit_frequency = db.Column(db.Integer)
     deposit_day = db.Column(db.Integer)
-    contact_option = db.Column(db.String(36))
+    # Onboarding Step 1 contact details for the company (not the signed-up
+    # person -- user.email / user.user_phone are that, and one user can own
+    # several entities). Both optional: the wizard marks them so, and every
+    # entity created before c1a01 has NULL. The phone is stored digits-only.
+    contact_phone = db.Column(db.String(20))
+    business_email = db.Column(db.String(100))
     xero_org_id = db.Column(db.String(36))
     xero_short_code = db.Column(db.String(50))
     currency_format = db.Column(db.String(30))
