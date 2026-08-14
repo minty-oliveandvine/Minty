@@ -30,7 +30,7 @@ from flask_login import current_user, login_required, login_user
 from blueprints.entity import entity_bp
 from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
-                       UserEntity, db, tz)
+                       UserEntity, db)
 from services.permission_policy import Role, is_superuser
 from services.user_presence import resume_presence
 
@@ -46,11 +46,22 @@ def record_entity_access(entity_id: str, user_id: str) -> None:
     try:
         updated = Entity.query.filter(Entity.id == entity_id).update(
             {
-                # datetime.now(tz), not datetime.now(): the column is a naive
-                # TIMESTAMP and every other timestamp in this app is stored as
-                # Hong Kong wall time. A bare now() on a UTC host would render
-                # the card 8 hours behind.
-                "last_accessed_at": datetime.now(tz),
+                # UTC, AND NAIVE, DELIBERATELY. ``_format_last_accessed`` converts to
+                # Hong Kong for display; this end only has to be consistent.
+                #
+                # It used to write ``datetime.now(tz)`` — an AWARE +08:00 value — meaning
+                # to store Hong Kong wall time. That is not what a naive
+                # ``timestamp without time zone`` column does with an offset: Postgres
+                # CONVERTS the value using the session ``TimeZone`` (UTC here) instead of
+                # keeping its wall clock, so 5:36 PM landed as 09:36 and the card read 8
+                # hours behind — the very thing the old comment said it was preventing.
+                #
+                # ``.replace(tzinfo=None)`` is what makes this immune rather than merely
+                # correct today: passing an aware UTC value would land as UTC only while
+                # the session ``TimeZone`` stays UTC, and would silently start storing
+                # Hong Kong digits the day somebody set it to Asia/Hong_Kong. A naive
+                # value is stored exactly as written, whatever the session says.
+                "last_accessed_at": datetime.now(timezone.utc).replace(tzinfo=None),
                 "last_accessed_by_user_id": user_id,
             },
             synchronize_session=False,

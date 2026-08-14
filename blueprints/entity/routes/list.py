@@ -1,7 +1,7 @@
 # Entity list and report dashboard routes.
 
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import (current_app, flash, redirect, render_template, request,
                    session, url_for)
@@ -30,14 +30,38 @@ from services.permission_policy import Permission, has_permission, is_superuser
 
 
 def _format_last_accessed(dt):
-    """Render a last-login timestamp like "9 Jun 5:42 PM".
+    """Render a last-login timestamp like "9 Jun 5:42 PM", in Hong Kong time.
+
+    STORED AS UTC, CONVERTED HERE. ``last_accessed_at`` is a naive
+    ``timestamp without time zone`` holding UTC — see ``record_entity_access``, which
+    writes it that way deliberately. A naive column has no opinion about which zone its
+    digits belong to, so the only thing that makes them meaningful is the pair of
+    conventions at the two ends: write UTC, read UTC, convert once, here.
+
+    It used to render the digits verbatim, which was correct only if they were already
+    Hong Kong wall time. They were not: the write handed Postgres an aware +08:00 value,
+    and a naive column CONVERTS an aware value using the session ``TimeZone`` (UTC on the
+    server) rather than keeping its wall clock. So every card was 8 hours behind — a login
+    at 5:36 PM read "9:36 AM" — which is exactly the failure the old comment on the write
+    said it was avoiding.
+
+    Rows written before this are already UTC for that same reason, so they read correctly
+    now without being touched.
 
     Built without strftime's %-d / %-I, which are glibc extensions and raise on
     Windows, so this renders identically on a dev box and on the server.
     """
     if not dt:
         return None
-    return f"{dt.day} {dt.strftime('%b')} {dt.strftime('%I:%M %p').lstrip('0')}"
+    # Naive values are UTC by the convention above. An aware one is honoured as it stands,
+    # so this stays correct if the column is ever migrated to ``timestamptz``.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(tz)
+    return (
+        f"{local.day} {local.strftime('%b')} "
+        f"{local.strftime('%I:%M %p').lstrip('0')}"
+    )
 
 
 @entity_bp.route("/entity")
