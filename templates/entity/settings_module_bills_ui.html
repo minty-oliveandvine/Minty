@@ -95,7 +95,7 @@
         {% set fn = (current_user.first_name or '')[:1] %}
         {% set ln = (current_user.last_name or '')[:1] %}
         {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
-        <a href="{{ bills_app_profile_url(org.id) }}"
+        <a href="{{ bills_app_profile_url(org.id, from_bills=True) }}"
            class="relative inline-flex shrink-0 cursor-pointer items-center pl-0.5 sm:pl-2 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54d3da]"
            aria-label="Open profile in Payments"
            title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
