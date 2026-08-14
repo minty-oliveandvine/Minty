@@ -97,8 +97,19 @@ def init_app(app, db):
 
             return billing_app_home_url(entity_id, org, current_user.id)
 
-        def bills_app_profile_url(entity_id, *, from_bills: bool = True):
-            """Module 2 (Bills) profile page — JWT landing with ``next=/profile``."""
+        def bills_app_profile_url(entity_id, *, from_bills: bool = False):
+            """Module 2 (Bills) profile page — JWT landing with ``next=/profile``.
+
+            ``from_bills`` records WHICH MODULE the user left, so the profile's back link
+            can return them to it. It defaults to False because twelve of the sixteen
+            templates that link here are the Petty Cash UI — the dashboard, its settings
+            pages and every report — and only the four ``*_bills_ui.html`` ones are
+            Payment Request, which pass it explicitly.
+
+            It used to default True, which meant a Petty Cash user's profile offered
+            "‹ Payments" and dropped them into a module their company may not even have
+            bought.
+            """
             if not entity_id:
                 return url_for("entity.entity_list")
             if not current_user.is_authenticated:
