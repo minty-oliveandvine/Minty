@@ -149,12 +149,18 @@
                      greyed clock when the entity has never been opened since
                      this shipped. We don't guess a date we don't have. #}
                   {% if org.last_accessed_display %}
-                  <span class="group relative inline-flex">
-                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-500 text-white" aria-label="Last opened {{ org.last_accessed_display }}{{ ' by ' ~ org.last_accessed_by if org.last_accessed_by }}">
+                  {# data-server-time carries the server's string verbatim (Hong Kong
+                     wall time). localizeLastAccessed() at the bottom of this file
+                     rewrites the tooltip and the aria-label in the viewer's own
+                     timezone. Display only — nothing here is sent back. #}
+                  <span class="group relative inline-flex js-last-accessed"
+                        data-server-time="{{ org.last_accessed_display }}"
+                        data-by="{{ org.last_accessed_by or '' }}">
+                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-500 text-white" data-role="last-accessed-badge" aria-label="Last opened {{ org.last_accessed_display }}{{ ' by ' ~ org.last_accessed_by if org.last_accessed_by }}">
                       <svg class="w-4 h-4" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="m612-292 56-56-148-148v-184h-80v216l172 172ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>
                     </span>
                     <span class="pointer-events-none absolute bottom-full right-0 mb-2 hidden group-hover:block whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-right shadow-md z-20">
-                      <span class="block text-[12px] text-gray-500 leading-snug">{{ org.last_accessed_display }}</span>
+                      <span class="block text-[12px] text-gray-500 leading-snug" data-role="last-accessed-time">{{ org.last_accessed_display }}</span>
                       {% if org.last_accessed_by %}
                       <span class="block text-[12px] text-gray-500 leading-snug">By {{ org.last_accessed_by }}</span>
                       {% endif %}
@@ -238,6 +244,87 @@
       const empty = document.getElementById('noCompanyResults');
       if (empty) empty.classList.toggle('hidden', visible !== 0);
     }
+
+    // "Last logged in" arrives from the server as Hong Kong wall time, rendered
+    // like "14 Aug 5:09 PM" — record_entity_access() stamps datetime.now(tz)
+    // with tz = Asia/Hong_Kong into a naive column, so the string carries no
+    // zone of its own. A viewer in another timezone therefore reads a clock time
+    // that never happened for them. This re-renders it in the browser's zone: at
+    // UTC+8 the text is unchanged, elsewhere it shifts by that zone's offset.
+    //
+    // Frontend-only on purpose: the server keeps sending exactly what it always
+    // sent, and nothing here is written back. If the string can't be parsed we
+    // leave the server's text alone rather than show a guess.
+    (function localizeLastAccessed() {
+      const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      // "14 Aug 5:09 PM" — day, 3-letter month, 12-hour clock, meridiem.
+      const PATTERN = /^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{1,2}):(\d{2})\s*([AP]M)$/i;
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      // Asia/Hong_Kong is a fixed +08:00 — no DST — so a constant is exact here.
+      // If the server ever stops stamping in Hong Kong time, this is the one
+      // number to change.
+      const SOURCE_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+      // Server string -> Date, or null if it isn't the shape we expect.
+      function parseServerTime(text) {
+        const m = PATTERN.exec((text || '').trim());
+        if (!m) return null;
+        const month = MONTHS.findIndex(function (name) {
+          return name.toLowerCase() === m[2].toLowerCase();
+        });
+        if (month < 0) return null;
+
+        const day = parseInt(m[1], 10);
+        const minute = parseInt(m[4], 10);
+        let hour = parseInt(m[3], 10) % 12;          // 12 AM -> 0, 12 PM -> 12
+        if (m[5].toUpperCase() === 'PM') hour += 12;
+
+        // Read the fields as Hong Kong wall time: build the instant as if they
+        // were UTC, then back out the +08:00 the server baked in.
+        function instantFor(year) {
+          return Date.UTC(year, month, day, hour, minute) - SOURCE_OFFSET_MS;
+        }
+
+        // The server's string carries no year. Assume the current one, and step
+        // back if that lands in the future — "last opened" is always in the past.
+        // The day of slack absorbs timezone offsets around New Year.
+        const now = Date.now();
+        const year = new Date(now + SOURCE_OFFSET_MS).getUTCFullYear();
+        let ms = instantFor(year);
+        if (ms > now + DAY_MS) ms = instantFor(year - 1);
+
+        const parsed = new Date(ms);
+        return isNaN(parsed.getTime()) ? null : parsed;
+      }
+
+      // Rebuilt by hand rather than via toLocaleString so the badge keeps the
+      // exact format the server used — only the timezone changes.
+      function formatLocal(date) {
+        const hour24 = date.getHours();
+        const hour12 = hour24 % 12 || 12;
+        const minute = String(date.getMinutes()).padStart(2, '0');
+        const meridiem = hour24 < 12 ? 'AM' : 'PM';
+        return date.getDate() + ' ' + MONTHS[date.getMonth()] + ' ' +
+               hour12 + ':' + minute + ' ' + meridiem;
+      }
+
+      document.querySelectorAll('.js-last-accessed').forEach(function (el) {
+        const local = parseServerTime(el.getAttribute('data-server-time'));
+        if (!local) return;                          // unparseable — keep as served
+
+        const text = formatLocal(local);
+        const time = el.querySelector('[data-role="last-accessed-time"]');
+        if (time) time.textContent = text;
+
+        const badge = el.querySelector('[data-role="last-accessed-badge"]');
+        if (badge) {
+          const by = (el.getAttribute('data-by') || '').trim();
+          badge.setAttribute('aria-label',
+            'Last opened ' + text + (by ? ' by ' + by : ''));
+        }
+      });
+    })();
   </script>
 </body>
 </html>
