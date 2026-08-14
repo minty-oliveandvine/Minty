@@ -190,6 +190,42 @@ def _resolve_currency_id(value: str) -> str:
     return row.id if row else ""
 
 
+def _normalize_contact_phone(value: str) -> tuple[str | None, str]:
+    """Payload value → (stored phone or None, error).
+
+    Digits only, mirroring the wizard, which strips punctuation before sending
+    and caps the field at 11. Length is re-checked here rather than trusted:
+    this is a plain JSON route, so the client-side maxLength is not a control.
+    An empty value returns None — the caller writes NULL, which is how a user
+    who deletes their number actually gets it cleared.
+    """
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    if not digits:
+        return None, ""
+    if not 8 <= len(digits) <= 11:
+        return None, "Phone number must be 8-11 digits."
+    return digits, ""
+
+
+def _normalize_business_email(value: str) -> tuple[str | None, str]:
+    """Payload value → (stored email or None, error).
+
+    Deliberately shallow: one @ with something either side and no spaces. The
+    column is the company's contact address and is never used to authenticate
+    or to send a confirmation, so a stricter parser would reject legitimate
+    addresses for no gain. Empty clears the field.
+    """
+    email = (value or "").strip()
+    if not email:
+        return None, ""
+    if len(email) > 100:
+        return None, "Business email must be 100 characters or fewer."
+    local, sep, domain = email.partition("@")
+    if not sep or not local or not domain or any(c.isspace() for c in email):
+        return None, "Please enter a valid business email."
+    return email, ""
+
+
 # --- Routes ---------------------------------------------------------------
 
 @entity_bp.route("/entity/success")
@@ -236,6 +272,18 @@ def entity_create():
                 form.entity_name.errors = [*form.entity_name.errors, error]
                 flash(error, "danger")
                 return redirect(url_for("entity.entity_create"))
+            # The form has always validated these two as required and then
+            # thrown them away; now that the columns exist, persist them. The
+            # form validators already bound the lengths, so the normalizers
+            # here only strip the phone to digits.
+            from models.db import db as _db
+            entity.contact_phone, _ = _normalize_contact_phone(
+                form.contact_phone.data
+            )
+            entity.business_email, _ = _normalize_business_email(
+                form.business_email.data
+            )
+            _db.session.commit()
             return redirect(url_for("entity.entity_create_success", entity_id=entity.id))
 
     return render_template(
@@ -450,6 +498,19 @@ def onboarding_create_entity():
         resp.status_code = 400
         return _cors(resp)
 
+    # Optional company contact details (Step 1). Validated before the entity is
+    # created so a bad phone/email is a 400 rather than a half-saved entity.
+    contact_phone, phone_err = _normalize_contact_phone(data.get("contact_phone"))
+    if phone_err:
+        resp = jsonify({"error": phone_err})
+        resp.status_code = 400
+        return _cors(resp)
+    business_email, email_err = _normalize_business_email(data.get("business_email"))
+    if email_err:
+        resp = jsonify({"error": email_err})
+        resp.status_code = 400
+        return _cors(resp)
+
     entity, error = create_entity_for_user(user_id, entity_name, country_code, currency_id)
     if error:
         resp = jsonify({"error": error})
@@ -458,6 +519,8 @@ def onboarding_create_entity():
 
     from models.db import db as _db
     entity.status = "onboarding"
+    entity.contact_phone = contact_phone
+    entity.business_email = business_email
     _db.session.commit()
 
     resp = jsonify({"entity_id": entity.id, "name": entity.name})
@@ -587,6 +650,27 @@ def onboarding_update_entity(entity_id):
         currency_info = CurrencyInfo.query.get(currency_id)
         if currency_info:
             entity.currency_format = currency_info.symbol or "$"
+
+    # --- Contact details ------------------------------------------------------
+    # Keyed off presence, not truthiness: both fields are optional, so "" is a
+    # meaningful value meaning "clear this". An absent key leaves the stored
+    # value alone, which keeps older callers that never send them working.
+    if "contact_phone" in payload:
+        contact_phone, phone_err = _normalize_contact_phone(payload.get("contact_phone"))
+        if phone_err:
+            resp = jsonify({"error": phone_err})
+            resp.status_code = 400
+            return _cors(resp)
+        entity.contact_phone = contact_phone
+    if "business_email" in payload:
+        business_email, email_err = _normalize_business_email(
+            payload.get("business_email")
+        )
+        if email_err:
+            resp = jsonify({"error": email_err})
+            resp.status_code = 400
+            return _cors(resp)
+        entity.business_email = business_email
 
     try:
         _db.session.commit()
