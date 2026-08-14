@@ -272,15 +272,26 @@ def create_app():
     # the login page, `requests` follows it, and billing parses an HTML 200 as JSON.
     from blueprints.xero.routes.routes import internal_xero_access_token
     csrf.exempt(internal_xero_access_token)
-    # The payer portal's card handoff. Module 2's profile posts this with the billing
-    # JWT and no session cookie, so CSRF would redirect it to the login page and the
-    # client would parse an HTML 200 as JSON. It authenticates on the bearer token and
-    # takes no id from the request — the customer is resolved from the token's user —
-    # so there is nothing a forged cross-site POST could aim at somebody else.
-    from blueprints.subscription.routes.portal import (my_invite_admin_api,
-                                                       my_payment_method_api)
-    csrf.exempt(my_payment_method_api)
+    # The payer portal's writes. Module 2's profile posts these with the billing JWT and
+    # no session cookie, so CSRF would redirect them to the login page and the client
+    # would parse an HTML 200 as JSON. They authenticate on the bearer token, and the four
+    # that DO take an id from the request check it: a payment method whose customer isn't
+    # the token's payer answers "not found" (see payment_methods._owned), so a forged
+    # cross-site POST reaches nothing.
+    from blueprints.subscription.routes.portal import (
+        my_invite_admin_api,
+        my_payment_method_confirm_api,
+        my_payment_method_default_api,
+        my_payment_method_remove_api,
+        my_payment_method_setup_intent_api,
+        my_payment_method_update_api,
+    )
     csrf.exempt(my_invite_admin_api)
+    csrf.exempt(my_payment_method_setup_intent_api)
+    csrf.exempt(my_payment_method_confirm_api)
+    csrf.exempt(my_payment_method_default_api)
+    csrf.exempt(my_payment_method_update_api)
+    csrf.exempt(my_payment_method_remove_api)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,

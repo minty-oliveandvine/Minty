@@ -419,152 +419,6 @@ def test_internal_sort_keys_never_reach_the_response(app, payer_portal):
     assert all("_date" not in m for m in entity["modules"])
 
 
-# --- Billing -----------------------------------------------------------------
-
-
-@pytest.fixture
-def payer_billing(app, payer_portal, monkeypatch):
-    """``build_payer_billing`` on the same synthetic rows, with Stripe stubbed.
-
-    The card is a network read the page must survive without, so the stub is part of the
-    contract rather than a convenience.
-    """
-    from blueprints.subscription.services import portal
-    from blueprints.subscription.services import store as sub_store
-    from blueprints.subscription.services import stripe_client
-
-    def _install(rows, entities, *, mapping=None, card=None, plan=None, **kwargs):
-        payer_portal(rows, entities, **kwargs)
-        monkeypatch.setattr(
-            sub_store, "customer_mapping_for_user", lambda _u: mapping
-        )
-        monkeypatch.setattr(sub_store, "billing_plan_for_codes", lambda codes: plan)
-        monkeypatch.setattr(
-            stripe_client, "customer_default_payment_method", lambda _c: "pm_1"
-        )
-        monkeypatch.setattr(stripe_client, "payment_method_display", lambda _p: card)
-        return portal
-
-    return _install
-
-
-def _account(mapping_kwargs=None):
-    fields = {"stripe_customer_id": "cus_1", "dunning_started_at": None}
-    fields.update(mapping_kwargs or {})
-    return SimpleNamespace(**fields)
-
-
-def test_billing_names_the_plan_a_paid_entity_is_actually_on(app, payer_billing):
-    """Keyed by the module SET, not summed per module — the bundle IS the discount."""
-    portal = payer_billing(
-        rows=[
-            _row("PETTY_CASH", "active", entity_id="e1",
-                 first_billed_at=NOW - timedelta(days=40)),
-            _row("BILL", "active", entity_id="e1",
-                 first_billed_at=NOW - timedelta(days=40)),
-        ],
-        entities=[{"id": "e1", "name": "Acme", "country": "HK"}],
-        paid_through=NOW + timedelta(days=20),
-        mapping=_account(),
-        plan=SimpleNamespace(display_name="Super Minty", code="BILL+PETTY_CASH"),
-    )
-
-    with app.app_context():
-        result = portal.build_payer_billing("u1")
-
-    row = result["entities"][0]
-    assert row["plan"] == "Super Minty"
-    assert row["status_label"] == "Active"
-    assert result["account"]["status_label"] == "Active"
-
-
-def test_a_trialing_entity_names_the_plan_it_would_convert_to(app, payer_billing):
-    """A trial is charged nothing yet. Leaving the cell blank would hide what it is about
-    to cost, which is the one thing this page exists to answer."""
-    portal = payer_billing(
-        rows=[_row("BILL", "trial", entity_id="e1",
-                   trial_end=NOW + timedelta(days=9))],
-        entities=[{"id": "e1", "name": "Acme", "country": "HK"}],
-        mapping=_account(),
-        plan=SimpleNamespace(display_name="Payment Request", code="BILL"),
-    )
-
-    with app.app_context():
-        result = portal.build_payer_billing("u1")
-
-    row = result["entities"][0]
-    assert row["plan"] == "Payment Request"
-    assert row["status_label"] == "Free trial"
-
-
-def test_dunning_makes_the_whole_account_past_due(app, payer_billing):
-    """Dunning is an ACCOUNT fact — one payer, one card, one clock — so it cannot mark
-    one company and spare another."""
-    portal = payer_billing(
-        rows=[
-            _row("BILL", "active", entity_id="e1",
-                 first_billed_at=NOW - timedelta(days=40)),
-            _row("BILL", "active", entity_id="e2",
-                 first_billed_at=NOW - timedelta(days=40)),
-        ],
-        entities=[
-            {"id": "e1", "name": "Acme", "country": "HK"},
-            {"id": "e2", "name": "Beta", "country": "SG"},
-        ],
-        paid_through=NOW + timedelta(days=20),
-        mapping=_account({"dunning_started_at": NOW - timedelta(days=1)}),
-        plan=SimpleNamespace(display_name="Payment Request", code="BILL"),
-    )
-
-    with app.app_context():
-        result = portal.build_payer_billing("u1")
-
-    assert result["account"]["status_label"] == "Past due"
-    assert {e["status_label"] for e in result["entities"]} == {"Past due"}
-
-
-def test_no_billing_account_is_a_state_the_page_can_show(app, payer_billing):
-    """An app-level trial creates no anchor and no customer. "Nothing billed yet" is the
-    truthful answer; a blank card row would read as a failure."""
-    portal = payer_billing(
-        rows=[_row("BILL", "trial", entity_id="e1",
-                   trial_end=NOW + timedelta(days=9))],
-        entities=[{"id": "e1", "name": "Acme", "country": "HK"}],
-        mapping=None,
-    )
-
-    with app.app_context():
-        result = portal.build_payer_billing("u1")
-
-    assert result["account"]["has_account"] is False
-    assert result["account"]["card"] is None
-
-
-def test_a_stripe_failure_does_not_take_the_page_down(app, payer_billing, monkeypatch):
-    """The card is a network read. Losing it costs one field, not the screen."""
-    from blueprints.subscription.services import stripe_client
-
-    portal = payer_billing(
-        rows=[_row("BILL", "active", entity_id="e1",
-                   first_billed_at=NOW - timedelta(days=40))],
-        entities=[{"id": "e1", "name": "Acme", "country": "HK"}],
-        paid_through=NOW + timedelta(days=20),
-        mapping=_account(),
-        plan=SimpleNamespace(display_name="Payment Request", code="BILL"),
-    )
-
-    def _boom(_c):
-        raise RuntimeError("stripe is down")
-
-    monkeypatch.setattr(stripe_client, "customer_default_payment_method", _boom)
-
-    with app.app_context():
-        result = portal.build_payer_billing("u1")
-
-    assert result["account"]["card"] is None
-    assert result["entities"][0]["status_label"] == "Active"
-
-
 # --- Invoices ----------------------------------------------------------------
 
 
@@ -918,6 +772,51 @@ def test_the_payment_method_is_not_guessed(app, payer_invoices):
     assert result["invoices"][0]["payment_method"] is None
 
 
+def test_a_currency_code_is_spaced_off_the_amount(app, monkeypatch):
+    """"HKD57.54" scans as one token rather than a currency and an amount.
+
+    ``currency_info`` records no symbol for plenty of currencies and the lookup falls back
+    to the bare code, so this is the ordinary case rather than the edge one. Same rule as
+    ``modules._fmt_money``: a code is spaced, a glyph is not.
+    """
+    from blueprints.entity.models import currency_info
+    from blueprints.subscription.services import portal
+
+    monkeypatch.setattr(
+        currency_info,
+        "CurrencyInfo",
+        SimpleNamespace(
+            query=SimpleNamespace(
+                filter_by=lambda **_k: SimpleNamespace(first=lambda: None)
+            )
+        ),
+    )
+
+    with app.app_context():
+        assert portal._money(5754, "HKD") == "HKD 57.54"
+
+
+def test_a_currency_glyph_is_not_spaced_off_the_amount(app, monkeypatch):
+    """"HK$ 57.54" is not how a symbol is written."""
+    from blueprints.entity.models import currency_info
+    from blueprints.subscription.services import portal
+
+    monkeypatch.setattr(
+        currency_info,
+        "CurrencyInfo",
+        SimpleNamespace(
+            query=SimpleNamespace(
+                filter_by=lambda **_k: SimpleNamespace(
+                    first=lambda: SimpleNamespace(symbol="HK$")
+                )
+            )
+        ),
+    )
+
+    with app.app_context():
+        assert portal._money(5754, "HKD") == "HK$57.54"
+
+
 # --- Change subscriber (read only) -------------------------------------------
 
 
@@ -1179,81 +1078,6 @@ def test_an_entity_scoped_token_is_accepted(app, monkeypatch):
     # Flask appends its own ``Cookie`` to Vary; what matters is that Origin is pinned,
     # so a response cached for one origin is never replayed to another.
     assert "Origin" in response.headers["Vary"]
-
-
-@pytest.fixture
-def payment_method_route(app, monkeypatch):
-    """Capture the ``return_url`` handed to Stripe without opening a real session."""
-    from blueprints.subscription.services import checkout
-    from blueprints.subscription.services import store as sub_store
-
-    seen: list[str] = []
-    monkeypatch.setattr(sub_store, "customer_id_for_user", lambda _u: "cus_1")
-    monkeypatch.setattr(
-        checkout,
-        "create_billing_portal_session",
-        lambda customer_id, return_url, **_kw: seen.append(return_url)
-        or {"url": "https://billing.stripe.com/stub"},
-    )
-    return seen
-
-
-def test_the_card_form_returns_to_where_it_was_opened_from(app, payment_method_route):
-    from blueprints.subscription.services import portal  # noqa: F401
-
-    client = app.test_client()
-    response = client.post(
-        "/api/me/billing/payment-method",
-        json={"next": "/profile/billing/account?entity=e1"},
-        headers={"Authorization": f"Bearer {_token(app, user_id='u1')}"},
-    )
-
-    assert response.status_code == 200
-    assert response.get_json()["url"].startswith("https://billing.stripe.com/")
-    assert payment_method_route[-1].endswith("/profile/billing/account?entity=e1")
-
-
-@pytest.mark.parametrize(
-    "hostile",
-    ["https://evil.example/x", "//evil.example/x", "/../../etc", "javascript:alert(1)"],
-)
-def test_a_hostile_next_cannot_steer_the_return(app, payment_method_route, hostile):
-    """Stripe follows ``return_url`` after the card is saved, so echoing a caller-supplied
-    one back is an open redirect with a payment form in front of it. Anything that is not
-    a plain path on this origin falls back to the billing page."""
-    client = app.test_client()
-    response = client.post(
-        "/api/me/billing/payment-method",
-        json={"next": hostile},
-        headers={"Authorization": f"Bearer {_token(app, user_id='u1')}"},
-    )
-
-    assert response.status_code == 200
-    assert payment_method_route[-1].endswith("/profile/billing")
-    assert "evil.example" not in payment_method_route[-1]
-
-
-def test_the_card_form_needs_a_token(app):
-    client = app.test_client()
-    assert client.post("/api/me/billing/payment-method", json={}).status_code == 401
-
-
-def test_no_billing_account_is_reported_not_five_hundred(app, monkeypatch):
-    """The portal cannot mint a customer, so the first card has to come through an
-    entity's subscribe flow. That is a 409 with something to say, not a crash."""
-    from blueprints.subscription.services import store as sub_store
-
-    monkeypatch.setattr(sub_store, "customer_id_for_user", lambda _u: None)
-
-    client = app.test_client()
-    response = client.post(
-        "/api/me/billing/payment-method",
-        json={},
-        headers={"Authorization": f"Bearer {_token(app, user_id='u1')}"},
-    )
-
-    assert response.status_code == 409
-    assert response.get_json()["error"]
 
 
 def test_preflight_answers_without_a_token(app):

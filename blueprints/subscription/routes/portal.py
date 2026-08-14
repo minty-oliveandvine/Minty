@@ -233,42 +233,6 @@ def my_invite_admin_api():
     return _cors(make_response(jsonify({"ok": True, "message": message}), 200))
 
 
-@subscription_bp.route("/api/me/billing", methods=["GET", "OPTIONS"])
-def my_billing_api():
-    """The caller's ONE billing account, and what each entity puts on it.
-
-    Same gate and same reasoning as ``my_subscriptions_api``: no id in the request, so
-    nothing to point at somebody else's account. Read-only — changing a card stays in the
-    Stripe flows.
-
-    Not paged. A payer has one account and a handful of entities on it, and the answer to
-    "what am I being charged, and on which card" is not improved by arriving in slices.
-    """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
-
-    from models.db import User
-
-    if User.query.get(user_id) is None:
-        return _unauthorized("no_user_claim", 403)
-
-    from blueprints.subscription.services import portal
-
-    try:
-        payload = portal.build_payer_billing(user_id)
-    except Exception:
-        current_app.logger.exception("payer billing API failed for user %s", user_id)
-        return _cors(
-            make_response(jsonify({"error": "Could not load your billing."}), 500)
-        )
-
-    return _cors(make_response(jsonify(payload), 200))
-
-
 @subscription_bp.route("/api/me/invoices", methods=["GET", "OPTIONS"])
 def my_invoices_api():
     """The caller's invoices, newest first.
@@ -304,90 +268,206 @@ def my_invoices_api():
     return _cors(make_response(jsonify(payload), 200))
 
 
-@subscription_bp.route(
-    "/api/me/billing/payment-method", methods=["POST", "OPTIONS"]
-)
-def my_payment_method_api():
-    """Open Stripe's payment-method form for the caller's billing account.
+# --- Saved payment methods ---------------------------------------------------
+#
+# The in-app wallet behind the billing account page. It replaced a hand-off to Stripe's
+# hosted payment-method form — one POST that answered with a portal URL for the browser to
+# leave for. That route is gone; the entity settings page still reaches the hosted portal
+# through ``checkout.open_payment_method_update``, which is a different surface.
+#
+# What is NOT moved in-app is the card itself. Every one of these carries ids and display
+# fields only — the number is typed into Stripe Elements and confirmed straight against a
+# SetupIntent, so no PAN reaches this process (see ``services.payment_methods``).
+#
+# Same gate as the rest of the portal, with one difference that matters: four of them take
+# a ``pm_…`` id FROM THE REQUEST, which is the first thing in this file that can be
+# pointed somewhere. ``payment_methods._owned`` is what closes that — the method's customer
+# is compared against the customer resolved from the TOKEN's user, and somebody else's id
+# answers "not found" rather than being acted on.
+#
+# All POST, including the ones that read as DELETE or PATCH. ``_cors`` advertises GET,
+# POST and OPTIONS, and a preflight for a method the header does not name is refused by
+# the browser before the route is ever reached.
 
-    Answers ``{"url": …}`` for the client to send the browser to. The card never touches
-    this application — that is the point, and it is what keeps us out of PCI scope. The
-    portal session is deep-linked to the payment-method flow and pinned to the restricted
-    configuration, so Stripe's own Cancel button is unreachable (cancelling is in-app
-    exclusively — see ``_billing_portal_configuration``).
 
-    The ONLY write-ish route in the payer portal, and it still writes nothing here: it
-    mints a Stripe session scoped to the caller's own customer, resolved from the token's
-    user. There is no id in the request that could point it at somebody else's card.
+def _payment_methods_call(handler):
+    """Run one payment-method action for the bearer's own account.
 
-    ``next`` is an optional PATH on the Module 2 origin to come back to. Validated as a
-    path, never taken as a URL: echoing a caller-supplied absolute URL into a redirect
-    Stripe will follow is an open redirect with extra steps.
+    Every endpoint below has the same shape — authenticate, act, answer the fresh list —
+    and the same three failure modes, so they are written once here. ``PaymentMethodError``
+    carries a message written for the customer and the status to say it with (409 for the
+    two removal refusals, 422 for a bad expiry); anything else is a bug or Stripe being
+    down, and says so without leaking what broke.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    from blueprints.subscription.services.payment_methods import PaymentMethodError
 
     user_id = _user_id_from_bearer()
     if not user_id:
         return _unauthorized("unauthorized")
 
-    payload = request.get_json(silent=True) or {}
-    nxt = str(payload.get("next") or "/profile/billing")
-    # A single leading slash and nothing that could climb out of the origin. "//host"
-    # is protocol-relative and would leave it entirely; ".." only normalises to another
-    # path on the same origin, but there is no reason to hand Stripe one.
-    if not nxt.startswith("/") or nxt.startswith("//") or ".." in nxt:
-        nxt = "/profile/billing"
-    return_url = f"{_frontend_origin()}{nxt}"
+    from models.db import User
 
-    from blueprints.subscription.services import store as sub_store
-    from blueprints.subscription.services.checkout import (
-        CheckoutError, open_payment_method_update_for_customer)
+    if User.query.get(user_id) is None:
+        return _unauthorized("no_user_claim", 403)
 
     try:
-        session = open_payment_method_update_for_customer(
-            sub_store.customer_id_for_user(user_id), return_url
-        )
-    except CheckoutError as exc:
-        # 409 is the "no customer yet" case, and it is not an error the user caused: the
-        # portal cannot create a customer, so the FIRST card has to come through the
-        # entity's subscribe flow. The client turns this into that instruction.
+        payload = handler(user_id)
+    except PaymentMethodError as exc:
         return _cors(make_response(jsonify({"error": exc.message}), exc.status))
     except Exception:
         current_app.logger.exception(
-            "payment method API failed for user %s", user_id
+            "payment methods API failed for user %s", user_id
         )
         return _cors(
             make_response(
-                jsonify({"error": "Could not open the payment form."}), 500
+                jsonify({"error": "Something got stuck on our end. Let's try again?"}),
+                500,
             )
         )
+    return _cors(make_response(jsonify(payload), 200))
 
-    return _cors(make_response(jsonify({"url": session.get("url")}), 200))
+
+def _pm_id() -> str:
+    return str((request.get_json(silent=True) or {}).get("payment_method") or "").strip()
 
 
-@subscription_bp.route("/api/me/billing/options", methods=["GET", "OPTIONS"])
-def my_billing_options_api():
-    """Dropdown contents for the billing-account form — countries, currencies, plans.
+@subscription_bp.route("/api/me/billing/payment-methods", methods=["GET", "OPTIONS"])
+def my_payment_methods_api():
+    """Every payment method saved on the caller's billing account, default first.
 
-    Behind the same token as the rest of the portal even though none of it is personal:
-    it is the catalog this deployment sells, and there is no reason for it to be the one
-    endpoint here that answers to anybody.
+    ``has_account`` false is not an empty wallet: the payer has no Stripe customer at all,
+    which is the ordinary state of an account whose trials never captured a card. The page
+    shows "Add payment method" and nothing else there.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
 
-    if not _user_id_from_bearer():
-        return _unauthorized("unauthorized")
+    from blueprints.subscription.services import payment_methods
 
-    from blueprints.subscription.services import portal
+    return _payment_methods_call(payment_methods.list_for_user)
 
-    try:
-        payload = portal.billing_form_options()
-    except Exception:
-        current_app.logger.exception("billing options API failed")
-        return _cors(
-            make_response(jsonify({"error": "Could not load the options."}), 500)
+
+@subscription_bp.route(
+    "/api/me/billing/payment-methods/setup-intent", methods=["POST", "OPTIONS"]
+)
+def my_payment_method_setup_intent_api():
+    """Open a SetupIntent for the in-app card form.
+
+    Answers ``{client_secret, publishable_key, setup_intent}`` — what Stripe Elements needs
+    to mount and confirm. The client secret authorises the browser to confirm THIS intent
+    and nothing else; the publishable key is public by definition. Neither is a credential
+    for this application.
+
+    Takes nothing from the request. The customer, when there is one, is resolved from the
+    token's user — and when there isn't, none is created here: an abandoned form must not
+    leave a customer behind, so the customer is made in ``confirm`` once Stripe says a card
+    exists.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    return _payment_methods_call(payment_methods.start_setup)
+
+
+@subscription_bp.route(
+    "/api/me/billing/payment-methods/confirm", methods=["POST", "OPTIONS"]
+)
+def my_payment_method_confirm_api():
+    """Adopt the card the browser just confirmed. Body: ``{setup_intent, make_default?}``.
+
+    The intent id comes back from the client, so nothing in the body is trusted: the
+    intent is re-read from Stripe and refused unless it carries this caller's own
+    ``metadata.user_id`` stamp. A customerless SetupIntent has nothing else tying it to
+    anybody, which is exactly why the stamp is there.
+
+    Idempotent — a retried request cannot produce a second card or a second customer.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    body = request.get_json(silent=True) or {}
+    setup_intent = str(body.get("setup_intent") or "").strip()
+    make_default = bool(body.get("make_default"))
+
+    return _payment_methods_call(
+        lambda user_id: payment_methods.confirm_setup(
+            user_id, setup_intent, make_default=make_default
         )
+    )
 
-    return _cors(make_response(jsonify(payload), 200))
+
+@subscription_bp.route(
+    "/api/me/billing/payment-methods/default", methods=["POST", "OPTIONS"]
+)
+def my_payment_method_default_api():
+    """Make one saved method the default. Body: ``{payment_method}``.
+
+    ACCOUNT-WIDE by construction. Invoices are raised against the payer's customer, so the
+    default decides what charges every company on the account — there is no per-entity card
+    to set, and the UI says so where the choice is made.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    payment_method = _pm_id()
+    return _payment_methods_call(
+        lambda user_id: payment_methods.set_default(user_id, payment_method)
+    )
+
+
+@subscription_bp.route(
+    "/api/me/billing/payment-methods/update", methods=["POST", "OPTIONS"]
+)
+def my_payment_method_update_api():
+    """Edit a saved method. Body: ``{payment_method, exp_month?, exp_year?, name?, address?}``.
+
+    Only what Stripe permits to change on an existing method: the expiry, and the billing
+    name and address. A card's number, brand and CVC are the card — replacing those is
+    "Add payment method", and this endpoint cannot be used to try.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    body = request.get_json(silent=True) or {}
+    payment_method = _pm_id()
+    address = body.get("address")
+
+    return _payment_methods_call(
+        lambda user_id: payment_methods.update(
+            user_id,
+            payment_method,
+            exp_month=body.get("exp_month"),
+            exp_year=body.get("exp_year"),
+            name=body.get("name"),
+            address=address if isinstance(address, dict) else None,
+        )
+    )
+
+
+@subscription_bp.route(
+    "/api/me/billing/payment-methods/remove", methods=["POST", "OPTIONS"]
+)
+def my_payment_method_remove_api():
+    """Detach a saved method. Body: ``{payment_method}``.
+
+    Two 409s the page shows verbatim, both about leaving a live account unable to pay
+    itself: the default cannot go while another method could take its place, and the last
+    method cannot go at all while something is still billing forward. Each names its fix.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    payment_method = _pm_id()
+    return _payment_methods_call(
+        lambda user_id: payment_methods.remove(user_id, payment_method)
+    )

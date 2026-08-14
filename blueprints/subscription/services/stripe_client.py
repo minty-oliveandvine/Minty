@@ -140,12 +140,17 @@ def retrieve_subscription(subscription_id: str):
 SUBSCRIPTION_DESCRIPTION = "Minty"
 
 
-# NOTE: no ``create_customer`` here, deliberately. Nothing in this app creates a Stripe
-# Customer directly — a customer must not exist until a card has actually been saved, so
+# NOTE: no customer is created on any path that MIGHT save a card, deliberately. A
+# customer must not exist until a card has actually been saved, so
 # ``create_setup_checkout_session`` hands Stripe ``customer_creation="always"`` and lets
 # it create one at session confirmation. ``checkout._adopt_session_customer`` then stamps
-# and maps it. Re-adding a direct create would reintroduce an orphan customer for every
-# abandoned checkout.
+# and maps it. Creating one up front reintroduces an orphan customer for every abandoned
+# checkout.
+#
+# ``create_customer_for_user`` below is the one direct create, and it does not weaken
+# that: it is called from the in-app card form's CONFIRM step, i.e. after Stripe has
+# already told us a payment method exists. Card first, customer second — the invariant is
+# about ordering, not about which API call makes the customer.
 
 
 def find_customer_by_user(user_id: str):
@@ -526,6 +531,175 @@ def payment_method_display(payment_method_id: str | None) -> dict | None:
         }
 
     return None
+
+
+# --- Saved payment methods (the in-app wallet) -------------------------------
+#
+# Everything above reads or writes the ONE default card, which is all the billing engine
+# ever needed: ``issue_invoice`` charges the customer and Stripe bills whatever
+# ``invoice_settings.default_payment_method`` names. The billing account PAGE needs the
+# rest of the shelf — every method saved against the customer, so one can be added,
+# corrected, promoted or removed without leaving the app.
+#
+# Stripe remains the only place a card number exists. These helpers move ids and display
+# fields; the PAN is entered into Stripe Elements in the browser and never reaches this
+# process, which is what keeps the application out of PCI scope.
+
+
+def create_customer_for_user(
+    user_id,
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    description: str | None = None,
+):
+    """Create the payer's Stripe Customer, stamped so every lookup can find it.
+
+    THE ONLY DIRECT CUSTOMER CREATE IN THE APPLICATION, and it has exactly one caller:
+    the in-app card form's confirm step, once Stripe has confirmed a SetupIntent and a
+    payment method genuinely exists (see ``payment_methods.confirm_setup``). Do not call
+    it earlier in a flow — "no customer without a card" is what stops an abandoned form
+    leaving an orphan behind, and this is the first moment the card is a fact.
+
+    ``metadata.user_id`` is not optional. It is what ``find_customer_by_user`` recovers
+    from when the local mapping row is missing, and a customer without it is invisible to
+    every lookup we have.
+
+    The idempotency key is the payer, permanently: two tabs confirming two SetupIntents
+    seconds apart must not produce two customers for one payer, and Customer Search is
+    eventually consistent so it cannot be used to dedupe a write that just happened.
+    Stripe replays the original response for 24h; beyond that the mapping row (written by
+    the caller) is what prevents a second create.
+    """
+    payload: dict[str, object] = {"metadata": {"user_id": str(user_id)}}
+    if name:
+        payload["name"] = name
+    if email:
+        payload["email"] = email
+    if description:
+        payload["description"] = description
+    return get_stripe().Customer.create(
+        **payload, idempotency_key=f"user-customer-{user_id}"
+    )
+
+
+def list_payment_methods(customer_id: str | None) -> list:
+    """Every payment method attached to a customer, newest first.
+
+    No ``type`` filter — the customer's whole shelf. Filtering to ``card`` would silently
+    hide a Stripe Link wallet that a payer checked out with, i.e. the very method their
+    renewals are charged against (see ``payment_method_display``, which learned the same
+    lesson).
+
+    Returns ``[]`` for a payer with no customer rather than raising: "no billing account
+    yet" is a real state the page has to render (an app-level trial never captured a
+    card), not an error.
+    """
+    if not customer_id:
+        return []
+    return list(
+        get_stripe().PaymentMethod.list(
+            customer=customer_id, limit=100
+        ).auto_paging_iter()
+    )
+
+
+def retrieve_payment_method(payment_method_id: str):
+    """Fetch one PaymentMethod (None if blank).
+
+    The OWNERSHIP CHECK behind every mutation on this shelf: the id arrives from the
+    browser, so ``pm.customer`` is compared against the caller's own customer before
+    anything is promoted, edited or detached. Without it, a payer who guessed another
+    payer's ``pm_…`` id could detach their card.
+    """
+    if not payment_method_id:
+        return None
+    return get_stripe().PaymentMethod.retrieve(payment_method_id)
+
+
+def create_setup_intent(customer_id: str | None, *, user_id, metadata: dict | None = None):
+    """A SetupIntent for the in-app card form to confirm against.
+
+    ``usage="off_session"`` because of what the saved card is FOR: renewals and dunning
+    retries charge it with nobody at the keyboard (``billing_gateway.issue_invoice``). Set
+    up on-session, the card can be saved in a state the issuer later refuses for
+    unattended charges — a failure that surfaces a month later on a renewal rather than
+    now, in front of the person who could fix it.
+
+    ``customer`` is optional and often absent: a payer adding their FIRST card has no
+    customer, and creating one to open a form they may abandon is the orphan this app
+    refuses to make. Stripe attaches the method to the customer on success when one is
+    given; ``payment_methods.confirm_setup`` creates the customer and attaches the method
+    by hand when one is not.
+
+    ``metadata.user_id`` is what makes the confirm step safe. The SetupIntent id comes
+    back from the browser, and for a customerless intent there is nothing else to check it
+    against — an intent that does not carry the caller's own stamp is refused rather than
+    attached.
+
+    Card only. The Payment Element can offer redirect-based methods (iDEAL, Bancontact),
+    and every one of them is a bank mandate this billing engine has no path for: it
+    charges a saved method off-session on the anchor, which those cannot do.
+    """
+    payload: dict[str, object] = {
+        "usage": "off_session",
+        "payment_method_types": ["card"],
+        "metadata": {"user_id": str(user_id), **(metadata or {})},
+    }
+    if customer_id:
+        payload["customer"] = customer_id
+    return get_stripe().SetupIntent.create(**payload)
+
+
+def retrieve_setup_intent(setup_intent_id: str):
+    """Fetch one SetupIntent (None if blank). Read to learn what the browser saved."""
+    if not setup_intent_id:
+        return None
+    return get_stripe().SetupIntent.retrieve(setup_intent_id)
+
+
+def update_payment_method(
+    payment_method_id: str,
+    *,
+    exp_month: int | None = None,
+    exp_year: int | None = None,
+    billing_details: dict | None = None,
+):
+    """Edit what CAN be edited on a saved method: the expiry, and the billing details.
+
+    Stripe does not let a card's number, CVC or brand be changed — those are the card, and
+    a different card is a new PaymentMethod. So "Edit" here means the two things that
+    legitimately change on the same plastic: a reissued expiry date, and the name/address
+    the issuer checks against (a cardholder who moved is a real cause of declines).
+
+    ``exp_month``/``exp_year`` are rejected outright by Stripe on a non-card method, so
+    the caller filters them out for a wallet rather than sending them and reading back a
+    Stripe error the customer cannot act on.
+    """
+    payload: dict[str, object] = {}
+    if exp_month is not None or exp_year is not None:
+        card: dict[str, object] = {}
+        if exp_month is not None:
+            card["exp_month"] = int(exp_month)
+        if exp_year is not None:
+            card["exp_year"] = int(exp_year)
+        payload["card"] = card
+    if billing_details:
+        payload["billing_details"] = billing_details
+    if not payload:
+        return None
+    return get_stripe().PaymentMethod.modify(payment_method_id, **payload)
+
+
+def detach_payment_method(payment_method_id: str):
+    """Remove a saved method from its customer.
+
+    Detaching the customer's DEFAULT also clears ``invoice_settings.default_payment_method``
+    at Stripe's end, which is why the caller refuses to detach a default while another
+    method exists — the promotion has to happen first, or the account is briefly left with
+    a shelf full of cards and nothing nominated to charge.
+    """
+    return get_stripe().PaymentMethod.detach(payment_method_id)
 
 
 def create_billing_portal_session(
