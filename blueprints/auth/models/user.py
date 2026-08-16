@@ -64,6 +64,22 @@ class User(UserMixin, db.Model):
     # TIMESTAMP on this table.
     signed_in_at = db.Column(db.TIMESTAMP, nullable=True)
     last_seen_at = db.Column(db.TIMESTAMP, nullable=True)
+    # WHICH company they are signed in to, which the two stamps above cannot say.
+    # Those are facts about the person — signed in to Minty, seen recently — but
+    # Settings > Users asks a question about a company: who is here, in THIS one.
+    # Without this a person signed in to company A was listed as present in company
+    # B as well, since nothing in the row distinguished them.
+    #
+    # Set when they open a company and cleared when they leave it or sign out (see
+    # services/user_presence.py). NULL means signed in to Minty but not inside any
+    # company — standing on the entity list, which is where every session begins.
+    # Deliberately NOT a foreign key. ``entities.last_accessed_by_user_id`` already
+    # points the other way, so a constraint here closes a cycle between the two
+    # tables — SQLAlchemy cannot then sort them for create/drop and warns that it
+    # may become an error. The reference is inert: it is only ever compared for
+    # equality, never followed, so a row left pointing at a deleted company simply
+    # matches nothing, and presence ages out within the hour regardless.
+    current_entity_id = db.Column(db.String(36), nullable=True, index=True)
 
     @classmethod
     def normalize_system_role(cls, system_role: str | None) -> str:

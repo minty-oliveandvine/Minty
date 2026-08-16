@@ -123,7 +123,7 @@ def module_selector(entity_id):
     # an entity comes through here (the entity list links each card to this page),
     # so this is the one place that reliably means "I am going in". Ordinary page
     # loads must NOT do this — see resume_presence for why.
-    resume_presence(current_user)
+    resume_presence(current_user, entity_id)
 
     # Superusers viewing an entity they aren't a member of get a view-only
     # super_admin role in the JWT so Module 2 can identify them.
