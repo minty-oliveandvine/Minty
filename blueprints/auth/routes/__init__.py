@@ -1,6 +1,7 @@
 from . import dashboard  # noqa: F401
 from . import email_auth  # noqa: F401
 from . import home  # noqa: F401
+from . import leave_entity  # noqa: F401
 from . import login  # noqa: F401
 from . import logout  # noqa: F401
 from . import password_reset  # noqa: F401

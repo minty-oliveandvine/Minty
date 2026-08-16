@@ -398,7 +398,8 @@
         <div class="space-y-2">
 
           <!-- Logout -->
-          <a href="{{ url_for('auth.logout') }}" class="flex items-center space-x-3 cursor-pointer hover:bg-[#294882] p-3 rounded-lg transition-colors">
+          {# Inside a company, so this leaves the company. See components/sidepanel.html. #}
+          <a href="{{ url_for('auth.leave_entity') if org is defined and org and org.id else url_for('auth.logout') }}" class="flex items-center space-x-3 cursor-pointer hover:bg-[#294882] p-3 rounded-lg transition-colors">
             <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"></path>
             </svg>

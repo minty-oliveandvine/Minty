@@ -262,40 +262,139 @@ def test_the_page_can_build_the_poll_url(app):
     assert url.endswith("/entity/settings/users/abc-123/presence")
 
 
-def test_the_poll_fragment_renders_rows_and_both_empty_states(app, db_session):
-    """The fragment is rendered on its own by the poll, not just inside the page,
-    so it has to stand up with nothing but the three values the route passes."""
+def test_the_roster_renders_members_and_its_one_empty_state(app, db_session):
+    """The upper section: everyone in the company, with what may be done to them.
+
+    Empty here can only mean nobody has been invited — the two-way empty state was
+    needed when this list showed who was signed in, where empty also meant
+    "everyone is out". That question now has its own section.
+    """
     from flask import render_template
 
-    user = _make_user(db_session, username="fragment.user")
+    user = _make_user(db_session, username="roster.user")
     with app.test_request_context("/"):
         rows = render_template(
             "entity/settings_users_rows.html",
             users=[(user, "admin")],
-            member_count=1,
             is_view_only=False,
         )
-        assert "fragment.user" in rows
+        assert "roster.user" in rows
         assert 'data-role="admin"' in rows
 
-        # Members exist but nobody is on — needs no action from the admin.
-        quiet = render_template(
-            "entity/settings_users_rows.html",
-            users=[],
-            member_count=3,
-            is_view_only=False,
+        empty = render_template(
+            "entity/settings_users_rows.html", users=[], is_view_only=False
         )
-        assert "No one's signed in right now" in quiet
-        assert "3 team members" in quiet
+        assert "inviting your first user" in empty
 
-        # Nobody has ever been invited — this one does need an action.
-        unused = render_template(
-            "entity/settings_users_rows.html",
-            users=[],
-            member_count=0,
-            is_view_only=False,
+
+def test_the_signed_in_fragment_stands_up_on_its_own(app, db_session):
+    """The lower section is what the poll re-renders, so it has to render with
+    nothing but ``signed_in`` — the poll passes no roster values at all."""
+    from flask import render_template
+
+    user = _make_user(db_session, username="present.user")
+    with app.test_request_context("/"):
+        listed = render_template(
+            "entity/settings_users_signed_in.html", signed_in=[(user, "admin")]
         )
-        assert "inviting your first user" in unused
+        assert "present.user" in listed
+        # Read-only by design: the actions live on the roster above, so there is
+        # exactly one place to remove a person from.
+        assert "openDeleteUserModal" not in listed
+        assert "openEditUserModal" not in listed
+
+        empty = render_template(
+            "entity/settings_users_signed_in.html", signed_in=[]
+        )
+        assert "No one's signed in at the moment." in empty
+
+
+def test_being_in_one_company_does_not_list_you_in_another(app, db_session):
+    """The reported bug. Presence lives on the user — signed in, seen recently —
+    but the Users page asks about a company. Without recording WHICH company, one
+    sign-in listed the person as present in every company they belonged to."""
+    from services.user_presence import is_signed_in_clause, resume_presence
+    from models.db import User
+
+    user = _make_user(db_session, username="twoco.user")
+    with app.test_request_context("/"):
+        resume_presence(user, "entity-one")
+
+        def present_in(entity_id):
+            rows = (
+                db_session.session.query(User.id)
+                .filter(is_signed_in_clause(entity_id))
+                .all()
+            )
+            return user.id in {r[0] for r in rows}
+
+        assert present_in("entity-one") is True
+        assert present_in("entity-two") is False
+
+
+def test_moving_to_another_company_moves_you_between_the_lists(app, db_session):
+    """A person is in one place at a time, so arriving in B leaves A."""
+    from services.user_presence import is_signed_in_clause, resume_presence
+    from models.db import User
+
+    user = _make_user(db_session, username="mover.user")
+    with app.test_request_context("/"):
+        def present_in(entity_id):
+            rows = (
+                db_session.session.query(User.id)
+                .filter(is_signed_in_clause(entity_id))
+                .all()
+            )
+            return user.id in {r[0] for r in rows}
+
+        resume_presence(user, "entity-one")
+        resume_presence(user, "entity-two")
+
+        assert present_in("entity-one") is False
+        assert present_in("entity-two") is True
+
+
+def test_signing_in_places_you_in_no_company_yet(app, db_session):
+    """Signing in lands you on the entity list, having chosen none — so a fresh
+    session must not inherit wherever the last one ended."""
+    from services.user_presence import (is_signed_in_clause, mark_signed_in,
+                                        resume_presence)
+    from models.db import User
+
+    user = _make_user(db_session, username="fresh.user")
+    with app.test_request_context("/"):
+        resume_presence(user, "entity-one")
+        mark_signed_in(user)  # a new session begins
+
+        rows = (
+            db_session.session.query(User.id)
+            .filter(is_signed_in_clause("entity-one"))
+            .all()
+        )
+        assert user.id not in {r[0] for r in rows}
+        # Still signed in to Minty, just not inside a company.
+        assert _reload(db_session, user.id).signed_in_at is not None
+
+
+def test_a_request_about_no_company_leaves_the_recorded_one_alone(app, db_session):
+    """Most pages name no entity — the profile, the entity list, plain API calls.
+    Treating each as "left the company" would flicker people off their colleagues'
+    lists all day. Leaving is an explicit act."""
+    from services.user_presence import (is_signed_in_clause, refresh_presence,
+                                        resume_presence)
+    from models.db import User
+
+    user = _make_user(db_session, username="wanderer.user")
+    with app.test_request_context("/"):
+        resume_presence(user, "entity-one")
+        refresh_presence(user)  # a page with no entity in its URL
+
+        rows = (
+            db_session.session.query(User.id)
+            .filter(is_signed_in_clause("entity-one"))
+            .all()
+        )
+        assert user.id in {r[0] for r in rows}
 
 
 def test_opening_an_entity_puts_a_signed_out_user_back_on_the_list(app, db_session):
@@ -319,7 +418,7 @@ def test_opening_an_entity_puts_a_signed_out_user_back_on_the_list(app, db_sessi
         assert user.id not in _signed_in_ids(db_session)
 
         # Clicking into a company.
-        resume_presence(user)
+        resume_presence(user, "entity-one")
         assert user.id in _signed_in_ids(db_session)
 
 
@@ -332,9 +431,47 @@ def test_opening_an_entity_keeps_an_existing_sign_in_time(app, db_session):
         mark_signed_in(user)
         original = _reload(db_session, user.id).signed_in_at
 
-        resume_presence(user)
+        resume_presence(user, "entity-one")
 
         assert _reload(db_session, user.id).signed_in_at == original
+
+
+def test_leaving_a_company_keeps_the_session_but_drops_presence(app, client, db_session):
+    """Log out from inside a company means "leave the company", not "leave Minty".
+
+    Two steps out, one word: pressing it in a company lands you on the entity list
+    still signed in, and pressing it again there ends the session for real. So this
+    route must NOT log the user out — but it must take them off the company's
+    signed-in list, because they are no longer there.
+    """
+    user_id = _make_user(db_session, username="leaver.user").id
+    client.post(
+        "/login",
+        data={"username": "leaver.user", "password": "password123"},
+        follow_redirects=False,
+    )
+    assert user_id in _signed_in_ids(db_session)
+
+    resp = client.get("/leave-entity", follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert "/entity" in (resp.location or "")
+    assert user_id not in _signed_in_ids(db_session)
+
+    # Still signed in: an authenticated request is not bounced to login, and making
+    # it does NOT re-adopt them onto the list (mark_signed_out stamps last_seen_at
+    # for exactly this reason — see refresh_presence).
+    follow = client.get("/index", follow_redirects=False)
+    assert follow.status_code != 401
+    assert "/login" not in (follow.location or "")
+    assert user_id not in _signed_in_ids(db_session)
+
+
+def test_leaving_a_company_is_not_the_same_route_as_logging_out(app):
+    """Both exist, and they are different doors. Collapsing them is the bug this
+    pair was built to fix — one word, two steps, two endpoints."""
+    assert "auth.leave_entity" in app.view_functions
+    assert "auth.logout" in app.view_functions
 
 
 def test_logging_in_again_after_a_sign_out_relists(app, db_session):
