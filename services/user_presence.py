@@ -86,19 +86,34 @@ def presence_window_seconds() -> int:
         return DEFAULT_PRESENCE_WINDOW_SECONDS
 
 
-def is_signed_in_clause():
-    """SQLAlchemy criterion for "this user is signed in right now".
+def is_signed_in_clause(entity_id=None):
+    """SQLAlchemy criterion for "this user is signed in to ``entity_id`` right now".
 
-    Both columns are required. ``signed_in_at`` alone would keep a closed browser
-    on the list; ``last_seen_at`` alone would put a logged-out user back on it the
-    moment any lingering session touched the app.
+    THREE conditions, and the entity is not optional in spirit. The two stamps are
+    facts about the person — they signed in, and we have seen them since — while the
+    question a company's Users page asks is "who is here, in THIS company". Answering
+    it from the stamps alone listed anyone signed in to Minty on every company they
+    belonged to at once, which is the bug this argument exists to fix.
+
+    ``signed_in_at`` alone would keep a closed browser on the list; ``last_seen_at``
+    alone would put a logged-out user back on it the moment any lingering session
+    touched the app; and without ``current_entity_id`` the answer belongs to no
+    company in particular.
+
+    Omitting ``entity_id`` asks the looser question — signed in to Minty at all,
+    wherever they are. Nothing on the Users page wants that; it is here for callers
+    that genuinely mean "anywhere", and it is deliberately the awkward one to reach
+    for rather than the default.
     """
     cutoff = now() - timedelta(seconds=presence_window_seconds())
-    return and_(
+    conditions = [
         User.signed_in_at.isnot(None),
         User.last_seen_at.isnot(None),
         User.last_seen_at >= cutoff,
-    )
+    ]
+    if entity_id is not None:
+        conditions.append(User.current_entity_id == str(entity_id))
+    return and_(*conditions)
 
 
 def _user_id(user) -> str | None:
@@ -138,9 +153,15 @@ def _stamp(user, **values) -> None:
 
 
 def mark_signed_in(user) -> None:
-    """Put the user on the list. Called from the ``user_logged_in`` signal."""
+    """Signed in to Minty — but not yet inside any company.
+
+    Called from the ``user_logged_in`` signal, which knows nothing about companies:
+    signing in lands you on the entity list, having chosen none. So the company is
+    cleared rather than left over from last time, or the first page of a new session
+    would place them wherever they were when the previous one ended.
+    """
     stamp = now()
-    _stamp(user, signed_in_at=stamp, last_seen_at=stamp)
+    _stamp(user, signed_in_at=stamp, last_seen_at=stamp, current_entity_id=None)
 
 
 def mark_signed_out(user) -> None:
@@ -152,11 +173,11 @@ def mark_signed_out(user) -> None:
     ``last_seen_at`` would read as never-stamped, and ``refresh_presence`` would
     adopt them straight back onto the list.
     """
-    _stamp(user, signed_in_at=None, last_seen_at=now())
+    _stamp(user, signed_in_at=None, last_seen_at=now(), current_entity_id=None)
 
 
-def resume_presence(user) -> None:
-    """Put the user back on the list because they just opened an entity.
+def resume_presence(user, entity_id) -> None:
+    """Put the user on THIS company's list, because they just opened it.
 
     The counterpart to ``refresh_presence``, which deliberately refuses to revive
     a signed-out session. That refusal is right for page loads — signing out of
@@ -169,19 +190,34 @@ def resume_presence(user) -> None:
     and sign-in — and without it, "log out, then go back into the company" leaves
     you invisible for as long as the session lasts, which is the bug this fixes.
 
-    COALESCE, so someone already listed keeps the time they actually signed in
-    rather than having it reset each time they switch company.
+    COALESCE on ``signed_in_at``, so someone already listed keeps the time they
+    actually signed in rather than having it reset each time they switch company.
+    ``current_entity_id`` is overwritten outright, because that is the one thing
+    opening a company genuinely changes — and moving to company B necessarily means
+    leaving company A's list, since a person is in one place at a time.
     """
     stamp = now()
     _stamp(
         user,
         last_seen_at=stamp,
         signed_in_at=func.coalesce(User.signed_in_at, stamp),
+        current_entity_id=str(entity_id) if entity_id else None,
     )
 
 
-def refresh_presence(user) -> None:
+def refresh_presence(user, entity_id=None) -> None:
     """Hold an authenticated user on the list for another window.
+
+    ``entity_id`` is the company the CURRENT REQUEST is about, when it is about one.
+    Passing it keeps presence following the person as they move — including when
+    they arrive somewhere by deep link rather than through the company's front door,
+    which ``resume_presence`` alone would miss.
+
+    A request with no company (the entity list, the profile, an API with no entity in
+    its path) passes None, and None LEAVES THE COMPANY ALONE rather than clearing it.
+    Plenty of pages simply do not name an entity, and treating every one of them as
+    "left the company" would flicker people off their colleagues' lists all day.
+    Leaving is an explicit act: /leave-entity and sign-out clear it.
 
     ``last_seen_at`` is always bumped. ``signed_in_at`` is written only in the one
     case where its blankness means "nobody ever asked" — and the two columns
@@ -205,12 +241,14 @@ def refresh_presence(user) -> None:
     sees the row as it was before this update.
     """
     stamp = now()
-    _stamp(
-        user,
-        last_seen_at=stamp,
-        signed_in_at=case(
+    values = {
+        "last_seen_at": stamp,
+        "signed_in_at": case(
             (User.signed_in_at.isnot(None), User.signed_in_at),
             (User.last_seen_at.is_(None), stamp),
             else_=None,
         ),
-    )
+    }
+    if entity_id:
+        values["current_entity_id"] = str(entity_id)
+    _stamp(user, **values)

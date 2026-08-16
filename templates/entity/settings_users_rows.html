@@ -1,20 +1,17 @@
-{# The signed-in user rows, on their own so they can be re-rendered alone.
+{# The member roster — everyone in the company, and what may be done to them.
 
-   Settings > Users polls for changes (see the live-refresh block in
-   settings_users_scripts.html) and swaps this fragment in. Keeping it a partial
-   rather than rebuilding rows in JavaScript means there is exactly one definition
-   of what a user row looks like — a JS copy would drift from this one the first
-   time either changed.
+   The upper of the two sections on Settings > Users. This is the one that is acted
+   on: roles, the subscriber tag, edit and remove. Who is signed in right now is a
+   separate question answered further down by settings_users_signed_in.html, and it
+   is read-only precisely so there is only ever one place to remove a person from.
 
-   Rendered by entity_settings_users for the full page and by
-   entity_settings_users_presence for the poll, both from the same query, so the
-   two can never disagree about who is signed in.
+   Kept as a partial rather than inlined so the page and any other caller share one
+   definition of a user row.
 
-   Needs: users, member_count, is_view_only, subscriber_id, can_edit_users,
-   can_remove_users. EVERY caller must pass all six. A caller that forgets one
-   does not fail — Jinja renders undefined as empty — it silently drops the
-   subscriber tag or hides a button, and on the poll that shows up as UI which
-   appears on load and vanishes twenty seconds later. #}
+   Needs: users, is_view_only, subscriber_id, can_edit_users, can_remove_users.
+   EVERY caller must pass all five. A caller that forgets one does not fail — Jinja
+   renders undefined as empty — it silently drops the subscriber tag or hides a
+   button that should be there. #}
 {% for user, role in users %}
 <div class="{% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} rounded-lg shadow-sm p-4">
   <div class="flex items-center justify-between">
@@ -77,15 +74,10 @@
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
     </svg>
   </div>
-  {# Two different empty states. An entity with members but nobody online
-     needs no action — telling that admin to "invite your first user" would
-     be plainly wrong. #}
-  {% if member_count %}
-  <h3 class="text-lg font-medium text-gray-900 mb-2">No one's signed in right now</h3>
-  <p class="text-gray-500 mb-4">This list shows who's currently signed in. Your {{ member_count }} team member{% if member_count != 1 %}s{% endif %} will appear here when they log back in.</p>
-  {% else %}
+  {# One empty state now, and it is unambiguous: this list is the roster, so empty
+     can only mean nobody has been invited. The two-way version was needed when this
+     showed who was signed in, where empty also meant "everyone is out". #}
   <h3 class="text-lg font-medium text-gray-900 mb-2">No users found</h3>
   <p class="text-gray-500 mb-4">Get started by inviting your first user to this organization.</p>
-  {% endif %}
 </div>
 {% endif %}

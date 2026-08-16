@@ -4,9 +4,10 @@
         <!-- Header Section -->
         <div class="flex items-center justify-between mb-6">
           <h2 class="text-lg font-semibold text-gray-800">User Management</h2>
-          {# The list shows who is signed in, not who is a member, so the count has
-             to say which it is — "1 user" next to a five-person team reads as data loss. #}
-          <span id="signedInCount" class="text-sm text-gray-500">{{ users|length }} signed in</span>
+          {# This count belongs to the roster below it, which is everyone in the
+             company. Who is signed in is a separate question with its own count, at
+             the top of its own section further down. #}
+          <span class="text-sm text-gray-500">{{ users|length }} member{% if users|length != 1 %}s{% endif %}</span>
         </div>
 
                  <!-- Filter Section -->
@@ -50,20 +51,12 @@
           </div>
         </div>
 
-        <!-- User List -->
-        {# The rows live in their own container so the live refresh can replace just
-           them. Pending invitations sit OUTSIDE it — they are loaded separately by
-           loadPendingInvitations() and would be wiped by every poll if they shared
-           the swapped element. #}
+        <!-- Member roster: everyone in the company, and what you can do to them -->
+        {# Pending invitations sit outside #userListRows — they are loaded separately
+           by loadPendingInvitations(), and sharing a container with anything that gets
+           replaced would wipe them. #}
         <div class="space-y-3">
-          {# The poll URL is optional. Live refresh is an enhancement on top of a list
-             that is already correct the moment it renders, so this block must not
-             hard-require ``org`` just to draw itself — anything rendering it for the
-             rows alone (the subscriber-tag tests do) would otherwise die on an
-             undefined. With no URL the script simply never starts polling. #}
-          <div id="userListRows"
-               class="space-y-3"
-               {% if org is defined and org %}data-presence-url="{{ url_for('entity.entity_settings_users_presence', org_id=org.id) }}"{% endif %}>
+          <div id="userListRows" class="space-y-3">
             {% include 'entity/settings_users_rows.html' %}
           </div>
 
@@ -73,6 +66,40 @@
             <div id="pendingInvitationsList" class="space-y-3"></div>
           </div>
         </div>
+
+        <!-- Online Users: a different question, so its own section -->
+        {# PARKED, not deleted. Flip this to true to bring it back.
+
+           Hiding it also stops the polling by itself: the refresh block in
+           settings_users_scripts.html looks for #signedInRows and returns when it is
+           absent, so nothing is fetched every twenty seconds while this is off. The
+           presence columns keep being maintained either way — sign-in, sign-out and
+           which company you are in are all still recorded, so switching this back on
+           shows live data immediately rather than starting from empty.
+
+           Below the roster when shown, because it is the softer fact. The roster is
+           who the company IS and is acted on; this is who happens to be at their desk,
+           and it is the only part of the page that changes on its own.
+
+           The poll URL is optional: live refresh is an enhancement on a list that is
+           already correct when rendered, so this must not hard-require ``org`` just to
+           draw itself — anything rendering the block for its rows alone (the
+           subscriber-tag tests do) would otherwise die on an undefined. #}
+        {% set show_online_users = false %}
+        {% if show_online_users %}
+        <div class="mt-8">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Online Users</h3>
+            <span id="signedInCount" class="text-sm text-gray-500">{{ signed_in|length }} logged in</span>
+          </div>
+          <div class="bg-white rounded-lg shadow-sm px-4 py-2 divide-y divide-gray-100">
+            <div id="signedInRows"
+                 {% if org is defined and org %}data-presence-url="{{ url_for('entity.entity_settings_users_presence', org_id=org.id) }}"{% endif %}>
+              {% include 'entity/settings_users_signed_in.html' %}
+            </div>
+          </div>
+        </div>
+        {% endif %}
         <!-- <button id="saveButton" type="button" onclick="handleSaveChanges()" class="bg-[#54D3DA] font-medium hover:bg-[#54D3DA]/80 px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full">
           Save Changes
         </button> -->

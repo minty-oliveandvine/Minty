@@ -380,14 +380,42 @@ def init_app(app, db):
         try:
             if request.endpoint in PRESENCE_INERT_ENDPOINTS:
                 return
+            entity_id = _request_entity_id()
             last = session.get("presence_seen_at")
             now_ts = time.time()
             if last and (now_ts - float(last)) < SEEN_REFRESH_SECONDS:
-                return
+                # Throttled — EXCEPT when the company changed. Moving from one
+                # company to another must show up at once on both lists, and a
+                # minute of "still in the old one" is exactly the stale answer this
+                # column was added to stop.
+                if not entity_id or entity_id == session.get("presence_entity_id"):
+                    return
             session["presence_seen_at"] = now_ts
-            refresh_presence(current_user)
+            if entity_id:
+                session["presence_entity_id"] = entity_id
+            refresh_presence(current_user, entity_id)
         except Exception:
             logger.exception("Failed to refresh sign-in presence")
+
+    def _request_entity_id():
+        """The company this request is about, or None when it is about none.
+
+        Read from the URL the same way the currency resolver does. Never from the
+        bare ``id`` view arg — on report routes that is a report id, and stamping it
+        as a company would put people in a company that does not exist.
+
+        None is a real answer, not a failure: the entity list, the profile and the
+        admin pages are about no company at all, and ``refresh_presence`` leaves the
+        recorded one alone rather than treating those as leaving.
+        """
+        view_args = request.view_args or {}
+        value = (
+            view_args.get("entity_id")
+            or view_args.get("org_id")
+            or request.args.get("entity_id")
+            or request.args.get("org_id")
+        )
+        return str(value).strip() if value else None
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error):
