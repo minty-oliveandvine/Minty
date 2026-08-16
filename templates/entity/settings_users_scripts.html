@@ -602,17 +602,12 @@
          }
        });
 
-       // Update user count display
-       updateUserCount(visibleCount);
-     }
-
-     function updateUserCount(count) {
-       const countElement = document.getElementById('signedInCount');
-       if (countElement) {
-         // Matches the server-rendered wording — the list is who is signed in, not
-         // who is a member, and the two counts are different numbers.
-         countElement.textContent = `${count} signed in`;
-       }
+       // Deliberately does NOT touch a count. The header count belongs to the member
+       // roster and is a fact about the company, not about what the filter happens to
+       // be showing — overwriting it here made "3 members" become "1 member" the
+       // moment someone filtered by role, which reads as people having disappeared.
+       // The signed-in count below has its own element and its own source.
+       void visibleCount;
      }
 
      // ── Live refresh of the signed-in list ───────────────────────────────
@@ -622,12 +617,18 @@
      // abandoned browser takes the full idle window to drop off. A push channel
      // would add a long-lived connection per viewer — and a worker to hold it —
      // to deliver the same information no sooner.
+     // Only the signed-in section refreshes. The roster above it changes when an
+     // admin invites, edits or removes someone — all of which reload the page — so
+     // re-sending it would carry no news, and swapping it out would fight the role
+     // filter and lose any half-open row menu with it.
      (function () {
-       const container = document.getElementById('userListRows');
+       const container = document.getElementById('signedInRows');
        if (!container || typeof fetch !== 'function') return;
 
        const url = container.getAttribute('data-presence-url');
        if (!url) return;
+
+       const countEl = document.getElementById('signedInCount');
 
        const POLL_MS = 20000;
        let timer = null;
@@ -646,8 +647,13 @@
            .then(function (data) {
              if (!data || typeof data.html !== 'string') return;
              container.innerHTML = data.html;
-             // Re-applies the filter AND refreshes the count in one call.
-             filterUsers(currentRoleFilter);
+             if (countEl && typeof data.count === 'number') {
+               // Wording matches what the server renders into this element. They
+               // have to agree, or the first poll silently rewrites the label.
+               countEl.textContent = `${data.count} logged in`;
+             }
+             // No filterUsers() here: the role filter belongs to the roster above,
+             // which this poll never touches.
            })
            .catch(function () {
              // Offline, or a session that has expired. Either way the next tick

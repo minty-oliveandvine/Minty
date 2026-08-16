@@ -106,7 +106,11 @@
             Settings
           </a>
           {% endif %}
-          <a href="{{ url_for('auth.logout') }}"
+          {# Log out means "leave this company" from inside one, and "leave Minty"
+             from the entity list where there is no company to leave. Same word, two
+             steps out: press it in a company and you land on the entity list, press
+             it again there and you are signed out. #}
+          <a href="{{ url_for('auth.leave_entity') if active_entity_id else url_for('auth.logout') }}"
              class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-base font-medium transition-colors text-[#656565] hover:bg-[#656565]/10"
              onclick="PageTransition.navigateWithFade(this.href); return false;">
             <span class="material-symbols-outlined shrink-0 text-[22px] leading-none text-[#656565]" aria-hidden="true">logout</span>
