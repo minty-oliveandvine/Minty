@@ -287,7 +287,13 @@ def get_module_cards(entity_id: str) -> list[dict]:
     # card but no consent gets the same nudge - otherwise its trial would quietly expire
     # and the user would never learn why.
     try:
-        has_billing_consent = sub_store.has_billing_consent(entity_id)
+        # Asked about the entity's PAYER — the person whose card the nudge is about.
+        # After a handover the previous payer's consent is history and says nothing
+        # about whether this one has agreed, so a card-but-no-consent entity would
+        # otherwise stop showing the nudge and let its trial lapse unexplained.
+        has_billing_consent = sub_store.has_billing_consent(
+            entity_id, sub_store.payer_for_entity(entity_id)
+        )
     except Exception:
         # Best-effort: never fail the page over the nudge. Assume consent so we do not
         # nag someone who has already given it.

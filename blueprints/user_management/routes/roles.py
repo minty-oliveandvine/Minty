@@ -7,6 +7,8 @@ from blueprints.user_management import user_management_bp
 from blueprints.user_management.services.roles import (
     check_can_manage_membership_or_error,
     check_not_last_admin_or_error,
+    check_not_pending_subscriber_or_error,
+    check_not_subscription_payer_anywhere_or_error,
     check_not_subscription_payer_or_error,
     check_role_assignment_or_error,
     check_role_change_or_error,
@@ -254,6 +256,13 @@ def delete_user_role(user_id):
     if error is not None:
         return error
 
+    # 4. A handover offered TO them is relying on them still being here. Removing them
+    #    now would make the accept refuse and cancel the offer, which the outgoing payer
+    #    would only notice as an exit that never completes.
+    error = check_not_pending_subscriber_or_error(user_id, entity_id)
+    if error is not None:
+        return error
+
     db.session.delete(membership)
     db.session.commit()
     return (
@@ -272,6 +281,16 @@ def delete_user_role(user_id):
 @user_management_bp.route("/minty/api/users/me", methods=["DELETE"])
 @login_required
 def deactivate_my_account():
+    # Refused while this account still pays for a company. Deactivating leaves every
+    # membership row and every ``payer_user_id`` untouched, so without this the account
+    # goes dark while the renewals carry on charging its card — and nobody left inside
+    # the entity can stop them, because only the payer may manage the subscription.
+    # ``check_not_subscription_payer_or_error`` already refuses the same outcome one
+    # membership at a time; this closes the account-level door beside it.
+    error = check_not_subscription_payer_anywhere_or_error(current_user.id)
+    if error:
+        return error
+
     # Data retention policy: keep historical records, deactivate account only.
     current_user.approved = False
     current_user.access_token = None

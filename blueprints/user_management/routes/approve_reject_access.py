@@ -33,6 +33,27 @@ def reject_user(user_id):
     if denied is not None:
         return denied
     user = User.query.get_or_404(user_id)
+
+    # Same refusal as ``check_not_subscription_payer_anywhere_or_error``, spelled out
+    # here because this route answers in flashes rather than JSON. Deactivating a payer
+    # leaves ``payer_user_id`` pointing at someone who can no longer sign in, while the
+    # renewals keep charging their card and no remaining admin may stop them.
+    #
+    # Refused even for a superuser: the resulting state cannot be repaired from inside
+    # the app by anyone, so "staff may override" would only mean staff may create it.
+    # The way through is to move the subscription first, which is now a supported act.
+    from blueprints.subscription.services import store as sub_store
+
+    paying_for = sub_store.entities_paid_for_by(user.id)
+    if paying_for:
+        names = ", ".join(name for _entity_id, name in paying_for)
+        flash(
+            f"I can't deactivate {user.username} while they're paying for {names}. "
+            "Move the subscription to another admin first.",
+            "warning",
+        )
+        return redirect(url_for("user_management.admin_dashboard"))
+
     user.approved = False
     db.session.commit()
     flash(f"I've rejected {user.username} and deactivated the account.", "warning")

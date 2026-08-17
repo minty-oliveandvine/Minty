@@ -79,8 +79,11 @@ def test_the_jobs_run_in_the_documented_order(app, daily, recorder):
     """The order is the whole reason this module exists rather than five cron lines.
 
     close-trials before run-renewals bills a trial converting today by today's pass;
-    retry-dunning after run-renewals puts this morning's failed renewal into dunning
-    before the retry pass reads it; sweep-access last — see the regression proof below.
+    repair-transfers also before it, because finishing a stranded handover writes the
+    claim that keeps that entity off this run's invoice — left until afterwards, the
+    renewal would bill days the new payer has already paid for; retry-dunning after
+    run-renewals puts this morning's failed renewal into dunning before the retry pass
+    reads it; sweep-access last — see the regression proof below.
     """
     with app.app_context():
         daily.run_daily(NOW, issue=False)
@@ -88,6 +91,7 @@ def test_the_jobs_run_in_the_documented_order(app, daily, recorder):
     assert recorder == [
         "notify-trial-ending",
         "close-trials",
+        "repair-transfers",
         "run-renewals",
         "retry-dunning",
         "sweep-access",
@@ -144,6 +148,7 @@ def test_one_job_failing_does_not_stop_the_others(app, daily, recorder):
 
     assert recorder == [
         daily.CLOSE_TRIALS,
+        daily.REPAIR_TRANSFERS,
         daily.RUN_RENEWALS,
         daily.RETRY_DUNNING,
         daily.SWEEP_ACCESS,
@@ -290,7 +295,7 @@ def test_the_light_pass_runs_the_two_money_jobs_and_a_scoped_sweep(app, daily, r
     with app.app_context():
         result = daily.run_daily(NOW, issue=False, mode=daily.LIGHT)
 
-    assert recorder == [daily.CLOSE_TRIALS, daily.RUN_RENEWALS]
+    assert recorder == [daily.CLOSE_TRIALS, daily.REPAIR_TRANSFERS, daily.RUN_RENEWALS]
     assert daily.NOTIFY_TRIAL_ENDING not in recorder
     assert daily.RETRY_DUNNING not in recorder
     assert daily.SWEEP_ACCESS not in recorder

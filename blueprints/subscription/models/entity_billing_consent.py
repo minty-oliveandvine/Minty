@@ -18,6 +18,14 @@ entity, adding another module to that same entity is an ordinary purchase.
 Note this cannot be a per-entity CARD. One payer has one Stripe subscription with a line
 per entity, and a Stripe subscription has a single default payment method — subscription
 items can't each carry their own. Consent is the per-entity thing; the card is shared.
+
+Per entity AND PER PAYER. It was once unique on ``entity_id`` alone, which was
+indistinguishable from correct only because an entity's payer never changed. Once a
+subscription can be handed to someone else, a single row per entity means the OLD payer's
+agreement authorises charging the NEW payer's card — the trial-end job included, with no
+user action at all. So the grain is ``(entity_id, user_id)``: each payer answers for
+themselves, and the previous payer's row stays as history, because "why was I billed for
+this entity in June" is asked most often by the person who no longer pays.
 """
 import uuid
 
@@ -26,14 +34,20 @@ from models.db import db
 
 class EntityBillingConsent(db.Model):
     __tablename__ = "entity_billing_consent"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = (
+        # One consent per (entity, payer) — see the module docstring. Not on entity_id
+        # alone, or a transferred entity would keep answering about the wrong person.
+        db.UniqueConstraint(
+            "entity_id", "user_id", name="uq_entity_billing_consent_entity_user"
+        ),
+        {"schema": "pettycashv2"},
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.entities.id"),
         nullable=False,
-        unique=True,
     )
     # Who agreed. FK to user (not user_stripe_customer) for the same reason the
     # subscription mirror does it: consent can be recorded before a customer exists.

@@ -288,7 +288,7 @@ def test_converting_a_trial_prices_it_against_what_the_entity_ALREADY_bills(monk
 
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_1")
     monkeypatch.setattr(checkout, "trial_payment_method", lambda cid: "pm_1")
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: True)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: True)
     monkeypatch.setattr(f"{_CATALOG}.plan_for_module", lambda code: object())
     monkeypatch.setattr(checkout, "_finish_conversion", lambda *a, **k: None)
     monkeypatch.setattr(

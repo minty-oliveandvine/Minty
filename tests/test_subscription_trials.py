@@ -101,7 +101,7 @@ def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
     monkeypatch.setattr(store, "module_row", lambda eid, code: existing_row)
     # Default these tests to a CONSENTED entity so they keep testing what they're about
     # (conversion mechanics). The consent gate itself is covered separately.
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: True)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: True)
     monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_1")
     monkeypatch.setattr(checkout, "trial_payment_method", lambda cid: "pm_1")
@@ -466,7 +466,7 @@ def test_due_trial_expires_when_the_entity_never_consented_to_billing(monkeypatc
     from blueprints.subscription.services import changes, store
 
     monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row()])
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: False)  # never authorised
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: False)  # never authorised
 
     def _boom(*a, **k):
         raise AssertionError("must not bill an entity the payer never authorised")

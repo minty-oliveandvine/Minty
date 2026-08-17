@@ -433,7 +433,7 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
     _seed_catalog(db_session)
     now = clock.now()
 
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: consent)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: consent)
 
     # A running app-level trial, as a module ROW. The card used to read this from a
     # live Stripe subscription view; a trial has no Stripe object at all, which is why

@@ -1,0 +1,617 @@
+"""Handing one entity's subscription to a different payer.
+
+The current payer offers; another admin of the same entity accepts; at accept the new
+payer is charged for the window the old payer's money does not reach, and the payer
+pointer moves.
+
+=============================================================================
+WHY ACCEPT IS ORDERED RATHER THAN ATOMIC
+
+Accepting has to charge and then flip, and those cannot be one transaction. Every helper
+in ``store`` commits its own unit of work — the anchor by ``start_billing_cycle``, the
+invoice row by ``reserve_invoice`` BEFORE the processor is contacted, its ``open`` status
+by ``settle_invoice`` before the payment is even attempted. By the time a card declines,
+three writes are already on disk, and ``reserve_invoice``'s collision path issues a
+session-wide ``rollback()`` that would silently discard anything staged.
+
+So the guarantee is ORDER, not atomicity:
+
+    charge first, flip second — a decline leaves the entity exactly where it was.
+
+and one invariant that must not be broken later:
+
+    NOTHING MAY BE STAGED IN THE SESSION ACROSS THE CHARGE.
+
+The cost of ordering is a window between "money taken" and "pointer moved". The offer row
+is the journal that closes it: ``charging`` is committed before the charge is attempted,
+``charged`` once the money is in, ``accepted`` once the pointer has moved. A process that
+dies in between leaves a row saying exactly how far it got, and two paths finish it — a
+retried accept (``respond_to_transfer`` is re-entrant) and ``repair_stranded``. Both
+ADOPT the invoice already paid under the stored key; neither ever charges again.
+
+``run_renewals`` solves the same shape the same way. The difference is that a renewal
+recomputes its key on the next pass anyway, so a crash repairs itself; an accept is a
+one-shot user action that nothing would revisit.
+
+=============================================================================
+THE KEY
+
+``transfer-{transfer_id}-{attempt}``, with the counter incremented and committed before
+each attempt. Identical within an attempt, so a double-click is refused by the unique
+index on ``subscription_invoice.idempotency_key``; different across attempts, so a
+declined card can be fixed and retried. ``changes.change_key`` cannot be reused: it embeds
+a timestamp of ``at``, and ``at`` here is stored and does not move between retries — so
+the key would be stable in both directions and JAM the retry, because voiding an invoice
+deliberately keeps its row and its key claimed.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from loguru import logger
+
+from blueprints.subscription.constants import (
+    AUDIT_TRANSFER_ACCEPTED,
+    AUDIT_TRANSFER_CANCELLED,
+    AUDIT_TRANSFER_DECLINED,
+    AUDIT_TRANSFER_OFFERED,
+    EXT_PENDING,
+    OUTCOME_ABORTED,
+    OUTCOME_SUCCEEDED,
+    PHASE_PAST_DUE,
+    PHASE_TRIAL,
+    TRANSFER_ACCEPTED as STATUS_ACCEPTED,
+    TRANSFER_CANCELLED as STATUS_CANCELLED,
+    TRANSFER_CHARGED as STATUS_CHARGED,
+    TRANSFER_CHARGING as STATUS_CHARGING,
+    TRANSFER_DECLINED as STATUS_DECLINED,
+    TRANSFER_EXPIRED as STATUS_EXPIRED,
+    TRANSFER_OPEN_STATUSES as OPEN_STATUSES,
+    TRANSFER_PENDING as STATUS_PENDING,
+    TRANSFER_STRANDED_STATUSES as STRANDED_STATUSES,
+)
+from blueprints.subscription.services import clock, store
+from models.db import SubscriptionTransfer, User, UserEntity, db
+
+#: How long an unanswered offer stays open. Checked at ACCEPT as well as by any sweep,
+#: so an expired offer cannot be accepted merely because nothing has swept it yet —
+#: otherwise "expires in 7 days" means "expires whenever the sweep next runs".
+TRANSFER_TTL_DAYS = 7
+
+
+def _uuid() -> str:
+    import uuid
+
+    return str(uuid.uuid4())
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    """Re-attach UTC to a datetime read back from the row.
+
+    Some drivers return naive datetimes for a ``timezone=True`` column, and the billing
+    layer REFUSES them — ``billing._require_aware`` raises rather than guess a zone, and
+    so does ``store.transfer_entity_payer``. Reached from here that refusal would land
+    AFTER the charge, stranding a handover whose money has already been taken, which is
+    the one outcome this whole flow is ordered to avoid.
+
+    ``renewals.entities_billed_in`` carries the same defence for the same reason.
+    """
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+# --- refusals -------------------------------------------------------------------
+
+
+def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
+    """Every reason this handover must be refused, as complete sentences.
+
+    Sentences rather than codes because the payer portal shows the server's words
+    verbatim only when they look like prose — a lowercase machine token is replaced with
+    generic copy on the way through, so a code here becomes "something went wrong".
+
+    EVALUATED TWICE: at offer, and again inside accept. Every one of these can change in
+    the days between — the payer can enter dunning, a module can be cancelled or go to
+    trial, the nominee can be demoted or deactivated, a card can be removed — and nothing
+    else would notice.
+    """
+    from blueprints.subscription.services import stripe_client
+    from services.permission_policy import Role, role_at_least
+
+    reasons: list[str] = []
+    rows = store.rows_for_entity(entity_id)
+
+    # 1. Only the established payer may give the bill away. Strict identity, NOT
+    #    ``may_manage_subscription`` — that answers True when there is no payer at all,
+    #    which is the one case where there is nothing to hand over.
+    payer = store.payer_for_entity(entity_id)
+    if payer is None:
+        reasons.append("Nobody is being billed for this company yet, so there's nothing to hand over.")
+    elif str(payer) != str(from_user_id):
+        reasons.append("Only the person currently being billed can hand this company over.")
+
+    # 2. Debt splits in half. The arrears sit on the PAYER's account while the phase sits
+    #    on the row, so transferring mid-dunning gives the new payer a "payment due" card
+    #    with nothing owed on their account, and leaves the real debt uncollectable.
+    if store.payer_is_dunning(from_user_id):
+        reasons.append(
+            "There's a payment still being collected on this account. "
+            "Once that's settled the handover can go ahead."
+        )
+    elif any(row.phase == PHASE_PAST_DUE for row in rows):
+        reasons.append(
+            "This company has a payment outstanding. Settle it first, then hand it over."
+        )
+    if store.payer_is_dunning(to_user_id):
+        reasons.append(
+            "That person has a payment still being collected, so they can't take on "
+            "another company right now."
+        )
+
+    # 3. A pending cancel-extension is money the OUTGOING payer owes. It rides the module
+    #    row, so moving the row moves the debt onto the new payer's invoice — and makes it
+    #    uncollectable from the person who actually incurred it.
+    if any(
+        row.extension_state == EXT_PENDING and (row.extension_amount or 0) > 0
+        for row in rows
+    ):
+        reasons.append(
+            "There's an unbilled cancellation charge on this company. "
+            "It'll be collected on the next invoice — hand the company over after that."
+        )
+
+    # 4. A trial converting after the handover would charge the NEW payer's card on the
+    #    OLD payer's consent row, at an amount nobody showed them — and with no warning
+    #    email, because the trial-ending notice is deduped per entity and already went to
+    #    the old payer. If they have no card it expires the module outright instead.
+    if any(row.phase == PHASE_TRIAL for row in rows):
+        reasons.append(
+            "This company has a module still on trial. Once the trial ends and the "
+            "subscription starts, it can be handed over."
+        )
+
+    # 5. The bill can only sit with someone who could act on it — and who can sign in.
+    #    ``_admin_candidates`` checks the membership flags but not the account one, so a
+    #    deactivated admin still appears on the list this validates against.
+    membership = (
+        db.session.query(UserEntity.role)
+        .filter(
+            UserEntity.entity_id == str(entity_id),
+            UserEntity.user_id == str(to_user_id),
+            UserEntity.approved,
+        )
+        .first()
+    )
+    account = db.session.get(User, str(to_user_id))
+    if membership is None or not role_at_least(membership[0], Role.ADMIN.value):
+        reasons.append("That person needs to be an admin of this company first.")
+    elif account is None or not getattr(account, "approved", False):
+        reasons.append("That account isn't active, so it can't take on the billing.")
+
+    # 6. Without a saved card nothing can be charged AT ALL: ``start_billing_cycle``
+    #    silently no-ops for a payer with no ``user_stripe_customer`` row, so the accept
+    #    would fail at the charge having promised to succeed.
+    else:
+        customer_id = store.customer_id_for_user(to_user_id)
+        if not customer_id or not stripe_client.customer_default_payment_method(customer_id):
+            reasons.append(
+                "That person needs a saved payment method before they can take over "
+                "the billing."
+            )
+
+    return reasons
+
+
+#: Blockers that make an offer permanently invalid rather than temporarily refused: the
+#: payer changed, or the nominee is no longer eligible. Everything else may clear on its
+#: own (a debt is settled, a trial converts), so the offer is left standing.
+_FATAL_PREFIXES = (
+    "Only the person currently being billed",
+    "Nobody is being billed",
+    "That person needs to be an admin",
+    "That account isn't active",
+)
+
+
+def _is_fatal(reasons: list[str]) -> bool:
+    return any(r.startswith(p) for r in reasons for p in _FATAL_PREFIXES)
+
+
+# --- reads ------------------------------------------------------------------------
+
+
+def pending_transfer_for_entity(entity_id) -> SubscriptionTransfer | None:
+    """The open offer on this entity, if any. At most one — see the partial unique index."""
+    if not entity_id:
+        return None
+    return (
+        SubscriptionTransfer.query.filter(
+            SubscriptionTransfer.entity_id == str(entity_id),
+            SubscriptionTransfer.status.in_(OPEN_STATUSES),
+        )
+        .order_by(SubscriptionTransfer.created_at.desc())
+        .first()
+    )
+
+
+def incoming_transfers(user_id) -> list[SubscriptionTransfer]:
+    """Offers addressed to this user and still open.
+
+    The one recipient-scoped read in the subscription domain. Every other portal query
+    filters on ``payer_user_id``, which is exactly wrong here: the whole point is the
+    companies this person does NOT pay for yet.
+    """
+    if not user_id:
+        return []
+    return (
+        SubscriptionTransfer.query.filter(
+            SubscriptionTransfer.to_user_id == str(user_id),
+            SubscriptionTransfer.status.in_(OPEN_STATUSES),
+        )
+        .order_by(SubscriptionTransfer.created_at.desc())
+        .all()
+    )
+
+
+def quote_transfer(entity_id, *, to_user_id, at=None) -> dict | None:
+    """What taking this company over would cost, for the accept screen.
+
+    ``at`` defaults to the outgoing payer's ``paid_through`` — the instant their money
+    stops covering the entity. An ESTIMATE while the offer is open: that date advances on
+    every successful renewal, so it is re-read at accept and this figure is not trusted.
+    """
+    from blueprints.subscription.services import checkout
+
+    payer = store.payer_for_entity(entity_id)
+    if at is None:
+        at = store.paid_through_for_user(payer) if payer else None
+    if at is None:
+        at = clock.now()
+
+    codes = _billable_codes(entity_id)
+    if not codes:
+        return None
+    return checkout.quote_transfer_charge(entity_id, to_user_id, codes, at=at)
+
+
+def _billable_codes(entity_id) -> set[str]:
+    """The module codes the new payer takes on — everything still billing forward."""
+    from blueprints.subscription.services import access
+
+    return {
+        row.function_code.upper()
+        for row in store.rows_for_entity(entity_id)
+        if access.is_billing_forward(phase=row.phase)
+    }
+
+
+# --- offer / cancel / decline -------------------------------------------------------
+
+
+def offer_transfer(user_id, entity_id, to_user_id) -> tuple[bool, str, dict | None]:
+    """Open an offer to hand ``entity_id`` to ``to_user_id``. Returns ``(ok, message, offer)``."""
+    if str(user_id) == str(to_user_id):
+        return False, "You're already the one being billed for this company.", None
+
+    reasons = transfer_blockers(
+        entity_id, from_user_id=user_id, to_user_id=to_user_id
+    )
+    if reasons:
+        return False, reasons[0], None
+
+    if pending_transfer_for_entity(entity_id) is not None:
+        return False, "There's already a handover waiting on this company.", None
+
+    now = clock.now()
+    quote = quote_transfer(entity_id, to_user_id=to_user_id)
+    offer = SubscriptionTransfer(
+        id=_uuid(),
+        entity_id=str(entity_id),
+        from_user_id=str(user_id),
+        to_user_id=str(to_user_id),
+        status=STATUS_PENDING,
+        expires_at=now + timedelta(days=TRANSFER_TTL_DAYS),
+        quoted_amount=(quote or {}).get("amount"),
+        quoted_currency=(quote or {}).get("currency"),
+    )
+    db.session.add(offer)
+    try:
+        db.session.commit()
+    except Exception:
+        # The partial unique index is the real guard against two open offers; this is the
+        # race the pre-check above cannot close.
+        db.session.rollback()
+        logger.warning("transfer: a concurrent offer already exists for {}", entity_id)
+        return False, "There's already a handover waiting on this company.", None
+
+    _record(offer, AUDIT_TRANSFER_OFFERED, actor=user_id, outcome=OUTCOME_SUCCEEDED)
+    return True, "The handover request has been sent.", _as_dict(offer)
+
+
+def cancel_transfer(user_id, transfer_id) -> tuple[bool, str]:
+    """Withdraw an offer. The initiator's escape hatch — without it their own exit
+    depends indefinitely on someone else answering."""
+    offer = db.session.get(SubscriptionTransfer, str(transfer_id))
+    if offer is None or offer.status not in OPEN_STATUSES:
+        return False, "That handover isn't open any more."
+    if str(offer.from_user_id) != str(user_id):
+        return False, "Only the person who started this handover can cancel it."
+    if offer.status != STATUS_PENDING:
+        # Mid-charge. Cancelling now would strand money already being collected.
+        return False, "That handover is already being processed."
+
+    offer.status = STATUS_CANCELLED
+    offer.responded_at = clock.now()
+    db.session.commit()
+    _record(offer, AUDIT_TRANSFER_CANCELLED, actor=user_id, outcome=OUTCOME_ABORTED)
+    return True, "The handover request has been withdrawn."
+
+
+def _decline(offer, user_id) -> tuple[bool, str, dict | None]:
+    offer.status = STATUS_DECLINED
+    offer.responded_at = clock.now()
+    db.session.commit()
+    _record(offer, AUDIT_TRANSFER_DECLINED, actor=user_id, outcome=OUTCOME_ABORTED)
+    return True, "You've declined the handover.", None
+
+
+# --- accept -------------------------------------------------------------------------
+
+
+def respond_to_transfer(user_id, transfer_id, *, accept: bool) -> tuple[bool, str, dict | None]:
+    """Accept or decline an offer. Returns ``(ok, message, result)``.
+
+    RE-ENTRANT. Called on an offer already in ``charging`` or ``charged`` it picks up at
+    the adopt step instead of starting a second charge, which is what makes a retry after
+    a crash safe rather than a double bill.
+    """
+    offer = db.session.get(SubscriptionTransfer, str(transfer_id))
+    if offer is None or offer.status not in OPEN_STATUSES:
+        return False, "That handover isn't open any more.", None
+    if str(offer.to_user_id) != str(user_id):
+        return False, "That handover was sent to someone else.", None
+
+    now = clock.now()
+    expires_at = _aware(offer.expires_at)
+    # Checked HERE, not only by a sweep. Otherwise "expires in 7 days" quietly means
+    # "expires whenever something next looks at it".
+    if expires_at is not None and expires_at <= now and offer.status == STATUS_PENDING:
+        offer.status = STATUS_EXPIRED
+        db.session.commit()
+        return False, "That handover request has expired.", None
+
+    if not accept:
+        return _decline(offer, user_id)
+
+    reasons = transfer_blockers(
+        offer.entity_id,
+        from_user_id=offer.from_user_id,
+        to_user_id=offer.to_user_id,
+    )
+    if reasons:
+        if _is_fatal(reasons):
+            offer.status = STATUS_CANCELLED
+            offer.responded_at = now
+            db.session.commit()
+            _record(offer, AUDIT_TRANSFER_CANCELLED, actor=user_id,
+                    outcome=OUTCOME_ABORTED, note=reasons[0][:500])
+        return False, reasons[0], None
+
+    return _accept(offer, user_id, now)
+
+
+def _accept(offer, user_id, now) -> tuple[bool, str, dict | None]:
+    from blueprints.subscription.services import checkout
+
+    entity_id = offer.entity_id
+    codes = _billable_codes(entity_id)
+    if not codes:
+        return False, "There's nothing active on this company to hand over.", None
+
+    # READ THE HANDOVER INSTANT NOW, never the value quoted when the offer was made.
+    # ``run_renewals`` advances ``paid_through`` on every successful renewal, so an offer
+    # that outlived a cycle would otherwise bill a window the outgoing payer has since
+    # paid for — a full duplicate charge.
+    at = _aware(store.paid_through_for_user(offer.from_user_id)) or now
+
+    customer_id = store.customer_id_for_user(offer.to_user_id)
+    if not customer_id:
+        return False, "That billing account isn't set up to be charged.", None
+
+    # --- the journal write, committed BEFORE the external call ----------------------
+    # Same shape as ``notify._claim``: a process that dies between the two must leave a
+    # claim with no side effect, never a side effect with no claim.
+    if offer.status == STATUS_PENDING:
+        offer.charge_attempt = int(offer.charge_attempt or 0) + 1
+        offer.charge_key = f"transfer-{offer.id}-{offer.charge_attempt}"
+        offer.status = STATUS_CHARGING
+        offer.accepted_billed_through = at
+        db.session.commit()
+
+    # --- the charge. NOTHING may be staged in the session across this ---------------
+    if offer.status == STATUS_CHARGING:
+        result = checkout._bill_transfer_in_house(
+            entity_id,
+            offer.to_user_id,
+            customer_id,
+            codes,
+            at=at,
+            idempotency_key=offer.charge_key,
+        )
+        if not result["paid"]:
+            # Back to pending so it can be retried — with a FRESH key, because the
+            # counter stays incremented and the voided one stays claimed.
+            offer.status = STATUS_PENDING
+            db.session.commit()
+            return False, result["reason"], None
+
+        offer.status = STATUS_CHARGED
+        offer.charge_invoice_id = result["invoice_id"]
+        offer.accepted_billed_through = result["period_end"]
+        offer.quoted_amount = result["amount"]
+        offer.quoted_currency = result["currency"]
+        db.session.commit()
+
+    return _complete(offer, actor_user_id=user_id, now=now)
+
+
+def _complete(offer, *, actor_user_id, now) -> tuple[bool, str, dict | None]:
+    """Move the pointer. Everything before this is reversible by doing nothing; this is
+    the step that makes the handover real, and it is ONE transaction.
+
+    Shared by ``_accept`` and ``repair_stranded`` so a handover finished by the nightly
+    pass is identical to one finished by the customer clicking twice.
+    """
+    from blueprints.entity.services import modules as entity_modules
+
+    entity_id = offer.entity_id
+    from_user_id = offer.from_user_id
+    to_user_id = offer.to_user_id
+    codes = [row.function_code for row in store.rows_for_entity(entity_id)]
+
+    store.transfer_entity_payer(
+        entity_id, to_user_id, billed_through=_aware(offer.accepted_billed_through)
+    )
+    # Their own agreement, recorded against THEM. The old payer's row stays as history —
+    # "why was I billed for this in June" is asked most often by the person who no longer
+    # pays — and it no longer authorises anything, because consent is asked per payer.
+    store.record_billing_consent(entity_id, to_user_id, "transfer")
+
+    offer.status = STATUS_ACCEPTED
+    offer.responded_at = now
+    db.session.commit()
+
+    for code in codes:
+        store.record_action(
+            entity_id=entity_id,
+            function_code=code,
+            payer_user_id=from_user_id,
+            action=AUDIT_TRANSFER_ACCEPTED,
+            outcome=OUTCOME_SUCCEEDED,
+            actor_user_id=actor_user_id,
+            payer_before=from_user_id,
+            payer_after=to_user_id,
+        )
+
+    # AFTER the commit. Nothing else re-syncs ``entity_function_map`` at a flip — dunning
+    # does it on recovery, the light pass only for payers it touched — and this is only
+    # safe once the claim is on the row, or it would revoke what it just transferred.
+    try:
+        entity_modules.sweep_expired_module_access(payer_user_id=to_user_id)
+    except Exception:
+        logger.exception(
+            "transfer: could not re-sync module access for {} after the handover",
+            to_user_id,
+        )
+
+    logger.info(
+        "transfer: entity {} moved from payer {} to {} (covered to {})",
+        entity_id, from_user_id, to_user_id, offer.accepted_billed_through,
+    )
+    return True, "You're now the subscriber for this company.", _as_dict(offer)
+
+
+# --- the repair step ------------------------------------------------------------------
+
+
+def repair_stranded(now=None, *, limit=None) -> dict:
+    """Finish handovers whose accept got part-way and stopped.
+
+    NORMALLY DOES NOTHING — an accept that completes leaves no row in ``charging`` or
+    ``charged``, and the partial index it reads is empty. It exists for the one window
+    the ordering cannot remove: money collected, pointer not yet moved, and a one-shot
+    user action that nothing would otherwise revisit.
+
+    It charges nothing. A ``charged`` row is finished from what is already paid; a
+    ``charging`` row is resolved by ASKING the processor through the same adopt path the
+    accept uses, and released back to ``pending`` only when the processor confirms it
+    never saw the invoice.
+    """
+    from blueprints.subscription.services import renewals
+
+    now = now or clock.now()
+    rows = (
+        SubscriptionTransfer.query.filter(
+            SubscriptionTransfer.status.in_(STRANDED_STATUSES)
+        )
+        .order_by(SubscriptionTransfer.created_at)
+        .limit(limit or None)
+        .all()
+    )
+    result = {"completed": [], "released": [], "waiting": []}
+
+    for offer in rows:
+        try:
+            if offer.status == STATUS_CHARGED:
+                _complete(offer, actor_user_id=offer.to_user_id, now=now)
+                result["completed"].append(offer.id)
+                continue
+
+            customer_id = store.customer_id_for_user(offer.to_user_id)
+            status = renewals._already_invoiced(
+                customer_id, offer.charge_key, metadata_key="transfer_key"
+            )
+            if status == "paid":
+                record = store.invoice_for_key(offer.charge_key)
+                offer.charge_invoice_id = getattr(record, "external_id", None)
+                offer.status = STATUS_CHARGED
+                db.session.commit()
+                _complete(offer, actor_user_id=offer.to_user_id, now=now)
+                result["completed"].append(offer.id)
+            elif status is None:
+                # The processor never saw it, and the reservation has been discarded, so
+                # the key is free again. Back to pending for a clean retry.
+                offer.status = STATUS_PENDING
+                db.session.commit()
+                result["released"].append(offer.id)
+            else:
+                # Raised and unpaid. Leave it — the customer can still settle it, and
+                # forcing it either way here would either bill twice or give it away.
+                result["waiting"].append(offer.id)
+        except Exception:
+            db.session.rollback()
+            logger.exception("transfer: could not repair stranded handover {}", offer.id)
+
+    if any(result.values()):
+        logger.info("transfer: repaired stranded handovers {}", result)
+    return result
+
+
+# --- helpers ---------------------------------------------------------------------------
+
+
+def _record(offer, action, *, actor, outcome, note=None) -> None:
+    """One audit row per module code — ``function_code`` is NOT NULL and the payer sits on
+    every row of the entity, so a handover is recorded the same way a cancellation is."""
+    try:
+        for row in store.rows_for_entity(offer.entity_id):
+            store.record_action(
+                entity_id=offer.entity_id,
+                function_code=row.function_code,
+                payer_user_id=offer.from_user_id,
+                action=action,
+                outcome=outcome,
+                actor_user_id=actor,
+                payer_before=offer.from_user_id,
+                payer_after=offer.to_user_id,
+                note=note,
+            )
+    except Exception:
+        # An audit failure must not undo a handover that has already happened.
+        logger.exception("transfer: could not record {} for {}", action, offer.id)
+
+
+def _as_dict(offer) -> dict:
+    return {
+        "id": offer.id,
+        "entity_id": offer.entity_id,
+        "from_user_id": offer.from_user_id,
+        "to_user_id": offer.to_user_id,
+        "status": offer.status,
+        "expires_at": offer.expires_at,
+        "amount": offer.quoted_amount,
+        "currency": offer.quoted_currency,
+        "billed_through": offer.accepted_billed_through,
+        "invoice_id": offer.charge_invoice_id,
+    }

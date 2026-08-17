@@ -70,14 +70,70 @@ def entities_billed_in(user_id, period: Period) -> set[str]:
     return billed
 
 
+def _covered_entities(user_id, period: Period, *, through_end: bool) -> set[str]:
+    """Entities of this payer whose ``billed_through`` claim reaches into ``period``.
+
+    The claim is money already collected for the entity from somewhere other than this
+    payer's renewal cycle — today, only a subscriber transfer, which invoices the new
+    payer at accept for the window the old payer's payment did not reach.
+
+    ``through_end`` picks which of the two questions is being asked:
+
+    * False — "does the claim reach INTO this period?" (``> period.start``). These must
+      not be billed again. Strictly greater, so a claim landing exactly on the boundary
+      does not suppress the period that begins there: half-open periods tile, and the
+      instant that ends one begins the next.
+    * True — "does the claim cover this period ENTIRELY?" (``>= period.end``). These are
+      settled, so the account's cycle still has to advance over them.
+
+    Billing-forward rows only. A cancelled or terminated row keeps whatever claim it had,
+    and letting a dead row's stale date suppress a live entity's renewal would give the
+    days away.
+    """
+    covered = set()
+    for row in store.module_rows_for_payer(user_id):
+        claim = getattr(row, "billed_through", None)
+        if claim is None:
+            continue
+        if not access.is_billing_forward(phase=row.phase):
+            continue
+        # Same defence ``entities_billed_in`` needs: some drivers hand back naive
+        # datetimes, and comparing one against an aware period raises rather than
+        # answering — which here would stop the payer being billed at all.
+        if claim.tzinfo is None:
+            claim = claim.replace(tzinfo=timezone.utc)
+        reaches = claim >= period.end if through_end else claim > period.start
+        if reaches:
+            covered.add(str(row.entity_id))
+    return covered
+
+
+def entities_covered_into(user_id, period: Period) -> set[str]:
+    """Entities this renewal must NOT bill — someone else's money already bought part of
+    this period for them. See ``_covered_entities``."""
+    return _covered_entities(user_id, period, through_end=False)
+
+
+def entities_covered_past(user_id, period: Period) -> set[str]:
+    """Entities whose claim covers this period outright, so the account's cycle must
+    advance even though nothing was invoiced. See ``_covered_entities``."""
+    return _covered_entities(user_id, period, through_end=True)
+
+
 def billable_codes_by_entity(user_id, period: Period | None = None) -> dict[str, set[str]]:
     """{entity_id: {module codes}} this payer will be charged for next period.
 
-    ``period`` drops the entities already charged for it — see ``entities_billed_in``.
-    Omitting it answers the looser question "is there anything on this account at all",
-    which is what ``due_renewals`` needs before a period has even been chosen.
+    ``period`` drops the entities already charged for it — see ``entities_billed_in`` for
+    an entity that bought its own way into this period, and ``entities_covered_into`` for
+    one carrying a transfer's claim over it. Omitting it answers the looser question "is
+    there anything on this account at all", which is what ``due_renewals`` needs before a
+    period has even been chosen.
     """
-    already = entities_billed_in(user_id, period) if period is not None else set()
+    already = (
+        entities_billed_in(user_id, period) | entities_covered_into(user_id, period)
+        if period is not None
+        else set()
+    )
     by_entity: dict[str, set[str]] = {}
     for row in store.module_rows_for_payer(user_id):
         if not access.is_billing_forward(phase=row.phase):
@@ -232,8 +288,16 @@ def period_key(user_id, period: Period) -> str:
     return f"renewal-{user_id}-{period.start:%Y%m%d}"
 
 
-def _already_invoiced(customer_id, key: str) -> str | None:
+def _already_invoiced(
+    customer_id, key: str, *, metadata_key: str = "renewal_key"
+) -> str | None:
     """The status of the invoice already raised under ``key``, or None if there is none.
+
+    ``metadata_key`` is the field the fallback scan matches on, and exists so the payer
+    TRANSFER charge can reuse this rather than reimplement it. The three-way resolution
+    below — confirmed / reserved-but-unknown / never existed — is the part that must not
+    be written twice: getting it subtly wrong either charges someone twice or blocks a
+    charge forever, and both failures are silent.
 
     ONE INDEXED LOOKUP, where this used to LIST the payer's Stripe invoices and scan
     their metadata — once per payer, every renewal run. The local row is written before
@@ -264,7 +328,7 @@ def _already_invoiced(customer_id, key: str) -> str | None:
         "renewal: {} was reserved but never confirmed sent; asking the processor", key
     )
     existing = billing_gateway.find_invoice_by_metadata(
-        customer_id, "renewal_key", key
+        customer_id, metadata_key, key
     )
     if existing is None:
         store.discard_invoice(record.id)
@@ -356,7 +420,16 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
             # own invoice, and leaving ``paid_through`` behind would make the account
             # permanently due, re-checked every day, and — once past the grace window —
             # revoked for non-payment it had actually made.
-            if issue and entities_billed_in(user_id, period):
+            #
+            # A transferred entity reaches this the same way: excluded from the invoice
+            # by ``entities_covered_into`` because it was already paid for at accept. The
+            # exclusion MUST be paired with the advance — suppressing the line while
+            # leaving ``paid_through`` behind turns one avoided double-charge into a
+            # guaranteed one, because the account stays due and is re-billed the next day.
+            if issue and (
+                entities_billed_in(user_id, period)
+                or entities_covered_past(user_id, period)
+            ):
                 store.set_paid_through(user_id, period.end)
                 skipped.append({**entry, "reason": "already covered this period"})
             else:

@@ -146,7 +146,7 @@ def _wire(monkeypatch, *, default_pm=None, module_rows=None, billed_codes=(),
 
     # Default to an entity the payer HAS authorised, so these tests keep testing
     # pricing mechanics. The consent gate is covered separately below.
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: True)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: True)
     monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
 
     calls = {"charged": [], "default_pm": [], "setup": [], "stamped": [],
@@ -271,7 +271,7 @@ def test_a_saved_card_alone_does_not_authorise_a_second_entity(monkeypatch):
     from blueprints.subscription.services import store
 
     checkout, calls = _wire(monkeypatch, default_pm="pm_saved")
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: False)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: False)
     monkeypatch.setattr(
         checkout, "payment_method_display",
         lambda pm: {"brand": "visa", "last4": "4242"},
@@ -299,7 +299,7 @@ def test_confirming_records_consent_then_bills(monkeypatch):
     consents: list = []
     consented = {"value": False}
 
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: consented["value"])
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: consented["value"])
     monkeypatch.setattr(
         store, "record_billing_consent",
         lambda eid, uid, source: (consents.append((eid, uid, source)),
@@ -321,7 +321,7 @@ def test_confirmation_amount_is_the_bundle_price_not_the_sum(monkeypatch):
     from blueprints.subscription.services import store
 
     checkout, calls = _wire(monkeypatch, default_pm="pm_saved")
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: False)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: False)
     monkeypatch.setattr(checkout, "payment_method_display", lambda pm: None)
 
     result = checkout.start_modules_checkout(
