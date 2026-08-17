@@ -547,14 +547,26 @@ def subscription_notice_api(entity_id):
     return _notice_cors(make_response(jsonify(notice), 200))
 
 
-def billing_app_profile_unscoped_url(user_id, *, from_bills: bool = False) -> str:
-    """Handoff URL for Module 2 profile with no entity context (Select Company)."""
+def billing_app_profile_unscoped_url(
+    user_id, *, from_bills: bool = False, next_path: str | None = None
+) -> str:
+    """Handoff URL for Module 2 profile with no entity context (Select Company).
+
+    ``next_path`` lands the recipient somewhere DEEPER than the profile root, and exists
+    for the subscriber-handover email: its whole purpose is to put someone in front of one
+    specific request, and a link to the profile root asks them to go and find it. It must
+    still go through this function rather than straight at the frontend path — a cold
+    recipient with no session is bounced to module selection, and the minted token is what
+    stops that.
+    """
     profile_seg = (
         os.environ.get("PAYMENT_REQUEST_PROFILE_PATH")
         or os.environ.get("BILLING_PROFILE_PATH")
         or "profile"
     ).strip("/")
     next_arg = f"/{profile_seg}" if profile_seg else "/profile"
+    if next_path:
+        next_arg = "/" + str(next_path).lstrip("/")
     role = _resolve_user_entity_role(user_id, "")
     token = _generate_module_token(user_id, "", None, role)
     url = (

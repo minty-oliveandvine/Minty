@@ -281,6 +281,9 @@ def create_app():
     from blueprints.subscription.routes.portal import (
         my_invite_admin_api,
         my_payment_method_confirm_api,
+        my_transfer_cancel_api,
+        my_transfer_initiate_api,
+        my_transfer_respond_api,
         my_payment_method_default_api,
         my_payment_method_remove_api,
         my_payment_method_setup_intent_api,
@@ -292,6 +295,14 @@ def create_app():
     csrf.exempt(my_payment_method_default_api)
     csrf.exempt(my_payment_method_update_api)
     csrf.exempt(my_payment_method_remove_api)
+    # The handover routes. NO TEST CAN CATCH A MISSING ONE — tests/conftest.py disables
+    # CSRF entirely — so these are verified by hand and any new route here must be added
+    # deliberately. Each still checks the caller: the service refuses unless the token's
+    # user is the entity's payer (initiate/cancel) or the offer's recipient (respond), so
+    # a forged cross-site POST reaches nothing even before this.
+    csrf.exempt(my_transfer_initiate_api)
+    csrf.exempt(my_transfer_respond_api)
+    csrf.exempt(my_transfer_cancel_api)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,

@@ -1085,3 +1085,186 @@ def test_preflight_answers_without_a_token(app):
     response = client.open("/api/me/subscriptions", method="OPTIONS")
     assert response.status_code == 204
     assert "Access-Control-Allow-Origin" in response.headers
+
+
+# --- The handover routes -------------------------------------------------------
+#
+# Four routes, one shared shell, and the thing worth pinning is that they all answer the
+# same way: 401 without a bearer, 400 only for a MISSING routing id, 422 with a full
+# sentence for a stated refusal, and CORS on every response including the errors.
+#
+# 422 and not 403: the service's refusals are written to be read by the person who
+# clicked, and the client only shows the server's words when they look like prose.
+
+
+def _post(app, path, body, **claims):
+    return app.test_client().post(
+        path,
+        json=body,
+        headers={"Authorization": f"Bearer {_token(app, **(claims or {'user_id': 'u1'}))}"},
+    )
+
+
+def test_initiating_a_handover_needs_a_bearer(app):
+    response = app.test_client().post(
+        "/api/me/subscriptions/transfer", json={"entity": "e1", "to_user": "u2"}
+    )
+    assert response.status_code == 401
+
+
+def test_initiating_a_handover_needs_an_entity(app):
+    response = _post(app, "/api/me/subscriptions/transfer", {"to_user": "u2"})
+    assert response.status_code == 400
+    assert "entity" in response.get_json()["error"]
+
+
+def test_initiating_a_handover_needs_a_recipient(app):
+    response = _post(app, "/api/me/subscriptions/transfer", {"entity": "e1"})
+    assert response.status_code == 400
+
+
+def test_a_refused_handover_is_a_422_with_the_reason_in_words(app, monkeypatch):
+    """The client replaces anything that looks like a machine code with generic copy, so
+    a refusal has to arrive as a sentence or the user is told nothing."""
+    from blueprints.subscription.services import transfers
+
+    monkeypatch.setattr(
+        transfers, "offer_transfer",
+        lambda *_a, **_k: (False, "That person needs to be an admin of this company first.", None),
+    )
+
+    response = _post(app, "/api/me/subscriptions/transfer",
+                     {"entity": "e1", "to_user": "u2"})
+
+    assert response.status_code == 422
+    error = response.get_json()["error"]
+    assert " " in error and error[0].isupper()
+    assert "Access-Control-Allow-Origin" in response.headers
+
+
+def test_a_successful_offer_returns_it(app, monkeypatch):
+    from blueprints.subscription.services import transfers
+
+    monkeypatch.setattr(
+        transfers, "offer_transfer",
+        lambda *_a, **_k: (True, "The handover request has been sent.", {"id": "t1"}),
+    )
+
+    response = _post(app, "/api/me/subscriptions/transfer",
+                     {"entity": "e1", "to_user": "u2"})
+
+    assert response.status_code == 200
+    assert response.get_json()["transfer"]["id"] == "t1"
+
+
+def test_an_unexpected_failure_is_a_500_not_a_stack_trace(app, monkeypatch):
+    from blueprints.subscription.services import transfers
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("processor unreachable")
+
+    monkeypatch.setattr(transfers, "offer_transfer", _boom)
+
+    response = _post(app, "/api/me/subscriptions/transfer",
+                     {"entity": "e1", "to_user": "u2"})
+
+    assert response.status_code == 500
+    assert "unreachable" not in response.get_json()["error"]
+    assert "Access-Control-Allow-Origin" in response.headers
+
+
+def test_responding_needs_a_transfer_id(app):
+    response = _post(app, "/api/me/subscriptions/transfer/respond", {"accept": True})
+    assert response.status_code == 400
+
+
+def test_accepting_passes_the_flag_through(app, monkeypatch):
+    from blueprints.subscription.services import transfers
+
+    seen = {}
+
+    def _respond(user_id, transfer_id, *, accept):
+        seen.update(user=user_id, transfer=transfer_id, accept=accept)
+        return True, "You're now the subscriber for this company.", {"id": transfer_id}
+
+    monkeypatch.setattr(transfers, "respond_to_transfer", _respond)
+
+    response = _post(app, "/api/me/subscriptions/transfer/respond",
+                     {"transfer": "t1", "accept": True}, user_id="u2")
+
+    assert response.status_code == 200
+    assert seen == {"user": "u2", "transfer": "t1", "accept": True}
+
+
+def test_declining_is_the_same_route_with_the_flag_off(app, monkeypatch):
+    from blueprints.subscription.services import transfers
+
+    seen = {}
+    monkeypatch.setattr(
+        transfers, "respond_to_transfer",
+        lambda u, t, *, accept: (seen.update(accept=accept) or
+                                 (True, "You've declined the handover.", None)),
+    )
+
+    response = _post(app, "/api/me/subscriptions/transfer/respond",
+                     {"transfer": "t1", "accept": False}, user_id="u2")
+
+    assert response.status_code == 200
+    assert seen["accept"] is False
+
+
+def test_cancelling_needs_a_transfer_id(app):
+    response = _post(app, "/api/me/subscriptions/transfer/cancel", {})
+    assert response.status_code == 400
+
+
+def test_cancelling_reports_the_service_s_refusal(app, monkeypatch):
+    from blueprints.subscription.services import transfers
+
+    monkeypatch.setattr(
+        transfers, "cancel_transfer",
+        lambda *_a, **_k: (False, "That handover is already being processed."),
+    )
+
+    response = _post(app, "/api/me/subscriptions/transfer/cancel", {"transfer": "t1"})
+
+    assert response.status_code == 422
+    assert "already being processed" in response.get_json()["error"]
+
+
+def test_the_inbox_is_scoped_to_the_token_not_the_request(app, monkeypatch):
+    """The one recipient-scoped read in this file. Every other portal query filters on
+    ``payer_user_id``; this one deliberately returns companies the caller does NOT pay
+    for, so the scoping has to come from the token and nowhere else."""
+    from blueprints.subscription.services import transfers
+
+    seen = {}
+    monkeypatch.setattr(
+        transfers, "incoming_transfers_payload",
+        lambda uid: seen.setdefault("uid", uid) and [] or [{"id": "t1"}],
+    )
+
+    response = app.test_client().get(
+        "/api/me/subscriptions/transfers?user_id=someone-else",
+        headers={"Authorization": f"Bearer {_token(app, user_id='u2')}"},
+    )
+
+    assert response.status_code == 200
+    assert seen["uid"] == "u2", "the query string must not be able to redirect this"
+
+
+def test_the_inbox_needs_a_bearer(app):
+    response = app.test_client().get("/api/me/subscriptions/transfers")
+    assert response.status_code == 401
+
+
+def test_the_handover_routes_answer_preflight_without_a_token(app):
+    for path in (
+        "/api/me/subscriptions/transfer",
+        "/api/me/subscriptions/transfer/respond",
+        "/api/me/subscriptions/transfer/cancel",
+        "/api/me/subscriptions/transfers",
+    ):
+        response = app.test_client().options(path)
+        assert response.status_code == 204, path
+        assert "Access-Control-Allow-Origin" in response.headers, path

@@ -1392,7 +1392,15 @@ def quote_transfer_charge(entity_id, payer_user_id, codes, *, at):
         return None
     return {
         "amount": invoice.total,
-        "currency": invoice.currency,
+        "currency": (invoice.currency or "").upper(),
+        # THE WINDOW ACTUALLY CHARGED — from the handover instant, not from the period
+        # start. These differ by design: the period is the new payer's whole cycle, and
+        # they are only billed the part of it after the old payer's money runs out. A
+        # screen that quotes ``period_start`` tells the customer they are paying for days
+        # somebody else already paid for, which is both wrong and alarming.
+        # ``preview_reinstate_modules`` names the same pair covers_from / covers_to.
+        "covers_from": at,
+        "covers_to": period.end,
         "period_start": period.start,
         "period_end": period.end,
         "anchor_at": anchor,

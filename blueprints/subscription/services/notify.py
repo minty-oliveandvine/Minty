@@ -30,11 +30,16 @@ the entire customer-facing vocabulary of the billing system is reviewable on one
 which matters more here than template purity, because these are the only words Minty ever
 says to a customer about their money.
 
-Recipient is the PAYER only. Every action these emails ask for (add a card, settle an
-invoice, confirm billing) is one only the payer can take; co-admins on an entity would
-receive amounts they cannot act on. The consequence is a known gap — a co-admin still
-watches modules go dark with no explanation — and closing it needs a separate, redacted
-template set rather than a wider recipient list on these.
+Recipient is the PAYER, with ONE exception. Every action these emails ask for (add a card,
+settle an invoice, confirm billing) is one only the payer can take; co-admins on an entity
+would receive amounts they cannot act on. The consequence is a known gap — a co-admin
+still watches modules go dark with no explanation — and closing it needs a separate,
+redacted template set rather than a wider recipient list on these.
+
+The exception is ``subscriber_transfer_requested``, which is addressed to someone who is
+NOT yet the payer and is being asked to become one. It belongs here rather than in a
+separate system because it is a message about money with an amount in it, and the whole
+point of keeping this vocabulary on one screen is that no such message escapes review.
 """
 from __future__ import annotations
 
@@ -58,6 +63,10 @@ DUNNING_RETRY_FAILED = "dunning_retry_failed"
 PAYMENT_RECOVERED = "payment_recovered"
 ACCOUNT_CLOSED = "account_closed"
 ACCESS_REVOKED = "access_revoked"
+# The handover family. ``requested`` is the one email in this module sent to a non-payer.
+SUBSCRIBER_TRANSFER_REQUESTED = "subscriber_transfer_requested"
+SUBSCRIBER_TRANSFER_ACCEPTED = "subscriber_transfer_accepted"
+SUBSCRIBER_TRANSFER_FAILED = "subscriber_transfer_failed"
 
 EVENTS = (
     TRIAL_ENDING,
@@ -69,6 +78,9 @@ EVENTS = (
     PAYMENT_RECOVERED,
     ACCOUNT_CLOSED,
     ACCESS_REVOKED,
+    SUBSCRIBER_TRANSFER_REQUESTED,
+    SUBSCRIBER_TRANSFER_ACCEPTED,
+    SUBSCRIBER_TRANSFER_FAILED,
 )
 
 TEMPLATE = "email/subscription_notice.html"
@@ -445,6 +457,90 @@ def _access_revoked(ctx: dict) -> dict:
     }
 
 
+def _subscriber_transfer_requested(ctx: dict) -> dict:
+    """Sent to the person being ASKED to take the bill on — not to the payer.
+
+    It names the amount and the date because accepting is a purchase, and a request to
+    take on a recurring cost with the figure withheld is not a request anyone can answer.
+    """
+    entity = ctx.get("entity_name") or "a company"
+    who = ctx.get("from_name") or "The current subscriber"
+    amount = money(ctx.get("amount"), ctx.get("currency"))
+    return {
+        "tone": "info",
+        "subject": f"{who} would like you to take over billing for {entity}",
+        "heading": f"Take over the subscription for {entity}?",
+        "lede": (
+            f"{who} has asked you to become the subscriber for {entity}. If you accept, "
+            "its subscription moves to your billing account and future invoices come to you."
+        ),
+        "facts": [
+            ("Company", entity),
+            ("Requested by", who),
+            ("Charged when you accept", amount),
+            ("Covers from", day(ctx.get("billed_through"))),
+            ("Request expires", day(ctx.get("expires_at"))),
+        ],
+        "body": [
+            "The amount above covers the period the current subscriber has already paid "
+            "for up to — you are not charged for days they have covered.",
+            "Nothing changes until you accept.",
+        ],
+        "cta_label": "Review the request",
+        "cta_url": ctx.get("portal_url") or base_url(),
+    }
+
+
+def _subscriber_transfer_accepted(ctx: dict) -> dict:
+    """Sent to the OUTGOING payer: their bill just got smaller and they should know why."""
+    entity = ctx.get("entity_name") or "a company"
+    who = ctx.get("to_name") or "another admin"
+    return {
+        "tone": "info",
+        "subject": f"{who} is now the subscriber for {entity}",
+        "heading": "The subscription has been handed over",
+        "lede": (
+            f"{who} has taken over the subscription for {entity}. You will not be billed "
+            "for it again."
+        ),
+        "facts": [("Company", entity), ("New subscriber", who)],
+        "body": [
+            "Invoices you were already sent stay on your account — they are the record "
+            "of what you paid, so they do not move.",
+        ],
+        "cta_label": "View your subscriptions",
+        "cta_url": ctx.get("portal_url") or base_url(),
+    }
+
+
+def _subscriber_transfer_failed(ctx: dict) -> dict:
+    """Sent to the person who tried to accept, when the card did not go through.
+
+    Says plainly that nothing moved. A failed handover that reads as ambiguous leaves two
+    people each assuming the other is being billed.
+    """
+    entity = ctx.get("entity_name") or "a company"
+    return {
+        "tone": "alert",
+        "subject": f"We couldn't complete the handover for {entity}",
+        "heading": "That payment didn't go through",
+        "lede": (
+            f"The payment to take over {entity} was declined, so the handover has not "
+            "happened and the current subscriber is still being billed."
+        ),
+        "facts": [
+            ("Company", entity),
+            ("Amount", money(ctx.get("amount"), ctx.get("currency"))),
+        ],
+        "body": [
+            "Nothing has changed. Update your payment method and accept the request "
+            "again — it is still open.",
+        ],
+        "cta_label": "Update payment method",
+        "cta_url": ctx.get("portal_url") or base_url(),
+    }
+
+
 _COPY = {
     TRIAL_ENDING: _trial_ending,
     TRIAL_CONVERTED: _trial_converted,
@@ -455,6 +551,9 @@ _COPY = {
     PAYMENT_RECOVERED: _payment_recovered,
     ACCOUNT_CLOSED: _account_closed,
     ACCESS_REVOKED: _access_revoked,
+    SUBSCRIBER_TRANSFER_REQUESTED: _subscriber_transfer_requested,
+    SUBSCRIBER_TRANSFER_ACCEPTED: _subscriber_transfer_accepted,
+    SUBSCRIBER_TRANSFER_FAILED: _subscriber_transfer_failed,
 }
 
 

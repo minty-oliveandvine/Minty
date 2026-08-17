@@ -233,6 +233,148 @@ def my_invite_admin_api():
     return _cors(make_response(jsonify({"ok": True, "message": message}), 200))
 
 
+def _transfer_call(handler, *, description: str):
+    """The shared shell for the four handover routes.
+
+    Every one of them answers the same way, and writing that four times is how the
+    answers drift: preflight without a token, 401 without a bearer, 400 only for a
+    missing routing id, **422 with a full sentence** for any business refusal, 500 for a
+    surprise — and every response, errors included, back through ``_cors``.
+
+    422 rather than 403 matters here. The service's refusals are sentences meant to be
+    read by the person who clicked ("that person needs a saved payment method"), and the
+    client only shows the server's words when they look like prose.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        return _unauthorized("unauthorized")
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = handler(user_id, payload)
+    except _MissingField as exc:
+        return _cors(make_response(jsonify({"error": str(exc)}), 400))
+    except Exception:
+        current_app.logger.exception("%s failed for user %s", description, user_id)
+        return _cors(
+            make_response(jsonify({"error": "Something got stuck on my end!"}), 500)
+        )
+
+    ok, message, data = result
+    if not ok:
+        return _cors(make_response(jsonify({"error": message}), 422))
+    body = {"ok": True, "message": message}
+    if data is not None:
+        body["transfer"] = data
+    return _cors(make_response(jsonify(body), 200))
+
+
+class _MissingField(Exception):
+    """A required routing id was absent — a 400, distinct from a stated refusal."""
+
+
+def _required(payload: dict, field: str) -> str:
+    value = str(payload.get(field) or "").strip()
+    if not value:
+        raise _MissingField(f"{field} is required")
+    return value
+
+
+@subscription_bp.route(
+    "/api/me/subscriptions/transfer", methods=["POST", "OPTIONS"]
+)
+def my_transfer_initiate_api():
+    """Offer this entity's subscription to another admin. Body: ``{entity, to_user}``.
+
+    Authorised inside the service, not here: ``transfer_blockers`` refuses unless the
+    caller is that entity's payer, which is the same test that gates every other change
+    to a subscription.
+    """
+    from blueprints.subscription.services import transfers
+
+    return _transfer_call(
+        lambda user_id, payload: transfers.offer_transfer(
+            user_id, _required(payload, "entity"), _required(payload, "to_user")
+        ),
+        description="transfer initiate",
+    )
+
+
+@subscription_bp.route(
+    "/api/me/subscriptions/transfer/respond", methods=["POST", "OPTIONS"]
+)
+def my_transfer_respond_api():
+    """Accept or decline a handover offered to you. Body: ``{transfer, accept}``.
+
+    THE ONE ROUTE HERE THAT MOVES MONEY. It is also re-entrant: called twice it adopts
+    the invoice already paid under the offer's key rather than raising a second one, so a
+    double-click or a retry after a timeout costs nothing.
+    """
+    from blueprints.subscription.services import transfers
+
+    return _transfer_call(
+        lambda user_id, payload: transfers.respond_to_transfer(
+            user_id,
+            _required(payload, "transfer"),
+            accept=bool(payload.get("accept")),
+        ),
+        description="transfer respond",
+    )
+
+
+@subscription_bp.route(
+    "/api/me/subscriptions/transfer/cancel", methods=["POST", "OPTIONS"]
+)
+def my_transfer_cancel_api():
+    """Withdraw an offer you made. Body: ``{transfer}``.
+
+    The initiator's escape hatch. Without it their own exit from a company depends
+    indefinitely on somebody else opening their email.
+    """
+    from blueprints.subscription.services import transfers
+
+    return _transfer_call(
+        lambda user_id, payload: (
+            *transfers.cancel_transfer(user_id, _required(payload, "transfer")),
+            None,
+        ),
+        description="transfer cancel",
+    )
+
+
+@subscription_bp.route("/api/me/subscriptions/transfers", methods=["GET", "OPTIONS"])
+def my_transfers_api():
+    """Handovers offered TO the caller.
+
+    A NEW AUTHORISATION SHAPE for this file, and worth saying out loud: every other
+    portal read filters on ``payer_user_id`` and is safe by construction because it can
+    only ever return the caller's own companies. This one deliberately returns companies
+    they do NOT pay for — that is the entire point — so it is scoped on ``to_user_id``
+    from the token instead. Still nothing in the request can be swapped for someone
+    else's offers, which is the property that matters.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        return _unauthorized("unauthorized")
+
+    from blueprints.subscription.services import transfers
+
+    try:
+        payload = transfers.incoming_transfers_payload(user_id)
+    except Exception:
+        current_app.logger.exception("incoming transfers failed for user %s", user_id)
+        return _cors(
+            make_response(jsonify({"error": "Could not load those requests."}), 500)
+        )
+    return _cors(make_response(jsonify({"transfers": payload}), 200))
+
+
 @subscription_bp.route("/api/me/invoices", methods=["GET", "OPTIONS"])
 def my_invoices_api():
     """The caller's invoices, newest first.
