@@ -483,6 +483,11 @@ def _admin_candidates(entity_id) -> list[dict]:
                 # Same filter as the Settings user list: an unapproved row is a request
                 # to join, not a member.
                 UserEntity.approved,
+                # And the ACCOUNT has to be live, not just the membership. A deactivated
+                # user keeps their ``user_entity`` row and so kept appearing here — an
+                # offer to them can never be accepted, and it freezes the payer's own
+                # exit behind an inbox nobody can open.
+                User.approved.is_(True),
             )
             .all()
         )
@@ -530,13 +535,84 @@ def build_subscriber_options(user_id, entity_id) -> dict | None:
         key=lambda c: (c["name"] or c["email"] or "").lower(),
     )
 
+    # Why the button may be unavailable, and what it would cost — both computed here so
+    # the screen can SAY so before the click. Without them the only way to learn that a
+    # handover is refused is to attempt one, which is a poor way to find out that a trial
+    # is running or a debt is outstanding.
+    from blueprints.subscription.services import transfers
+
+    try:
+        pending = transfers.pending_transfer_for_entity(entity.id)
+    except Exception:
+        # Advisory, not load-bearing: the screen still renders and the POST still
+        # refuses on its own checks. The rollback is NOT optional — on Postgres a failed
+        # statement aborts the whole transaction, so swallowing the exception without
+        # resetting the session turns one bad query into a 500 several calls later.
+        db.session.rollback()
+        logger.exception("portal: could not read a pending handover for %s", entity.id)
+        pending = None
+
+    blockers: list[str] = []
+    quotes: dict[str, dict] = {}
+    if pending is None and rest:
+        try:
+            # ENTITY-level refusals, asked once. A candidate has to be named to ask, but
+            # only the answers true of the COMPANY are kept — a trial still running, a
+            # debt outstanding — because those hold whoever accepts.
+            blockers = [
+                reason
+                for reason in transfers.transfer_blockers(
+                    entity.id, from_user_id=payer_id, to_user_id=rest[0]["id"]
+                )
+                # Refusals about a PARTICULAR CANDIDATE are dropped: they say nothing
+                # about the entity, and "that person needs a saved payment method" above
+                # a list of five people reads as though none of them could take it.
+                if not reason.startswith("That person")
+            ]
+            if not blockers:
+                # PER CANDIDATE, and the earlier version of this was simply wrong. The
+                # quote is NOT a fact about the entity: its window ends at the
+                # RECIPIENT's period end, derived from their own billing anchor. Two
+                # admins whose cycles turn over on different days are charged different
+                # amounts for the same handover, so a single figure labelled "whoever
+                # accepts" is correct only for the one person it was priced against.
+                #
+                # Affordable done properly: pricing reads the recipient's cycle and the
+                # plan, both local, and does not touch the processor.
+                for candidate in rest:
+                    priced = transfers.quote_transfer(
+                        entity.id, to_user_id=candidate["id"]
+                    )
+                    if priced is not None:
+                        quotes[candidate["id"]] = priced
+        except Exception:
+            db.session.rollback()
+            logger.exception("portal: could not price a handover for %s", entity.id)
+            blockers, quotes = [], {}
+
     return {
         "entity": {"entity_id": str(entity.id), "entity_name": entity.name or ""},
         "current": current,
         "candidates": [
             {**current, "is_current": True},
-            *({**c, "is_current": False} for c in rest),
+            # Each carries ITS OWN price, because the amount depends on the recipient's
+            # billing anchor rather than on the entity.
+            *(
+                {**c, "is_current": False, "quote": quotes.get(c["id"])}
+                for c in rest
+            ),
         ],
+        "blockers": blockers,
+        "pending_transfer": (
+            {
+                "id": pending.id,
+                "to_user_id": pending.to_user_id,
+                "status": pending.status,
+                "since": pending.created_at,
+            }
+            if pending is not None
+            else None
+        ),
     }
 
 

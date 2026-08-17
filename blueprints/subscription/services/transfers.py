@@ -171,6 +171,19 @@ def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
             "subscription starts, it can be handed over."
         )
 
+    # 4b. NOTHING LEFT TO PAY FOR. An entity whose only modules are expired trials or
+    #     finished cancellations still names a payer on those dead rows, so every check
+    #     above passes — but ``_billable_codes`` comes back empty and the accept refuses.
+    #
+    #     Caught HERE rather than there because the difference is who finds out. Left to
+    #     the accept, the offer is allowed, the email goes out, and the recipient is the
+    #     one told it cannot happen — for a reason that was already true when it was sent.
+    if not _billable_codes(entity_id):
+        reasons.append(
+            "There's no active subscription on this company to hand over. "
+            "Subscribe a module first, then it can be handed over."
+        )
+
     # 5. The bill can only sit with someone who could act on it — and who can sign in.
     #    ``_admin_candidates`` checks the membership flags but not the account one, so a
     #    deactivated admin still appears on the list this validates against.
@@ -254,6 +267,53 @@ def incoming_transfers(user_id) -> list[SubscriptionTransfer]:
     )
 
 
+def incoming_transfers_payload(user_id) -> list[dict]:
+    """Offers addressed to this user, shaped for the portal inbox.
+
+    Carries the COMPANY NAME, who is asking, and a live quote — an offer that says only
+    "someone wants you to take over something" cannot be answered. The quote is re-derived
+    here rather than read off the row because the stored one is an estimate taken when the
+    offer was made, and the outgoing payer's ``paid_through`` advances on every renewal.
+    """
+    from models.db import Entity
+
+    out = []
+    for offer in incoming_transfers(user_id):
+        entity = db.session.get(Entity, str(offer.entity_id))
+        asker = db.session.get(User, str(offer.from_user_id))
+        try:
+            quote = quote_transfer(offer.entity_id, to_user_id=offer.to_user_id)
+        except Exception:
+            # A quote that cannot be priced must not hide the request itself — the
+            # accept screen re-quotes anyway, and an invisible offer is worse than one
+            # with a missing figure.
+            logger.exception("transfer: could not quote offer {}", offer.id)
+            quote = None
+        out.append(
+            {
+                **_as_dict(offer),
+                "entity_name": getattr(entity, "name", None) or "",
+                "from_name": _display_name(asker),
+                "quote": quote,
+                "blockers": transfer_blockers(
+                    offer.entity_id,
+                    from_user_id=offer.from_user_id,
+                    to_user_id=offer.to_user_id,
+                ),
+            }
+        )
+    return out
+
+
+def _display_name(person) -> str:
+    if person is None:
+        return "an admin"
+    full = " ".join(
+        filter(None, [getattr(person, "first_name", ""), getattr(person, "last_name", "")])
+    ).strip()
+    return full or getattr(person, "username", None) or "an admin"
+
+
 def quote_transfer(entity_id, *, to_user_id, at=None) -> dict | None:
     """What taking this company over would cost, for the accept screen.
 
@@ -326,6 +386,7 @@ def offer_transfer(user_id, entity_id, to_user_id) -> tuple[bool, str, dict | No
         return False, "There's already a handover waiting on this company.", None
 
     _record(offer, AUDIT_TRANSFER_OFFERED, actor=user_id, outcome=OUTCOME_SUCCEEDED)
+    _notify(offer, "requested")
     return True, "The handover request has been sent.", _as_dict(offer)
 
 
@@ -444,6 +505,7 @@ def _accept(offer, user_id, now) -> tuple[bool, str, dict | None]:
             # counter stays incremented and the voided one stays claimed.
             offer.status = STATUS_PENDING
             db.session.commit()
+            _notify(offer, "failed")
             return False, result["reason"], None
 
         offer.status = STATUS_CHARGED
@@ -504,6 +566,8 @@ def _complete(offer, *, actor_user_id, now) -> tuple[bool, str, dict | None]:
             "transfer: could not re-sync module access for {} after the handover",
             to_user_id,
         )
+
+    _notify(offer, "accepted")
 
     logger.info(
         "transfer: entity {} moved from payer {} to {} (covered to {})",
@@ -579,6 +643,72 @@ def repair_stranded(now=None, *, limit=None) -> dict:
 
 
 # --- helpers ---------------------------------------------------------------------------
+
+
+def _notify(offer, kind: str) -> None:
+    """Send the handover email. ALWAYS after the commit it reports.
+
+    ``notify`` commits twice of its own — it claims a dedupe row before sending and
+    settles it after — so calling it mid-transaction publishes a half-finished flip and
+    can take the caller's uncommitted work with it.
+
+    Never raises. An email that fails to send must not undo a handover that has already
+    happened, and the audit row is the durable record either way.
+    """
+    from blueprints.subscription.services import notify as notifier
+
+    events = {
+        "requested": (
+            notifier.SUBSCRIBER_TRANSFER_REQUESTED, offer.to_user_id, "/profile/subscriptions/incoming"
+        ),
+        "accepted": (
+            notifier.SUBSCRIBER_TRANSFER_ACCEPTED, offer.from_user_id, "/profile/subscriptions"
+        ),
+        "failed": (
+            notifier.SUBSCRIBER_TRANSFER_FAILED, offer.to_user_id, "/profile/billing"
+        ),
+    }
+    event, recipient, path = events[kind]
+
+    try:
+        from blueprints.entity.routes.modules import billing_app_profile_unscoped_url
+        from models.db import Entity
+
+        entity = db.session.get(Entity, str(offer.entity_id))
+        names = {}
+        for key, uid in (("from_name", offer.from_user_id), ("to_name", offer.to_user_id)):
+            person = db.session.get(User, str(uid))
+            names[key] = (
+                " ".join(
+                    filter(None, [getattr(person, "first_name", ""), getattr(person, "last_name", "")])
+                ).strip()
+                or getattr(person, "username", None)
+                or "an admin"
+            )
+
+        notifier.notify(
+            recipient,
+            event,
+            # Per TRANSFER, not per entity: a re-offer after a decline is a new request
+            # and must send, where an entity-scoped key would swallow it — the mistake
+            # the trial keys already make, which is why a transferred entity's trial
+            # warning can never reach its new payer.
+            dedupe_key=f"transfer-{offer.id}-{kind}",
+            context={
+                "entity_id": offer.entity_id,
+                "entity_name": getattr(entity, "name", None) or "your company",
+                "amount": offer.quoted_amount,
+                "currency": offer.quoted_currency,
+                "billed_through": offer.accepted_billed_through,
+                "expires_at": offer.expires_at,
+                "portal_url": billing_app_profile_unscoped_url(recipient, next_path=path),
+                **names,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "transfer: could not send the {} email for handover {}", kind, offer.id
+        )
 
 
 def _record(offer, action, *, actor, outcome, note=None) -> None:

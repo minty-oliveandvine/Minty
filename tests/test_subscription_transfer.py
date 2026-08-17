@@ -483,3 +483,92 @@ def test_module_access_is_resynced_after_the_flip(db_session, monkeypatch):
     transfers.respond_to_transfer(NEW, offer.id, accept=True)
 
     assert calls["swept"] == [NEW]
+
+
+# --- an entity with nothing left to pay for ------------------------------------
+#
+# An expired trial, or a cancellation that has run its course, leaves a ROW behind — and
+# that row still names a payer. So every other refusal passes and the offer looks fine,
+# while ``_billable_codes`` comes back empty and there is nothing to charge for.
+#
+# Refused at OFFER, not at accept. Left to the accept the request goes out, the email
+# lands, and the recipient is the one told it cannot happen — for a reason that was
+# already true when it was sent.
+
+
+def test_an_entity_whose_only_module_expired_cannot_be_handed_over(db_session, monkeypatch):
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_Row(phase="expired")])
+
+    reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
+
+    assert any("no active subscription" in r for r in reasons)
+
+
+def test_an_entity_winding_down_cannot_be_handed_over(db_session, monkeypatch):
+    """``scheduled_cancel`` is not billing forward either: it may still have access, but
+    nothing renews, so the incoming payer would be taking on nothing."""
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_Row(phase="scheduled_cancel")])
+
+    reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
+
+    assert any("no active subscription" in r for r in reasons)
+
+
+def test_the_offer_is_refused_rather_than_the_accept(db_session, monkeypatch):
+    """The whole point of catching it early — no request, and therefore no email."""
+    transfers, calls = _wire(monkeypatch, db_session, rows=[_Row(phase="expired")])
+
+    ok, msg, _ = transfers.offer_transfer(OLD, ENTITY, NEW)
+
+    assert ok is False
+    assert "no active subscription" in msg
+    assert calls["charges"] == []
+
+
+def test_a_dead_row_beside_a_live_one_does_not_block_it(db_session, monkeypatch):
+    """The common shape: one module expired its trial, another is paid and running. The
+    live one is what makes the entity transferable, and the dead one must not veto it."""
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_Row(code="PETTY_CASH", phase="expired"), _Row(code="BILL", phase="active")],
+    )
+
+    assert transfers.transfer_blockers(
+        ENTITY, from_user_id=OLD, to_user_id=NEW
+    ) == []
+
+
+def test_only_the_live_module_is_charged_for(db_session, monkeypatch):
+    """The expired row moves with the entity but is not priced — you do not bill someone
+    for a module nobody holds."""
+    transfers, calls = _wire(
+        monkeypatch, db_session,
+        rows=[_Row(code="PETTY_CASH", phase="expired"), _Row(code="BILL", phase="active")],
+    )
+    offer = _offer(db_session, transfers)
+
+    transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    # _billable_codes is what the charge is priced on, and it is active-only.
+    assert calls["charges"], "the handover should have gone through"
+    assert calls["flips"] == [(ENTITY, NEW, PERIOD_END)]
+
+
+def test_the_dead_row_still_moves_to_the_new_payer(db_session, monkeypatch):
+    """It is a row about the ENTITY, so it follows the entity. That also carries the spent
+    trial with it: ``start_module_trial`` refuses any module whose row already exists, so
+    the incoming payer inherits "this module has had its free trial" rather than getting a
+    fresh one. The trial belongs to the company, not to whoever is paying."""
+    transfers, calls = _wire(
+        monkeypatch, db_session,
+        rows=[_Row(code="PETTY_CASH", phase="expired"), _Row(code="BILL", phase="active")],
+    )
+    offer = _offer(db_session, transfers)
+
+    transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    # One UPDATE over the entity — every row of it, whatever its phase.
+    assert calls["flips"] == [(ENTITY, NEW, PERIOD_END)]
+    # And the audit records both modules, dead one included.
+    accepted = [a for a in calls["audit"] if a["action"] == "transfer_accepted"]
+    assert {a["function_code"] for a in accepted} == {"PETTY_CASH", "BILL"}
