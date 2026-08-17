@@ -166,8 +166,8 @@ def may_manage_subscription(entity_id, user_id) -> bool:
 # --- Per-entity billing consent ----------------------------------------------
 
 
-def has_billing_consent(entity_id) -> bool:
-    """True if the payer has agreed to be billed for THIS entity.
+def has_billing_consent(entity_id, user_id=None) -> bool:
+    """True if ``user_id`` has agreed to be billed for THIS entity.
 
     A payer's card lives on their one Stripe customer and is shared by every entity they
     pay for, so "has a card" says nothing about whether they agreed to pay for a
@@ -175,29 +175,49 @@ def has_billing_consent(entity_id) -> bool:
     (``checkout.start_modules_checkout``) and — more importantly — the trial-end job
     (``checkout.convert_or_expire_due_trials``), which otherwise converts a brand-new
     entity's trial to paid with no user action at all.
+
+    ASK ABOUT A PAYER, always. The question this answers is "may I charge THIS card for
+    this entity", and consent is given by a person, not held by a company. It used to
+    ignore ``user_id`` entirely and answer "does any row exist", which was indistinguishable
+    from the right answer only because an entity's payer never changed. Once a subscription
+    can be handed over, the old payer's row would authorise charging the NEW payer's card —
+    including the trial-end job converting with no user action at all.
+
+    Omitting ``user_id`` keeps the old any-row behaviour and logs, so the remaining callers
+    are visible rather than silently wrong. Treat that as a call site not yet converted.
     """
     if not entity_id:
         return False
-    return (
-        EntityBillingConsent.query.filter_by(entity_id=str(entity_id)).first()
-        is not None
-    )
+    query = EntityBillingConsent.query.filter_by(entity_id=str(entity_id))
+    if user_id is None:
+        logger.warning(
+            "consent: asked whether entity {} has consent without naming a payer; "
+            "answering about ANY payer, which is wrong once a subscription is transferred",
+            entity_id,
+        )
+    else:
+        query = query.filter(EntityBillingConsent.user_id == str(user_id))
+    return query.first() is not None
 
 
 def record_billing_consent(entity_id, user_id, source: str) -> None:
     """Record that ``user_id`` agreed to be billed for ``entity_id``.
 
     ``source`` is how it was given — ``"card"`` (entered a card in a setup Checkout
-    opened for this entity) or ``"confirmed"`` (accepted the in-app charge
-    confirmation against an already-saved card). Kept for support: "why was I billed
-    for this entity?"
+    opened for this entity), ``"confirmed"`` (accepted the in-app charge confirmation
+    against an already-saved card), or ``"transfer"`` (accepted a handover of the whole
+    subscription, which is the same agreement made about a company someone else was
+    paying for). Kept for support: "why was I billed for this entity?"
 
-    Idempotent: consent is once per entity (unique on ``entity_id``), and re-consenting
-    is a no-op rather than an error, so a refreshed return URL is harmless.
+    Idempotent PER PAYER, which is the point: re-consenting is a harmless no-op so a
+    refreshed return URL does nothing, but a DIFFERENT payer consenting to the same entity
+    inserts a second row rather than being swallowed. The old rows are left alone — they
+    are the answer to "why was I billed for this entity in June", and the person who asks
+    that is usually the one who no longer pays.
     """
     if not entity_id or not user_id:
         return
-    if has_billing_consent(entity_id):
+    if has_billing_consent(entity_id, user_id):
         return
     db.session.add(
         EntityBillingConsent(
@@ -403,8 +423,18 @@ def entity_ids_with_billed_modules(user_id=None) -> set[str]:
     }
 
 
-def set_payer_module_phase(user_id, *, from_phase: str, to_phase: str) -> int:
+def set_payer_module_phase(
+    user_id, *, from_phase: str, to_phase: str, skip_covered_at: datetime | None = None
+) -> int:
     """Move every one of a payer's module rows from one phase to another.
+
+    ``skip_covered_at`` excludes rows whose ``billed_through`` is still ahead of that
+    instant — days somebody has already paid for. Used by ``begin_dunning``: a payer
+    whose card fails has their rows marked past due, but an entity transferred TO them
+    was invoiced at accept and is paid for regardless of what their card did since.
+    Without the exclusion that entity joins a dunning run it has no debt in, and — because
+    ``end_dunning`` deliberately leaves rows past due when collection is given up — it is
+    then terminated by the access sweep on a debt that was never its own.
 
     Exists because the module PHASE and the account's dunning state have to agree, and
     only the account was being written. When a renewal failed, ``begin_dunning`` marked
@@ -419,12 +449,19 @@ def set_payer_module_phase(user_id, *, from_phase: str, to_phase: str) -> int:
     cancellation or an expiry is never swept up by a billing event that has nothing to
     do with it. Returns the number of rows moved.
     """
-    moved = (
-        EntityModuleSubscription.query.filter(
-            EntityModuleSubscription.payer_user_id == str(user_id),
-            EntityModuleSubscription.phase == from_phase,
+    query = EntityModuleSubscription.query.filter(
+        EntityModuleSubscription.payer_user_id == str(user_id),
+        EntityModuleSubscription.phase == from_phase,
+    )
+    if skip_covered_at is not None:
+        query = query.filter(
+            db.or_(
+                EntityModuleSubscription.billed_through.is_(None),
+                EntityModuleSubscription.billed_through <= skip_covered_at,
+            )
         )
-        .update({EntityModuleSubscription.phase: to_phase}, synchronize_session=False)
+    moved = query.update(
+        {EntityModuleSubscription.phase: to_phase}, synchronize_session=False
     )
     db.session.commit()
     if moved:
@@ -452,7 +489,16 @@ def begin_dunning(user_id, failed_at: datetime) -> None:
     db.session.commit()
     # The rows have to move too, or the past-due grace never applies: access is read
     # from the module phase, not from the account.
-    set_payer_module_phase(user_id, from_phase=PHASE_ACTIVE, to_phase=PHASE_PAST_DUE)
+    #
+    # ``skip_covered_at`` spares rows already paid for past this moment — an entity
+    # transferred to this payer and invoiced at accept. Their card failing says nothing
+    # about days that were collected before it did.
+    set_payer_module_phase(
+        user_id,
+        from_phase=PHASE_ACTIVE,
+        to_phase=PHASE_PAST_DUE,
+        skip_covered_at=failed_at,
+    )
 
 
 def record_dunning_attempt(user_id) -> int:
@@ -576,6 +622,123 @@ def upsert_module_row(
     return row
 
 
+def transfer_entity_payer(entity_id, new_payer_user_id, *, billed_through=None) -> int:
+    """Move EVERY module row of one entity to a new payer, in ONE statement.
+
+    The deliberate exception to one-payer-per-entity, and the reason it is a separate
+    function rather than a flag on ``upsert_module_row``: that function IGNORES a payer
+    change and only logs it, and the comment above explains what re-opening that path
+    would cost — a second admin cancelling a module used to take the billing relationship
+    with them. A transfer is a different act, authorised on both sides, and it says so by
+    having its own name.
+
+    ONE UPDATE, not a loop. A row-by-row rewrite is order-dependent: ``payer_for_entity``
+    answers from an unordered ``.first()``, so a partial flip makes the entity's payer
+    nondeterministic — and every later ``upsert_module_row`` on that entity would then
+    re-spread whichever payer happened to be read back.
+
+    ``billed_through`` records the days the OLD payer already paid for, or that were
+    bought at accept. Forward-only: it is written only where it would move the value
+    later, so a second transfer of an entity can never shorten a claim the first one
+    established. Never set back to NULL.
+
+    Returns the number of rows moved. Does NOT commit — the caller owns the transaction,
+    because the flip, the consent row and the audit entries have to land together or not
+    at all.
+    """
+    if not entity_id or not new_payer_user_id:
+        raise ValueError("transfer_entity_payer needs an entity and a new payer")
+
+    if billed_through is not None and billed_through.tzinfo is None:
+        raise ValueError("billed_through must be timezone-aware")
+
+    # TWO statements, each doing one thing, because the two columns have different rules:
+    # the payer moves on every row unconditionally, the claim only ever moves FORWARD.
+    # Folding them into one UPDATE and then patching up the rows the forward-only filter
+    # skipped double-counts — after the first pass those rows satisfy the second pass's
+    # ``>=`` test too, and ``moved`` is what tells the caller the flip actually happened.
+    moved = EntityModuleSubscription.query.filter(
+        EntityModuleSubscription.entity_id == str(entity_id)
+    ).update(
+        {EntityModuleSubscription.payer_user_id: str(new_payer_user_id)},
+        synchronize_session=False,
+    )
+
+    if billed_through is not None:
+        # Forward-only enforced in the WHERE rather than trusted from the caller, so a
+        # row already covered further out keeps its own, longer claim.
+        EntityModuleSubscription.query.filter(
+            EntityModuleSubscription.entity_id == str(entity_id),
+            db.or_(
+                EntityModuleSubscription.billed_through.is_(None),
+                EntityModuleSubscription.billed_through < billed_through,
+            ),
+        ).update(
+            {EntityModuleSubscription.billed_through: billed_through},
+            synchronize_session=False,
+        )
+
+    logger.info(
+        "store: transferred {} module row(s) of entity {} to payer {} (billed_through={})",
+        moved, entity_id, new_payer_user_id, billed_through,
+    )
+    return moved
+
+
+def payer_is_dunning(user_id) -> bool:
+    """Whether collection is currently failing for this payer.
+
+    The single-user form of ``accounts_in_dunning``. A transfer is refused while either
+    side is in it: the outgoing payer because the debt is theirs and splitting it in half
+    leaves it uncollectable, the incoming payer because they are in no state to take on
+    another bill.
+    """
+    if not user_id:
+        return False
+    row = customer_mapping_for_user(user_id)
+    return bool(row is not None and row.dunning_started_at is not None)
+
+
+def rows_for_entity(entity_id) -> list[EntityModuleSubscription]:
+    """Every module row of one entity, whatever its phase or payer."""
+    if not entity_id:
+        return []
+    return EntityModuleSubscription.query.filter_by(entity_id=str(entity_id)).all()
+
+
+def entities_paid_for_by(user_id) -> list[tuple[str, str]]:
+    """``(entity_id, name)`` for every entity whose bill this user currently carries.
+
+    Answers "may this person leave / deactivate?" — the question the membership-level
+    payer guard asks about one entity, asked across all of them. Named rather than
+    counted because a refusal that lists the companies is actionable and a bare "you
+    still pay for something" is not.
+
+    Phase-blind on purpose: a cancelled or past-due row still names a payer, and a payer
+    with an unsettled row is exactly the one who must not vanish.
+    """
+    if not user_id:
+        return []
+    rows = EntityModuleSubscription.query.filter_by(
+        payer_user_id=str(user_id)
+    ).with_entities(EntityModuleSubscription.entity_id).all()
+    ids = {str(entity_id) for (entity_id,) in rows}
+    if not ids:
+        return []
+
+    # Lazy, like ``renewals._entity_names`` — the subscription store must not pull the
+    # entity model graph in at import time.
+    from models.db import Entity
+
+    named = {
+        str(e.id): (e.name or "").strip() or str(e.id)
+        for e in Entity.query.filter(Entity.id.in_(list(ids))).all()
+    }
+    # An entity row that has gone missing still counts — it is the SUBSCRIPTION that
+    # strands, and dropping it here would let the payer slip out through a broken FK.
+    return sorted((eid, named.get(eid, eid)) for eid in ids)
+
+
 def due_trials(now, limit: int | None = None) -> list[EntityModuleSubscription]:
     """App-level trials whose ``trial_end`` has passed and that still need closing out.
 
@@ -678,19 +841,33 @@ def record_action(
     extension_state=None,
     cancel_reason=None,
     note=None,
+    payer_before=None,
+    payer_after=None,
 ) -> SubscriptionAuditLog:
-    """Append an immutable cancel/uncancel record. ``extension_amount`` is frozen here
-    (the mirror deliberately doesn't store it).
+    """Append an immutable cancel/uncancel/transfer record. ``extension_amount`` is frozen
+    here (the mirror deliberately doesn't store it).
 
     ``cancel_reason`` is the customer's own text from the cancellation dialog. It is
     kept here rather than on the module row because it is history: every cancellation
-    keeps its own, where a column on the row would hold only the most recent one."""
+    keeps its own, where a column on the row would hold only the most recent one.
+
+    ``payer_before`` / ``payer_after`` are set only by the transfer family of actions,
+    which are the first ones here with two parties. ``payer_user_id`` keeps its existing
+    meaning throughout — the payer at the time of the action, so on a transfer it is the
+    OUTGOING one, matching every other row's "whose bill was this".
+
+    A transfer writes ONE ROW PER MODULE CODE of the entity, because ``function_code`` is
+    NOT NULL and the payer lives on every row. That is deliberate rather than a
+    workaround: it makes "what happened to this module" answerable the same way for a
+    handover as for a cancellation."""
     entry = SubscriptionAuditLog(
         id=_uuid(),
         entity_id=str(entity_id),
         function_code=str(function_code).upper(),
         payer_user_id=str(payer_user_id),
         actor_user_id=str(actor_user_id) if actor_user_id else None,
+        payer_before=str(payer_before) if payer_before else None,
+        payer_after=str(payer_after) if payer_after else None,
         action=action,
         outcome=outcome,
         phase_before=phase_before,

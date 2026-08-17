@@ -36,6 +36,8 @@ sys.modules.setdefault(
 from blueprints.user_management.routes import roles as roles_routes
 from blueprints.user_management.services.roles import (
     check_not_last_admin_or_error,
+    check_not_pending_subscriber_or_error,
+    check_not_subscription_payer_anywhere_or_error,
     check_not_subscription_payer_or_error,
     check_role_change_or_error,
 )
@@ -64,6 +66,31 @@ class _Members:
 
     def all(self):
         return list(self._rows)
+
+
+class _Accounts:
+    """A User stand-in that reports a fixed set of ids as deactivated.
+
+    The guard asks it only for accounts it can prove are switched off, so this returns
+    exactly those and ignores the filter arguments.
+    """
+
+    def __init__(self, deactivated_ids):
+        self._ids = list(deactivated_ids)
+        self.query = self
+        # Column stand-ins: the guard builds `id.in_(...)` and `approved.is_(False)`
+        # before it ever calls `.filter`, so these have to answer, not just exist.
+        self.id = SimpleNamespace(in_=lambda _values: None)
+        self.approved = SimpleNamespace(is_=lambda _value: None)
+
+    def filter(self, *_args):
+        return self
+
+    def with_entities(self, *_args):
+        return self
+
+    def all(self):
+        return [(uid,) for uid in self._ids]
 
 
 # --- the payer ------------------------------------------------------------------
@@ -160,6 +187,89 @@ def test_a_superuser_membership_counts_as_admin_cover():
     members = _Members([_member("u1", "admin"), _member("u2", "super_admin")])
     with app.test_request_context():
         assert check_not_last_admin_or_error("admin", "u1", "e1", model=members) is None
+
+
+def test_a_deactivated_account_does_not_count_as_admin_cover():
+    """The membership flag says "let into this company"; ``User.approved`` says "can sign
+    in at all", and a deactivated account passes the first while failing the second.
+    Counting only the membership let a dead account stand as cover for a live admin — so
+    the last person who could actually administer the entity came off it, leaving an
+    admin who cannot reach it."""
+    app = _build_app()
+    members = _Members([_member("u1", "admin"), _member("u2", "admin")])
+    with app.test_request_context():
+        error = check_not_last_admin_or_error(
+            "admin", "u1", "e1", model=members, user_model=_Accounts(["u2"])
+        )
+
+    assert error is not None
+    assert "only admin" in error[0].get_json()["message"]
+
+
+def test_a_live_second_admin_still_counts():
+    """The same roster with nobody deactivated is the ordinary case, and must not be
+    refused just because the account check now runs."""
+    app = _build_app()
+    members = _Members([_member("u1", "admin"), _member("u2", "admin")])
+    with app.test_request_context():
+        assert check_not_last_admin_or_error(
+            "admin", "u1", "e1", model=members, user_model=_Accounts([])
+        ) is None
+
+
+def test_an_unresolvable_account_lookup_keeps_the_cover():
+    """Positive identification only. With no database bound the lookup raises, and the
+    guard has to fall permissive — discounting cover on a failed check would refuse a
+    removal that is perfectly fine."""
+    app = _build_app()
+    members = _Members([_member("u1", "admin"), _member("u2", "admin")])
+    with app.test_request_context():
+        assert check_not_last_admin_or_error("admin", "u1", "e1", model=members) is None
+
+
+# --- the payer, reached by closing the account ------------------------------------
+#
+# The membership guard above refuses one company at a time. ``DELETE /minty/api/users/me``
+# reached the same stranded state through a different door: it flips ``User.approved`` and
+# clears the tokens while leaving every membership and every ``payer_user_id`` in place, so
+# the payer can no longer sign in, no remaining admin may manage the subscription, and the
+# renewals carry on charging a card nobody can reach.
+
+
+def test_an_account_that_pays_for_a_company_cannot_be_closed():
+    app = _build_app()
+    with app.test_request_context():
+        error = check_not_subscription_payer_anywhere_or_error(
+            "u1", entities_lookup=lambda _u: [("e1", "Bakery Ltd")]
+        )
+
+    assert error is not None
+    response, status = error
+    assert status == 409
+    assert "Bakery Ltd" in response.get_json()["message"]
+
+
+def test_the_refusal_names_every_company():
+    """A refusal that lists them is actionable; "you still pay for something" is not."""
+    app = _build_app()
+    with app.test_request_context():
+        error = check_not_subscription_payer_anywhere_or_error(
+            "u1",
+            entities_lookup=lambda _u: [
+                ("e1", "Bakery Ltd"), ("e2", "Cafe Co"), ("e3", "Deli Inc"),
+            ],
+        )
+
+    message = error[0].get_json()["message"]
+    assert "Bakery Ltd, Cafe Co and Deli Inc" in message
+
+
+def test_an_account_paying_for_nothing_closes_normally():
+    app = _build_app()
+    with app.test_request_context():
+        assert check_not_subscription_payer_anywhere_or_error(
+            "u1", entities_lookup=lambda _u: []
+        ) is None
 
 
 # --- the same two invariants, reached by demotion --------------------------------
@@ -321,3 +431,80 @@ def test_an_ordinary_removal_still_works(monkeypatch):
     assert response.get_json()["status"] == "success"
     assert session.deleted == [membership]
     assert session.commit_calls == 1
+
+
+# --- someone a handover is offered to ----------------------------------------------
+#
+# The two sides of a transfer can otherwise pass each other. An offer is validated when it
+# is made and again when it is accepted, but nothing stopped the nominee being taken off
+# the entity in between — so accept would re-check, refuse, and permanently cancel an
+# offer the OUTGOING payer was relying on to get out. Silent from their side; it shows up
+# only as an exit that never completes.
+
+
+def test_the_nominee_of_a_pending_handover_cannot_be_removed():
+    app = _build_app()
+    with app.test_request_context():
+        error = check_not_pending_subscriber_or_error(
+            "u2", "e1", pending_lookup=lambda _e: "u2"
+        )
+
+    assert error is not None
+    response, status = error
+    assert status == 409
+    assert "being handed over to them" in response.get_json()["message"]
+
+
+def test_someone_else_is_unaffected_by_a_pending_handover():
+    app = _build_app()
+    with app.test_request_context():
+        assert check_not_pending_subscriber_or_error(
+            "u3", "e1", pending_lookup=lambda _e: "u2"
+        ) is None
+
+
+def test_no_pending_handover_blocks_nobody():
+    app = _build_app()
+    with app.test_request_context():
+        assert check_not_pending_subscriber_or_error(
+            "u2", "e1", pending_lookup=lambda _e: None
+        ) is None
+
+
+def test_the_nominee_cannot_be_demoted_out_of_admin_either():
+    """Demotion reaches the same place removal does — the accept needs the rank."""
+    app = _build_app()
+    with app.test_request_context():
+        error = check_role_change_or_error(
+            "admin", "cashier", "u2", "e1",
+            model=_Members([_member("u1", "admin"), _member("u2", "admin")]),
+            payer_lookup=lambda _e: "u1",
+            pending_lookup=lambda _e: "u2",
+        )
+
+    assert error is not None
+    assert "being handed over to them" in error[0].get_json()["message"]
+
+
+def test_a_promotion_is_still_never_blocked_by_a_pending_handover():
+    """Promotion is how the nominee becomes eligible in the first place."""
+    app = _build_app()
+    with app.test_request_context():
+        assert check_role_change_or_error(
+            "cashier", "admin", "u2", "e1",
+            model=_Members([]),
+            payer_lookup=lambda _e: "u1",
+            pending_lookup=lambda _e: "u2",
+        ) is None
+
+
+def test_the_payer_check_fails_closed_on_a_split_entity():
+    """``payer_for_entity`` answers from an unordered ``.first()``, so a half-applied flip
+    would let the answer depend on which row came back. Asking about ANY row means a split
+    state refuses the removal rather than allowing it on a coin toss."""
+    app = _build_app()
+    with app.test_request_context():
+        # Two rows disagreeing; u1 is named by one of them.
+        assert check_not_subscription_payer_or_error(
+            "u1", "e1", payer_lookup=lambda _e: "u1"
+        ) is not None

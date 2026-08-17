@@ -46,6 +46,7 @@ from blueprints.subscription.models.billing_policy import BillingPolicy  # noqa:
 from blueprints.subscription.models.subscription_audit_log import SubscriptionAuditLog  # noqa: E402
 from blueprints.subscription.models.subscription_invoice import SubscriptionInvoice, SubscriptionInvoiceLine  # noqa: E402
 from blueprints.subscription.models.subscription_email_log import SubscriptionEmailLog  # noqa: E402
+from blueprints.subscription.models.subscription_transfer import SubscriptionTransfer  # noqa: E402
 
 __all__ = [
     "db",
@@ -88,6 +89,7 @@ __all__ = [
     "SubscriptionInvoice",
     "SubscriptionInvoiceLine",
     "SubscriptionEmailLog",
+    "SubscriptionTransfer",
     "TermsConsent",
 ]
 

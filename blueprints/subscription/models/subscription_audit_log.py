@@ -29,9 +29,22 @@ class SubscriptionAuditLog(db.Model):
         db.String(36), db.ForeignKey("pettycashv2.user.id"), nullable=True
     )
 
-    action = db.Column(db.String(20), nullable=False)  # cancel / uncancel
+    action = db.Column(db.String(20), nullable=False)  # cancel / uncancel / transfer_*
     phase_before = db.Column(db.String(30), nullable=True)
     phase_after = db.Column(db.String(30), nullable=True)
+
+    # WHO PAID, before and after. Null on every action that does not move the bill —
+    # which is all of them except the transfer family, so null is "not a payer change"
+    # rather than "unknown". ``payer_user_id`` above stays what it has always been: the
+    # payer at the time of the action, i.e. the OUTGOING one on a transfer.
+    #
+    # They exist because a transfer is the first action here with two parties. Recording
+    # it as a bare ``payer_user_id`` would answer "who was billed" and lose the only
+    # question anyone asks afterwards — where did this company's bill go, and who agreed
+    # to take it. No FK, matching ``actor_user_id``'s neighbours in spirit: this is
+    # history and has to survive either person leaving.
+    payer_before = db.Column(db.String(36), nullable=True)
+    payer_after = db.Column(db.String(36), nullable=True)
     app_access_until = db.Column(db.DateTime(timezone=True), nullable=True)
     extension_amount = db.Column(db.Integer, nullable=True)
     extension_state = db.Column(db.String(20), nullable=True)

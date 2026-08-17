@@ -28,11 +28,15 @@ class _Account:
 
 
 class _Row:
-    def __init__(self, entity_id="e1", code="BILL", phase="active"):
+    def __init__(self, entity_id="e1", code="BILL", phase="active",
+                 billed_through=None):
         self.entity_id = entity_id
         self.function_code = code
         self.phase = phase
         self.payer_user_id = "u1"
+        # Money already collected for this row from outside the payer's own cycle —
+        # a subscriber transfer, invoiced at accept. None on every ordinary row.
+        self.billed_through = billed_through
 
 
 class _Plan:
@@ -631,3 +635,106 @@ def test_a_past_period_does_not_exempt_an_entity_forever(monkeypatch):
     renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
     assert len(calls["issued"]) == 1
+
+
+# --- a transferred entity's claim -----------------------------------------------
+#
+# ``billed_through`` is money already collected for an entity from outside this payer's
+# cycle: a subscriber transfer invoices the NEW payer at accept for the window the old
+# payer's payment did not reach. The renewal then has two jobs, and doing only the first
+# is worse than doing neither — excluding the entity while leaving ``paid_through``
+# behind keeps the account permanently due, so it is re-billed the very next day.
+#
+# The renewal period here is [8 Feb 13:00, 8 Mar 13:00).
+
+PERIOD_START = datetime(2027, 2, 8, 13, tzinfo=UTC)
+PERIOD_END = datetime(2027, 3, 8, 13, tzinfo=UTC)
+
+
+def test_a_claim_reaching_into_the_period_is_not_billed_again(monkeypatch):
+    """The entity was paid for at accept. Billing it here charges the same days twice."""
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_Row(billed_through=datetime(2027, 2, 20, tzinfo=UTC))],
+    )
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["issued"] == []
+    assert result["skipped"][0]["reason"] == "nothing billable"
+    # NOT advanced: the claim stops partway through, so the rest of the period really is
+    # unpaid and the account is legitimately still due.
+    assert calls["paid_through"] == []
+
+
+def test_a_claim_covering_the_period_advances_the_cycle(monkeypatch):
+    """Excluding without advancing is the trap. The claim covers these days outright, so
+    the account is settled and its cycle has to move even though nothing was invoiced."""
+    renewals, calls = _wire(monkeypatch, rows=[_Row(billed_through=PERIOD_END)])
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["issued"] == []
+    assert result["skipped"][0]["reason"] == "already covered this period"
+    assert calls["paid_through"] == [("u1", PERIOD_END)]
+
+
+def test_a_claim_landing_on_the_period_start_is_not_sticky(monkeypatch):
+    """Periods are half-open and tile: the instant that ends one begins the next. A claim
+    expiring exactly at this period's start bought none of it, so it renews at full price
+    — the off-by-one that would otherwise hand over a free month."""
+    renewals, calls = _wire(monkeypatch, rows=[_Row(billed_through=PERIOD_START)])
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert len(calls["issued"]) == 1
+    assert calls["issued"][0][1].total == 40000
+
+
+def test_a_dead_row_s_stale_claim_excludes_nothing(monkeypatch):
+    """A cancelled row keeps whatever claim it had. Letting that suppress the entity would
+    stop the LIVE module beside it being billed — the entity would run on for free."""
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[
+            _Row(code="BILL"),
+            _Row(code="PETTY_CASH", phase="cancelled", billed_through=PERIOD_END),
+        ],
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert len(calls["issued"]) == 1
+    assert calls["paid_through"] == [("u1", PERIOD_END)]
+
+
+def test_one_entity_s_claim_does_not_shield_another(monkeypatch):
+    """The claim is per ENTITY, not per account. A payer who took over one company still
+    owes for the others on the same invoice."""
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[
+            _Row(entity_id="e1", billed_through=PERIOD_END),
+            _Row(entity_id="e2"),
+        ],
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert len(calls["issued"]) == 1
+    lines = calls["issued"][0][1].lines
+    assert [line.entity_id for line in lines] == ["e2"]
+
+
+def test_a_naive_claim_does_not_stop_the_run(monkeypatch):
+    """Some drivers hand back naive datetimes. Comparing one against an aware period
+    raises rather than answering, and an exception here would stop the payer being billed
+    at all — the same defence ``entities_billed_in`` already carries."""
+    renewals, calls = _wire(
+        monkeypatch, rows=[_Row(billed_through=PERIOD_END.replace(tzinfo=None))]
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["issued"] == []
+    assert calls["paid_through"] == [("u1", PERIOD_END)]

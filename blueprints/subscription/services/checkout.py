@@ -451,7 +451,11 @@ def start_modules_checkout(
     # A saved card implies a customer (it's read off one), but say so explicitly —
     # customer_id is Optional now that this no longer creates one up front.
     if customer_id and payment_method:
-        if not store.has_billing_consent(entity.id):
+        # Asked about the payer whose card is about to be charged — which is the acting
+        # user. Every route reaching here carries ``@require_subscription_payer``, so
+        # they are either the established payer or the one establishing the relationship;
+        # ``payer_for_entity`` would return the same answer and cost a query to do it.
+        if not store.has_billing_consent(entity.id, getattr(user, "id", None)):
             # Charge NOTHING. The caller shows "you'll be billed X on card ending Y"
             # and calls confirm_modules_checkout if the payer accepts.
             return {"needs_confirmation": _billing_confirmation(entity, plans, payment_method)}
@@ -1116,7 +1120,7 @@ def _trial_will_convert(entity_id, payer_user_id) -> bool:
             return False
         if not trial_payment_method(customer_id):
             return False
-        return bool(store.has_billing_consent(entity_id))
+        return bool(store.has_billing_consent(entity_id, payer_user_id))
     except Exception:
         logger.exception(
             "trial: could not determine conversion readiness for entity {}", entity_id
@@ -1188,7 +1192,11 @@ def _convert_due_trials(entity_id, rows) -> tuple[list, list]:
     # converts to a real charge with no user action whatsoever, purely because a card
     # was saved for a different entity. Expire instead; the settings page nudges for
     # consent while the trial is still running (see modules.get_module_cards).
-    if not store.has_billing_consent(entity_id):
+    #
+    # Asked about THIS payer, read off the row above. On an entity whose subscription
+    # was handed over, the previous payer's consent says nothing about this card — and
+    # this is the job that would otherwise charge it unattended.
+    if not store.has_billing_consent(entity_id, payer_user_id):
         logger.info(
             "trial: entity {} has a card but no billing consent; expiring {} rather "
             "than charging",
@@ -1336,6 +1344,225 @@ def _void_unpaid_conversion(invoice_id, entity_id) -> None:
         )
 
 
+def _entity_invoice_name(entity_id) -> str:
+    """The entity's name for an invoice line, falling back to its id.
+
+    Never raises. A cosmetic lookup must not be able to stop a charge — a line reading as
+    a uuid is bad, and silently not billing is worse.
+    """
+    from models.db import Entity
+
+    try:
+        entity = Entity.query.filter_by(id=entity_id).first()
+        if entity is not None and (entity.name or "").strip():
+            return entity.name.strip()
+        logger.error("billing: entity {} has no name for its invoice line", entity_id)
+    except Exception:
+        logger.exception(
+            "billing: could not read the name for entity {}; billing it as its id",
+            entity_id,
+        )
+    return str(entity_id)
+
+
+def quote_transfer_charge(entity_id, payer_user_id, codes, *, at):
+    """What taking over ``entity_id`` costs the new payer, without charging anything.
+
+    Returns ``{"amount", "currency", "period_start", "period_end", "anchor_at",
+    "anchor_is_new"}``, or None if the combination cannot be priced.
+
+    THE SAME CALCULATION the charge uses — ``_transfer_invoice`` below is called by both,
+    rather than mirrored by hand. That is the rule ``_paid_cancel_terms`` already sets and
+    states: the figure shown before confirming and the figure actually taken cannot be
+    computed two ways. ``preview_reinstate_modules`` is what happens when they are, and
+    it shipped quoting zero.
+
+    Reads nothing and writes nothing — in particular it does NOT anchor an unanchored
+    payer, it only reports what their anchor WOULD become, so opening the accept screen
+    has no side effect.
+    """
+    anchor, _currency = store.billing_cycle_for_user(payer_user_id)
+    anchor_is_new = anchor is None
+    if anchor_is_new:
+        # Not written. See the charge for why the anchor lands on ``at``.
+        anchor = at
+
+    invoice, period = _transfer_invoice(entity_id, anchor, codes, at=at)
+    if invoice is None:
+        return None
+    return {
+        "amount": invoice.total,
+        "currency": invoice.currency,
+        "period_start": period.start,
+        "period_end": period.end,
+        "anchor_at": anchor,
+        "anchor_is_new": anchor_is_new,
+    }
+
+
+def _transfer_invoice(entity_id, anchor, codes, *, at):
+    """Price the new payer JOINING this entity at ``at``. Returns ``(invoice, period)``.
+
+    Two things separate this from ``_bill_module_change_in_house``'s arithmetic, and both
+    are the whole point of the function existing:
+
+    * THE PERIOD COMES FROM ``at``, not from ``now``. The transfer's ``at`` is the instant
+      the old payer's money runs out, which is in the FUTURE when the offer is accepted.
+      Deriving the period from ``now`` instead puts ``at`` past ``period.end``, so
+      ``Period.remaining_seconds`` returns 0, ``prorate`` returns 0, ``build_change``
+      returns None — and the caller reads None as "nothing was owed", which is a success.
+      The entity would be handed over free, silently.
+    * BEFORE IS EMPTY. For the incoming payer this entity is a join, whatever it was to
+      the outgoing one, so the line is priced as starting rather than as a change.
+    """
+    from blueprints.subscription.services import changes
+    from blueprints.subscription.services.billing import period_containing
+
+    period = period_containing(anchor, at)
+    invoice = changes.build_change(
+        entity_id, _entity_invoice_name(entity_id), set(), set(codes), period, at
+    )
+    return invoice, period
+
+
+def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *,
+                            at, idempotency_key):
+    """Charge the NEW payer for taking over ``entity_id`` from ``at``.
+
+    Returns ``{"paid", "period_end", "invoice_id", "amount", "currency", "reason"}``.
+    ``paid`` False means nothing was collected and the caller must not move the payer
+    pointer — the entity stays where it is.
+
+    Called at ACCEPT, before anything about the entity has been changed, and that ordering
+    is the whole safety story. The accept cannot be one transaction (``store``'s helpers
+    each commit their own unit of work, and ``reserve_invoice`` commits the invoice row
+    before the processor is even contacted), so a decline is survived by having moved
+    nothing yet rather than by rolling back. **Nothing may be staged in the session when
+    this is called** — ``reserve_invoice`` commits the whole session on success and rolls
+    the whole session back on an idempotency collision, so staged work would either land
+    early or vanish.
+
+    ``idempotency_key`` is supplied by the caller rather than derived here, and it carries
+    the offer's attempt number. Within one attempt it is identical, so a double-click is
+    refused by the unique index on ``subscription_invoice.idempotency_key``; across
+    attempts it differs, so a declined card can be fixed and retried. A key derived from
+    ``at`` — which is what ``changes.change_key`` would give, since ``at`` is stored and
+    does not move — would be stable in both directions and JAM the retry, because voiding
+    an invoice deliberately keeps its row and its key claimed.
+    """
+    from blueprints.subscription.services import billing_gateway, renewals
+    from blueprints.subscription.services.billing import join_memo
+
+    def _failed(reason):
+        return {"paid": False, "period_end": None, "invoice_id": None,
+                "amount": 0, "currency": None, "reason": reason}
+
+    anchor, _currency = store.billing_cycle_for_user(payer_user_id)
+    first_charge = anchor is None
+    if first_charge:
+        # ANCHOR AT ``at``, NOT AT ``now``. Their cycle then begins exactly where the old
+        # payer's money ends, so the handover has no seam and this first charge is one
+        # clean period (``prorate`` returns the full amount when ``at <= period.start``).
+        # Anchoring at ``now`` instead — which is what every other caller of
+        # ``start_billing_cycle`` does — would start their cycle on whichever day they
+        # happened to click accept, and bill a part-month matching neither payer's cycle.
+        plan = store.billing_plan_for_codes(set(codes))
+        store.start_billing_cycle(payer_user_id, at, (plan.currency if plan else ""))
+        anchor, _currency = store.billing_cycle_for_user(payer_user_id)
+        if anchor is None:
+            # No ``user_stripe_customer`` row at all, so nothing can be charged. The
+            # accept blockers refuse this case up front; reaching it means the account
+            # went away between the check and here.
+            logger.error("transfer: could not anchor payer {}", payer_user_id)
+            return _failed("That billing account isn't set up to be charged.")
+
+    invoice, period = _transfer_invoice(entity_id, anchor, codes, at=at)
+    if invoice is None or not invoice.total:
+        # Nothing to collect — the window is empty or the plan prices it at zero. Treat it
+        # as settled rather than failed: the days are covered and there is no document to
+        # chase. The caller still records the period end, so the renewal stays suppressed.
+        logger.info(
+            "transfer: nothing to charge for entity {} from {}; period ends {}",
+            entity_id, at, period.end,
+        )
+        return {"paid": True, "period_end": period.end, "invoice_id": None,
+                "amount": 0, "currency": None, "reason": None}
+
+    # ADOPT before charging. A previous attempt under this exact key may have collected
+    # the money and died before the pointer moved — the crash window this whole design is
+    # ordered around. ``renewals._already_invoiced`` is the three-way resolution for that
+    # (confirmed / reserved-but-unknown / never existed) and is reused rather than
+    # reimplemented, because getting it subtly wrong charges someone twice.
+    existing = renewals._already_invoiced(
+        customer_id, idempotency_key, metadata_key="transfer_key"
+    )
+    if existing == "paid":
+        logger.info(
+            "transfer: {} was already collected; adopting it rather than charging again",
+            idempotency_key,
+        )
+        return {"paid": True, "period_end": period.end,
+                "invoice_id": store.invoice_for_key(idempotency_key).external_id,
+                "amount": invoice.total, "currency": invoice.currency, "reason": None}
+    if existing is not None:
+        # Raised but unpaid. Do not raise a second document against the same window.
+        return _failed("There's already an unpaid invoice for this handover.")
+
+    # The memo states the actual span — "12 Sept to 1 Oct, 19 of 30 days" — which the
+    # invoice's own period_start/period_end cannot, because they record the payer's whole
+    # period. Without it the customer sees a part-month charge with no explanation of why.
+    plan = store.billing_plan_for_codes(set(codes))
+    product_name = plan.display_name if plan else "Subscription"
+
+    try:
+        result = billing_gateway.issue_invoice(
+            customer_id,
+            invoice,
+            memo=join_memo(
+                _entity_invoice_name(entity_id),
+                product_name,
+                invoice.total,
+                period,
+                at,
+            ),
+            metadata={"transfer_key": idempotency_key, "entity_id": str(entity_id)},
+            idempotency_key=idempotency_key,
+            payer_user_id=payer_user_id,
+        )
+    except Exception as exc:
+        logger.exception(
+            "transfer: could not bill the handover of entity {} to {}",
+            entity_id, payer_user_id,
+        )
+        # A decline arrives HERE, as an exception out of ``Invoice.pay``, by which point
+        # the document is finalized and OPEN. Void it: an abandoned open invoice becomes
+        # the first thing ``dunning.collect_due`` chases on any later episode, for a
+        # handover that never happened.
+        _void_unpaid_conversion(getattr(exc, "invoice_id", None), entity_id)
+        return _failed(
+            getattr(exc, "user_message", None)
+            or "That payment didn't go through. Check the card and try again."
+        )
+
+    if (result or {}).get("status") != "paid":
+        logger.warning(
+            "transfer: invoice {} for entity {} is {}; not moving the payer",
+            (result or {}).get("id"), entity_id, (result or {}).get("status"),
+        )
+        _void_unpaid_conversion((result or {}).get("id"), entity_id)
+        return _failed("That payment didn't go through. Check the card and try again.")
+
+    # ESTABLISH the cycle, never ADVANCE one that exists — the same rule, and the same
+    # reason, as ``_bill_module_change_in_house``: ``paid_through`` is the ACCOUNT's
+    # marker, and moving it for one entity's charge announces that every other entity on
+    # the account is settled too, silently cancelling their renewal.
+    if first_charge:
+        store.set_paid_through(payer_user_id, period.end)
+
+    return {"paid": True, "period_end": period.end, "invoice_id": result.get("id"),
+            "amount": invoice.total, "currency": invoice.currency, "reason": None}
+
+
 def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
                                  current, codes):
     """Bill a module change from Minty's own arithmetic. Returns the new paid-through.
@@ -1351,9 +1578,8 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
     (280.00). A later entity joining an existing payer is prorated against the anchor
     already recorded (373.33). Both figures were verified against Stripe before cutover.
     """
-    from blueprints.subscription.services import billing_gateway, changes
+    from blueprints.subscription.services import changes
     from blueprints.subscription.services.billing import period_containing
-    from models.db import Entity
 
     now = clock.now()
     anchor, _currency = store.billing_cycle_for_user(payer_user_id)
@@ -1374,22 +1600,7 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
 
     period = period_containing(anchor, now)
 
-    # The entity name is what makes the invoice line readable, but it must not be able
-    # to STOP the conversion: failing here would cost the customer their modules over a
-    # cosmetic lookup. Falls back to the id and logs loudly — a line reading as a uuid
-    # is bad, and silently not billing is worse.
-    name = str(entity_id)
-    try:
-        entity = Entity.query.filter_by(id=entity_id).first()
-        if entity is not None and (entity.name or "").strip():
-            name = entity.name.strip()
-        else:
-            logger.error("billing: entity {} has no name for its invoice line", entity_id)
-    except Exception:
-        logger.exception(
-            "billing: could not read the name for entity {}; billing it as its id",
-            entity_id,
-        )
+    name = _entity_invoice_name(entity_id)
 
     try:
         invoice = changes.issue_change(
@@ -2163,7 +2374,7 @@ def preview_subscribe_modules(entity, user, codes) -> dict:
         # is shared, so the first charge on a company is authorised explicitly. The card
         # is named in that case for the same reason ``_billing_confirmation`` names it:
         # authorising a charge without saying which card it lands on is half a disclosure.
-        "needs_consent": not store.has_billing_consent(entity.id),
+        "needs_consent": not store.has_billing_consent(entity.id, payer_user_id),
         "card": _preview_card_display(payer_user_id),
     }
 

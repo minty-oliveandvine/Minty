@@ -72,6 +72,27 @@ class EntityModuleSubscription(db.Model):
     # rolling period end per row is what let three rows of one payer hold three answers,
     # each refreshed only when its own entity was touched.
 
+    # Money already collected covers this row up to (exclusive) this instant, from a
+    # source OTHER than the current payer's account cycle. NULL — every row until a
+    # transfer touches it — means "no such claim", i.e. the account's ``paid_through``
+    # is the only answer, which is the behaviour that predates this column.
+    #
+    # It exists because a payer transfer buys days outside a renewal: the entity moves
+    # on 20 Aug, the old payer had paid it to 12 Sept, and the new payer is invoiced at
+    # accept for 12 Sept -> their own period end. ``renewals`` must then not bill those
+    # days again, and must still advance the payer's cycle over them.
+    #
+    # NOT the old ``current_period_end`` in a new coat. That one rolled monthly and was
+    # recomputed per entity, which is how three rows of one payer came to disagree. This
+    # is written once at accept, only ever moves forward, and is never cleared — and it
+    # is deliberately absent from ``_MODULE_MUTABLE_FIELDS``, so ``upsert_module_row``
+    # RAISES on it and no existing field-dict writer can clobber it.
+    #
+    # Not ``app_access_until`` either: that returns at precedence rule 1 in
+    # ``access.access_end`` (suppressing the past-due grace) and is cleared by every
+    # successful charge, by termination and by trial expiry.
+    billed_through = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+
     # --- cancel extension (see constants.EXTENSION_STATES) ---
     # The amount is recorded here and collected by the next renewal run, so cancelling
     # never depends on a card clearing. Under Stripe this was a pending invoice ITEM

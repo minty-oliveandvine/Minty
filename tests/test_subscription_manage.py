@@ -141,7 +141,7 @@ def _wire(monkeypatch, *, rows, paid_through=None, now=None):
     monkeypatch.setattr(checkout, "_customer_id_for_entity", lambda eid: "cus_1")
     # An entity being managed here is already billing, so it has consent. The gate
     # itself is covered in test_subscription_checkout / test_subscription_trials.
-    monkeypatch.setattr(store, "has_billing_consent", lambda eid: True)
+    monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: True)
     monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
     monkeypatch.setattr(
         store, "billing_cycle_for_user",

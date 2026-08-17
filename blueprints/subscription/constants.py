@@ -53,6 +53,37 @@ AUDIT_UNCANCEL = "uncancel"
 # or the grace a debt was allowed, finally ran out. Nobody clicks this one — it is the
 # access sweep recording a date passing (see ``checkout.terminate_lapsed_module``).
 AUDIT_TERMINATE = "terminate"
+# The entity's bill changed hands. Unlike the three above, these are not about what an
+# entity is subscribed to — they are about WHO PAYS for it, which is why the log carries
+# ``payer_before`` / ``payer_after`` alongside them. One row per module code, because
+# ``function_code`` is NOT NULL and the payer sits on every row of the entity.
+AUDIT_TRANSFER_OFFERED = "transfer_offered"      # 16 chars
+AUDIT_TRANSFER_ACCEPTED = "transfer_accepted"    # 17
+AUDIT_TRANSFER_DECLINED = "transfer_declined"    # 17
+AUDIT_TRANSFER_CANCELLED = "transfer_cancelled"  # 18
+# All four fit the model's String(20). Counted rather than assumed, because the shipped
+# column is VARCHAR(40) and the model is narrower — the model is the binding constraint.
+
+# --- Subscriber transfer lifecycle (subscription_transfer.status) -------------
+# ``charging`` and ``charged`` are the two NON-TERMINAL states: an accept that got
+# part-way. They exist because accepting cannot be one transaction — the charge and the
+# payer flip commit separately — so the row has to record how far it got, and the
+# recovery paths resolve exactly these two.
+TRANSFER_PENDING = "pending"
+TRANSFER_CHARGING = "charging"
+TRANSFER_CHARGED = "charged"
+TRANSFER_ACCEPTED = "accepted"
+TRANSFER_DECLINED = "declined"
+TRANSFER_CANCELLED = "cancelled"
+TRANSFER_EXPIRED = "expired"
+
+#: Statuses holding a live claim on the entity — no second offer may open against it.
+#: Covers the in-flight states, not just ``pending``, or a second accept could start
+#: while the first is mid-charge and both would move the same pointer.
+TRANSFER_OPEN_STATUSES = (TRANSFER_PENDING, TRANSFER_CHARGING, TRANSFER_CHARGED)
+
+#: An accept that stopped part-way. The repair step's work list; normally empty.
+TRANSFER_STRANDED_STATUSES = (TRANSFER_CHARGING, TRANSFER_CHARGED)
 
 # --- Audit outcomes (subscription_audit_log.outcome) --------------------------
 OUTCOME_SUCCEEDED = "succeeded"

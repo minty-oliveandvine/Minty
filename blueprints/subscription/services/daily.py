@@ -95,12 +95,23 @@ RETRY_DUNNING = "retry-dunning"
 # reconciled when only a handful of accounts were.
 SWEEP_TOUCHED = "sweep-touched"
 
+# Finish subscriber handovers whose accept got part-way and stopped. Normally a no-op:
+# it reads a partial index that an accept which completed leaves empty. It exists for the
+# one window the accept's ordering cannot remove — money collected, payer pointer not yet
+# moved — because unlike a renewal, which recomputes its key on the next pass anyway, an
+# accept is a one-shot user action that nothing would otherwise revisit.
+REPAIR_TRANSFERS = "repair-transfers"
+
 FULL = "full"
 LIGHT = "light"
 
 JOB_ORDER = (
     NOTIFY_TRIAL_ENDING,
     CLOSE_TRIALS,
+    # BEFORE the renewal. A stranded handover has already been paid for, and completing
+    # it writes the claim that keeps the entity off this run's invoice — left until
+    # afterwards, the renewal would bill days the new payer has already settled.
+    REPAIR_TRANSFERS,
     RUN_RENEWALS,
     RETRY_DUNNING,
     SWEEP_ACCESS,
@@ -112,6 +123,7 @@ JOB_ORDER = (
 # to the payers involved.
 LIGHT_ORDER = (
     CLOSE_TRIALS,
+    REPAIR_TRANSFERS,
     RUN_RENEWALS,
     SWEEP_TOUCHED,
 )
@@ -224,6 +236,16 @@ def _run_renewals(now: datetime, *, days_before: int, issue: bool) -> dict:
     return run_renewals(now, scope=ALL_PAYERS, issue=issue)
 
 
+def _repair_transfers(now: datetime, *, days_before: int, issue: bool) -> dict:
+    from blueprints.subscription.services.transfers import repair_stranded
+
+    # Honours no ``issue`` gate because it CHARGES NOTHING. It finishes a handover from
+    # money already collected, or asks the processor about a reservation and releases it;
+    # gating that behind the billing switch would leave a paid-for company stranded on
+    # every shadow run.
+    return repair_stranded(now)
+
+
 def _retry_dunning(now: datetime, *, days_before: int, issue: bool) -> dict:
     from blueprints.subscription.services.dunning import collect_due
 
@@ -236,6 +258,7 @@ _RUNNERS = {
     SWEEP_ACCESS: _sweep_access,
     RUN_RENEWALS: _run_renewals,
     RETRY_DUNNING: _retry_dunning,
+    REPAIR_TRANSFERS: _repair_transfers,
 }
 
 
