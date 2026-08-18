@@ -5,8 +5,14 @@
    templates pass the same context (module_cards, subscription_summary,
    subscription_panel, next_payment_date, org, can_manage_modules).
 
-   Module access is driven entirely by the module subscription state; each card's
-   action (open trial, subscribe) acts on that directly — there is no on/off toggle.
+   Module access is driven entirely by the module subscription state; there is no on/off
+   toggle, and THE CARDS CARRY NO SUBSCRIBE ACTION. A card states what the entity has;
+   changing what it has is the decision modal, reached from the panel's one button.
+
+   That is the whole point of the split. The cards used to offer "Start free trial" and
+   "Subscribe", which staged into a cart beside the panel — a second route to the same
+   modules, priced by a different rule, so which one a customer took decided whether they
+   got the free trial or paid for it. Removing them leaves one list and one price.
 
    The panel's button always opens the SAME decision modal
    (module_subscription_scripts.html); only its caption differs, and only to say which
@@ -14,11 +20,11 @@
    a trial to convert — no card, or this company never authorised the saved one — and
    "Manage subscription" otherwise, including a trial that will convert on its own.
 
-   Cancelling and un-cancelling live in that modal: unticking a PAID module drops it and
-   re-ticking a cancelled one keeps it, which is why a winding-down card shows only its
-   status. The exception is a LIVE PAID module, which keeps its own Cancel on the card —
-   both routes run the same preview and the same confirmation, so the terms are identical
-   either way.
+   Cancelling and un-cancelling live in that modal too: unticking a PAID module drops it
+   and re-ticking a cancelled one keeps it, which is why a winding-down card shows only
+   its status. The one exception is a LIVE PAID module, which keeps its own Cancel on the
+   card — both routes run the same preview and the same confirmation, so the terms are
+   identical either way.
 
    A RUNNING TRIAL CANNOT BE CANCELLED FROM THE UI at all: not from its card, and not from
    the modal, where its row is locked on. The server-side cancellation still exists and a
@@ -217,8 +223,8 @@
         {% else %}
         {# "not active" alone reads as "never had this", which leaves the customer
            wondering why the action beside it is Subscribe rather than a free trial. The
-           second line is the missing half: the trial was held and used up. Grouped in
-           one div so it sits under the status rather than taking the column's gap. #}
+           second line is the missing half: which of the three it is. Grouped in one div
+           so it sits under the status rather than taking the column's gap. #}
         <div class="text-left sm:text-right">
           <span class="text-sm font-semibold text-[#F97362]">not active</span>
           {% if card.trial_expired %}
@@ -229,6 +235,20 @@
              phase=active until a sweep writes it, so "subscription ended" claimed a
              cancellation that never happened. #}
           <p class="text-xs text-gray-500">access ended {{ card.lapsed_long }}</p>
+          {% elif card.trial_eligible %}
+          {# The third case, and the only one that is an OFFER rather than a post-mortem:
+             this module has never been held, so its free trial is still there to take.
+             Teal, not the grey the other two use — those explain why the module is off,
+             this one says something is available, and the modal already spends this
+             colour on "Free trial".
+
+             It states the offer WITHOUT a button, like everything else in this column:
+             taking a module up is a tick in the decision modal, which is the single place
+             the shape of the subscription is chosen (see the comment on the action branch
+             below). Mutually exclusive with ``trial_expired`` by construction —
+             ``trial_eligible`` requires that no subscription row exists, and that row is
+             what ``trial_expired`` is read from. #}
+          <p class="text-xs font-medium text-[#2f8f95]">free trial available</p>
           {% endif %}
         </div>
         {% endif %}
@@ -305,18 +325,11 @@
         {% if card.trial_closing %}
         <p class="text-xs text-gray-500">trial ended- finalising</p>
         {% endif %}
-        {# A trial that will NOT convert looks exactly like one that will, and the
-           difference is a deadline the customer can miss.
-
-           ONLY the no-card case is warned about here. The other reason a trial won't
-           convert — a saved card this company was never authorised for — used to read
-           "won't convert — confirm billing", which names an action with no customer-facing
-           button on this page: confirming billing lives in the decision modal and in a
-           dev-only banner. A warning whose instruction cannot be followed is worse than
-           the panel's own account of the trial. #}
-        {% if card.needs_card and not card.needs_consent_only %}
-        <p class="text-xs font-medium text-amber-700">won't convert — add a card</p>
-        {% endif %}
+        {# NO "won't convert" warning here, for either reason it can be true. Neither
+           names an action with a button on this card: adding a card and confirming
+           billing both live in the decision modal. The panel below states the trial's
+           real outcome — it ends on its date and nothing is charged — which is the
+           account a customer can actually act on. #}
 
         {# Live PAID module: cancel in-app (prorated), access continues until
            paid-through. Unlike a trial — which is dropped by unticking it in the decision
@@ -333,33 +346,17 @@
         <p class="text-xs text-gray-500">valid until {{ card.period_end_long }}</p>
         {% endif %}
 
-        {# Never held it: card-free trial available. Clicking STAGES it in the panel so
-           the user previews it before confirming — it doesn't start the trial yet. #}
-        {% elif card.trial_eligible %}
-        <button type="button"
-                data-trial-code="{{ card.code }}"
-                data-trial-name="{{ card.name }}"
-                data-trial-amount="{{ card.amount }}"
-                data-cart-kind="trial"
-                onclick="toggleCartSelection(this)"
-                class="border border-[#54d3da] text-[#54d3da] hover:bg-[#54d3da]/10 text-xs font-semibold px-3.5 py-1.5 rounded-full transition-colors whitespace-nowrap">
-          Start free trial
-        </button>
+        {# A module the entity does NOT hold gets STATUS ONLY — no action of its own.
+           Taking one up is a tick in the decision modal ("Choose your modules"), which is
+           the single place the shape of the subscription is chosen. The card's own
+           buttons staged into a separate cart beside it, so the same module could be
+           started from two controls that priced it differently: the card offered a bare
+           "Subscribe" while the modal, for the same module with its free trial intact,
+           started that trial instead. One list, one price, one route.
 
-        {# Trial already used up, or held and lost: straight to paid. STAGES it too,
-           into the same cart — buying jumped to Stripe from here, so the bundle price of
-           adding a second module was never shown until after the decision. The panel's
-           button then commits, and its caption switches to "Subscribe". #}
-        {% else %}
-        <button type="button"
-                data-trial-code="{{ card.code }}"
-                data-trial-name="{{ card.name }}"
-                data-trial-amount="{{ card.amount }}"
-                data-cart-kind="paid"
-                onclick="toggleCartSelection(this)"
-                class="border border-[#54d3da] text-[#54d3da] hover:bg-[#54d3da]/10 text-xs font-semibold px-3.5 py-1.5 rounded-full transition-colors whitespace-nowrap">
-          Subscribe
-        </button>
+           The status column above already says which case this is — "free trial
+           available", "free trial expired" or "access ended <date>" under "not active" —
+           so removing the button removes an action, not an explanation. #}
         {% endif %}
         {% endif %}
       </div>
@@ -368,17 +365,6 @@
   </div>
 
   <!-- Right column: "Your subscription" panel -->
-  {# Split the cards into what's currently enabled (for the live future-invoice total)
-     and what can be staged for a trial (eligible + not yet enabled). #}
-  {% set ns = namespace(enabled=[], stageable=[]) %}
-  {% for c in module_cards or [] %}
-    {% if c.subscription_status in ['trialing', 'active', 'past_due'] and not c.pending_cancel %}
-      {% set ns.enabled = ns.enabled + [{'code': c.code, 'name': c.name, 'amount': c.amount | float}] %}
-    {% elif c.trial_eligible %}
-      {% set ns.stageable = ns.stageable + [c] %}
-    {% endif %}
-  {% endfor %}
-
   {% set panel = subscription_panel %}
   {% set summ = subscription_summary %}
   {# ALWAYS rendered. It used to disappear when nothing was enabled, which removed the
@@ -387,14 +373,14 @@
      build_subscription_panel returns an is_empty panel instead, so what changes is the
      CONTENT, never the presence. #}
   <aside class="w-full lg:w-80 shrink-0">
-    {# data-* feed the client-side future-invoice preview: staging a trial recomputes the
-       combined monthly total (bundle-priced when the enabled+staged set is the bundle). #}
+    {# data-* are read by the decision modal's ``planFor``: it prices the ticked set with
+       the same bundle rule the server uses, so unticking a module visibly loses the
+       discount in the modal rather than surprising the payer on the invoice. #}
     <div id="subscription-panel"
          data-bundle-amount="{{ summ.bundle_amount if summ else 0 }}"
          data-bundle-codes="{{ summ.bundle_codes | join(',') if summ else '' }}"
          data-bundle-name="{{ summ.bundle_name if summ else '' }}"
          data-currency="{{ panel.currency if panel else (summ.currency if summ else '') }}"
-         data-enabled='{{ ns.enabled | tojson }}'
          {% if not panel or panel.is_empty %}data-empty="1"{% endif %}
          class="rounded-2xl border border-gray-200/70 bg-white p-6 shadow-sm">
       <h2 class="text-lg font-bold text-gray-900">Your subscription</h2>
@@ -432,11 +418,7 @@
         {% endif %}
         {% endfor %}
         {% endif %}
-        {# staged lines (trial or paid) are inserted here by renderCart #}
       </div>
-
-      {# Shown only while trials are staged — explains the total is the future invoice. #}
-      <div data-staged-note class="mt-4 rounded-xl bg-[#EAF8F9] px-3.5 py-2.5 text-sm font-medium leading-snug text-[#2f8f95] hidden"></div>
 
       {% if panel and panel.note %}
       <div data-panel-note class="mt-4 rounded-xl bg-[#EAF8F9] px-3.5 py-2.5 text-sm font-medium leading-snug text-[#2f8f95]">
@@ -512,10 +494,11 @@
       {% endif %}
 
       {% if can_manage_modules %}
-      {# The current-state action, hidden while trials are staged. An empty panel has no
-         primary action — subscribing starts from a module card, and there is no billing
-         account to manage until something has been charged — so the div renders empty
-         and renderCart still has its hook for the staged-cart swap. #}
+      {# THE ONLY WAY IN. The cards no longer carry an action of their own, so this button
+         is how every subscription decision is reached — taking a module up, dropping one,
+         and undoing a cancellation. ``build_subscription_panel`` therefore gives even an
+         EMPTY panel a primary action whenever the catalog has anything in it; the div
+         renders empty only for a company with no modules available at all. #}
       <div data-panel-primary>
         {# Both actions open the SAME subscription decision modal — the panel's button is
            only a difference of caption. It does not go to Stripe from here: the modal is
@@ -537,17 +520,6 @@
         </button>
         {% endif %}
       </div>
-      {# Commit the staged free trials — shown only while something is staged. #}
-      {# Caption is set by renderCart — "Start free trial" or "Subscribe" depending on
-         what is staged. The one below is only what shows before anything is. #}
-      <button type="button" data-panel-confirm onclick="commitCart(this)"
-              class="w-full mt-5 bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-sm transition-colors hidden">
-        Start free trial
-      </button>
-      <button type="button" data-panel-clear onclick="clearCart()"
-              class="w-full mt-2 text-xs text-gray-500 underline hover:text-gray-700 hidden">
-        Clear
-      </button>
       {% endif %}
     </div>
   </aside>

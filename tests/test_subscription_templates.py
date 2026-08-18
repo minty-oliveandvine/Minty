@@ -286,3 +286,36 @@ def test_stripe_portal_is_dev_only_too(app):
         app, module_cards=[paid_card], subscription_panel=paid, dev_tools=False
     )
     assert "openManageBilling" not in off
+
+
+def test_an_untried_module_says_its_free_trial_is_available(app):
+    """"not active" is three different situations, and the card names which one.
+
+    The two post-mortems were already there — the trial was used up, or a paid period
+    ran out. The offer was not: a module the entity has never held still has its free
+    trial, and the card said only "not active" beside it, which reads as the same dead
+    end as the other two.
+    """
+    untried = _trial_card("BILL", "Payment Request")
+    untried.update(subscription_status=None, needs_card=False, trial_eligible=True)
+
+    section, _ = _render_trial(app, module_cards=[untried])
+
+    assert "not active" in section
+    assert "free trial available" in section
+    # The offer is a STATEMENT, not a control: taking the module up is a tick in the
+    # decision modal, which is the only place the subscription's shape is chosen.
+    assert "Start free trial" not in section
+
+
+def test_a_used_up_trial_is_not_offered_one(app):
+    """The mirror of the above, and the reason the two cannot both render: a spent
+    trial still has its subscription row, and ``trial_eligible`` requires no row."""
+    spent = _trial_card("BILL", "Payment Request")
+    spent.update(subscription_status=None, needs_card=False,
+                 trial_eligible=False, trial_expired=True)
+
+    section, _ = _render_trial(app, module_cards=[spent])
+
+    assert "free trial expired" in section
+    assert "free trial available" not in section

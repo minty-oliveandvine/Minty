@@ -148,9 +148,13 @@ def test_a_payer_with_no_paid_through_has_no_live_paid_module(app, monkeypatch):
 
 
 def test_a_used_up_trial_says_so_under_not_active(app, monkeypatch):
-    """"not active" alone reads as "never had this", and leaves the customer wondering
-    why the card offers Subscribe instead of a free trial. A module whose PAID
-    subscription ended is a different sentence — never_billed is what separates them."""
+    """"not active" alone reads as "never had this". A module whose PAID subscription
+    ended is a different sentence — never_billed is what separates them.
+
+    It carries more weight now than when the card had a button beside it: the cards no
+    longer offer "Start free trial" or "Subscribe" at all — taking a module up is a tick
+    in the decision modal — so this second line is the ONLY thing on the card that says
+    which kind of "not active" this is."""
     from flask import render_template
 
     card = {
@@ -167,14 +171,16 @@ def test_a_used_up_trial_says_so_under_not_active(app, monkeypatch):
             org=type("O", (), {"id": "e1", "name": "Co"})(), can_manage_modules=True,
         )
 
-    # Split at the panel: its hidden staged-cart button is captioned "Start free trial"
-    # until renderCart relabels it, so a whole-page search would always match.
+    # Split at the panel, whose primary button is captioned "Subscribe to Minty" — a
+    # whole-page search for "Subscribe" would match that and prove nothing about the card.
     cards_html = html.split("<aside", 1)[0]
     assert "not active" in cards_html
     assert "free trial expired" in cards_html
-    # The trial is spent, so the action is the paid one.
+    # NO ACTION on the card, whichever kind of "not active" it is. Both buttons were
+    # removed: they staged into a cart beside the panel, a second route to the same
+    # modules that priced a module with its trial intact as a plain purchase.
     assert "Start free trial" not in cards_html
-    assert "Subscribe" in cards_html
+    assert "Subscribe" not in cards_html
 
     card["trial_expired"] = False
     with app.test_request_context():
@@ -298,12 +304,20 @@ def test_the_closing_card_is_the_running_trial_card_plus_one_line(app):
     assert "Start free trial" not in closing
 
 
-def test_the_closing_card_still_warns_when_it_will_not_convert(app):
-    """``needs_card`` outlives the term. A trial with no card is about to expire, and that
-    warning is the last thing the customer can act on — losing it in the transition would
-    drop the notice at the moment it matters most."""
+def test_the_card_never_warns_that_a_trial_will_not_convert(app):
+    """Removed deliberately, for BOTH reasons ``needs_card`` can be true.
+
+    Neither fix has a button on this card — adding a payment method and confirming
+    billing for this company both live in the decision modal — so the warning named an
+    action the customer could not follow from where they were told to take it. The panel
+    below carries the trial's real account instead.
+    """
+    for kwargs in ({"needs_card": True}, {"needs_card": True, "needs_consent_only": True}):
+        assert "won't convert" not in _render(app, _trial_card(**kwargs))
+
+    # The closing state is still just the one extra label, with no warning smuggled in.
     closing = _render(app, _trial_card(trial_closing=True, needs_card=True))
-    assert "won't convert" in closing
+    assert "won't convert" not in closing
     assert "trial ended- finalising" in closing
 
 
