@@ -504,3 +504,245 @@ def test_payment_method_status_endpoint_requires_membership(app, db_session):
         headers={"Authorization": f"Bearer {_token(app)}"},
     )
     assert res.status_code == 403
+
+# --- "Buy now": the payer's cards, and consent to bill this entity ----------
+#
+# Step 2's Buy now shows the payer their saved cards, takes one (or a new one), and
+# records consent to bill THIS entity. It charges nothing — the 30-day trial still runs
+# its term; consent is what makes it convert at the end instead of lapsing.
+
+
+def _entity_with_member(db, user_id="u1"):
+    """A real entity the bearer is a member of, so the routes' membership check passes."""
+    import uuid as _uuid
+
+    from models.db import Entity, User, UserEntity
+
+    user = User(
+        id=user_id,
+        email=f"{user_id}@example.com",
+        username=f"{user_id}@example.com",
+        first_name="Pay",
+        last_name="Er",
+        password="x",
+        system_role=User.SYSTEM_ROLE_NORMAL,
+        approved=True,
+    )
+    entity = Entity(id=str(_uuid.uuid4()), name="Acme")
+    db.session.add_all([user, entity])
+    db.session.flush()
+    db.session.add(UserEntity(user_id=user.id, entity_id=entity.id, role="admin"))
+    db.session.commit()
+    # The ID, not the instance: the request the test then makes closes the session out
+    # from under it, and reading .id afterwards raises DetachedInstanceError.
+    return entity.id
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("get", "/api/onboarding/billing/payment-methods"),
+        ("post", "/api/onboarding/billing/payment-methods/setup-intent"),
+        ("post", "/api/onboarding/billing/payment-methods/confirm"),
+        ("post", "/api/onboarding/billing/payment-methods/default"),
+        ("post", "/api/onboarding/billing/authorize"),
+    ],
+)
+def test_buy_now_endpoints_require_a_token(app, method, path):
+    client = app.test_client()
+    assert getattr(client, method)(path).status_code == 401
+
+
+def test_buy_now_card_routes_answer_the_onboarding_origin(app, monkeypatch):
+    """The whole reason these exist beside the payer portal's identical routes.
+
+    The portal's own ``/api/me/billing/payment-methods`` names FRONTEND_APP_URL in its
+    ``Access-Control-Allow-Origin``, so a browser on the onboarding origin is blocked
+    before the bearer token is ever read. If this header ever comes back as the billing
+    frontend, the Buy now sheet silently stops loading cards.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    monkeypatch.setenv("ONBOARDING_APP_URL", "https://onboard.example.com")
+    monkeypatch.setattr(
+        payment_methods,
+        "list_for_user",
+        lambda user_id: {"has_account": True, "default_id": "pm_1", "methods": [], "total": 0},
+    )
+
+    client = app.test_client()
+    res = client.get(
+        "/api/onboarding/billing/payment-methods",
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 200
+    assert res.headers["Access-Control-Allow-Origin"] == "https://onboard.example.com"
+    assert res.get_json()["default_id"] == "pm_1"
+
+
+def test_buy_now_card_route_reports_the_service_error_verbatim(app, monkeypatch):
+    """``PaymentMethodError`` messages are written for the payer, so they're passed through
+    with their own status rather than flattened to a generic 500."""
+    from blueprints.subscription.services import payment_methods
+
+    def _boom(user_id):
+        raise payment_methods.PaymentMethodError(
+            "Card payments aren't configured on this environment.", status=503
+        )
+
+    monkeypatch.setattr(payment_methods, "start_setup", _boom)
+
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/payment-methods/setup-intent",
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 503
+    assert "aren't configured" in res.get_json()["error"]
+
+
+def test_confirm_makes_the_new_card_the_default_when_asked(app, monkeypatch):
+    """A card added inside Buy now is the one the payer was shown, so it must be the one
+    that gets charged — the flag reaches the service rather than being dropped."""
+    from blueprints.subscription.services import payment_methods
+
+    seen = {}
+
+    def _confirm(user_id, setup_intent, *, make_default=False):
+        seen.update(user_id=user_id, setup_intent=setup_intent, make_default=make_default)
+        return {"has_account": True, "default_id": "pm_new", "methods": [], "total": 1}
+
+    monkeypatch.setattr(payment_methods, "confirm_setup", _confirm)
+
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/payment-methods/confirm",
+        json={"setup_intent": "seti_1", "make_default": True},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 200
+    assert seen == {"user_id": "u1", "setup_intent": "seti_1", "make_default": True}
+
+
+def test_authorize_records_consent_for_this_entity_and_charges_nothing(
+    app, db_session, monkeypatch
+):
+    """Buy now's actual effect: a consent row, and no Stripe call of any kind.
+
+    Nothing here may reach Stripe — the trial has paid time left, so the right outcome is
+    "convert at term end", not "charge now". A subscription created here would bill the
+    payer on the day they agreed to be billed *later*.
+    """
+    from blueprints.subscription.services import checkout, store
+
+    entity_id = _entity_with_member(db_session)
+    def _never(*a, **k):
+        raise AssertionError("Buy now must not subscribe or charge anything")
+
+    monkeypatch.setattr(checkout, "start_modules_checkout", _never)
+    monkeypatch.setattr(checkout, "_create_paid_subscriptions", _never)
+
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/authorize",
+        json={"entity_id": entity_id},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json() == {"has_billing_consent": True}
+    assert store.has_billing_consent(entity_id, "u1") is True
+    # Per (entity, PAYER) — someone else's agreement is not this payer's.
+    assert store.has_billing_consent(entity_id, "u2") is False
+
+
+def test_authorize_is_idempotent(app, db_session):
+    """A double-click, or a sheet re-opened before the status read caught up."""
+    from blueprints.subscription.models.entity_billing_consent import (
+        EntityBillingConsent,
+    )
+
+    entity_id = _entity_with_member(db_session)
+    client = app.test_client()
+    headers = {"Authorization": f"Bearer {_token(app)}"}
+
+    for _ in range(2):
+        res = client.post(
+            "/api/onboarding/billing/authorize",
+            json={"entity_id": entity_id},
+            headers=headers,
+        )
+        assert res.status_code == 200
+
+    assert (
+        EntityBillingConsent.query.filter_by(entity_id=entity_id, user_id="u1").count()
+        == 1
+    )
+
+
+def test_authorize_requires_membership(app, db_session):
+    """Consent is given about an entity you belong to. A stranger's token gets 403."""
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/authorize",
+        json={"entity_id": "not-mine"},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+    assert res.status_code == 403
+
+
+def test_status_reports_card_and_consent_separately(app, db_session, monkeypatch):
+    """The two facts Step 2 reads, and why they are two.
+
+    The card belongs to the PAYER and is shared by every entity they pay for, so it says
+    nothing about this entity. Only consent does. Collapsing them would offer Buy now to
+    a payer who has already bought, or hide it from one who hasn't.
+    """
+    from blueprints.subscription.services import checkout, store
+
+    entity_id = _entity_with_member(db_session)
+    monkeypatch.setattr(checkout, "entity_has_payment_method", lambda e: True)
+
+    client = app.test_client()
+    headers = {"Authorization": f"Bearer {_token(app)}"}
+
+    before = client.get(
+        f"/api/onboarding/payment-method?entity_id={entity_id}", headers=headers
+    ).get_json()
+    assert before == {"has_payment_method": True, "has_billing_consent": False}
+
+    store.record_billing_consent(entity_id, "u1", "confirmed")
+
+    after = client.get(
+        f"/api/onboarding/payment-method?entity_id={entity_id}", headers=headers
+    ).get_json()
+    assert after == {"has_payment_method": True, "has_billing_consent": True}
+
+
+def test_status_still_reports_consent_when_stripe_is_down(app, db_session, monkeypatch):
+    """An unreachable Stripe must not be able to answer "no consent".
+
+    The card read is allowed to fail closed (report no card); the consent read is local
+    and must not be dragged down with it, or a payer who has already bought is offered
+    Buy now again for something they already agreed to.
+    """
+    from blueprints.subscription.services import checkout, store
+
+    entity_id = _entity_with_member(db_session)
+    store.record_billing_consent(entity_id, "u1", "confirmed")
+
+    def _down(_entity):
+        raise RuntimeError("stripe is down")
+
+    monkeypatch.setattr(checkout, "entity_has_payment_method", _down)
+
+    client = app.test_client()
+    body = client.get(
+        f"/api/onboarding/payment-method?entity_id={entity_id}",
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    ).get_json()
+
+    assert body == {"has_payment_method": False, "has_billing_consent": True}

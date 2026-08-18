@@ -754,10 +754,17 @@ def _entity_for_member(user_id, entity_id):
 
 @entity_bp.route("/api/onboarding/payment-method", methods=["GET", "OPTIONS"])
 def onboarding_payment_method_status():
-    """Does this entity have a card on file? (onboarding Step 2's Save & Next gate)
+    """What Step 2's "Buy now" needs to know about this entity's billing.
 
-    GET ?entity_id=… → {"has_payment_method": bool}, read live from Stripe. Trials are
-    card-backed, so the wizard can't move past module selection until this is true.
+    GET ?entity_id=… → {"has_payment_method": bool, "has_billing_consent": bool}.
+
+    Two separate questions, and the second is the one that matters. The card is read live
+    from Stripe and belongs to the PAYER, shared across every entity they pay for, so it
+    says nothing about this entity. Consent is per (entity, payer) and is what decides
+    whether this entity's 30-day trial converts to paid at term end or simply lapses.
+
+    Neither gates the wizard: the trial starts either way, so a payer who skips Buy now
+    still onboards — they just lapse at day 30 instead of converting.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -784,7 +791,19 @@ def onboarding_payment_method_status():
         )
         has_pm = False
 
-    return _cors(jsonify({"has_payment_method": has_pm}))
+    # Local read, deliberately outside the try above: an unreachable Stripe must not be
+    # able to report "no consent" for an entity the payer has already authorised, which
+    # would offer them Buy now a second time for something they already bought.
+    from blueprints.subscription.services import store
+
+    return _cors(
+        jsonify(
+            {
+                "has_payment_method": has_pm,
+                "has_billing_consent": store.has_billing_consent(entity.id, user_id),
+            }
+        )
+    )
 
 
 @entity_bp.route("/api/onboarding/payment-method/setup", methods=["POST", "OPTIONS"])
@@ -886,6 +905,197 @@ def onboarding_payment_method_complete():
         return _cors(resp)
 
     return _cors(jsonify({"has_payment_method": True}))
+
+
+# --- Onboarding "Buy now" ---------------------------------------------------
+#
+# The four payment-method routes below are deliberate MIRRORS of the payer portal's
+# ``/api/me/billing/payment-methods*``, not a refactor of them: same service functions
+# underneath, only the CORS header differs — and that difference is the entire reason
+# they exist. The portal's ``_cors`` names ONE origin (``FRONTEND_APP_URL``), so a
+# browser on the onboarding origin is blocked before the request is even authenticated.
+# Widening the portal's header to a list would loosen the payer portal's surface for the
+# benefit of a different app; four thin wrappers don't touch it at all.
+
+
+def _billing_call(handler):
+    """Run one payment-method action for the bearer's own account, CORS'd for onboarding.
+
+    The onboarding twin of ``subscription.routes.portal._payment_methods_call``: same
+    contract, and the same three failure modes written once. ``PaymentMethodError``
+    carries a message meant for the customer and the status to say it with; anything
+    else is a bug or Stripe being down, and says so without naming what broke.
+
+    Note these act on the PAYER, not on an entity — a card belongs to the person, not to
+    the company — so unlike the routes above there is no entity to check membership on.
+    """
+    from blueprints.subscription.services.payment_methods import PaymentMethodError
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    try:
+        payload = handler(user_id)
+    except PaymentMethodError as exc:
+        resp = jsonify({"error": exc.message})
+        resp.status_code = exc.status
+        return _cors(resp)
+    except Exception:
+        current_app.logger.exception(
+            "onboarding billing: payment-method action failed for user %s", user_id
+        )
+        resp = jsonify({"error": "Something got stuck on our end. Let's try again?"})
+        resp.status_code = 500
+        return _cors(resp)
+
+    return _cors(jsonify(payload))
+
+
+@entity_bp.route("/api/onboarding/billing/payment-methods", methods=["GET", "OPTIONS"])
+def onboarding_billing_payment_methods():
+    """Every card saved on the payer's account, with the default marked.
+
+    GET → the same shape the payer portal renders, so the Buy now sheet and the billing
+    page cannot drift into describing the same card differently.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    return _billing_call(payment_methods.list_for_user)
+
+
+@entity_bp.route(
+    "/api/onboarding/billing/payment-methods/setup-intent", methods=["POST", "OPTIONS"]
+)
+def onboarding_billing_setup_intent():
+    """Open a SetupIntent for the in-app card form.
+
+    POST → ``{client_secret, publishable_key, setup_intent}``. The publishable key is
+    handed back rather than configured in the onboarding app: one place holds the Stripe
+    config, and a key that disagrees with the intent's account becomes a bug that cannot
+    happen if the browser never chooses it.
+
+    Works for a payer with no Stripe customer yet — a SetupIntent does not need one, and
+    the customer is created at confirm once Stripe says the card is real. Abandoning the
+    sheet here therefore leaves nothing behind.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    return _billing_call(payment_methods.start_setup)
+
+
+@entity_bp.route(
+    "/api/onboarding/billing/payment-methods/confirm", methods=["POST", "OPTIONS"]
+)
+def onboarding_billing_confirm():
+    """Adopt the card the browser just confirmed. Body: ``{setup_intent, make_default?}``.
+
+    Only the intent id crosses this boundary — the card number is typed into Stripe
+    Elements and confirmed straight against the SetupIntent, so no PAN reaches this
+    process.
+
+    Saving a card AUTHORISES NOTHING. Billing this entity needs that entity's own consent,
+    which is ``/billing/authorize`` below — a separate call for exactly that reason.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    payload = request.get_json(silent=True) or {}
+    setup_intent = str(payload.get("setup_intent") or "").strip()
+    make_default = bool(payload.get("make_default"))
+
+    return _billing_call(
+        lambda user_id: payment_methods.confirm_setup(
+            user_id, setup_intent, make_default=make_default
+        )
+    )
+
+
+@entity_bp.route(
+    "/api/onboarding/billing/payment-methods/default", methods=["POST", "OPTIONS"]
+)
+def onboarding_billing_set_default():
+    """Nominate the card future invoices are charged against. Body: ``{payment_method}``.
+
+    Account-wide by construction, and worth being clear about: a payer has ONE Stripe
+    customer carrying ONE default payment method, shared by every entity they pay for.
+    Choosing here re-points their other entities too. There is no per-entity card to set —
+    consent is the per-entity thing (see ``EntityBillingConsent``), the card is shared.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    payment_method = str(
+        (request.get_json(silent=True) or {}).get("payment_method") or ""
+    ).strip()
+
+    return _billing_call(
+        lambda user_id: payment_methods.set_default(user_id, payment_method)
+    )
+
+
+@entity_bp.route("/api/onboarding/billing/authorize", methods=["POST", "OPTIONS"])
+def onboarding_billing_authorize():
+    """Record consent to bill THIS entity. Body: ``{entity_id}``. Charges nothing.
+
+    This is what "Buy now" actually buys. The 30-day trial still runs its full term; what
+    changes is what happens at the end of it — ``checkout.convert_or_expire_due_trials``
+    converts a trial to paid only when the payer has BOTH a card and a consent row for the
+    entity, and lets it lapse otherwise. So this is the difference between "converts" and
+    "expires", not between "trial" and "charged now".
+
+    Consent is recorded before the trials exist — onboarding starts those at finalize — and
+    that is fine: consent is per entity, not per subscription, and outlives the wizard.
+
+    Idempotent per payer, so a double-click or a re-opened sheet is harmless.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity, err = _entity_for_member(user_id, (payload.get("entity_id") or "").strip())
+    if err:
+        return err
+
+    from blueprints.subscription.services.checkout import (
+        CheckoutError,
+        authorize_entity_billing,
+    )
+    from models.db import User
+
+    try:
+        authorize_entity_billing(entity, User.query.get(str(user_id)))
+    except CheckoutError as exc:
+        resp = jsonify({"error": exc.message})
+        resp.status_code = exc.status
+        return _cors(resp)
+    except Exception:
+        current_app.logger.exception(
+            "onboarding billing: could not authorize billing for %s", entity.id
+        )
+        resp = jsonify({"error": "Could not confirm billing. Please try again."})
+        resp.status_code = 500
+        return _cors(resp)
+
+    return _cors(jsonify({"has_billing_consent": True}))
 
 
 @entity_bp.route("/api/onboarding/modules", methods=["POST", "OPTIONS"])
