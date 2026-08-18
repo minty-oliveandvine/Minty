@@ -7,6 +7,32 @@
    Cancelling goes through the in-app prorated flow, never Stripe's portal: the
    portal's own cancel skips the access extension and the 30-day guarantee. #}
 
+{# Scrolling without the scrollbar, for the dialogs that cap their height. A modal is
+   ~400px of card floating on a dimmed page, and the platform scrollbar — an opaque
+   track with arrow buttons on Windows — reads as part of the page behind rather than
+   as chrome belonging to the dialog, hard against the rounded corner it clips.
+
+   Both properties are needed and neither is a fallback for the other: the pseudo-element
+   is WebKit/Blink, `scrollbar-width` is the standard one Firefox implements, and
+   `-ms-overflow-style` is legacy Edge. They live in a plain class rather than as Tailwind
+   arbitrary variants because these pages load Tailwind from the CDN, and a class whose
+   only definition is generated at runtime is one more thing that can silently not apply.
+
+   Scrolling itself is untouched — wheel, trackpad, touch and keyboard all still work.
+   What is lost is the standing hint that there IS more below, which is why this is put
+   only on dialogs whose content is short enough to overflow on small viewports alone. #}
+<style>
+  .no-scrollbar {
+    scrollbar-width: none;      /* Firefox */
+    -ms-overflow-style: none;   /* legacy Edge / IE */
+  }
+  .no-scrollbar::-webkit-scrollbar {   /* Chrome, Safari, current Edge */
+    display: none;
+    width: 0;
+    height: 0;
+  }
+</style>
+
 {# Full-screen blocking loader. Stripe calls can take a few seconds; this covers
    the whole viewport (fixed inset-0, top z-index) so the user can't click anything
    else while the request is in flight. #}
@@ -90,7 +116,7 @@
 <div id="cancelSubModal"
      class="fixed inset-0 bg-black bg-opacity-40 z-[110] hidden flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="cancelSubTitle">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+  <div class="no-scrollbar bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-[#FDECEC]">
       <span class="text-lg font-bold text-[#E5484D]" aria-hidden="true">!</span>
     </div>
@@ -131,16 +157,23 @@
   </div>
 </div>
 
-{# Subscription decision modal — the one place the shape of the subscription is chosen.
-   TWO variants of the same list, picked by what the entity actually has:
+{# Subscription decision modal — "Choose your modules", the one place the shape of the
+   subscription is chosen, and now the ONLY place: the module cards carry no Start free
+   trial / Subscribe of their own any more.
 
-     * trial — "We're glad with your decision!". Only live modules are listed, ticked.
-       Continue asks for whatever the kept trials still need (a card, or billing consent)
-       so they convert instead of expiring.
-     * paid  — "Change your modules". Adds the modules the entity does NOT have, so the
-       list is add-or-remove, and Save changes applies both directions.
+   ONE list, for every entity. It used to be two variants of the same markup — a trial one
+   titled "We're glad with your decision!" that listed only what was live, and a paid one
+   titled "Change your modules" that added what the entity did not have. They are merged.
 
-   What each row does when it is ticked / unticked is decided by data-keep-state:
+   Two reasons, and the first is a straight consequence of the cards losing their buttons.
+   The trial variant HID every module the entity did not hold, on the grounds that starting
+   one belonged to the card — so with the cards silent, a trialing entity would have had no
+   way at all to take up a second module. And the split asked the wrong question anyway: it
+   keyed off what the entity is rather than what it is deciding, so the same tick meant the
+   same thing on both and only the wrapper differed.
+
+   Every row is listed in every state, and what each one does when ticked / unticked is
+   decided by data-keep-state:
 
      trial     ticked → needs card or consent   CANNOT BE UNTICKED (box is disabled)
      paid      ticked → nothing (already on)    unticked → prorated cancel, priced+confirmed
@@ -148,6 +181,11 @@
                ...while one is still available. Only a module with no free days left —
                   a spent trial, a lapsed paid subscription — is subscribed and charged.
      winding   ticked → renew                   unticked → nothing
+
+   That available row is the one the cards used to duplicate. The card offered a bare
+   "Subscribe" for a module whose free trial was still intact, while this list started the
+   trial for the very same module — one module, two routes, two prices, and which one the
+   customer paid decided by where they happened to click. The card's route is gone.
 
    CANCELLING A FREE TRIAL IS NOT OFFERED IN THE UI. It was this modal's untick, and
    nothing else — the module cards never carried it — so removing the untick removes the
@@ -160,22 +198,37 @@
    (110), because it stays open while the decision is applied: the loader has to cover
    it, and the confirmations it raises have to sit on top of it. #}
 {# The trial's end date — from ANY trialing module, cancelled or not: a cancelled trial
-   still runs to that date, and that is the date its copy has to name. #}
-{% set trial_end = ((module_cards or []) | selectattr('subscription_status', 'equalto', 'trialing') | map(attribute='period_end_long') | select | first) %}
+   still runs to that date, and that is the date its copy has to name.
+
+   THE EARLIEST ONE. This used to take whichever trialing card came first, and cards are
+   built in ``MODULE_CODES`` order, not date order — so two trials started on different
+   days could put the LATER date on "Your free trial covers … until X", on the plan note,
+   and on the "From X" label of the billing dialog that authorises the conversion. The
+   first thing that happens is the first trial ending; that is the date with a deadline
+   attached to it, and the one the customer can miss.
+
+   Sorted on ``period_end``, the raw datetime, rather than on the formatted string —
+   "12 Sep 2026" and "3 Oct 2026" do not sort as text. ``selectattr('period_end')`` drops
+   the cards that have no date to sort by. #}
+{% set trial_end = ((module_cards or [])
+                    | selectattr('subscription_status', 'equalto', 'trialing')
+                    | selectattr('period_end')
+                    | sort(attribute='period_end')
+                    | map(attribute='period_end_long') | select | first) %}
 <div id="subDecisionModal"
      data-trial-end="{{ trial_end or '' }}"
      data-next-payment="{{ next_payment_date or '' }}"
      class="fixed inset-0 bg-black bg-opacity-40 z-[95] hidden flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="subDecisionTitle">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-    <h2 id="subDecisionTitle" class="text-lg font-bold text-gray-900">We're glad with your decision!</h2>
+    <h2 id="subDecisionTitle" class="text-lg font-bold text-gray-900">Choose your modules</h2>
     <p id="subDecisionIntro" class="mt-1.5 text-sm text-gray-500"></p>
 
     <div class="mt-5 space-y-2">
       {% for c in module_cards or [] %}
-      {# One row per canonical module, in every state — the trial variant hides the ones
-         that are not live (see applyVariant), the paid variant shows them as the "add"
-         half of "add or remove".
+      {# One row per canonical module, in EVERY state — nothing is hidden. The trial
+         variant used to drop the modules the entity did not hold; with the module cards
+         no longer offering them either, that would take them off the page entirely.
 
          The row is the label, so the whole thing is a click target rather than just the
          20px box. The price/status line is written by JS from the same fmtMoney the
@@ -185,6 +238,10 @@
          prices and cancels like a paid module, so it keeps that state, and the badge
          below is what tells them apart. #}
       {% set state = 'paid' if c.subscription_status == 'past_due' else ('winding' if c.pending_cancel else ('trial' if c.subscription_status == 'trialing' else ('paid' if c.subscription_status == 'active' else 'available'))) %}
+      {# Carried separately from ``state`` because the two say different things: an overdue
+         module PRICES and CANCELS exactly like a paid one, which is why it keeps that
+         state, but every DATE on it is a different date. See data-keep-until below. #}
+      {% set overdue = c.subscription_status == 'past_due' %}
       {# A RUNNING TRIAL IS LOCKED ON. Cancelling a free trial is not offered anywhere in
          the UI, so its tick cannot be cleared and its row is not a click target — a box
          that unticks and then does nothing would be worse than no box at all. The row
@@ -227,11 +284,11 @@
                   ``checked`` to every reader below, so a kept trial still reaches the
                   card / consent step that makes it convert. #}
                {% if state == 'trial' %}disabled{% endif %}
-               {# NEVER HELD THIS MODULE, so a free trial is still available for it.
-                  ``applySubVariant`` hides these rows entirely: this modal only charges,
-                  and charging for a module the entity could still trial for free is a
-                  worse deal reached by a different click than the module card offers for
-                  the same module. Starting it belongs to that card. #}
+               {# NEVER HELD THIS MODULE, so a free trial is still available for it, and
+                  ticking the row STARTS that trial rather than buying it. The trial
+                  variant used to hide these rows and leave them to the module card; the
+                  card no longer offers them, so hiding them here would take the module
+                  off the page altogether. #}
                data-keep-trial-eligible="{{ '1' if c.trial_eligible else '' }}"
                data-keep-code="{{ c.code }}"
                data-keep-name="{{ c.name }}"
@@ -240,7 +297,17 @@
                {# A cancelled TRIAL is winding down too, but it has no paid access to run
                   out — what ends is the free trial itself, on its own date. #}
                data-keep-was-trial="{{ '1' if c.trial_cancelled else '' }}"
-               data-keep-until="{{ ((c.access_end_long if (state == 'winding' and not c.trial_cancelled) else c.period_end_long)) or '' }}"
+               {# In arrears. The row prices like a paid one, but it cannot be DATED like
+                  one: ``period_end`` is ``paid_through``, and for an overdue module that
+                  is by definition behind us — the renewal failing is what put it here.
+                  The row read "active until 14 Aug 2026" beside a "Payment due" badge, a
+                  date already gone under a label saying access continues to it.
+
+                  ``access_end_long`` is the honest one: paid_through + the past-due grace
+                  (access.access_end), which is the date access is actually cut off and
+                  the same "Pay by …" the notice modal quotes. #}
+               data-keep-overdue="{{ '1' if overdue else '' }}"
+               data-keep-until="{{ ((c.access_end_long if (overdue or (state == 'winding' and not c.trial_cancelled)) else c.period_end_long)) or '' }}"
                data-keep-needs="{% if c.needs_card and c.needs_consent_only %}consent{% elif c.needs_card %}card{% else %}none{% endif %}"
                class="h-5 w-5 shrink-0 rounded-md border-gray-300 text-[#54d3da] focus:ring-[#54d3da] focus:ring-offset-0" />
       </label>
@@ -250,7 +317,7 @@
     {# What the ticked set actually costs, recomputed on every tick — bundle-priced when
        the selection is exactly the bundle, so dropping one module visibly loses the
        discount instead of silently changing the invoice later. #}
-    <div id="subDecisionPlanBox" class="mt-4 flex items-center justify-between gap-4 rounded-xl bg-[#EAF8F9] px-4 py-3">
+    <div id="subDecisionPlanBox" class="mt-4 flex items-center justify-between gap-4 rounded-xl bg-gray-50 px-4 py-3">
       <span class="min-w-0">
         <span class="block text-sm text-gray-700">Your plan</span>
         <span id="subDecisionNote" class="mt-0.5 block text-xs leading-snug text-gray-500"></span>
@@ -258,14 +325,24 @@
       <span id="subDecisionPlan" class="shrink-0 text-sm font-bold text-gray-900"></span>
     </div>
 
-    <div id="subDecisionActions" class="mt-5 flex flex-col gap-2">
+    {# row-reverse so the pair reads Close · Save changes while the PRIMARY stays first in
+       the DOM — it is the default action and the one a keyboard reaches first. In
+       row-reverse the main axis runs right-to-left, so justify-start is what keeps the
+       pair against the right edge.
+
+       Fixed markup, not re-dressed by JS. There used to be a second set of chrome for the
+       trial variant (a full-width primary over a quiet "Not now"), and it went with the
+       variant — see the header comment. The Save caption still changes, but only to say
+       what the ticks will DO, which is a fact about the selection and not about which
+       kind of entity is looking at it. #}
+    <div id="subDecisionActions" class="mt-5 flex flex-row-reverse items-center justify-start gap-3">
       <button type="button" id="subDecisionContinue"
-              class="w-full bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-sm transition-colors">
-        Continue
+              class="bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm transition-colors">
+        Save changes
       </button>
       <button type="button" id="subDecisionDismiss"
-              class="w-full text-xs text-gray-500 underline hover:text-gray-700">
-        Not now
+              class="border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors">
+        Close
       </button>
     </div>
   </div>
@@ -696,24 +773,6 @@
     }
   };
 
-  // --- staged modules (cart) ----------------------------------------------------
-  // A card's "Start free trial" or "Subscribe" STAGES the module into the Subscription
-  // panel instead of acting immediately, so the user previews it — and the live total
-  // updates to the FUTURE invoice (the combined monthly, bundle-priced when the enabled
-  // + staged set is exactly the bundle). The panel's button then commits them.
-  //
-  // Both kinds share one cart because they share one question: what will this company
-  // cost once these are on. Buying jumped straight to Stripe, so the bundle price of
-  // adding a second module was never shown until after the decision — the exact preview
-  // the trial path already gave.
-  const cart = new Map(); // code -> { code, name, amount, kind: 'trial' | 'paid' }
-
-  function cartKinds() {
-    const kinds = new Set();
-    cart.forEach(function (i) { kinds.add(i.kind); });
-    return kinds;
-  }
-
   // Match the server's money formatting (modules._fmt_money): no cents when whole, two
   // when not, and a CODE spaced off the number while a glyph is not — "HKD 400" but
   // "HK$400". These figures land in the same panel as the server-rendered ones, so a
@@ -726,173 +785,6 @@
     const space = /[A-Za-z]$/.test(sym || '') ? ' ' : '';
     return (sym || '') + space + s;
   }
-
-  function renderCart() {
-    const panel = document.getElementById('subscription-panel');
-    if (!panel) return;
-    const linesEl = panel.querySelector('[data-panel-lines]');
-    const totalEl = panel.querySelector('[data-panel-total]');
-    const noteEl = panel.querySelector('[data-panel-note]');
-    const footerEl = panel.querySelector('[data-panel-footer]');
-    const primaryEl = panel.querySelector('[data-panel-primary]');
-    const confirmEl = panel.querySelector('[data-panel-confirm]');
-    const clearEl = panel.querySelector('[data-panel-clear]');
-    const stagedNote = panel.querySelector('[data-staged-note]');
-    // NOTE: the column is no longer shown or hidden — the panel is always rendered and
-    // only its CONTENT changes. data-empty survives on the element for the server's
-    // "nothing enabled" state; the footer it carries is hidden and restored by the
-    // data-panel-footer handling below, same as a live panel's.
-    const sym = panel.dataset.currency || '';
-
-    // Remember the server-rendered total once, so clearing the cart can restore it.
-    if (totalEl && panel.dataset.serverTotal === undefined) {
-      panel.dataset.serverTotal = totalEl.textContent;
-    }
-
-    // Re-render the staged lines under the existing ones.
-    linesEl.querySelectorAll('[data-staged]').forEach(function (n) { n.remove(); });
-    cart.forEach(function (it) {
-      const row = document.createElement('div');
-      row.className = 'flex items-center justify-between text-sm text-gray-700';
-      row.setAttribute('data-staged', '');
-      // The tag names which kind this line is. Without it a mixed cart shows two lines
-      // at the same price where one is free for a month and the other is charged now.
-      const tag = it.kind === 'paid' ? 'subscribing' : 'free trial';
-      row.innerHTML = '<span>' + it.name + ' <span class="text-[#3aa0a6]">· ' + tag + '</span></span>'
-        + '<span>' + fmtMoney(sym, it.amount) + '/mo</span>';
-      linesEl.appendChild(row);
-    });
-
-    const staged = Array.from(cart.values());
-    if (staged.length) {
-      // Future invoice = currently-enabled modules + staged, at the bundle price when the
-      // union is exactly the bundle. Mirrors build_subscription_panel on the server.
-      let enabled = [];
-      try { enabled = JSON.parse(panel.dataset.enabled || '[]'); } catch (e) {}
-      const bundleAmount = parseFloat(panel.dataset.bundleAmount || '0') || 0;
-      const bundleCodes = (panel.dataset.bundleCodes || '').split(',')
-        .map(function (c) { return c.trim().toUpperCase(); }).filter(Boolean).sort();
-      const all = enabled.concat(staged);
-      const codes = all.map(function (i) { return (i.code || '').toUpperCase(); }).sort();
-      const isBundle = bundleAmount > 0 && bundleCodes.length > 1
-        && codes.length === bundleCodes.length
-        && codes.every(function (c, i) { return c === bundleCodes[i]; });
-      const sum = all.reduce(function (a, i) { return a + (parseFloat(i.amount) || 0); }, 0);
-      const total = isBundle ? bundleAmount : sum;
-
-      if (totalEl) totalEl.textContent = fmtMoney(sym, total);
-      if (noteEl) noteEl.classList.add('hidden');
-      if (footerEl) footerEl.classList.add('hidden');
-      if (primaryEl) primaryEl.classList.add('hidden');
-      if (clearEl) clearEl.classList.remove('hidden');
-
-      // The commit button and the note both describe what CONFIRMING does, and that
-      // differs by kind: a trial starts free and bills later, a subscribe bills now.
-      // Saying "Starts free" over a cart that is about to charge would be a lie.
-      const kinds = cartKinds();
-      const hasPaid = kinds.has('paid');
-      const hasTrial = kinds.has('trial');
-      if (confirmEl) {
-        confirmEl.textContent = hasPaid ? 'Subscribe to Minty' : 'Start free trial';
-        confirmEl.classList.remove('hidden');
-      }
-      if (stagedNote) {
-        stagedNote.textContent = hasPaid && hasTrial
-          ? 'The trial starts free; the subscription is charged for the rest of the current period. The total below is your monthly rate.'
-          : hasPaid
-            ? 'Charged for the rest of the current billing period when you confirm. The total below is your monthly rate.'
-            : 'Starts free — the total below is your next invoice, charged when the trial converts.';
-        stagedNote.classList.remove('hidden');
-      }
-    } else {
-      if (totalEl) totalEl.textContent = panel.dataset.serverTotal || '';
-      if (noteEl) noteEl.classList.remove('hidden');
-      if (footerEl) footerEl.classList.remove('hidden');
-      if (primaryEl) primaryEl.classList.remove('hidden');
-      if (confirmEl) confirmEl.classList.add('hidden');
-      if (clearEl) clearEl.classList.add('hidden');
-      if (stagedNote) stagedNote.classList.add('hidden');
-    }
-  }
-
-  // Reflect the staged/unstaged state on a card's stage button.
-  //
-  // The unstaged caption is whatever the SERVER rendered — "Start free trial" on a
-  // module never held, "Subscribe" on one being re-bought — captured the first time the
-  // button is touched. Hardcoding "Start free trial" here relabelled every Subscribe
-  // button the moment it was un-staged.
-  function markCartButton(btn, staged) {
-    if (!btn.dataset.cartLabel) {
-      btn.dataset.cartLabel = (btn.textContent || '').trim() || 'Add';
-    }
-    if (staged) {
-      btn.textContent = 'Added ✓';
-      btn.classList.remove('border', 'border-[#54d3da]', 'text-[#54d3da]');
-      btn.classList.add('bg-[#54d3da]', 'text-white');
-    } else {
-      btn.textContent = btn.dataset.cartLabel;
-      btn.classList.remove('bg-[#54d3da]', 'text-white');
-      btn.classList.add('border', 'border-[#54d3da]', 'text-[#54d3da]');
-    }
-  }
-
-  window.toggleCartSelection = function (btn) {
-    const code = btn.dataset.trialCode;
-    if (!code) return;
-    markCartButton(btn, !cart.has(code));  // captures the caption before it changes
-    if (cart.has(code)) {
-      cart.delete(code);
-    } else {
-      cart.set(code, {
-        code: code,
-        name: btn.dataset.trialName || code,
-        amount: parseFloat(btn.dataset.trialAmount || '0') || 0,
-        kind: btn.dataset.cartKind === 'paid' ? 'paid' : 'trial',
-      });
-    }
-    renderCart();
-  };
-
-  window.clearCart = function () {
-    cart.clear();
-    document.querySelectorAll('[data-trial-code]').forEach(function (b) {
-      markCartButton(b, false);
-    });
-    renderCart();
-  };
-
-  // Commit the cart. Trials go first and in one call — card-free, no redirect — then the
-  // paid ones through the ordinary checkout, which may redirect to Stripe or ask for
-  // first-charge confirmation. That order matters: if checkout redirects, the trials are
-  // already started rather than lost with the page.
-  window.commitCart = async function (btn) {
-    const items = Array.from(cart.values());
-    if (!items.length) { notifyError('Add a module first.'); return; }
-    const trialCodes = items.filter(function (i) { return i.kind !== 'paid'; })
-                            .map(function (i) { return i.code; });
-    const paidCodes = items.filter(function (i) { return i.kind === 'paid'; })
-                           .map(function (i) { return i.code; });
-
-    const orig = btn ? btn.textContent : '';
-    if (trialCodes.length) {
-      if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
-      showBlockingLoader('Starting your free trial…');
-      try {
-        await postJson("{{ url_for('entity.entity_settings_module_start_trial', org_id=org.id) }}", { codes: trialCodes });
-      } catch (err) {
-        hideBlockingLoader();
-        notifyError(err.message || 'Could not start free trial.');
-        if (btn) { btn.disabled = false; btn.textContent = orig; }
-        return;
-      }
-      if (!paidCodes.length) { window.location.reload(); return; }
-    }
-
-    // doCheckout owns its own loader, confirmation dialog and redirect/reload.
-    if (btn) { btn.disabled = false; btn.textContent = orig; }
-    hideBlockingLoader();
-    await doCheckout(paidCodes, btn);
-  };
 
   // --- subscription decision modal ----------------------------------------------
   // Both panel states open this: "Subscribe to Minty" on a trial, "Manage
@@ -924,29 +816,24 @@
       // ticking and unticking it mean. See the table on the markup.
       state: input.dataset.keepState || 'available',
       wasTrial: input.dataset.keepWasTrial === '1',
+      // In arrears. Same state as a healthy paid row — it prices and cancels the same —
+      // but its ``until`` is a PAY-BY date, not an access-continues-to date.
+      overdue: input.dataset.keepOverdue === '1',
       until: input.dataset.keepUntil || '',
       // What this module still needs before its trial can convert: 'card' (the payer
       // has none), 'consent' (a card, but this company was never authorised for it), or
       // 'none' (it converts on its own). Server-computed — see get_module_cards.
       needs: input.dataset.keepNeeds || 'none',
-      // Never held, so a free trial is still available for it — see applySubVariant.
+      // Never held, so a free trial is still available for it — ticking STARTS that
+      // trial rather than buying the module. See commitSubDecision.
       trialEligible: input.dataset.keepTrialEligible === '1',
     };
   }
 
-  // Rows the current variant actually offers. The trial variant lists only what is
-  // live — its question is "keep or drop" — while the paid variant also lists what the
-  // entity does not have, because there its question is "add or remove".
-  function subVisibleRows() {
-    return subRows().filter(function (r) {
-      return !r.closest('[data-keep-row]').classList.contains('hidden');
-    });
-  }
-
-  // What a set of modules is called and what it costs. Same bundle rule as renderCart
-  // and the server's build_subscription_panel — the single bundle price when the set is
-  // exactly the bundle — so unticking a module visibly loses the discount here rather
-  // than surprising the payer on the invoice.
+  // What a set of modules is called and what it costs. Same bundle rule as the server's
+  // build_subscription_panel — the single bundle price when the set is exactly the
+  // bundle — so unticking a module visibly loses the discount here rather than
+  // surprising the payer on the invoice.
   function planFor(items) {
     const panel = document.getElementById('subscription-panel');
     const sym = (panel && panel.dataset.currency) || '';
@@ -970,72 +857,52 @@
     };
   }
 
-  // Dress the modal as the trial variant ("keep or drop") or the paid one ("add or
-  // remove"). Only the chrome changes — the rows, the pricing and what Save does are the
-  // same machinery, keyed off each row's state.
-  function applySubVariant(variant) {
-    const paid = variant === 'paid';
-    subModal.dataset.variant = variant;
-
-    // The trial variant hides only what the entity does NOT have: offering "add Payment
-    // Request" beside "keep your Petty Cash trial" would be two decisions in one list.
-    // Modules winding down stay in BOTH variants — re-ticking one is how a cancellation is
-    // undone, and it is the only way, since the cards no longer carry Renew.
-    //
-    // An available row STAYS in the paid variant whether or not its free trial is intact.
-    // What differs is what ticking it does, not whether it is listed — see
-    // commitSubDecision: a module with its trial unused starts that trial, and only one
-    // with no free days left is charged for.
-    subRows().forEach(function (r) {
-      const row = r.closest('[data-keep-row]');
-      row.classList.toggle('hidden', !paid && subItem(r).state === 'available');
-    });
-
-    const box = document.getElementById('subDecisionPlanBox');
-    box.classList.toggle('bg-[#EAF8F9]', !paid);
-    box.classList.toggle('bg-gray-50', paid);
-
-    // Trial: one full-width primary with a quiet "Not now" under it. Paid: the mockup's
-    // Close / Save changes pair, right-aligned.
-    const actions = document.getElementById('subDecisionActions');
-    const dismiss = document.getElementById('subDecisionDismiss');
-    const btn = document.getElementById('subDecisionContinue');
-    // row-reverse so the pair reads Close · Save changes while the PRIMARY stays first in
-    // the DOM — it is the default action and the one a keyboard reaches first. In
-    // row-reverse the main axis runs right-to-left, so justify-start is what keeps the
-    // pair against the right edge.
-    actions.className = paid
-      ? 'mt-5 flex flex-row-reverse items-center justify-start gap-3'
-      : 'mt-5 flex flex-col gap-2';
-    dismiss.className = paid
-      ? 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors'
-      : 'w-full text-xs text-gray-500 underline hover:text-gray-700';
-    dismiss.textContent = paid ? 'Close' : 'Not now';
-    btn.className = paid
-      ? 'bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm transition-colors'
-      : 'w-full bg-[#54d3da] hover:bg-[#54d3da]/90 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-sm transition-colors';
-  }
-
   // Row detail lines, plan line and button caption for the current ticks. With nothing
   // ticked the button says what it will actually do — this modal is where a subscription
   // is cancelled, and "Continue" over an empty selection would not say so.
   function renderSubDecision() {
     if (!subModal) return;
-    const paid = subModal.dataset.variant === 'paid';
-    const rows = subVisibleRows();
+    const rows = subRows();
     const items = rows.map(subItem);
     const kept = rows.filter(function (r) { return r.checked; }).map(subItem);
     const plan = planFor(kept.length ? kept : items);
     const endsOn = subModal.dataset.trialEnd || '';
     const nextPayment = subModal.dataset.nextPayment || '';
-    const keptTrial = kept.some(function (i) { return i.state === 'trial'; });
+    // Every line below is keyed off what is TICKED, never off which kind of entity is
+    // looking. That was the trial/paid variant's job and it is gone: the same selection
+    // has to read the same way whoever made it.
+    //
+    // A resumed cancelled trial counts as a kept trial. It is a ``winding`` row by state —
+    // ticking it calls renew — but what is being resumed is free days, so the copy that
+    // matters is when billing starts, not that it is billed monthly.
+    const keptTrial = kept.some(function (i) {
+      return i.state === 'trial' || (i.state === 'winding' && i.wasTrial);
+    });
+    const keptPaid = kept.some(function (i) { return i.state === 'paid'; });
     // What a cancellation here would be measured against: the paid period the entity is
     // already inside, else the payer's next payment date. That fallback used to be the
     // ANCHOR, which is the first-charge date and stays put — so the sentence "applies at
     // your next payment date (28 Jul 2026)" could name a date already gone.
-    const until = (items.filter(function (i) { return i.state === 'paid' && i.until; })
-                        .map(function (i) { return i.until; })[0]) || nextPayment;
+    //
+    // ...and an overdue entity walked straight back into it. Every row's ``until`` comes
+    // from ``paid_through``, which is held on the PAYER and is behind us for the whole
+    // account while a renewal is being retried — so the row-derived date is dropped
+    // entirely the moment anything here is overdue, not merely for the overdue rows. A
+    // sibling module spared by ``skip_covered_at`` stays ``active`` beside them and
+    // quotes the same stale paid_through.
+    //
+    // ``nextPayment`` is safe by construction: the server picks it with
+    // ``next_payment_from_panel``, which skips overdue rows, falling back to
+    // ``get_next_payment_date``, which projects the cycle forward from the anchor and so
+    // can only ever name a date still ahead.
+    const anyOverdue = items.some(function (i) { return i.overdue; });
+    const until = (!anyOverdue
+      && items.filter(function (i) { return i.state === 'paid' && i.until; })
+              .map(function (i) { return i.until; })[0]) || nextPayment;
 
+    // "active until" is what a paid row's date means. An OVERDUE row's date means the
+    // opposite end of the same window — the day access is cut off unless the money
+    // arrives — so it gets its own label rather than borrowing one that promises access.
     const DETAIL = { trial: 'trial ends', paid: 'active until', available: '' };
     rows.forEach(function (r) {
       const it = subItem(r);
@@ -1057,7 +924,7 @@
           + '/mo when it ends';
         return;
       }
-      const label = DETAIL[it.state];
+      const label = it.overdue ? 'pay by' : DETAIL[it.state];
       const suffix = label && it.until ? ' · ' + label + ' ' + it.until : '';
       // A trial that will not convert reads identically to one that will, and the
       // difference is a deadline that can be missed — so the missing card is called out.
@@ -1092,7 +959,7 @@
         noteEl.textContent = resumable.length
           ? 'Tick a module to resume it — nothing is charged until it renews.'
           : 'Tick a module to add it.';
-        btn.textContent = paid ? 'Save changes' : 'Continue';
+        btn.textContent = 'Save changes';
         return;
       }
       // Always the paid wording now. This used to branch on whether a trial or a paid
@@ -1114,28 +981,37 @@
     const saving = plan.saving > 0
       ? ' ' + plan.bundleName + ' saves ' + fmtMoney(plan.sym, plan.saving) + '/mo.'
       : '';
-    // A kept trial has not started billing yet, so the date that matters is when it
-    // converts. On a paying entity what the customer needs to know is when a change
-    // takes effect, which is the payment date they are already on.
-    //
-    // ...unless a NEW free trial is being started here, which is the one thing on a paying
-    // panel that is not charged. Saying "cancelling applies at your next payment date"
-    // over that decision answers a question nobody asked and leaves the actual one — am I
-    // paying for this today — unanswered. The plan line above still shows the monthly
-    // rate, so this says when it starts applying.
     const startingTrial = kept.some(function (i) {
       return i.state === 'available' && i.trialEligible;
     });
-    noteEl.textContent = paid
-      ? (startingTrial
-          ? 'Starts as a free trial — nothing is charged for it today, and it joins '
-            + 'your bill when the trial ends.'
-          : 'Cancelling a module applies at your next payment date'
-            + (until ? ' (' + until + ')' : '') + '.') + saving
-      : (keptTrial
+
+    // FOUR sentences, in the order of what the customer is most likely to be asking, and
+    // chosen by the SELECTION rather than by the entity's kind. The old version asked the
+    // variant first and so could only offer two of these to any given screen: a trialing
+    // entity was never told what a cancellation costs, and a paying one was never told
+    // that the trial it just ticked is free.
+    //
+    // 1. A NEW free trial is being started. The one thing here that is not charged, so it
+    //    outranks everything else — "cancelling applies at your next payment date" over
+    //    that decision answers a question nobody asked and leaves the real one, am I
+    //    paying for this today, unanswered. The plan line above still shows the rate.
+    // 2. A trial is being kept or resumed and nothing paid is in the selection: no billing
+    //    has started, so the date that matters is when it converts.
+    // 3. Something PAID is in the selection: what the customer needs is when a change
+    //    takes effect, which is the payment date they are already on.
+    // 4. Neither — the recurring line, with the next payment when there is a cycle.
+    noteEl.textContent = (
+      startingTrial
+        ? 'Starts as a free trial — nothing is charged for it today, and it joins '
+          + 'your bill when the trial ends.'
+        : keptTrial && !keptPaid
           ? 'Billing starts when your free trial ends' + (endsOn ? ' (' + endsOn + ')' : '') + '.'
-          : 'Billed monthly' + (nextPayment ? ', next payment ' + nextPayment : '') + '.') + saving;
-    btn.textContent = paid ? 'Save changes' : 'Continue';
+          : keptPaid
+            ? 'Cancelling a module applies at your next payment date'
+              + (until ? ' (' + until + ')' : '') + '.'
+            : 'Billed monthly' + (nextPayment ? ', next payment ' + nextPayment : '') + '.'
+    ) + saving;
+    btn.textContent = 'Save changes';
   }
 
   function closeSubDecision() {
@@ -1159,51 +1035,38 @@
       r.checked = state === 'trial' || state === 'paid';
     });
 
-    // Trial-shaped only when the entity is ONLY trialing. The moment one module is paid,
-    // this is a paying company that happens to have a trial running, and its list has to
-    // be the add-or-remove one: "we're glad with your decision", offered to someone who
-    // is already being billed, asks a question they answered months ago.
-    //
-    // A cancelled trial still counts as a trial — re-ticking it is how it is kept, and
-    // that is the case that most needs this list.
-    const states = subRows().map(subItem);
-    const anyTrial = states.some(function (i) {
-      return i.state === 'trial' || (i.state === 'winding' && i.wasTrial);
-    });
-    const anyPaid = states.some(function (i) {
-      return i.state === 'paid' || (i.state === 'winding' && !i.wasTrial);
-    });
-    const trialVariant = anyTrial && !anyPaid;
-    applySubVariant(trialVariant ? 'trial' : 'paid');
-
-    const items = subVisibleRows().map(subItem);
+    const items = subRows().map(subItem);
     const running = items.filter(function (i) { return i.state === 'trial'; });
     const endsOn = subModal.dataset.trialEnd || '';
-    // Everything the entity has is on its way out. That is not "add or remove modules" —
-    // there is one thing to do and a date by which to do it, so the intro says both.
     const winding = items.filter(function (i) { return i.state === 'winding'; });
     const live = items.filter(function (i) {
       return i.state === 'trial' || i.state === 'paid';
     });
     const turnOff = (winding.filter(function (i) { return i.until; })[0] || {}).until;
 
-    document.getElementById('subDecisionTitle').textContent = trialVariant
-      ? 'We’re glad with your decision!'
-      : 'Change your modules';
+    // The title is FIXED — "Choose your modules" for everyone. It used to switch to
+    // "We're glad with your decision!" for a trial-only entity, which congratulated
+    // someone for a decision they had not made yet, on the screen where they make it.
+    //
+    // The INTRO still varies, because what the list is for genuinely does. Four states,
+    // most specific first:
+    //   1. everything is winding down — one thing to do, and a date by which to do it;
+    //   2. nothing held at all — a first choice, and the free trial is the headline;
+    //   3. a trial running and nothing paid — name what it covers and when it ends;
+    //   4. anything else — the ordinary add-or-remove.
+    //
+    // None of them invites unticking a trial: its box is disabled, so "tick the ones you
+    // want to keep" would describe a choice the list does not offer.
     document.getElementById('subDecisionIntro').textContent =
       (winding.length && !live.length)
         ? 'You’ve cancelled — resume before your modules turn off'
           + (turnOff ? ' on ' + turnOff : '') + '.'
-        : !trialVariant
-          ? 'Add or remove modules — changes apply at your next payment date.'
-          // Neither line invites unticking any more: a running trial cannot be dropped
-          // here, so "tick the ones you want to keep" described a choice the list no
-          // longer offers. What IS still being asked is whether the trial converts, which
-          // is what Continue settles.
-          : running.length
+        : (!live.length && !winding.length)
+          ? 'Pick the modules you want. Anything you haven’t tried starts as a free trial.'
+          : (running.length && !live.some(function (i) { return i.state === 'paid'; }))
             ? 'Your free trial covers ' + planFor(running).name
               + (endsOn ? ' until ' + endsOn : '') + '.'
-            : 'Your free trial is running. Continue to set up billing so it converts.';
+            : 'Add or remove modules — changes apply at your next payment date.';
     renderSubDecision();
     subModal.classList.remove('hidden');
   };
@@ -1258,10 +1121,10 @@
 
   // Apply the decision. Removals run FIRST and paid ones are confirmed individually:
   // adding can redirect to Stripe, and a redirect part-way through would leave the
-  // removals unmade with the page gone. Same ordering rule as commitCart.
+  // removals unmade with the page gone.
   async function commitSubDecision() {
     const btn = document.getElementById('subDecisionContinue');
-    const rows = subVisibleRows();
+    const rows = subRows();
     const orig = btn.textContent;
     const ticked = rows.filter(function (r) { return r.checked; }).map(subItem);
     const unticked = rows.filter(function (r) { return !r.checked; }).map(subItem);
@@ -1406,8 +1269,8 @@
     // redirect to Stripe, and a redirect part-way through would leave the trials unstarted
     // with the page gone. Nothing is charged here, so there is no price to confirm — the
     // modal already said what this does, and a dialog over a free action trains people to
-    // click through the ones that cost money. Same endpoint and same shape as the module
-    // cards' own "Start free trial" (see commitCart).
+    // click through the ones that cost money. This is now the ONLY route to a free trial —
+    // the module cards' own "Start free trial" is gone.
     if (startTrials.length) {
       showBlockingLoader('Starting your free trial…');
       try {
@@ -1709,10 +1572,6 @@
   // If the user redirected to Stripe and came Back, the page may restore from the
   // bfcache with the blocking loader still visible — clear it so the UI isn't stuck.
   window.addEventListener('pageshow', hideBlockingLoader);
-
-  // Sync the panel with the (empty) cart on load — captures serverTotal so clearing can
-  // restore it, and puts the commit/clear buttons in their unstaged state.
-  renderCart();
 
   // Surface a failed setup-checkout return (redirected back with ?checkout_error=…)
   // as a toast, then strip it from the URL so a refresh doesn't repeat it.
