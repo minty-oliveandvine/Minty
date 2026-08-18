@@ -313,6 +313,10 @@ def create_app():
                                                   onboarding_finalize,
                                                   onboarding_invite,
                                                   onboarding_invite_cancel,
+                                                  onboarding_billing_authorize,
+                                                  onboarding_billing_confirm,
+                                                  onboarding_billing_set_default,
+                                                  onboarding_billing_setup_intent,
                                                   onboarding_modules,
                                                   onboarding_opening_balance,
                                                   onboarding_payment_method_complete,
@@ -337,6 +341,17 @@ def create_app():
     csrf.exempt(onboarding_saved_step)
     csrf.exempt(onboarding_update_entity)
     csrf.exempt(onboarding_xero_disconnect)
+    # Step 2's "Buy now": the payer's cards, and consent to bill this entity. Same reason
+    # as the payer portal's identical routes above — bearer JWT, no session cookie — and
+    # the same protection without CSRF: the two that take an id from the request check it
+    # against the token's own user. A payment method whose customer isn't the token's payer
+    # answers "not found" (``payment_methods._owned``), and an entity the token's user is
+    # not a member of answers 403 (``_entity_for_member``), so a forged cross-site POST
+    # reaches nothing.
+    csrf.exempt(onboarding_billing_setup_intent)
+    csrf.exempt(onboarding_billing_confirm)
+    csrf.exempt(onboarding_billing_set_default)
+    csrf.exempt(onboarding_billing_authorize)
     # Onboarding /auth and /auth/confirm call these from a different origin
     # (port 3001) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_check,
