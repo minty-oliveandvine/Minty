@@ -30,6 +30,11 @@ UTC = timezone.utc
 NOW = datetime(2026, 8, 19, 12, tzinfo=UTC)
 ANCHOR = datetime(2026, 6, 13, 12, tzinfo=UTC)
 ACCESS_UNTIL = datetime(2026, 9, 18, 12, tzinfo=UTC)
+# Inside the period NOW falls in (13 Aug - 13 Sep). An extension reaching PAST the period
+# end leaves nothing to charge — the preview skips it — so a row that is meant to cost
+# something on resume has to stop before it. This is what a cancellation swept by the
+# 13 Aug renewal looks like: invoiced, and its days running out on the 25th.
+COVERED_TO = datetime(2026, 8, 25, 12, tzinfo=UTC)
 
 PRICES = {
     frozenset({"PETTY_CASH"}): (28000, "Petty Cash"),
@@ -38,15 +43,22 @@ PRICES = {
 }
 
 
-def _row(code, phase, *, first_billed=NOW - timedelta(days=90)):
+def _row(code, phase, *, first_billed=NOW - timedelta(days=90), ext_state=None,
+         access_until=None):
     return SimpleNamespace(
         function_code=code,
         phase=phase,
         payer_user_id="payer-1",
-        app_access_until=ACCESS_UNTIL if phase == "scheduled_cancel" else None,
+        app_access_until=(
+            access_until if access_until is not None
+            else (ACCESS_UNTIL if phase == "scheduled_cancel" else None)
+        ),
         first_billed_at=first_billed,
         trial_end=None,
-        extension_state=None,
+        # ``invoiced`` is what makes resuming cost anything: a still-PENDING extension is
+        # discarded for free, so the preview skips it. Tests that want a real charge have
+        # to say so.
+        extension_state=ext_state,
         extension_amount=None,
     )
 
@@ -143,30 +155,113 @@ def test_a_past_due_module_still_counts(monkeypatch):
 # --- and the two amounts stay distinct --------------------------------------------
 
 
-def test_the_charge_today_still_counts_a_module_that_is_winding_down(monkeypatch):
-    """The other half of the rule, and the reason this cannot be fixed by using one set
-    for both figures. A cancelling module was PAID FOR this period, so for the days that
-    remain the entity is still the bundle — the charge now is the upgrade against it, not
-    a fresh join. Only the RECURRING figure drops it."""
+def _capture_build(monkeypatch):
+    """Record every ``build_change`` call the preview makes, in order."""
     from blueprints.subscription.services import changes
 
-    seen = {}
+    seen = []
 
     def _build(entity_id, name, before, after, period, at):
-        seen["before"], seen["after"] = set(before), set(after)
+        seen.append({"before": set(before), "after": set(after)})
         return SimpleNamespace(total=3484)
 
+    monkeypatch.setattr(changes, "build_change", _build)
+    return seen
+
+
+def test_the_charge_today_still_counts_a_module_that_is_winding_down(monkeypatch):
+    """The other half of the rule, and the reason this cannot be fixed by using one set
+    for both figures. A cancelling module that was PAID FOR this period is still on the
+    line for the days that remain, so the charge now is the upgrade against it, not a
+    fresh join. Only the RECURRING figure drops it.
+
+    Payment Request is the one winding down and its extension is still PENDING — it was
+    cancelled inside this period, after the renewal that billed it, so it genuinely was
+    paid for and its days run past the period end. Petty Cash is the one being resumed,
+    and its extension is INVOICED, which is what makes resuming cost anything at all.
+
+    This test used to assert nothing: both rows defaulted to no extension state, so the
+    preview skipped straight past ``build_change`` and the assertion sat behind an
+    ``if seen:`` that was never true.
+    """
     checkout = _wire(
         monkeypatch,
-        [_row("BILL", "scheduled_cancel"), _row("PETTY_CASH", "scheduled_cancel")],
+        [
+            _row("BILL", "scheduled_cancel", ext_state="pending"),
+            _row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
+                 access_until=COVERED_TO),
+        ],
         covered={"BILL", "PETTY_CASH"},
     )
-    monkeypatch.setattr(changes, "build_change", _build)
+    seen = _capture_build(monkeypatch)
 
     result = _preview(checkout)
 
     assert result["monthly"] == 28000, "recurring drops the module that is leaving"
-    if seen:
-        assert "BILL" in seen["before"], (
-            "the charge today still prices against the days already paid for"
-        )
+    assert seen, "the preview must actually price something"
+    assert "BILL" in seen[0]["before"], (
+        "the charge today still prices against the days already paid for"
+    )
+
+
+def test_after_a_renewal_a_resume_is_a_FRESH_JOIN_not_a_bundle_upgrade(monkeypatch):
+    """The undercharge this pairing was hiding.
+
+    Both modules were cancelled and the renewal has been through: it advanced the payer's
+    paid_through and stamped BOTH extensions invoiced, while billing neither module for
+    the period that just started. So nothing is on the plan line, and resuming one is a
+    fresh join at its standalone price — not an upgrade against a module the customer was
+    never charged for.
+
+    ``covered`` is empty here because that is what ``_billed_codes_in_house`` now returns
+    for two swept rows; the fix that makes it empty lives in ``access.is_covered_this_period``
+    and is pinned in tests/test_change_billing.py.
+    """
+    checkout = _wire(
+        monkeypatch,
+        [
+            _row("BILL", "scheduled_cancel", ext_state="invoiced",
+                 access_until=COVERED_TO + timedelta(days=1)),
+            _row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
+                 access_until=COVERED_TO),
+        ],
+        covered=set(),
+    )
+    seen = _capture_build(monkeypatch)
+
+    _preview(checkout)
+
+    assert seen, "the preview must actually price something"
+    assert seen[0]["before"] == set(), "nothing is on the line: this is a join"
+    assert seen[0]["after"] == {"PETTY_CASH"}
+
+
+def test_resuming_BOTH_quotes_what_the_two_renew_calls_will_actually_charge(monkeypatch):
+    """The dialog posts one list; the commit then calls /renew once per module.
+
+    So the second module is priced against a line that already has the first back on it —
+    ``_reactivate_module_in_house`` writes phase=ACTIVE before the next call runs. Seeding
+    the covered set with the whole wanted list instead priced both as if the other were
+    already there, quoting two bundle steps where the commit collects a join and then a
+    step.
+    """
+    checkout = _wire(
+        monkeypatch,
+        [
+            _row("BILL", "scheduled_cancel", ext_state="invoiced",
+                 access_until=COVERED_TO + timedelta(days=1)),
+            _row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
+                 access_until=COVERED_TO),
+        ],
+        covered=set(),
+    )
+    seen = _capture_build(monkeypatch)
+
+    entity = SimpleNamespace(id="e1", name="Demo Co")
+    user = SimpleNamespace(id="payer-1")
+    checkout.preview_reinstate_modules(entity, user, ["BILL", "PETTY_CASH"])
+
+    assert [s["before"] for s in seen] == [set(), {"BILL"}], (
+        "BILL joins an empty line; PETTY_CASH is then a step up from BILL"
+    )
+    assert [s["after"] for s in seen] == [{"BILL"}, {"BILL", "PETTY_CASH"}]

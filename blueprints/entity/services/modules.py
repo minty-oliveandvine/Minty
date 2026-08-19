@@ -343,7 +343,10 @@ def get_module_cards(entity_id: str) -> list[dict]:
     # cycle. Mirrors checkout._billed_codes_in_house exactly — the forecast and the
     # invoice must not be computed two ways — INCLUDING its treatment of a module that is
     # winding down: cancelled, but paid up to the period end, so for the days before that
-    # end it is still on the line and still part of a bundle.
+    # end it is still on the line and still part of a bundle. Only until the renewal that
+    # drops it, though, which is what the extension state and access end below are for:
+    # the payer's paid_through moves on without the module, and reading the date alone
+    # kept it on the line for a period it was never billed for.
     billed_now = {
         c
         for c, r in rows.items()
@@ -352,6 +355,8 @@ def get_module_cards(entity_id: str) -> list[dict]:
             first_billed_at=getattr(r, "first_billed_at", None),
             paid_through=paid_through,
             now=now,
+            extension_state=getattr(r, "extension_state", None),
+            app_access_until=getattr(r, "app_access_until", None),
         )
     }
 
@@ -1081,11 +1086,11 @@ def _extension_charges(cards: list[dict], fmt, bundle_codes=None, bundle_name=""
     no renewal row to fold it into, and the charge disappeared from a list titled
     "upcoming charges" while remaining perfectly real.
 
-    Cancelling a bundle is ONE decision and the two modules are priced against each other
-    for those days (checkout._leaving_marginal), so it is one line naming the plan and
-    carrying the whole figure — two half-rows the customer cannot reconcile against the
-    dialog they confirmed, or against the invoice, is the same mistake the renewal line
-    used to make by folding the extension in.
+    Cancelling a bundle is ONE decision and the two modules share the bundle price for
+    those days, split unevenly between their rows (checkout._leaving_marginal), so it is
+    one line naming the plan and carrying the whole figure — two uneven rows the customer
+    cannot reconcile against the dialog they confirmed, or against the invoice, is the
+    same mistake the renewal line used to make by folding the extension in.
 
     The date is the module's own period end — the extension rides the invoice raised for
     the cycle it is already inside.

@@ -319,3 +319,32 @@ def test_a_used_up_trial_is_not_offered_one(app):
 
     assert "free trial expired" in section
     assert "free trial available" not in section
+
+
+def test_the_cancellation_charge_on_the_card_is_dev_only(app):
+    """The pending cancel-extension used to print on the card in production, on the
+    argument that the module which owes money should not be the one place that never says
+    so. It is now behind the dev gate, because the customer is told twice already — the
+    panel carries an "Upcoming charges" row for it, and the dialog that confirms the
+    cancellation states it as due on the next invoice.
+
+    So this pins de-duplication, not concealment: gated on the card, and still computed,
+    because the same figure feeds the panel row that replaced it."""
+    cancelling = _trial_card("PETTY_CASH", "Petty Cash")
+    cancelling.update(
+        subscription_status="active",
+        pending_cancel=True,
+        trial_cancelled=False,
+        needs_card=False,
+        access_end_long="18 Sep 2026",
+        extension_formatted="HKD 43.29",
+    )
+
+    on, _ = _render_trial(app, module_cards=[cancelling])
+    assert "HKD 43.29 on your next invoice" in on
+
+    off, _ = _render_trial(app, module_cards=[cancelling], dev_tools=False)
+    assert "on your next invoice" not in off
+    # The rest of the cancelled card is untouched — only the money line is gated.
+    assert "Cancelled" in off
+    assert "18 Sep 2026" in off
