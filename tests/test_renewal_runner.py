@@ -462,6 +462,41 @@ def test_a_collected_extension_is_closed_out_so_it_cannot_ride_again(monkeypatch
     assert calls["marked"] == [["ext_9"]]
 
 
+def test_the_run_that_advances_the_cycle_is_the_run_that_stamps_the_extension(monkeypatch):
+    """The assumption ``access.is_covered_this_period`` now rests on.
+
+    That predicate has to know whether a cancelling module was billed for the period it is
+    being asked about. The account's ``paid_through`` cannot say: it moves for the whole
+    PAYER while ``billable_codes_by_entity`` leaves the cancelling module off the invoice.
+    The per-row half of the answer is ``extension_state == "invoiced"`` — which only works
+    because BOTH happen in this one run, for this one payer.
+
+    So this pins the pairing rather than either half: one entity still billing, one
+    cancelling and owing an extension, and after the run the cycle has moved AND the
+    extension is closed. Split them across runs and the predicate silently goes back to
+    counting a module for a period nobody billed it for — which undercharged every
+    reinstatement made after a renewal.
+    """
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_Row("e1", "BILL", phase="active"),
+              _Row("e2", "PETTY_CASH", phase="scheduled_cancel")],
+        extensions=[_Extension(id="ext_9", entity_id="e2", code="PETTY_CASH")],
+    )
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["marked"] == [["ext_9"]], "the extension is closed by this run"
+    assert calls["paid_through"] == [("u1", datetime(2027, 3, 8, 13, tzinfo=UTC))], (
+        "and the same run moves the cycle past the period it was never billed for"
+    )
+    # The cancelling module is on the invoice ONLY as its extension line — never as a
+    # plan line for the period that just started. That is the whole reason the date lies.
+    lines = calls["issued"][0][1].lines
+    assert [line.entity_id for line in lines] == ["e1", "e2"]
+    assert "access after cancellation" in lines[1].product_name
+
+
 def test_an_extension_is_closed_out_by_the_invoice_that_CARRIES_it(monkeypatch):
     """Raised, not paid — because a declined renewal is not an abandoned one.
 

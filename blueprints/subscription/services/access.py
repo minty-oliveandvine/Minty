@@ -33,6 +33,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+# The one extension state this module needs, imported rather than re-spelled: a second
+# copy of a status string is a thing that drifts. ``constants`` is dependency-free by
+# design — no models, no Stripe — so this does not cost the module its purity.
+from blueprints.subscription.constants import EXT_INVOICED
+
 # Grace windows (days) beyond the period / closure date during which a lapsing account
 # still grants module access.
 #
@@ -221,21 +226,43 @@ def is_billing_forward(*, phase: str) -> bool:
     return phase in (PHASE_ACTIVE, PHASE_PAST_DUE)
 
 
-def is_covered_this_period(*, phase: str, first_billed_at, paid_through, now) -> bool:
-    """Whether the CURRENT period has already been paid for this module.
+def is_covered_this_period(*, phase: str, first_billed_at, paid_through, now,
+                           extension_state=None, app_access_until=None) -> bool:
+    """Whether the current period's PLAN LINE already holds this module.
 
     A fourth question, and the one that prices a mid-period change: what does the line
     hold for the days being billed. It differs from ``is_billing_forward`` in exactly one
-    case — a module winding down. That module will not be charged again, so it is not
-    billing forward; but the customer paid for it through the period end, so until that
-    date it is on the line, and adding a second module to it is an upgrade to the bundle
-    rather than a fresh join. Petty Cash converting on 20 Aug beside a Payment Request
-    paid to 28 Aug costs the bundle margin for those 8 days, not its standalone price.
+    case — a module winding down, BEFORE the renewal that drops it. That module will not
+    be charged again, so it is not billing forward; but the customer paid for it through
+    the period end, so until then it is on the line, and adding a second module to it is
+    an upgrade to the bundle rather than a fresh join. Petty Cash converting on 20 Aug
+    beside a Payment Request paid to 28 Aug costs the bundle margin for those 8 days, not
+    its standalone price.
 
-    Two conditions keep that narrow:
-      * ``first_billed_at`` — a cancelled TRIAL is winding down too, and bought nothing.
-      * ``paid_through > now`` — past that date the module is simply gone, and the
-        re-price to whatever survives happens on the renewal.
+    Four conditions keep that narrow:
+
+    * ``first_billed_at`` — a cancelled TRIAL is winding down too, and bought nothing.
+    * ``paid_through > now`` — past that date nothing covers the module at all.
+    * the extension is not INVOICED. This is the part the account-level ``paid_through``
+      cannot say. A renewal advances that date for the WHOLE PAYER while
+      ``renewals.billable_codes_by_entity`` deliberately leaves the cancelling module off
+      the invoice — so after a renewal the date claims a period the module was never
+      billed for. The extension is stamped invoiced by the same run that advances the
+      date, which makes it the per-row half of the answer. Without it, reinstating one of
+      two cancelled modules after a renewal was priced as a bundle upgrade (the 120 step)
+      instead of a fresh join (280), and the invoice carried a credit for "unused time"
+      on a module that had no line to credit.
+    * ``app_access_until`` has not passed. Belt and braces for the cancellation that owed
+      nothing: ``checkout._cancel_module_in_house`` only records an extension when the
+      amount is positive, so a zero-amount cancellation NEVER gets the invoiced stamp.
+      ``checkout.terminate_lapsed_module`` would eventually move such a row to
+      ``cancelled``, but the daily sweep lags and is skipped outright when a money job
+      failed (``daily.SWEEP_BLOCKERS``), so the phase cannot be relied on to have caught
+      up.
+
+    The last two are NOT redundant. An invoiced extension whose days are still running has
+    an ``app_access_until`` in the future, and those days were bought at the marginal
+    extension rate on a line of their own — not on the plan line this predicate is about.
 
     Used for pricing a change INSIDE the period. Pricing access BEYOND it — the
     cancellation extension — asks ``is_billing_forward`` instead, because there the
@@ -243,13 +270,17 @@ def is_covered_this_period(*, phase: str, first_billed_at, paid_through, now) ->
     """
     if is_billing_forward(phase=phase):
         return True
-    return bool(
-        phase == PHASE_SCHEDULED_CANCEL
-        and first_billed_at is not None
-        and paid_through is not None
-        and now is not None
-        and paid_through > now
-    )
+    if phase != PHASE_SCHEDULED_CANCEL:
+        return False
+    if first_billed_at is None or paid_through is None or now is None:
+        return False
+    if paid_through <= now:
+        return False
+    if extension_state == EXT_INVOICED:
+        return False
+    if app_access_until is not None and app_access_until <= now:
+        return False
+    return True
 
 
 def grants_access(now: datetime, **kwargs) -> bool:

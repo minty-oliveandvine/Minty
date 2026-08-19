@@ -302,11 +302,25 @@
         {% if card.access_end_long %}
         <p class="text-xs font-medium text-[#D14343]">ends {{ card.access_end_long }}</p>
         {% endif %}
-        {# The cancellation's own charge. It is on the panel and in the dialog that
-           confirmed it; leaving it off the card meant the module that owes money was the
-           one place that never said so. #}
-        {% if card.extension_formatted %}
-        <p class="text-xs text-gray-500">{{ card.extension_formatted }} on your next invoice</p>
+        {# The cancellation's own charge — DEV ONLY (dev_tools = app.debug, set in
+           routes/settings.py), like the banner at the top of this file.
+
+           It used to show in production, on the argument that the module which owes money
+           should not be the one place that never says so. The customer is still told,
+           twice: the panel carries an "Upcoming charges" row for it ("Extra days after
+           your paid period — charged once, not monthly") and the dialog that confirms the
+           cancellation states it as "Due on your next invoice". So this is one statement
+           too many on the card, not a fact being withheld.
+
+           Kept behind the gate rather than deleted because it is the only place the
+           figure sits beside the module it belongs to, which is what makes it useful
+           while working on the cancellation pricing. Delete it once the panel row is
+           settled — or drop the gate again if the panel turns out not to be enough. #}
+        {% if dev_tools and card.extension_formatted %}
+        <p class="text-xs text-gray-400">
+          <span class="rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">Dev</span>
+          {{ card.extension_formatted }} on your next invoice
+        </p>
         {% endif %}
         {% endif %}
 

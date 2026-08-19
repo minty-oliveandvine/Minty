@@ -5,8 +5,10 @@ modules they own, so cancelling one of two modules re-prices what the entity bil
 rather than cancelling anything.
 
 Covers the rules that are easy to get wrong:
-* the extension bills the module's MARGINAL price (400 bundle - 280 survivor = 120),
-  not its standalone price;
+* the extension is priced against what is LEAVING, not against the line being kept: a
+  module going on its own bills its standalone 280, and a pair going together bills the
+  400 bundle between them (280 to the first code by sort order, the 120 step to the
+  second) — never 120 each;
 * cancelling RECORDS the extension amount on the row for the next renewal run to
   collect — it never charges up-front, so it never depends on a card and never aborts;
 * undoing a cancellation before that run deletes a number (no money moved); undoing it
@@ -185,8 +187,8 @@ def test_in_house_cancel_records_the_extension_instead_of_charging_it(monkeypatc
     allowed to trap somebody in a subscription. The amount is written to the row and
     collected by the next renewal run.
 
-    120 marginal (400 bundle - 280 survivor) x 11 of 31 days = 42.58, the same figure
-    Stripe produced for this case before the cutover."""
+    Petty Cash is the only module leaving, so it is priced on its own: 280 x 11 of 31
+    days = 99.35."""
     rows = [_Row("PETTY_CASH"), _Row("BILL")]
     checkout, calls = _wire(
         monkeypatch,
@@ -328,14 +330,17 @@ def test_a_module_leaving_ALONE_is_priced_on_its_own(monkeypatch):
     assert written["extension_amount"] == 9935
 
 
-def test_the_SECOND_cancellation_is_worth_the_same_as_the_first(monkeypatch):
-    """The price must not depend on the order of two clicks.
+def test_a_pair_leaving_together_splits_the_BUNDLE_by_code_order(monkeypatch):
+    """Two modules leaving are worth the bundle BETWEEN them, not a margin each.
 
-    Cancelling Petty Cash out of the bundle drops it off the billing-forward line, so
-    reading that line to price the NEXT cancellation made Payment Request look like a
-    lone 280 module: 63.57 against the 27.25 charged moments earlier, for the same days
-    out of the same bundle on the same invoice. The period is paid for either way, so
-    both are worth the bundle's 120 margin.
+    They held Super Minty for those extra days, so the days are worth Super Minty. The
+    400 is allocated in sorted code order — Payment Request first at its own 280, Petty
+    Cash the 120 step on top — and the shares telescope back to the bundle. Pricing each
+    one against the OTHER LEAVER gave 120 + 120 = 240, less than either module has ever
+    cost, for days on which the customer had both.
+
+    The share depends on ``sorted()``, never on which was clicked first: see
+    ``test_the_price_does_not_depend_on_the_order_of_the_two_clicks``.
     """
     rows = [_Row("BILL"), _Row("PETTY_CASH", phase="scheduled_cancel",
                                app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC))]
@@ -350,7 +355,80 @@ def test_the_SECOND_cancellation_is_worth_the_same_as_the_first(monkeypatch):
     checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
 
     written = dict(calls["rows"])["BILL"]
-    assert written["extension_amount"] == 4258, "the same 12000 x 11/31 as the first"
+    assert written["extension_amount"] == 9935, "BILL sorts first: 28000 x 11/31"
+
+
+def test_the_price_does_not_depend_on_the_order_of_the_two_clicks(monkeypatch):
+    """Cancel BILL then PETTY_CASH, or PETTY_CASH then BILL: the same two figures.
+
+    The allocation is by ``sorted()`` precisely so that it cannot depend on the order the
+    customer happened to click in. This is the invariant the old
+    "second cancellation is worth the same as the first" test was really protecting: the
+    two shares are no longer equal, but which module gets which is still fixed, and so is
+    the total.
+    """
+    access_end = datetime(2027, 2, 19, 13, tzinfo=UTC)
+
+    def _run(first, second):
+        rows = {"BILL": _Row("BILL"), "PETTY_CASH": _Row("PETTY_CASH")}
+        written: dict[str, dict] = {}
+        for code in (first, second):
+            # store.module_row hands back rows[0], so the module being cancelled leads.
+            ordered = [rows[code]] + [r for c, r in rows.items() if c != code]
+            checkout, calls = _wire(
+                monkeypatch,
+                rows=ordered,
+                paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+                now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+            )
+            monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+            checkout.cancel_module(_FakeEntity(), _FakeUser(), code)
+
+            # Replay the commit onto the fixture: the SECOND cancellation reads this
+            # state back off the rows to work out what is leaving with it.
+            rows[code].phase = "scheduled_cancel"
+            rows[code].app_access_until = access_end
+            for c, fields in calls["rows"]:
+                written[c] = {**written.get(c, {}), **fields}
+                for attr in ("extension_amount", "extension_state"):
+                    if attr in fields:
+                        setattr(rows[c], attr, fields[attr])
+        return written
+
+    for written in (_run("BILL", "PETTY_CASH"), _run("PETTY_CASH", "BILL")):
+        assert written["BILL"]["extension_amount"] == 9935
+        assert written["PETTY_CASH"]["extension_amount"] == 4258
+
+
+def test_a_leaver_whose_access_already_ran_out_does_not_dilute_the_new_one(monkeypatch):
+    """A module that stopped before the window even opens shares nothing.
+
+    ``_leaving_codes`` counts every winding-down row, so a module cancelled last cycle is
+    in the leaving SET even though its days are spent. The per-slice ``live`` sets are
+    what actually price the window, and they are built from the access ends — so a leaver
+    whose end is behind ``paid_through`` is never live, and Payment Request is charged its
+    own 280 rather than the 120 step it would owe beside a real companion.
+    """
+    rows = [
+        _Row("BILL"),
+        # Cancelled last cycle: access ran out before this period's anchor.
+        _Row("PETTY_CASH", phase="scheduled_cancel", ext_state="pending",
+             ext_amount=9935,
+             app_access_until=datetime(2027, 1, 15, 13, tzinfo=UTC)),
+    ]
+    checkout, calls = _wire(
+        monkeypatch,
+        rows=rows,
+        paid_through=datetime(2027, 2, 8, 13, tzinfo=UTC),
+        now=datetime(2027, 1, 20, 13, tzinfo=UTC),
+    )
+    monkeypatch.setattr(checkout, "_set_module_access", lambda e, c, on: None)
+
+    checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+
+    written = dict(calls["rows"])["BILL"]
+    assert written["extension_amount"] == 9935, "28000 x 11/31, not the 12000 step"
 
 
 def test_cancelling_the_second_module_RE_PRICES_the_first(monkeypatch):
@@ -358,9 +436,10 @@ def test_cancelling_the_second_module_RE_PRICES_the_first(monkeypatch):
     settled when the customer clicks.
 
     Petty Cash left alone and was charged its own 280 (9935). Payment Request following it
-    out makes them a pair again for those days, so BOTH are worth the 120 margin — and the
-    row already written has to be corrected, or the renewal collects a figure that was
-    only ever true while Petty Cash was leaving by itself.
+    out makes them a pair again for those days, worth the 400 bundle between them — and
+    Payment Request sorts FIRST, so it takes the 280 and Petty Cash is re-priced DOWN to
+    the 120 step. The row already written has to be corrected either way, or the renewal
+    collects a figure that was only ever true while Petty Cash was leaving by itself.
     """
     rows = [
         _Row("BILL", phase="active"),
@@ -379,8 +458,16 @@ def test_cancelling_the_second_module_RE_PRICES_the_first(monkeypatch):
     checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
 
     written = dict(calls["rows"])
-    assert written["BILL"]["extension_amount"] == 4258
-    assert written["PETTY_CASH"]["extension_amount"] == 4258, "re-priced from 9935"
+    assert written["BILL"]["extension_amount"] == 9935
+    assert written["PETTY_CASH"]["extension_amount"] == 4258, (
+        "re-priced DOWN from 9935 — Payment Request sorts first and takes the 280"
+    )
+    # The property the whole rule exists for: the two shares are the bundle rate prorated,
+    # to within the one minor unit two separate roundings cost (40000 x 11/31 = 14194).
+    assert (
+        written["BILL"]["extension_amount"] + written["PETTY_CASH"]["extension_amount"]
+        == 14193
+    )
 
 
 def test_uncancelling_one_module_RE_PRICES_the_one_still_leaving(monkeypatch):
@@ -388,7 +475,9 @@ def test_uncancelling_one_module_RE_PRICES_the_one_still_leaving(monkeypatch):
     again and goes back to its own 280 — otherwise it keeps a pair's price for days it
     now spends by itself."""
     rows = [
-        _Row("BILL", phase="scheduled_cancel", ext_state="pending", ext_amount=4258,
+        # The state a pair leaving together actually reaches: BILL sorts first and holds
+        # the standalone 280, PETTY_CASH the 120 step. Two equal 4258s is not producible.
+        _Row("BILL", phase="scheduled_cancel", ext_state="pending", ext_amount=9935,
              app_access_until=datetime(2027, 2, 19, 13, tzinfo=UTC)),
         _Row("PETTY_CASH", phase="scheduled_cancel", ext_state="pending",
              ext_amount=4258,
@@ -704,10 +793,13 @@ def test_cancelling_on_DIFFERENT_DAYS_keeps_each_date_but_prices_them_as_a_pair(
     Anchor 8 Jan, paid_through 8 Feb (31 days). Petty Cash cancelled 20 Jan runs to
     19 Feb; Payment Request cancelled 21 Jan runs to 20 Feb. So:
 
-      8 Feb -> 19 Feb   both there, each worth the 120 margin
+      8 Feb -> 19 Feb   both there: the 400 bundle between them, Payment Request taking
+                        its 280 and Petty Cash the 120 step
       19 Feb -> 20 Feb  Payment Request is alone, and worth its whole 280
 
-    which makes its last day cost 280/mo rather than a bundle price nobody is in.
+    which makes its last day cost 280/mo rather than a bundle price nobody is in. Payment
+    Request sorts first, so its own rate is 280 in BOTH pieces — segmentation only ever
+    bites the later-sorted code, and here that one has already stopped.
     """
     day_one = datetime(2027, 1, 20, 13, tzinfo=UTC)
     day_two = datetime(2027, 1, 21, 13, tzinfo=UTC)
@@ -744,10 +836,10 @@ def test_cancelling_on_DIFFERENT_DAYS_keeps_each_date_but_prices_them_as_a_pair(
     checkout.cancel_module(_FakeEntity(), _FakeUser(), "BILL")
 
     written = dict(calls["rows"])
-    # Its own window — a day later than Petty Cash's — priced in two pieces:
-    # 12000 x 11/31 = 4258 shared, then 28000 x 1/31 = 904 alone.
+    # Its own window — a day later than Petty Cash's — priced in two pieces at the same
+    # 280 rate: 28000 x 11/31 = 9935 shared, then 28000 x 1/31 = 904 alone.
     assert written["BILL"]["app_access_until"] == datetime(2027, 2, 20, 13, tzinfo=UTC)
-    assert written["BILL"]["extension_amount"] == 5162
-    # Re-priced to the pair rate over the window it already had — one piece, since
-    # nothing outlasts it.
+    assert written["BILL"]["extension_amount"] == 10839
+    # Re-priced to the 120 step over the window it already had — one piece, since nothing
+    # outlasts it.
     assert written["PETTY_CASH"]["extension_amount"] == 4258, "12000 x 11/31, was 9935"

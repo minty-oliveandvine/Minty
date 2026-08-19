@@ -192,13 +192,19 @@ def test_an_already_invoiced_change_is_not_charged_again(monkeypatch):
 
 
 class _Row:
-    def __init__(self, code, phase="active", first_billed_at=datetime(2026, 7, 28, tzinfo=UTC)):
+    def __init__(self, code, phase="active", first_billed_at=datetime(2026, 7, 28, tzinfo=UTC),
+                 ext_state=None, app_access_until=None):
         self.function_code = code
         self.phase = phase
         self.payer_user_id = "u1"
         # None = never charged for. It is what separates a cancelled PAID module (whose
         # period is bought and paid for) from a cancelled TRIAL (which bought nothing).
         self.first_billed_at = first_billed_at
+        # The two per-row facts the account's paid_through cannot supply: whether the
+        # renewal has already swept this module off the invoice, and whether the days it
+        # bought have run out. Default None/None = "still inside the period it paid for".
+        self.extension_state = ext_state
+        self.app_access_until = app_access_until
 
 
 def _stub_rows(monkeypatch, rows, paid_through=datetime(2026, 8, 28, 13, tzinfo=UTC)):
@@ -249,6 +255,48 @@ def test_a_cancelling_module_stops_counting_once_its_period_ends(monkeypatch):
     _stub_rows(
         monkeypatch, [_Row("PETTY_CASH", "scheduled_cancel")],
         paid_through=datetime(2026, 8, 19, 13, tzinfo=UTC),   # yesterday
+    )
+
+    assert checkout._billed_codes_in_house("e1") == set()
+
+
+def test_a_cancelling_module_stops_counting_once_the_RENEWAL_has_passed_it_by(monkeypatch):
+    """The account's paid_through is not enough, and this is the case it gets wrong.
+
+    A renewal advances paid_through for the whole PAYER while deliberately leaving the
+    cancelling module off the invoice (``renewals.billable_codes_by_entity``). So the date
+    alone says "covered" for a period the module was never billed for — and reinstating it
+    was then priced as a bundle upgrade (the 120 step) instead of the fresh join (280) it
+    is, with a credit line for unused time on a module that had no line to credit.
+
+    The per-row half of the answer is the extension: the same run that moves paid_through
+    stamps it invoiced.
+    """
+    from blueprints.subscription.services import checkout
+
+    _stub_rows(
+        monkeypatch,
+        [_Row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
+              app_access_until=datetime(2026, 9, 18, 13, tzinfo=UTC))],  # still running
+    )
+
+    assert checkout._billed_codes_in_house("e1") == set()
+
+
+def test_a_cancellation_that_owed_NOTHING_stops_counting_when_its_access_runs_out(monkeypatch):
+    """The hole the extension state cannot close.
+
+    An extension is only recorded when the amount is positive, so a cancellation worth
+    nothing never gets the invoiced stamp. ``terminate_lapsed_module`` would move the row
+    to ``cancelled`` eventually, but the daily sweep lags and is skipped when a money job
+    failed — so the access end has to be consulted directly.
+    """
+    from blueprints.subscription.services import checkout
+
+    _stub_rows(
+        monkeypatch,
+        [_Row("PETTY_CASH", "scheduled_cancel", ext_state=None,
+              app_access_until=datetime(2026, 8, 19, 13, tzinfo=UTC))],  # ran out
     )
 
     assert checkout._billed_codes_in_house("e1") == set()

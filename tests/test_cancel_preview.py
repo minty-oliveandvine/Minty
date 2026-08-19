@@ -13,8 +13,9 @@ previewed date and amount.
 Pricing is the part most easily got wrong, and it is measured against what is LEAVING —
 not against the line the entity keeps. Petty Cash cancelled on its own is charged its 280
 list price for the extra days, because nothing else is leaving with it; cancel Payment
-Request too and the pair is priced as the bundle it still is until it goes, making each
-worth the 120 margin inside it (see checkout._leaving_marginal).
+Request too and the pair is worth the 400 bundle between them, allocated in sorted code
+order — Payment Request takes the 280 and Petty Cash the 120 step (see
+checkout._leaving_marginal). The shares are uneven; the total is what the dialog quotes.
 """
 from __future__ import annotations
 
@@ -244,14 +245,17 @@ def test_preview_requires_a_code(monkeypatch):
         checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "")
 
 
-def test_previewing_a_PAIR_quotes_the_pair_not_two_solos(monkeypatch):
+def test_previewing_a_PAIR_quotes_the_BUNDLE_not_two_solos(monkeypatch):
     """Both halves of a bundle dropped in one click.
 
     Previewed independently each one looks like a lone leaver at its 280 list price
-    (9935 apiece, 19870 quoted) while the cancellations, run in sequence, re-price them
-    to a pair — so the dialog named more than twice what the invoice collects. Told what
-    else is going, the preview prices the set: 120 each, 8516 in total, under the plan
-    that covers them.
+    (9935 apiece, 19870 quoted) while the cancellations, run in sequence, price them as
+    the bundle — so the dialog named 560/month where the invoice collects 400. Told what
+    else is going, the preview prices the set under the plan that covers them: Payment
+    Request takes the 280 and Petty Cash the 120 step, 14193 in total.
+
+    The shares are UNEVEN, which is why ``leaving_total`` exists at all — this module's
+    own 4258 is not a figure the customer can reconcile against anything.
     """
     checkout, _ = _setup(monkeypatch, row=_Row("PETTY_CASH"))
 
@@ -259,8 +263,32 @@ def test_previewing_a_PAIR_quotes_the_pair_not_two_solos(monkeypatch):
         _FakeEntity(), _FakeUser(), "PETTY_CASH", ["BILL"]
     )
 
-    assert p["amount"] == 4258, "12000 x 11/31, not the solo 9935"
+    assert p["amount"] == 4258, "the 12000 step x 11/31 — PETTY_CASH sorts second"
     assert p["leaving_count"] == 2
     assert p["leaving_label"] == "Super Minty"
-    assert p["leaving_total"] == 8516, "both halves, which is what the invoice holds"
-    assert p["leaving_total_formatted"] == "85.16"
+    assert p["leaving_total"] == 14193, "both halves, which is what the invoice holds"
+    assert p["leaving_total_formatted"] == "141.93"
+
+
+def test_the_grouped_total_is_the_same_whichever_card_the_dialog_opened_from(monkeypatch):
+    """The pair is worth 400 between them however the customer got to the dialog.
+
+    ``amount`` is this row's share and differs by which module was clicked — 9935 for the
+    one that sorts first, 4258 for the other. ``leaving_total`` is the decision, and must
+    not. Cancelling from the Payment Request card and from the Petty Cash card are the
+    same act, and a dialog whose headline figure depended on that would be quoting the
+    allocation rather than the price.
+    """
+    checkout, _ = _setup(monkeypatch, row=_Row("PETTY_CASH"))
+    from_petty = checkout.preview_cancel_module(
+        _FakeEntity(), _FakeUser(), "PETTY_CASH", ["BILL"]
+    )
+
+    checkout, _ = _setup(monkeypatch, row=_Row("BILL"))
+    from_bill = checkout.preview_cancel_module(
+        _FakeEntity(), _FakeUser(), "BILL", ["PETTY_CASH"]
+    )
+
+    assert from_petty["amount"] == 4258
+    assert from_bill["amount"] == 9935, "BILL sorts first, so it carries the 280"
+    assert from_petty["leaving_total"] == from_bill["leaving_total"] == 14193

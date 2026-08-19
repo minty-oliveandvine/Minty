@@ -224,9 +224,12 @@ def start_line(amount: int, period: Period, at: datetime) -> Adjustment:
 # live here explicitly rather than falling out of a proration default:
 #
 # * access is only ever EXTENDED, never cut short (``cancel_access_end``);
-# * the module is worth its MARGINAL price on the line, not its list price
-#   (``marginal_amount``) — dropping Petty Cash from a 400 bundle leaves Bill at 280, so
-#   it was worth 120;
+# * the extra days are priced against what is LEAVING, not against what survives. The set
+#   leaving together is worth the plan that covers it, and that total is allocated in
+#   sorted code order — the first code its standalone price, each later one the step it
+#   adds (``checkout._leaving_marginal``, built on ``marginal_amount``). The shares
+#   telescope, so they sum to the plan: Petty Cash alone is worth 280, and Petty Cash with
+#   Payment Request is worth 400 between them (280 + 120), never 240;
 # * the swap down issues NO credit. The customer keeps access to ``access_end``, so
 #   refunding the unused time would be paying them for days they still get;
 # * only the days BEYOND the anchor are charged (``extension_charge``) — everything up to
