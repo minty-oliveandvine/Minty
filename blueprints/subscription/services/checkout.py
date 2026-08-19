@@ -964,7 +964,12 @@ def _notify_trial_outcomes(converted: list[dict], expired: list[dict],
             events.append((
                 payer,
                 event,
-                f"{entity_id}:{','.join(sorted(codes))}",
+                # Payer-scoped for the same reason as the warning above — the constraint
+                # cannot tell two recipients apart on its own. These fire once per trial
+                # so a handover has never actually collided here, but leaving one key in
+                # the family payer-blind is how the next one gets copied from the wrong
+                # example.
+                f"{payer}:{entity_id}:{','.join(sorted(codes))}",
                 {
                     "entity_id": entity_id,
                     "entity_name": names.get(str(entity_id)),
@@ -1081,7 +1086,18 @@ def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict
             events.append((
                 payer,
                 _notify_module().TRIAL_ENDING,
-                f"{entity_id}:{','.join(codes)}:{context['trial_end']:%Y-%m-%d}",
+                # THE PAYER IS PART OF THE KEY, and has to be. The uniqueness constraint
+                # is (event, dedupe_key) with ``user_id`` deliberately outside it, so the
+                # key is the only thing that can distinguish two recipients.
+                #
+                # Without the payer, a subscription handed over mid-trial silences the
+                # warning for the person who will actually be charged: the entity, the
+                # codes and ``trial_end`` are all unchanged by a handover, so the key
+                # regenerates identically, ``notify._claim`` finds the row already sent to
+                # the OUTGOING payer, and the incoming one hears nothing until the money
+                # leaves. This warning is not a reminder — it branches on ``needs_card``
+                # into "action needed" versus "nothing to do".
+                f"{payer}:{entity_id}:{','.join(codes)}:{context['trial_end']:%Y-%m-%d}",
                 context,
             ))
             warned.append({"entity_id": entity_id, "codes": codes,
@@ -1365,7 +1381,7 @@ def _entity_invoice_name(entity_id) -> str:
     return str(entity_id)
 
 
-def quote_transfer_charge(entity_id, payer_user_id, codes, *, at):
+def quote_transfer_charge(entity_id, payer_user_id, codes, *, at, before=None):
     """What taking over ``entity_id`` costs the new payer, without charging anything.
 
     Returns ``{"amount", "currency", "period_start", "period_end", "anchor_at",
@@ -1380,6 +1396,10 @@ def quote_transfer_charge(entity_id, payer_user_id, codes, *, at):
     Reads nothing and writes nothing — in particular it does NOT anchor an unanchored
     payer, it only reports what their anchor WOULD become, so opening the accept screen
     has no side effect.
+
+    ``before`` is what they are already billed for on this entity — empty for a handover
+    (a join), and the entity's billed codes for a trial converting later (an upgrade).
+    See ``_transfer_invoice``; getting it wrong more than doubled a quoted figure.
     """
     anchor, _currency = store.billing_cycle_for_user(payer_user_id)
     anchor_is_new = anchor is None
@@ -1387,7 +1407,7 @@ def quote_transfer_charge(entity_id, payer_user_id, codes, *, at):
         # Not written. See the charge for why the anchor lands on ``at``.
         anchor = at
 
-    invoice, period = _transfer_invoice(entity_id, anchor, codes, at=at)
+    invoice, period = _transfer_invoice(entity_id, anchor, codes, at=at, before=before)
     if invoice is None:
         return None
     return {
@@ -1408,27 +1428,42 @@ def quote_transfer_charge(entity_id, payer_user_id, codes, *, at):
     }
 
 
-def _transfer_invoice(entity_id, anchor, codes, *, at):
-    """Price the new payer JOINING this entity at ``at``. Returns ``(invoice, period)``.
+def _transfer_invoice(entity_id, anchor, codes, *, at, before=None):
+    """Price ``codes`` starting at ``at`` for this payer. Returns ``(invoice, period)``.
 
-    Two things separate this from ``_bill_module_change_in_house``'s arithmetic, and both
-    are the whole point of the function existing:
+    THE PERIOD COMES FROM ``at``, not from ``now``, and that is the whole reason this is
+    not ``_bill_module_change_in_house``. A transfer's ``at`` is the instant the old
+    payer's money runs out, which is in the FUTURE when the offer is accepted. Derive the
+    period from ``now`` instead and ``at`` lands past ``period.end``, so
+    ``Period.remaining_seconds`` returns 0, ``prorate`` returns 0, ``build_change``
+    returns None — and the caller reads None as "nothing was owed", which is a success.
+    The entity would be handed over free, silently.
 
-    * THE PERIOD COMES FROM ``at``, not from ``now``. The transfer's ``at`` is the instant
-      the old payer's money runs out, which is in the FUTURE when the offer is accepted.
-      Deriving the period from ``now`` instead puts ``at`` past ``period.end``, so
-      ``Period.remaining_seconds`` returns 0, ``prorate`` returns 0, ``build_change``
-      returns None — and the caller reads None as "nothing was owed", which is a success.
-      The entity would be handed over free, silently.
-    * BEFORE IS EMPTY. For the incoming payer this entity is a join, whatever it was to
-      the outgoing one, so the line is priced as starting rather than as a change.
+    ``before`` is WHAT THE PAYER IS ALREADY BILLED FOR on this entity, and it changes the
+    price a great deal:
+
+    * For the HANDOVER charge it is empty. The incoming payer pays for this entity for the
+      first time, whatever it was to the outgoing one, so the line is a join.
+    * For a TRIAL CONVERTING LATER it is not. By then they are already paying for whatever
+      was active, so the trial is an UPGRADE — priced at its margin inside the resulting
+      bundle, not at its standalone rate. On an entity with one active module and one on
+      trial the difference was 94.03 against 219.41: quoting the join would have promised
+      a charge more than double the real one.
+
+    Pass what ``_bill_module_change_in_house`` would see, i.e. ``_billed_codes_in_house``.
     """
     from blueprints.subscription.services import changes
     from blueprints.subscription.services.billing import period_containing
 
     period = period_containing(anchor, at)
+    current = {str(c).upper() for c in (before or set())}
     invoice = changes.build_change(
-        entity_id, _entity_invoice_name(entity_id), set(), set(codes), period, at
+        entity_id,
+        _entity_invoice_name(entity_id),
+        current,
+        current | {str(c).upper() for c in codes},
+        period,
+        at,
     )
     return invoice, period
 
@@ -2487,7 +2522,27 @@ def preview_reinstate_modules(entity, user, codes) -> dict:
             charged += int(getattr(invoice, "total", 0) or 0) if invoice else 0
             covers_from = min(covers_from or covered_to, covered_to)
 
-    monthly = int(plan_target.amount) if plan_target else 0
+    # WHAT IT COSTS FROM NEXT PERIOD, which is a different set from what is charged today.
+    #
+    # ``plan_target`` above is built from ``_billed_codes_in_house`` — modules PAID FOR
+    # this period — and that is right for the charge now: a module winding down was paid
+    # for, so resuming beside it is an upgrade to the bundle they still are until it goes.
+    #
+    # It is wrong for the ongoing price, because a winding-down module will not be there.
+    # On an entity with both modules cancelling, resuming one quoted "HKD 400.00/mo" — the
+    # bundle — when the other was about to lapse and the real ongoing cost is 280. The
+    # customer is told they will pay 120/month more than they will.
+    #
+    # So the recurring figure is built from what will still be BILLING FORWARD once this
+    # resume lands: whatever is active or past due, plus what is being resumed.
+    from blueprints.subscription.services import access
+
+    ongoing_codes = {
+        code for code, row in rows.items()
+        if access.is_billing_forward(phase=getattr(row, "phase", ""))
+    } | wanted
+    ongoing_plan = store.billing_plan_for_codes(ongoing_codes)
+    monthly = int(ongoing_plan.amount) if ongoing_plan else 0
     return {
         "codes": sorted(wanted),
         "label": (label_plan.display_name if label_plan else None),

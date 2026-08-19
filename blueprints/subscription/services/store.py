@@ -642,6 +642,11 @@ def transfer_entity_payer(entity_id, new_payer_user_id, *, billed_through=None) 
     later, so a second transfer of an entity can never shorten a claim the first one
     established. Never set back to NULL.
 
+    The two columns move on DIFFERENT ROW SETS, which is the subtle part. The payer moves
+    on every row — a dead row is still a row about this entity and must follow it. The
+    claim moves only on rows that were actually being billed, because that is the only
+    place the statement it makes is true. See the comment on the second UPDATE.
+
     Returns the number of rows moved. Does NOT commit — the caller owns the transaction,
     because the flip, the consent row and the audit entries have to land together or not
     at all.
@@ -665,10 +670,26 @@ def transfer_entity_payer(entity_id, new_payer_user_id, *, billed_through=None) 
     )
 
     if billed_through is not None:
-        # Forward-only enforced in the WHERE rather than trusted from the caller, so a
+        # BILLING-FORWARD ROWS ONLY, and this is a money rule rather than an optimisation.
+        #
+        # The claim means "someone else's money already covers these days". That is only
+        # ever true of a row that was being billed. A trial was free, and an expired or
+        # cancelled row is not being billed at all — stamping them says something false.
+        #
+        # On a trial row it is worse than untidy. It looks inert, because
+        # ``renewals._covered_entities`` skips anything not billing forward — but the
+        # trial converts, ``_finish_conversion`` writes ``phase=active``, and the claim
+        # silently becomes live. The new payer's renewals for that entity are then
+        # suppressed for every period the claim covers: free months, from a date nobody
+        # chose, with no invoice to notice the absence of. And it cannot be undone —
+        # ``billed_through`` is deliberately outside ``_MODULE_MUTABLE_FIELDS``, so no
+        # ordinary writer can clear it.
+        #
+        # Forward-only is enforced in the WHERE rather than trusted from the caller, so a
         # row already covered further out keeps its own, longer claim.
         EntityModuleSubscription.query.filter(
             EntityModuleSubscription.entity_id == str(entity_id),
+            EntityModuleSubscription.phase.in_((PHASE_ACTIVE, PHASE_PAST_DUE)),
             db.or_(
                 EntityModuleSubscription.billed_through.is_(None),
                 EntityModuleSubscription.billed_through < billed_through,

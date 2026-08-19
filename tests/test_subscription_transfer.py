@@ -71,6 +71,13 @@ class _Row:
         self.billed_through = None
 
 
+def _trial_row(code="PETTY_CASH", phase="trial", days=14):
+    """A module on a free trial, with an end date the handover must carry across."""
+    row = _Row(code=code, phase=phase)
+    row.trial_end = NOW + timedelta(days=days)
+    return row
+
+
 def _wire(monkeypatch, db, *, rows=None, payer=OLD, dunning=(), admin=True,
           approved=True, card=True, charge=None):
     """Mock what sits either side of the service; return (transfers, calls)."""
@@ -176,15 +183,19 @@ def test_an_unbilled_cancellation_charge_blocks_it(db_session, monkeypatch):
         rows=[_Row(ext_state="pending", ext_amount=2746)],
     )
     reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
-    assert any("unbilled cancellation charge" in r for r in reasons)
+    assert any("Un-cancel it" in r for r in reasons)
 
 
-def test_a_module_on_trial_blocks_it(db_session, monkeypatch):
-    """It would convert onto the new card against the OLD payer's consent, with no
-    warning email — the trial notice is deduped per entity and already went out."""
-    transfers, _ = _wire(monkeypatch, db_session, rows=[_Row(phase="trial")])
+def test_a_module_on_trial_no_longer_blocks_it(db_session, monkeypatch):
+    """This used to be a refusal, for three reasons that have each since been dealt with:
+    the conversion charged the new card on the OLD payer's consent (fixed when consent
+    became per-payer), the amount was never disclosed (now quoted on the accept screen),
+    and the warning email could never reach them (the trial dedupe key now carries the
+    payer). What makes it coherent rather than merely allowed is that the free days
+    genuinely travel — ``trial_end`` has one writer and no path moves it."""
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_trial_row()])
     reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
-    assert any("still on trial" in r for r in reasons)
+    assert not any("trial" in r.lower() for r in reasons)
 
 
 def test_a_non_admin_cannot_be_handed_the_bill(db_session, monkeypatch):
@@ -501,7 +512,7 @@ def test_an_entity_whose_only_module_expired_cannot_be_handed_over(db_session, m
 
     reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
 
-    assert any("no active subscription" in r for r in reasons)
+    assert any("nothing active on this company" in r for r in reasons)
 
 
 def test_an_entity_winding_down_cannot_be_handed_over(db_session, monkeypatch):
@@ -511,7 +522,7 @@ def test_an_entity_winding_down_cannot_be_handed_over(db_session, monkeypatch):
 
     reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
 
-    assert any("no active subscription" in r for r in reasons)
+    assert any("nothing active on this company" in r for r in reasons)
 
 
 def test_the_offer_is_refused_rather_than_the_accept(db_session, monkeypatch):
@@ -521,7 +532,7 @@ def test_the_offer_is_refused_rather_than_the_accept(db_session, monkeypatch):
     ok, msg, _ = transfers.offer_transfer(OLD, ENTITY, NEW)
 
     assert ok is False
-    assert "no active subscription" in msg
+    assert "nothing active on this company" in msg
     assert calls["charges"] == []
 
 
@@ -572,3 +583,454 @@ def test_the_dead_row_still_moves_to_the_new_payer(db_session, monkeypatch):
     # And the audit records both modules, dead one included.
     accepted = [a for a in calls["audit"] if a["action"] == "transfer_accepted"]
     assert {a["function_code"] for a in accepted} == {"PETTY_CASH", "BILL"}
+
+
+# --- the claim must not land on a row that was never billed -----------------------
+#
+# ``billed_through`` means "someone else's money already covers these days". That is only
+# true of a row that was being billed. A trial was free.
+#
+# Stamping a trial row LOOKS inert, because the renewal filter skips anything not billing
+# forward — right up until the trial converts, ``_finish_conversion`` writes phase=active,
+# and the claim silently goes live. The new payer's renewals for that entity are then
+# suppressed for every period it covers. Free months, and unfixable: the column is outside
+# ``_MODULE_MUTABLE_FIELDS``, so no ordinary writer can clear it.
+#
+# These run the REAL ``transfer_entity_payer`` against the database, because the thing
+# being tested is the WHERE clause on its second UPDATE — a mocked store proves nothing.
+
+
+def _real_rows(db, specs):
+    """Insert genuine entity_module_subscription rows and return the model."""
+    from models.db import EntityModuleSubscription
+
+    for code, phase in specs:
+        db.session.add(EntityModuleSubscription(
+            id=f"ems-{code}", entity_id=ENTITY, function_code=code,
+            payer_user_id=OLD, phase=phase,
+        ))
+    db.session.commit()
+    return EntityModuleSubscription
+
+
+def _claims(model):
+    # SQLite hands back naive datetimes for a timezone=True column, so the read is
+    # normalised here rather than in every assertion. Production re-attaches UTC the same
+    # way in ``transfers._aware`` — for a sharper reason there: the billing layer REFUSES
+    # a naive datetime, and that refusal would land after the money had moved.
+    def aware(value):
+        return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
+
+    return {
+        r.function_code: (r.payer_user_id, aware(r.billed_through))
+        for r in model.query.filter_by(entity_id=ENTITY).all()
+    }
+
+
+def test_the_claim_skips_a_trial_row_but_the_payer_does_not(db_session, monkeypatch):
+    from blueprints.subscription.services import store
+
+    model = _real_rows(db_session, [("BILL", "active"), ("PETTY_CASH", "trial")])
+
+    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    db_session.session.commit()
+
+    claims = _claims(model)
+    assert claims["BILL"] == (NEW, PERIOD_END), "a billed row carries the claim"
+    assert claims["PETTY_CASH"][0] == NEW, "every row follows the entity to the new payer"
+    assert claims["PETTY_CASH"][1] is None, (
+        "a trial was free — a claim here becomes free months once it converts"
+    )
+
+
+def test_the_claim_skips_expired_and_cancelled_rows_too(db_session, monkeypatch):
+    """Same rule, same reason: nothing was being billed, so nothing is covered."""
+    from blueprints.subscription.services import store
+
+    model = _real_rows(db_session, [
+        ("BILL", "active"),
+        ("PETTY_CASH", "expired"),
+        ("PAYMENT_REQUEST", "scheduled_cancel"),
+    ])
+
+    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    db_session.session.commit()
+
+    claims = _claims(model)
+    assert claims["BILL"][1] == PERIOD_END
+    assert claims["PETTY_CASH"][1] is None
+    assert claims["PAYMENT_REQUEST"][1] is None
+    assert all(payer == NEW for payer, _ in claims.values())
+
+
+def test_a_past_due_row_does_carry_the_claim(db_session, monkeypatch):
+    """``past_due`` IS billing forward — the subscription has not ended and the money is
+    still owed — so its days really were covered and the claim belongs on it."""
+    from blueprints.subscription.services import store
+
+    model = _real_rows(db_session, [("BILL", "past_due")])
+
+    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    db_session.session.commit()
+
+    assert _claims(model)["BILL"] == (NEW, PERIOD_END)
+
+
+def test_a_converted_trial_is_billable_rather_than_suppressed(db_session, monkeypatch):
+    """The end of the story the first test guards. Transfer while on trial, let it
+    convert, and the entity must appear on the new payer's renewal — not be skipped as
+    though somebody had already paid for it."""
+    from blueprints.subscription.services import renewals, store
+    from blueprints.subscription.services.billing import Period
+
+    model = _real_rows(db_session, [("PETTY_CASH", "trial")])
+    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    db_session.session.commit()
+
+    # The conversion: phase goes active, and nothing clears a claim.
+    model.query.filter_by(entity_id=ENTITY).update({"phase": "active"})
+    db_session.session.commit()
+
+    rows = model.query.filter_by(entity_id=ENTITY).all()
+    monkeypatch.setattr(store, "module_rows_for_payer", lambda uid: rows)
+
+    period = Period(
+        datetime(2027, 9, 1, tzinfo=UTC), datetime(2027, 10, 1, tzinfo=UTC)
+    )
+    assert renewals.entities_covered_into(NEW, period) == set(), (
+        "a converted trial carries no claim, so nothing suppresses its renewal"
+    )
+
+
+# --- handing over an entity that is on trial ---------------------------------------
+#
+# The free days travel with the row: `trial_end` has one writer and no path moves it, so
+# the incoming payer inherits the remaining term and the trial converts on THEIR card at
+# its original date. It stays once-per-entity, so they inherit a spent trial rather than
+# minting a fresh one.
+#
+# Nothing is charged at accept for the trial itself — those days are free. What they are
+# charged for is any module that was actually being billed.
+
+
+def test_a_trial_no_longer_blocks_a_handover(db_session, monkeypatch):
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_trial_row()])
+
+    assert transfers.transfer_blockers(
+        ENTITY, from_user_id=OLD, to_user_id=NEW
+    ) == []
+
+
+def test_a_trial_only_entity_is_handed_over_without_a_charge(db_session, monkeypatch):
+    """Nothing has been paid for, so there is no window to buy. The handover is the flip."""
+    transfers, calls = _wire(monkeypatch, db_session, rows=[_trial_row()])
+    offer = _offer(db_session, transfers)
+
+    ok, _msg, _ = transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    assert ok is True
+    assert calls["charges"] == [], "free days are not billable"
+    assert calls["flips"], "the payer still moves"
+    assert calls["consent"] == [(ENTITY, NEW, "transfer")], (
+        "their consent is what authorises the conversion later"
+    )
+    assert offer.status == "accepted"
+
+
+def test_a_charge_free_handover_raises_no_invoice_and_claims_no_key(db_session, monkeypatch):
+    """It skips the journal entirely, which is safe only because no money moves — the
+    journal exists to close the gap between taking money and moving the pointer."""
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_trial_row()])
+    offer = _offer(db_session, transfers)
+
+    transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    assert offer.charge_attempt == 0
+    assert offer.charge_key is None
+    assert offer.charge_invoice_id is None
+
+
+def test_a_mixed_entity_charges_only_for_the_paid_module(db_session, monkeypatch):
+    transfers, calls = _wire(
+        monkeypatch, db_session,
+        rows=[_trial_row(code="PETTY_CASH"), _Row(code="BILL", phase="active")],
+    )
+    offer = _offer(db_session, transfers)
+
+    transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    assert len(calls["charges"]) == 1
+    # Both rows move; only the billed one was priced.
+    accepted = [a for a in calls["audit"] if a["action"] == "transfer_accepted"]
+    assert {a["function_code"] for a in accepted} == {"PETTY_CASH", "BILL"}
+
+
+def test_an_entity_with_nothing_at_all_is_still_refused(db_session, monkeypatch):
+    """The narrowed rule has to keep catching the case it was written for — a genuinely
+    dead entity, where the dead rows still name a payer and every other check passes."""
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_Row(phase="expired")])
+
+    reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
+
+    assert any("nothing active on this company" in r for r in reasons)
+
+
+def test_an_expired_trial_is_not_mistaken_for_a_running_one(db_session, monkeypatch):
+    """``_trial_rows`` keys on the PHASE, not on the presence of a ``trial_end`` — an
+    expired row keeps its date as history, and reading that as a live trial would make
+    every dead entity look transferable."""
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_trial_row(phase="expired")],
+    )
+
+    reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
+
+    assert any("nothing active on this company" in r for r in reasons)
+
+
+# --- disclosing the inherited trial ------------------------------------------------
+#
+# Accepting now commits someone to a charge weeks away, so the screen has to name it.
+# The grouping is the part worth pinning: pricing is per module SET, so modules ending on
+# the same day are one bundled charge and must be quoted together. Quoting them
+# separately would disclose amounts that sum to more than the customer is charged.
+
+
+def _priced(monkeypatch, by_codes):
+    """Stand in for the real pricer, recording the code sets it was asked about."""
+    from blueprints.subscription.services import checkout
+
+    asked = []
+
+    def _quote(entity_id, payer_user_id, codes, *, at, before=None):
+        asked.append((frozenset(codes), at))
+        return {"amount": by_codes[frozenset(codes)], "currency": "HKD",
+                "anchor_is_new": False}
+
+    monkeypatch.setattr(checkout, "quote_transfer_charge", _quote)
+    return asked
+
+
+def _named(monkeypatch, names):
+    """Stand in for the catalog. ``billing_plan_for_codes`` is what turns a module SET
+    into the product name the customer sees on their invoice."""
+    from types import SimpleNamespace
+
+    from blueprints.subscription.services import store
+
+    def _plan(codes):
+        display = names if isinstance(names, str) else names.get(frozenset(codes))
+        return SimpleNamespace(display_name=display) if display else None
+
+    monkeypatch.setattr(store, "billing_plan_for_codes", _plan)
+
+
+def test_two_trials_ending_together_are_quoted_as_one_bundle(db_session, monkeypatch):
+    """The bundle IS the discount. Pricing each module alone and adding them up overstates
+    what the customer will actually pay — the same class of error as quoting the wrong
+    window, and on the same screen."""
+    end = NOW + timedelta(days=14)
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_trial_row(code="BILL"), _trial_row(code="PETTY_CASH")],
+    )
+    asked = _priced(monkeypatch, {frozenset({"BILL", "PETTY_CASH"}): 30097})
+    _named(monkeypatch, "Super Minty")
+
+    disclosure = transfers.trial_disclosure(ENTITY, NEW)
+
+    assert len(disclosure) == 1, "one conversion date, one charge, one line"
+    assert disclosure[0]["codes"] == ["BILL", "PETTY_CASH"]
+    assert disclosure[0]["amount"] == 30097
+    # NAMED by the set too, not just priced by it — the bundle is a product, and
+    # "Super Minty" is what the customer will see on the invoice.
+    assert disclosure[0]["label"] == "Super Minty"
+    assert asked == [(frozenset({"BILL", "PETTY_CASH"}), end)], (
+        "priced once, as a set, at the conversion date"
+    )
+
+
+def test_trials_ending_on_different_days_are_separate_charges(db_session, monkeypatch):
+    """They convert on different days, so they really are two charges — and collapsing
+    them into one line would misstate both the amount and the date."""
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_trial_row(code="BILL", days=7), _trial_row(code="PETTY_CASH", days=21)],
+    )
+    _priced(monkeypatch, {frozenset({"BILL"}): 28000,
+                          frozenset({"PETTY_CASH"}): 28000})
+    _named(monkeypatch, {frozenset({"BILL"}): "Payment Request",
+                         frozenset({"PETTY_CASH"}): "Petty Cash"})
+
+    disclosure = transfers.trial_disclosure(ENTITY, NEW)
+
+    assert [d["codes"] for d in disclosure] == [["BILL"], ["PETTY_CASH"]]
+    assert [d["label"] for d in disclosure] == ["Payment Request", "Petty Cash"]
+    assert [d["trial_end"] for d in disclosure] == sorted(
+        d["trial_end"] for d in disclosure
+    ), "soonest first — it is the one that needs attention"
+
+
+def test_an_entity_with_no_trials_discloses_nothing(db_session, monkeypatch):
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_Row(phase="active")])
+    assert transfers.trial_disclosure(ENTITY, NEW) == []
+
+
+def test_a_trial_that_cannot_be_priced_is_still_disclosed(db_session, monkeypatch):
+    """Being told a module is on trial with the amount missing beats being told nothing
+    about it at all."""
+    from blueprints.subscription.services import checkout
+
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_trial_row()])
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("no plan prices that")
+
+    monkeypatch.setattr(checkout, "quote_transfer_charge", _boom)
+
+    disclosure = transfers.trial_disclosure(ENTITY, NEW)
+
+    assert len(disclosure) == 1
+    assert disclosure[0]["codes"] == ["PETTY_CASH"]
+    assert disclosure[0]["amount"] is None
+
+
+def test_an_unpriceable_set_still_gets_a_readable_name(db_session, monkeypatch):
+    """No catalog row for the combination, so no plan name — but the customer must still
+    be told which module is on trial. Falls back to the phrase the emails already use,
+    rather than showing them a raw code like ``PETTY_CASH``."""
+    from blueprints.subscription.services import store
+
+    transfers, _ = _wire(monkeypatch, db_session, rows=[_trial_row(code="PETTY_CASH")])
+    monkeypatch.setattr(store, "billing_plan_for_codes", lambda codes: None)
+    _priced(monkeypatch, {frozenset({"PETTY_CASH"}): 28000})
+
+    disclosure = transfers.trial_disclosure(ENTITY, NEW)
+
+    assert disclosure[0]["label"] == "Petty Cash"
+
+
+def test_the_cancelling_refusal_offers_the_remedy_rather_than_a_wait(db_session, monkeypatch):
+    """Un-cancelling while the extension is still pending DELETES it — nobody has been
+    billed, so ``_reactivate_module_in_house`` just clears the number. Telling someone to
+    wait for the next invoice sent them away for up to a month to reach the same place one
+    click would."""
+    transfers, _ = _wire(
+        monkeypatch, db_session, rows=[_Row(ext_state="pending", ext_amount=2746)],
+    )
+
+    reasons = transfers.transfer_blockers(ENTITY, from_user_id=OLD, to_user_id=NEW)
+
+    assert "Un-cancel it" in reasons[0]
+    assert "next invoice" not in reasons[0]
+
+
+def test_only_the_most_blocking_reason_reaches_the_screen(db_session, monkeypatch):
+    """An entity can trip several at once. Four problems in a stack is a wall to triage,
+    not an instruction — and fixing the wrong one first is often impossible anyway."""
+    from blueprints.subscription.services import portal
+
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        # Cancelling AND nothing billing forward: two reasons, one actionable.
+        rows=[_Row(phase="scheduled_cancel", ext_state="pending", ext_amount=2746)],
+    )
+    all_reasons = transfers.transfer_blockers(
+        ENTITY, from_user_id=OLD, to_user_id=NEW
+    )
+    assert len(all_reasons) > 1, "the service still knows about all of them"
+
+    # The read model starts from a real entity row, unlike the service tests above.
+    from models.db import Entity
+
+    db_session.session.add(
+        Entity(id=ENTITY, name="Handover Co", country_code="HK", status="active")
+    )
+    db_session.session.commit()
+
+    monkeypatch.setattr(portal, "_admin_candidates",
+                        lambda eid: [{"id": NEW, "name": "N", "email": "n@t.com"}])
+    payload = portal.build_subscriber_options(OLD, ENTITY)
+
+    assert payload is not None
+    assert len(payload["blockers"]) == 1, "the screen shows one"
+    assert payload["blockers"][0] == all_reasons[0], "and it is the most blocking one"
+
+
+def test_a_trial_beside_an_active_module_is_priced_as_an_upgrade(db_session, monkeypatch):
+    """The conversion does NOT price a trial as a fresh join. By the time it converts the
+    payer is already being billed for whatever was active, so the trial costs its margin
+    inside the resulting bundle.
+
+    Found on real data: a trial beside one active module quoted 219.41 as a join against
+    94.03 as the upgrade — a promise of more than double the real charge, on the screen
+    where somebody decides whether to take the company on.
+    """
+    from blueprints.subscription.services import checkout
+
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_Row(code="BILL", phase="active"), _trial_row(code="PETTY_CASH")],
+    )
+    monkeypatch.setattr(checkout, "_billed_codes_in_house", lambda eid: {"BILL"})
+    asked = _priced(monkeypatch, {frozenset({"PETTY_CASH"}): 9403})
+    _named(monkeypatch, "Petty Cash")
+
+    disclosure = transfers.trial_disclosure(ENTITY, NEW)
+
+    assert disclosure[0]["amount"] == 9403
+    # Only the converting module is priced; the active one is the baseline, not a line.
+    assert [codes for codes, _at in asked] == [frozenset({"PETTY_CASH"})]
+
+
+def test_the_before_set_reaches_the_pricer(db_session, monkeypatch):
+    """Guards the actual regression: dropping ``before`` silently reverts to join pricing,
+    and the figure just gets bigger with no error anywhere."""
+    from blueprints.subscription.services import checkout
+
+    seen = {}
+
+    def _quote(entity_id, payer_user_id, codes, *, at, before=None):
+        seen["before"] = set(before or set())
+        return {"amount": 9403, "currency": "HKD", "anchor_is_new": False}
+
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_Row(code="BILL", phase="active"), _trial_row(code="PETTY_CASH")],
+    )
+    monkeypatch.setattr(checkout, "_billed_codes_in_house", lambda eid: {"BILL"})
+    monkeypatch.setattr(checkout, "quote_transfer_charge", _quote)
+    _named(monkeypatch, "Petty Cash")
+
+    transfers.trial_disclosure(ENTITY, NEW)
+
+    assert seen["before"] == {"BILL"}, "the already-billed module must be priced against"
+
+
+def test_a_later_trial_counts_the_earlier_one_as_already_billed(db_session, monkeypatch):
+    """Two trials ending on different days convert in sequence. By the time the second
+    lands the first is active and being paid for, so it belongs in the second's baseline —
+    otherwise the second is quoted as though it were joining alone."""
+    from blueprints.subscription.services import checkout
+
+    befores = []
+
+    def _quote(entity_id, payer_user_id, codes, *, at, before=None):
+        befores.append(set(before or set()))
+        return {"amount": 1000, "currency": "HKD", "anchor_is_new": False}
+
+    transfers, _ = _wire(
+        monkeypatch, db_session,
+        rows=[_trial_row(code="BILL", days=7),
+              _trial_row(code="PETTY_CASH", days=21)],
+    )
+    monkeypatch.setattr(checkout, "_billed_codes_in_house", lambda eid: set())
+    monkeypatch.setattr(checkout, "quote_transfer_charge", _quote)
+    _named(monkeypatch, "X")
+
+    transfers.trial_disclosure(ENTITY, NEW)
+
+    assert befores == [set(), {"BILL"}], (
+        "the earlier conversion is part of what the later one upgrades from"
+    )

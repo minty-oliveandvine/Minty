@@ -111,6 +111,13 @@ def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
     verbatim only when they look like prose — a lowercase machine token is replaced with
     generic copy on the way through, so a code here becomes "something went wrong".
 
+    ORDER IS PRIORITY, and callers rely on it. The refusal paths already answer with
+    ``reasons[0]``, and the portal shows only the first, so the list is built most-blocking
+    first: who you are, then whether the money is settled, then whether the recipient can
+    take it on. Someone shown four problems at once cannot tell which to fix, and fixing
+    the wrong one first often is not even possible — there is no point adjusting a card for
+    a person who is not an admin yet.
+
     EVALUATED TWICE: at offer, and again inside accept. Every one of these can change in
     the days between — the payer can enter dunning, a module can be cancelled or go to
     trial, the nominee can be demoted or deactivated, a card can be removed — and nothing
@@ -152,35 +159,54 @@ def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
     # 3. A pending cancel-extension is money the OUTGOING payer owes. It rides the module
     #    row, so moving the row moves the debt onto the new payer's invoice — and makes it
     #    uncollectable from the person who actually incurred it.
-    if any(
-        row.extension_state == EXT_PENDING and (row.extension_amount or 0) > 0
+    #    The remedy is UN-CANCELLING, not waiting. While the extension is still pending
+    #    nobody has been billed for it, so ``_reactivate_module_in_house`` simply deletes
+    #    the number — "no invoice item to remove, no credit note, no money moved in either
+    #    direction". Telling someone to wait for the next invoice sends them away for up
+    #    to a month to reach the same place one click would.
+    cancelling = [
+        row.function_code
         for row in rows
-    ):
+        if row.extension_state == EXT_PENDING and (row.extension_amount or 0) > 0
+    ]
+    if cancelling:
         reasons.append(
-            "There's an unbilled cancellation charge on this company. "
-            "It'll be collected on the next invoice — hand the company over after that."
+            "A module here is cancelling, and the charge for its last days hasn't been "
+            "billed yet. Un-cancel it and the charge goes away, then you can hand the "
+            "company over."
         )
 
-    # 4. A trial converting after the handover would charge the NEW payer's card on the
-    #    OLD payer's consent row, at an amount nobody showed them — and with no warning
-    #    email, because the trial-ending notice is deduped per entity and already went to
-    #    the old payer. If they have no card it expires the module outright instead.
-    if any(row.phase == PHASE_TRIAL for row in rows):
-        reasons.append(
-            "This company has a module still on trial. Once the trial ends and the "
-            "subscription starts, it can be handed over."
-        )
-
-    # 4b. NOTHING LEFT TO PAY FOR. An entity whose only modules are expired trials or
-    #     finished cancellations still names a payer on those dead rows, so every check
-    #     above passes — but ``_billable_codes`` comes back empty and the accept refuses.
+    # 4. A TRIAL IS NO LONGER A REFUSAL. It used to be, for three reasons, and all three
+    #    have since been dealt with:
     #
-    #     Caught HERE rather than there because the difference is who finds out. Left to
-    #     the accept, the offer is allowed, the email goes out, and the recipient is the
-    #     one told it cannot happen — for a reason that was already true when it was sent.
-    if not _billable_codes(entity_id):
+    #      * the conversion would charge the new card on the OLD payer's consent — fixed
+    #        when consent became per (entity, payer); the accept records the incoming
+    #        payer's own row, and ``_convert_due_trials`` asks about the payer on the row;
+    #      * the amount was never shown — now disclosed by ``trial_disclosure`` on the
+    #        accept screen, priced by the same function that charges it;
+    #      * the warning email could never reach them, because the trial dedupe key was
+    #        entity-scoped and the outgoing payer had already consumed it — the key now
+    #        carries the payer.
+    #
+    #    What makes the handover coherent rather than merely permitted is that the free
+    #    days genuinely travel: ``trial_end`` has one writer and no path moves it, and the
+    #    trial stays once-per-entity, so the incoming payer inherits a spent trial rather
+    #    than minting a fresh one.
+
+    # 4b. NOTHING LEFT AT ALL. An entity whose only modules are expired trials or finished
+    #     cancellations still names a payer on those dead rows, so every check above
+    #     passes — but there is nothing to hand over and nothing to charge.
+    #
+    #     A RUNNING TRIAL COUNTS as something to hand over even though it is not billing
+    #     forward: it is worth real money to the recipient and converts on their card. So
+    #     this asks the broader question than ``_billable_codes`` alone.
+    #
+    #     Caught HERE rather than at the accept because the difference is who finds out.
+    #     Left to the accept, the offer is allowed, the email goes out, and the recipient
+    #     is the one told it cannot happen — for a reason already true when it was sent.
+    if not _billable_codes(entity_id) and not _trial_rows(entity_id):
         reasons.append(
-            "There's no active subscription on this company to hand over. "
+            "There's nothing active on this company to hand over. "
             "Subscribe a module first, then it can be handed over."
         )
 
@@ -295,11 +321,16 @@ def incoming_transfers_payload(user_id) -> list[dict]:
                 "entity_name": getattr(entity, "name", None) or "",
                 "from_name": _display_name(asker),
                 "quote": quote,
+                # What they inherit that is not being charged for today — free days now,
+                # a charge on their card at its own date. Accepting commits them to it.
+                "trials": trial_disclosure(offer.entity_id, offer.to_user_id),
+                # One reason, the most blocking — same rule as the offering screen, and
+                # the same one ``respond_to_transfer`` answers with.
                 "blockers": transfer_blockers(
                     offer.entity_id,
                     from_user_id=offer.from_user_id,
                     to_user_id=offer.to_user_id,
-                ),
+                )[:1],
             }
         )
     return out
@@ -336,7 +367,13 @@ def quote_transfer(entity_id, *, to_user_id, at=None) -> dict | None:
 
 
 def _billable_codes(entity_id) -> set[str]:
-    """The module codes the new payer takes on — everything still billing forward."""
+    """The module codes the new payer is CHARGED FOR at accept — billing forward only.
+
+    Deliberately excludes trials. A trial is worth something to the recipient and does
+    move with the entity, but its days are free, so charging for them at the handover
+    would bill somebody for a period nobody is paying for. It becomes billable the moment
+    it converts, on their own card, at its own end date.
+    """
     from blueprints.subscription.services import access
 
     return {
@@ -344,6 +381,108 @@ def _billable_codes(entity_id) -> set[str]:
         for row in store.rows_for_entity(entity_id)
         if access.is_billing_forward(phase=row.phase)
     }
+
+
+def trial_disclosure(entity_id, to_user_id) -> list[dict]:
+    """What the incoming payer will be charged for trials they inherit, and when.
+
+    Accepting a handover now commits someone to a charge that lands weeks later, so the
+    screen has to name it. Returns one entry per CONVERSION DATE:
+    ``{codes, trial_end, amount, currency, anchor_is_new}``.
+
+    GROUPED BY ``trial_end`` AND PRICED AS A SET, because pricing is per module set. Two
+    modules ending on the same day convert in one charge at the bundle rate; quoting them
+    separately would disclose figures that sum to MORE than the customer is charged.
+    Modules ending on different days are genuinely separate charges, so they are separate
+    lines. ``notify_trials_ending`` groups the same way, and following it keeps the
+    accept screen and the warning email saying the same thing.
+
+    Priced by ``quote_transfer_charge`` — the same function that takes the money — with
+    ``at=trial_end``. It is pure: it reads the incoming payer's cycle and writes nothing,
+    so opening the screen cannot anchor anybody.
+
+    AN ESTIMATE, and the caller must present it as one. It is priced against the incoming
+    payer's anchor as it stands today; if they have none, the conversion will anchor them
+    at conversion time and bill a full period instead. ``anchor_is_new`` says which case
+    this is so the screen can word it honestly.
+    """
+    from blueprints.subscription.services import checkout
+
+    by_date: dict[datetime, set[str]] = {}
+    for row in _trial_rows(entity_id):
+        by_date.setdefault(_aware(row.trial_end), set()).add(row.function_code.upper())
+
+    # WHAT THEY ALREADY PAY FOR on this entity, which is what the conversion will price
+    # against. A trial landing beside an active module is an upgrade to the bundle, not a
+    # fresh join, and the two differ by more than double on a two-module entity.
+    #
+    # Accumulated across dates, in order: a trial converting in August is active by the
+    # time one converting in September does, so it belongs in the second one's "before".
+    # ``_forecast_conversion_charges`` simulates the same sequence for the settings page.
+    billed = {str(c).upper() for c in checkout._billed_codes_in_house(entity_id)}
+
+    out = []
+    for trial_end, codes in sorted(by_date.items()):
+        try:
+            quote = checkout.quote_transfer_charge(
+                entity_id, to_user_id, codes, at=trial_end, before=billed
+            )
+        except Exception:
+            # A price we cannot compute must not hide the trial itself — being told a
+            # module is on trial with the amount missing beats being told nothing.
+            logger.exception(
+                "transfer: could not price the trial ending {} on entity {}",
+                trial_end, entity_id,
+            )
+            quote = None
+        out.append({
+            "codes": sorted(codes),
+            # NAMED BY THE SET, because it is PRICED by the set. Two modules converting
+            # together are one plan — "Super Minty", not "Petty Cash and Payment Request"
+            # — and that is the name that will appear on the invoice, so it is the name
+            # to disclose. Falls back to the module phrase the emails use if the catalog
+            # cannot price the combination, which is the same fallback shape as
+            # ``build_renewal``: name it rather than leave a blank.
+            "label": _plan_label(codes),
+            "trial_end": trial_end,
+            "amount": (quote or {}).get("amount"),
+            "currency": (quote or {}).get("currency"),
+            "anchor_is_new": (quote or {}).get("anchor_is_new"),
+        })
+        billed |= {str(c).upper() for c in codes}
+    return out
+
+
+def _plan_label(codes) -> str:
+    """What this set of modules is called — the plan's own name where one prices them.
+
+    ``{PETTY_CASH, BILL}`` is "Super Minty", not two modules listed with an "and". The
+    bundle IS a product, it is what the invoice line says, and naming it any other way
+    describes a purchase the customer will not recognise on their statement.
+    """
+    from blueprints.subscription.services import notify as notifier
+
+    try:
+        plan = store.billing_plan_for_codes(set(codes))
+        if plan is not None and (plan.display_name or "").strip():
+            return plan.display_name.strip()
+    except Exception:
+        logger.exception("transfer: could not name the plan for {}", sorted(codes))
+    return notifier.modules_phrase(sorted(codes))
+
+
+def _trial_rows(entity_id) -> list:
+    """Rows still running a free trial — inherited whole, and charged for later.
+
+    Kept apart from ``_billable_codes`` because the two answer different questions: what
+    is charged at accept, and what is being handed over. A trial-only entity has nothing
+    in the first and something real in the second.
+    """
+    return [
+        row
+        for row in store.rows_for_entity(entity_id)
+        if row.phase == PHASE_TRIAL and row.trial_end is not None
+    ]
 
 
 # --- offer / cancel / decline -------------------------------------------------------
@@ -467,8 +606,17 @@ def _accept(offer, user_id, now) -> tuple[bool, str, dict | None]:
 
     entity_id = offer.entity_id
     codes = _billable_codes(entity_id)
+
+    # NOTHING TO CHARGE IS NOT A FAILURE. A trial-only entity has been paid for by nobody,
+    # so there is no window to buy and no invoice to raise — the handover is just the flip.
+    #
+    # Skipping straight to ``_complete`` also skips the whole journal: no ``charging``
+    # state, no idempotency key, no external call. That is safe precisely because the
+    # crash window the journal exists to close is the gap between taking money and moving
+    # the pointer, and here no money moves. The blockers have already refused the
+    # genuinely empty entity, so reaching this with no codes means a live trial.
     if not codes:
-        return False, "There's nothing active on this company to hand over.", None
+        return _complete(offer, actor_user_id=user_id, now=now)
 
     # READ THE HANDOVER INSTANT NOW, never the value quoted when the offer was made.
     # ``run_renewals`` advances ``paid_through`` on every successful renewal, so an offer
@@ -690,9 +838,9 @@ def _notify(offer, kind: str) -> None:
             recipient,
             event,
             # Per TRANSFER, not per entity: a re-offer after a decline is a new request
-            # and must send, where an entity-scoped key would swallow it — the mistake
-            # the trial keys already make, which is why a transferred entity's trial
-            # warning can never reach its new payer.
+            # and must send, where an entity-scoped key would swallow it. The trial keys
+            # used to make exactly that mistake — which is why a transferred entity's
+            # trial warning could never reach its new payer — and now carry the payer too.
             dedupe_key=f"transfer-{offer.id}-{kind}",
             context={
                 "entity_id": offer.entity_id,

@@ -780,3 +780,80 @@ def test_a_trial_ending_TODAY_is_left_to_the_trial_end_job(app, db_session, monk
         result = checkout.notify_trials_ending(days_before=3)
 
         assert result["warned"] == []
+
+
+def test_a_trial_warning_reaches_a_payer_the_entity_was_handed_to(
+    app, db_session, mail, monkeypatch
+):
+    """The whole reason "change subscriber" used to refuse an entity on trial.
+
+    The uniqueness constraint is (event, dedupe_key) with ``user_id`` deliberately outside
+    it, so the KEY is the only thing that can tell two recipients apart. A handover changes
+    neither the entity, nor the codes, nor ``trial_end`` — so a key built from those three
+    regenerates identically, ``_claim`` finds the row already sent to the outgoing payer,
+    and the person who is actually about to be charged is told nothing.
+
+    That is not a missed reminder. This email branches on ``needs_card`` into "action
+    needed" versus "nothing you need to do", so silence is indistinguishable from
+    reassurance right up until the money leaves.
+    """
+    from blueprints.subscription.services import checkout
+    from models.db import EntityModuleSubscription, SubscriptionEmailLog
+
+    with app.app_context():
+        outgoing = _make_payer(db_session, email="outgoing@test.com")
+        incoming = _make_payer(db_session, email="incoming@test.com")
+
+        trial_end = datetime(2026, 8, 20, 5, 0, tzinfo=UTC)
+        row = EntityModuleSubscription(
+            id=str(uuid.uuid4()), entity_id="e1", function_code="BILL",
+            payer_user_id=outgoing, phase="trial", trial_end=trial_end,
+        )
+        db_session.session.add(row)
+        db_session.session.commit()
+
+        monkeypatch.setattr(
+            checkout.clock, "now", lambda: datetime(2026, 8, 17, 8, 10, tzinfo=UTC)
+        )
+
+        # Warned once, to the payer at the time.
+        assert [w["entity_id"] for w in
+                checkout.notify_trials_ending(days_before=3)["warned"]] == ["e1"]
+
+        # The handover: only the payer moves. Entity, codes and trial_end are untouched,
+        # which is exactly why an entity-scoped key would swallow the second warning.
+        row.payer_user_id = incoming
+        db_session.session.commit()
+
+        assert [w["entity_id"] for w in
+                checkout.notify_trials_ending(days_before=3)["warned"]] == ["e1"]
+
+        sent = SubscriptionEmailLog.query.filter_by(event="trial_ending").all()
+        assert len(sent) == 2, "each payer gets their own warning"
+        assert {log.user_id for log in sent} == {outgoing, incoming}
+        assert len({log.dedupe_key for log in sent}) == 2, "the keys must differ"
+
+
+def test_the_same_payer_is_still_only_warned_once(app, db_session, mail, monkeypatch):
+    """Payer-scoping the key must not become a licence to re-send. The warning window
+    re-matches the same trial on every day it spans, and the log is the only thing
+    keeping that quiet."""
+    from blueprints.subscription.services import checkout
+    from models.db import EntityModuleSubscription, SubscriptionEmailLog
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        db_session.session.add(EntityModuleSubscription(
+            id=str(uuid.uuid4()), entity_id="e1", function_code="BILL",
+            payer_user_id=payer, phase="trial",
+            trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
+        ))
+        db_session.session.commit()
+
+        monkeypatch.setattr(
+            checkout.clock, "now", lambda: datetime(2026, 8, 17, 8, 10, tzinfo=UTC)
+        )
+        checkout.notify_trials_ending(days_before=3)
+        checkout.notify_trials_ending(days_before=3)
+
+        assert SubscriptionEmailLog.query.filter_by(event="trial_ending").count() == 1

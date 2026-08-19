@@ -554,6 +554,7 @@ def build_subscriber_options(user_id, entity_id) -> dict | None:
 
     blockers: list[str] = []
     quotes: dict[str, dict] = {}
+    inherited: dict[str, list] = {}
     if pending is None and rest:
         try:
             # ENTITY-level refusals, asked once. A candidate has to be named to ask, but
@@ -568,7 +569,11 @@ def build_subscriber_options(user_id, entity_id) -> dict | None:
                 # about the entity, and "that person needs a saved payment method" above
                 # a list of five people reads as though none of them could take it.
                 if not reason.startswith("That person")
-            ]
+            # ONE reason, the most blocking. ``transfer_blockers`` is ordered by priority
+            # and the refusal paths already answer with the first, so sending the whole
+            # list would let the screen say more than the POST will — and four problems at
+            # once is a wall the reader has to triage rather than an instruction.
+            ][:1]
             if not blockers:
                 # PER CANDIDATE, and the earlier version of this was simply wrong. The
                 # quote is NOT a fact about the entity: its window ends at the
@@ -585,10 +590,16 @@ def build_subscriber_options(user_id, entity_id) -> dict | None:
                     )
                     if priced is not None:
                         quotes[candidate["id"]] = priced
+                    # Trials the candidate would INHERIT — free days now, a charge on
+                    # their card later. Per candidate for the same reason the quote is:
+                    # the conversion is priced against their own cycle.
+                    inherited[candidate["id"]] = transfers.trial_disclosure(
+                        entity.id, candidate["id"]
+                    )
         except Exception:
             db.session.rollback()
             logger.exception("portal: could not price a handover for %s", entity.id)
-            blockers, quotes = [], {}
+            blockers, quotes, inherited = [], {}, {}
 
     return {
         "entity": {"entity_id": str(entity.id), "entity_name": entity.name or ""},
@@ -598,7 +609,12 @@ def build_subscriber_options(user_id, entity_id) -> dict | None:
             # Each carries ITS OWN price, because the amount depends on the recipient's
             # billing anchor rather than on the entity.
             *(
-                {**c, "is_current": False, "quote": quotes.get(c["id"])}
+                {
+                    **c,
+                    "is_current": False,
+                    "quote": quotes.get(c["id"]),
+                    "trials": inherited.get(c["id"]) or [],
+                }
                 for c in rest
             ),
         ],
