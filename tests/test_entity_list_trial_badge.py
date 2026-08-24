@@ -146,6 +146,15 @@ def test_the_badge_renders_only_for_a_trialing_entity(app):
         html = render_template("entity/index.html", organizations=orgs)
 
     trialing, paying = html.split("Paying Co", 1)
-    assert "Free Trial" in trialing
-    assert "Free trial: Petty Cash" in trialing, "the tooltip names the module"
-    assert "Free Trial" not in paying
+    # The wordmark is SVG outlines, not text, so the badge is found by its <use> of
+    # the sprite rather than by searching for the words "Free Trial". Matched on the
+    # href specifically: the id names the sprite and the stylesheet comment mentions
+    # it, and both of those are in the page whether a badge was drawn or not.
+    assert 'href="#trialBadgeTag"' in trialing
+    assert "Free trial: Petty Cash" in trialing, "the accessible name names the module"
+    assert 'href="#trialBadgeTag"' not in paying
+
+    # Drawn per card, DEFINED once — the sprite is ~4KB of path data and the list can
+    # be long.
+    assert html.count('href="#trialBadgeTag"') == 1
+    assert html.count('id="trialBadgeTag"') == 1
