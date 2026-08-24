@@ -1,0 +1,217 @@
+{# Styles for the Terms acceptance panel.
+
+   Shared by the standalone page (legal/accept.html) and the modal that covers
+   the Select Company list. Include ONCE per page, inside <head> or a styles
+   block.
+
+   Plain CSS rather than Tailwind utilities: this renders on the one screen a
+   person cannot navigate away from, and a flash of unstyled legal text while a
+   CDN script loads is the worst possible place for it. #}
+<style>
+  .tc-panel { color: #111827; }
+
+  /* Page mode — the standalone /legal/accept route. Wider than a single
+     column needs because the layout is two columns: document on the left,
+     illustration and actions on the right. */
+  .tc-page { max-width: 1140px; margin: 0 auto; padding: 48px 20px 64px; }
+
+  /* ---- Two-column shell ---- */
+  .tc-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 44px; align-items: start;
+  }
+  .tc-main { min-width: 0; }
+  .tc-side { display: flex; flex-direction: column; gap: 20px; }
+
+  /* ---- Heading ---- */
+  .tc-title {
+    font-size: 34px; font-weight: 800; letter-spacing: -0.02em;
+    color: #111827; margin: 0 0 10px; line-height: 1.2;
+  }
+  .tc-lead {
+    color: #6B7280; font-size: 15.5px; line-height: 1.6; margin: 0 0 24px;
+  }
+
+  /* ---- Notices ---- */
+  .tc-note, .tc-draft {
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
+    font-size: 14px; line-height: 1.55;
+  }
+  .tc-note  { background: #ECFDFB; border: 1px solid #A7E8E1; color: #115E56; }
+  .tc-draft { background: #FFFBEB; border: 1px solid #FCD34D; color: #92400E; }
+  .tc-note a { color: #0F7A6E; font-weight: 600; text-decoration: underline; }
+
+  /* ---- Document card ---- */
+  .tc-card {
+    background: #fff; border: 1px solid #E5E7EB; border-radius: 12px;
+    padding: 24px 12px 24px 26px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 14px rgba(16,24,40,.05);
+  }
+  .tc-updated { font-size: 13px; color: #9CA3AF; margin: 0 14px 16px 0; }
+  /* Scrollable, not paginated: the whole document is present on the page, so
+     "I was not shown it" is not available as an argument. */
+  .tc-doc {
+    /* Viewport-relative so a tall window shows more of the document, capped so
+       an enormous monitor does not produce one absurd column of text. */
+    max-height: min(58vh, 620px); overflow-y: auto; padding-right: 14px;
+    scrollbar-width: thin; scrollbar-color: #D1D5DB transparent;
+  }
+  .tc-doc::-webkit-scrollbar { width: 6px; }
+  .tc-doc::-webkit-scrollbar-track { background: transparent; }
+  .tc-doc::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 999px; }
+  .tc-doc h1, .tc-doc h2 {
+    font-size: 15px; font-weight: 700; color: #111827; margin: 20px 0 8px;
+    line-height: 1.4;
+  }
+  .tc-doc > :first-child { margin-top: 0; }
+  .tc-doc p  { font-size: 13.5px; line-height: 1.75; color: #6B7280; margin: 0 0 12px; }
+  .tc-doc ul { margin: 0 0 14px 20px; padding: 0; }
+  .tc-doc li { font-size: 13.5px; line-height: 1.7; color: #6B7280; margin-bottom: 6px; }
+
+  /* ---- Agreement tick box ---- */
+  .tc-check {
+    display: flex; gap: 12px; align-items: flex-start;
+    margin: 22px 0 0; cursor: pointer;
+  }
+  /* Custom control: the design calls for a teal rounded square with a white
+     tick, which the native checkbox cannot render. appearance:none is
+     deliberate HERE (unlike the sign-up box, which keeps the native control)
+     because every checked and unchecked state below is defined explicitly. */
+  .tc-check input {
+    appearance: none; -webkit-appearance: none;
+    width: 24px; height: 24px; flex: none; margin: 0;
+    border: 1.5px solid #D1D5DB; border-radius: 7px; background: #fff;
+    cursor: pointer; transition: background-color .15s ease, border-color .15s ease;
+  }
+  .tc-check input:hover { border-color: #9CA3AF; }
+  .tc-check input:checked {
+    background-color: #36C3B4; border-color: #36C3B4;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+    background-size: 14px; background-position: center; background-repeat: no-repeat;
+  }
+  .tc-check input:focus-visible { outline: 2px solid #36C3B4; outline-offset: 2px; }
+  /* Locked until the document has been read to the end. Muted rather than
+     invisible: the box has to stay legible so it is obvious what is waiting. */
+  .tc-check input:disabled {
+    background: #F3F4F6; border-color: #E5E7EB; cursor: not-allowed;
+  }
+  .tc-check:has(input:disabled) { cursor: not-allowed; }
+  .tc-check:has(input:disabled) span { color: #9CA3AF; }
+  /* Links stay readable and clickable even while the box is locked — someone
+     may well want to open the full document in a tab to read it there. */
+  .tc-check:has(input:disabled) a { color: #0F7A6E; }
+  /* Present for assistive tech, absent from the page. Not display:none —
+     that would hide it from screen readers too, which is the whole point of
+     keeping it. */
+  .tc-sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+    white-space: nowrap; border: 0;
+  }
+  .tc-check span { font-size: 15.5px; line-height: 1.5; color: #374151; }
+  /* #0F7A6E, not the button's #36C3B4: this is small text, and the brand teal
+     on white is about 2:1 contrast — unreadable for anyone with low vision.
+     #0F7A6E is the token the auth pages already use for links and clears AA. */
+  .tc-check a { color: #0F7A6E; font-weight: 600; text-decoration: none; }
+  .tc-check a:hover { text-decoration: underline; }
+
+  /* ---- Illustration ----
+     PORTRAIT 6:7 box against a LANDSCAPE 4:3 source (2400x1792), on purpose.
+
+     Rendered at its own 4:3 the mascot is small: roughly a third of that file
+     is beige background either side of the cat. object-fit: cover scales the
+     image to fill this taller box and crops the surplus width — about 18% off
+     each edge — which is all background, so the cat itself comes out
+     substantially larger. This is what matches the reference framing.
+
+     If the artwork is ever recropped tighter, drop back to its natural ratio
+     rather than cropping twice. */
+  .tc-illus-img {
+    width: 100%; height: auto; display: block; border-radius: 14px;
+    aspect-ratio: 6 / 7; object-fit: cover; object-position: center;
+  }
+
+  /* ---- Actions ---- */
+  /* Capped and centred under the illustration: at 420px the buttons would
+     stretch to the full column width and stop reading as buttons. */
+  .tc-actions {
+    display: flex; flex-direction: column; gap: 12px;
+    width: 100%; max-width: 300px; margin: 0 auto;
+  }
+  .tc-cancel {
+    background: #fff; border: 1px solid #D1D5DB; border-radius: 999px;
+    padding: 12px 24px; font-size: 15px; font-weight: 500; color: #374151;
+    text-decoration: none; text-align: center;
+    transition: background-color .15s ease;
+  }
+  .tc-cancel:hover { background: #F9FAFB; }
+  .tc-accept {
+    background: #36C3B4; color: #fff; border: 0; border-radius: 999px;
+    padding: 13px 24px; font-size: 15px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    transition: background-color .15s ease;
+  }
+  .tc-accept:hover:not(:disabled) { background: #2BA99C; }
+  .tc-accept:disabled { background: #D1D5DB; cursor: not-allowed; }
+  .tc-accept svg { width: 16px; height: 16px; }
+
+  .tc-error {
+    color: #B91C1C; font-size: 14px; min-height: 1.1em; text-align: center;
+  }
+  .tc-hash {
+    margin-top: 26px; text-align: center; font-size: 11px;
+    color: #D1D5DB; word-break: break-all;
+  }
+
+  /* ==================================================================
+     Modal mode — the panel laid over the Select Company list.
+
+     No close button, no click-outside dismiss, no Escape handler. This is a
+     gate, not a dialog: the only ways out are Accept (which records consent)
+     and Cancel (which logs out). A dismissible gate is decorative.
+     ================================================================== */
+  .tc-modal-backdrop {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+    background: rgba(249, 250, 251, 0.72);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    overflow-y: auto;
+  }
+  .tc-modal {
+    background: #fff; border-radius: 18px; width: 100%; max-width: 1180px;
+    padding: 36px 38px 32px; margin: auto;
+    box-shadow: 0 10px 40px rgba(16, 24, 40, .16), 0 2px 6px rgba(16, 24, 40, .06);
+  }
+  /* Tighter than page mode: the modal has to fit inside the viewport, whereas
+     the standalone page can simply grow and let the window scroll. */
+  .tc-modal .tc-grid { grid-template-columns: minmax(0, 1fr) 400px; gap: 40px; }
+  .tc-modal .tc-title { font-size: 27px; }
+  .tc-modal .tc-lead { font-size: 14px; margin-bottom: 18px; }
+  .tc-modal .tc-card { padding: 18px 10px 18px 20px; }
+  /* The backdrop scrolls if this ever overflows, so the cap is about comfort
+     rather than safety: heading + banner + tick box come to roughly 300px of
+     chrome, leaving this comfortably inside a 900px-tall window. */
+  .tc-modal .tc-doc { max-height: min(52vh, 520px); padding-right: 12px; }
+  .tc-modal .tc-doc h1, .tc-modal .tc-doc h2 { font-size: 14px; margin: 16px 0 6px; }
+  .tc-modal .tc-doc p,
+  .tc-modal .tc-doc li { font-size: 13.5px; }
+  .tc-modal .tc-check span { font-size: 14px; }
+  .tc-modal .tc-cancel { padding: 10px 20px; font-size: 14px; }
+  .tc-modal .tc-accept { padding: 11px 20px; font-size: 14px; }
+
+  /* ---- Narrow: one column, illustration hidden ----
+     The illustration is decorative, and on a phone it would push the actual
+     agreement below the fold. The document and the buttons are what matter. */
+  @media (max-width: 860px) {
+    .tc-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .tc-modal .tc-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .tc-illus-img { display: none; }
+    .tc-side { gap: 12px; }
+  }
+  @media (max-width: 640px) {
+    .tc-title { font-size: 25px; }
+    .tc-modal { padding: 24px 20px 22px; border-radius: 14px; }
+    .tc-modal .tc-title { font-size: 22px; }
+  }
+</style>

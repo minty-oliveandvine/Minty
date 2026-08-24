@@ -123,8 +123,34 @@ def test_accept_page_shows_the_terms_and_a_logout_link(logged_in, db_session):
     screen is a trap, and Phase 4's gate would make it inescapable.
     """
     body = logged_in.get("/legal/accept").get_data(as_text=True)
-    assert "Accept and continue" in body
+    assert "Accept &amp; Continue" in body
+    # "Cancel" IS the way out — it points at logout. The label has changed twice
+    # with the redesigns; what must never change is that the link is there.
     assert "/logout" in body
+    assert "Cancel" in body
+
+
+def test_the_tick_box_is_gated_on_reading_to_the_end(logged_in, db_session):
+    """The box unlocks only once the document has been scrolled to its end.
+
+    The lock itself is client-side — the server cannot tell whether anyone
+    scrolled, and does not try to. What this asserts is that the affordance is
+    present and wired: the hint the box points at via aria-describedby, and the
+    two guards that stop the pattern locking people out (a document shorter
+    than its box, and the pixel tolerance at the bottom).
+    """
+    body = logged_in.get("/legal/accept").get_data(as_text=True)
+
+    # Screen-reader only — deliberately not shown on screen. Without it a blind
+    # user meets a disabled checkbox with no stated reason.
+    assert 'id="accept-scroll-hint"' in body
+    assert 'class="tc-sr-only"' in body
+    assert 'aria-describedby="accept-scroll-hint"' in body
+    # Rendered enabled, disabled by the script: a script that fails to load
+    # must leave the box usable rather than trap everyone behind it.
+    assert "disabled" not in body.split('id="accept-box"')[1].split(">")[0]
+    assert "scrollHeight <= doc.clientHeight" in body
+    assert "<= 4" in body
 
 
 def test_accept_page_checkbox_starts_unticked(logged_in, db_session):
@@ -188,7 +214,7 @@ def test_a_returning_user_sees_the_what_changed_note(
 
     body = logged_in.get("/legal/accept").get_data(as_text=True)
 
-    assert "We have updated our Terms of Use" in body
+    assert "We have made a meaningful change" in body
     assert "You previously agreed to version" in body
     # The superseded version stays reachable, so they can see what they had
     # agreed to before.
@@ -200,7 +226,7 @@ def test_a_first_time_user_does_not_see_the_what_changed_note(
 ):
     body = logged_in.get("/legal/accept").get_data(as_text=True)
 
-    assert "We have updated our Terms of Use" not in body
+    assert "We have made a meaningful change" not in body
     assert "You previously agreed to version" not in body
 
 

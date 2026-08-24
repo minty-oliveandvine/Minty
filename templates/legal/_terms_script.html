@@ -1,0 +1,116 @@
+{# Submit behaviour for the Terms acceptance panel.
+
+   Include ONCE per page, after legal/_terms_panel.html. Identical whether the
+   panel is the standalone page or the modal over the Select Company list —
+   the recording endpoint, the CSRF header and the 409 handling do not change
+   with where the panel is drawn. #}
+<script>
+  (function () {
+    var box = document.getElementById('accept-box');
+    var button = document.getElementById('accept-submit');
+    var error = document.getElementById('accept-error');
+    if (!box || !button) { return; }
+
+    // ----------------------------------------------------------------
+    // Read-to-the-end lock
+    //
+    // The tick box stays disabled until the document has actually been
+    // scrolled to its end, so "I was never shown it" is harder to argue.
+    //
+    // This is an INTERFACE control, not a security one. The server cannot
+    // tell whether anyone scrolled, and it does not try to — the binding
+    // check remains the consent record itself. Treat this as making the
+    // record more defensible, never as something that enforces anything.
+    // ----------------------------------------------------------------
+    (function lockUntilRead() {
+      var doc = document.querySelector('.tc-doc');
+      var hint = document.getElementById('accept-scroll-hint');
+      if (!doc) { return; }
+
+      function unlock() {
+        box.disabled = false;
+        if (hint) { hint.hidden = true; }
+        doc.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', check);
+      }
+
+      function atEnd() {
+        // Tolerance of 4px, not equality. Sub-pixel layout, browser zoom and
+        // fractional device pixel ratios all mean scrollTop + clientHeight can
+        // land a hair short of scrollHeight at the true bottom — and an exact
+        // comparison would leave the box locked forever for those users.
+        return doc.scrollHeight - doc.scrollTop - doc.clientHeight <= 4;
+      }
+
+      function check() {
+        // A document shorter than its own box has nothing to scroll. Without
+        // this branch those users could never satisfy the condition and would
+        // be locked out permanently — the classic failure of this pattern.
+        if (doc.scrollHeight <= doc.clientHeight + 4 || atEnd()) { unlock(); }
+      }
+
+      function onScroll() { if (atEnd()) { unlock(); } }
+
+      box.disabled = true;
+      if (hint) { hint.hidden = false; }
+      doc.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', check);
+
+      check();
+      // Web fonts and the illustration can change the document's height after
+      // first paint, which can turn a scrollable box into a non-scrollable one
+      // or vice versa. Re-check once everything has settled.
+      window.addEventListener('load', check);
+    })();
+
+    box.addEventListener('change', function () {
+      button.disabled = !box.checked;
+    });
+
+    button.addEventListener('click', function () {
+      if (!box.checked) { return; }
+      button.disabled = true;
+      if (error) { error.textContent = ''; }
+
+      fetch('{{ url_for("legal.accept_submit") }}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+          accepted: true,
+          terms_version: '{{ document.version }}'
+        })
+      })
+        .then(function (response) {
+          return response.json().then(function (body) {
+            return { status: response.status, body: body };
+          });
+        })
+        .then(function (result) {
+          if (result.status === 200) {
+            window.location.href = result.body.redirect_url;
+            return;
+          }
+          // The Terms changed while this panel was open. Reload so they read
+          // and agree to what is actually live now, rather than filing a
+          // record against wording that has been replaced.
+          if (result.status === 409) {
+            window.location.reload();
+            return;
+          }
+          if (error) {
+            error.textContent = result.body.message || 'Something went wrong. Please try again.';
+          }
+          button.disabled = false;
+        })
+        .catch(function () {
+          if (error) {
+            error.textContent = 'Could not reach the server. Please try again.';
+          }
+          button.disabled = false;
+        });
+    });
+  })();
+</script>

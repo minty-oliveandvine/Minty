@@ -1,0 +1,116 @@
+{# The Terms acceptance panel — heading, document, tick box, illustration, actions.
+
+   Shared by legal/accept.html (standalone page) and the modal over the Select
+   Company list, so the two can never drift apart. Whatever renders this must
+   also include legal/_terms_styles.html once and legal/_terms_script.html once.
+
+   Context it reads:
+     document          required — a legal.registry.LegalDocument
+     is_update         optional — True when re-consenting to a new version
+     previous_version  optional — the version they agreed to before
+     tc_show_hash      optional — default True; the modal hides the fingerprint #}
+<div class="tc-panel">
+  <div class="tc-grid">
+
+    {# ---- Left: the heading, the document, the tick box ---- #}
+    <div class="tc-main">
+      <h1 class="tc-title">Terms &amp; Conditions</h1>
+
+      {% if is_update %}
+      <p class="tc-lead">
+        We have made a meaningful change to our Terms, so we are asking you to
+        review and accept them again.
+      </p>
+      <div class="tc-note">
+        You previously agreed to version <strong>{{ previous_version }}</strong>. You can
+        read the version you agreed to before
+        <a href="{{ url_for('legal.terms_version', version=previous_version) }}" target="_blank" rel="noopener">here</a>.
+      </div>
+      {% else %}
+      <p class="tc-lead">
+        Please review and accept our Terms &amp; Conditions and Privacy Policy to
+        finish setting up your account.
+      </p>
+      {% endif %}
+
+      {% if document.show_draft_notice %}
+      <div class="tc-draft">
+        <strong>Draft.</strong> This wording is not final, so this screen is for
+        testing only.
+      </div>
+      {% endif %}
+
+      <div class="tc-card">
+        {# Only rendered when the version actually has an effective date. beta-1's
+           is None because the source .docx still says [DATE] — better a missing
+           line than an invented date on a legal document. #}
+        {% if document.effective_date %}
+        <p class="tc-updated">Last updated: {{ document.effective_date }}</p>
+        {% endif %}
+        <div class="tc-doc">{{ document.html | safe }}</div>
+      </div>
+
+      <label class="tc-check">
+        <!-- Starts unticked, always. A pre-ticked box is not agreement — the
+             person has to do something for it to mean anything.
+
+             Rendered ENABLED. The script disables it on load and re-enables it
+             once the document has been scrolled to the end. Doing it that way
+             round means a script that fails to load leaves the box usable
+             rather than trapping everyone behind a lock that never opens —
+             the same fail-open reasoning the request gate uses. -->
+        <input type="checkbox" id="accept-box" aria-describedby="accept-scroll-hint">
+        <span>
+          I have read and agree to the
+          <a href="{{ url_for('legal.terms') }}" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+          and
+          <a href="{{ url_for('legal.privacy') }}" target="_blank" rel="noopener">Privacy Policy</a>.
+        </span>
+      </label>
+
+      {# Not shown on screen — the lock explains itself well enough once you
+         try to tick the box. Kept for screen readers only: without it a blind
+         user meets a disabled checkbox with no stated reason. Toggled by the
+         same script that toggles the lock. #}
+      <p class="tc-sr-only" id="accept-scroll-hint" hidden>
+        Please scroll to the end of the Terms &amp; Conditions to continue.
+      </p>
+    </div>
+
+    {# ---- Right: the illustration, then the actions ---- #}
+    <aside class="tc-side">
+      {# alt="" on purpose — the illustration is decorative. A screen reader
+         announcing it would put noise between the user and the agreement they
+         are being asked to make. width/height describe the RENDERED 6:7 box
+         (see .tc-illus-img), not the file's own 4:3 — they exist so the
+         browser reserves the right space before the image loads and the
+         buttons below it do not jump. #}
+      <img class="tc-illus-img"
+           src="{{ url_for('static', filename='img/minty_important_update.png') }}"
+           alt="" width="400" height="467" decoding="async">
+
+      <div class="tc-actions">
+        {# "Cancel" logs out. Someone who will not agree has nowhere else to go —
+           every other route is gated — so leaving is the only coherent action.
+           The gate's allow-list keeps the logout route reachable for exactly
+           this reason. #}
+        <a class="tc-cancel" href="{{ url_for('auth.logout') }}">Cancel</a>
+        <button class="tc-accept" id="accept-submit" disabled>
+          Accept &amp; Continue
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <div class="tc-error" id="accept-error"></div>
+    </aside>
+
+  </div>
+
+  {% if tc_show_hash is not defined or tc_show_hash %}
+  <div class="tc-hash">Document fingerprint (SHA-256): {{ document.sha256 }}</div>
+  {% endif %}
+</div>

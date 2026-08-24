@@ -18,6 +18,7 @@ from blueprints.entity.services.modules import (build_subscription_notices,
                                                 module_display_names)
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
+from blueprints.legal.services.gate import outstanding_terms_context
 from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.integration import get_accounts_from_xero
 from blueprints.xero.services.settings import (
@@ -101,9 +102,16 @@ def entity_list():
             .filter(UserEntity.user_id == current_user.id)
             .all()
         )
+    # The Terms panel renders as a modal over this page — it is where the gate
+    # sends anyone who has not agreed. None means nothing is outstanding.
+    # Resolved before the empty-list branch on purpose: a brand-new user with
+    # no companies is exactly the person most likely to owe an acceptance, and
+    # they never reach index.html.
+    terms = outstanding_terms_context()
+
     if not rows:
         logger.info("Entity list is empty")
-        return render_template("entity/entity_list_empty.html")
+        return render_template("entity/entity_list_empty.html", terms=terms)
 
     # Which module icons each card shows. This resolver is fail-closed (no
     # entity_function_map row means OFF), which is what we want here — a module
@@ -141,7 +149,9 @@ def entity_list():
                 ),
             }
         )
-    return render_template("entity/index.html", organizations=organizations)
+    return render_template(
+        "entity/index.html", organizations=organizations, terms=terms
+    )
 
 
 @entity_bp.route("/entity/<string:id>")
