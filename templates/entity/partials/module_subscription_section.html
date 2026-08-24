@@ -173,7 +173,7 @@
     {# WRAPS, and the status column below is what wraps. Three columns on one line only
        works while the middle one can have the leftovers: the illustration is a fixed
        80px and the status column is shrink-0 around pills that are whitespace-nowrap —
-       "Free trial · ends 12 Sep" alone is ~200px — so on a phone the description was
+       "Free trial ends 12 Sep" alone is ~200px — so on a phone the description was
        left with about 60px and rendered one word per line down the whole card. #}
     <div class="flex flex-wrap items-start gap-4 rounded-2xl border border-gray-200/70 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
       <!-- Illustration -->
@@ -226,7 +226,11 @@
            second line is the missing half: which of the three it is. Grouped in one div
            so it sits under the status rather than taking the column's gap. #}
         <div class="text-left sm:text-right">
-          <span class="text-sm font-semibold text-[#F97362]">not active</span>
+          {# ``block`` is what puts the line below on its own row. The two grey <p>
+             sub-lines below broke the line for free; the trial pill is an inline-block
+             (it must hug its text, not stretch to the column) and would otherwise sit
+             on this same line. #}
+          <span class="block text-sm font-semibold text-gray-400">not active</span>
           {% if card.trial_expired %}
           <p class="text-xs text-gray-500">free trial expired</p>
           {% elif card.lapsed_long %}
@@ -238,9 +242,10 @@
           {% elif card.trial_eligible %}
           {# The third case, and the only one that is an OFFER rather than a post-mortem:
              this module has never been held, so its free trial is still there to take.
-             Teal, not the grey the other two use — those explain why the module is off,
-             this one says something is available, and the modal already spends this
-             colour on "Free trial".
+             A teal PILL, not the grey small print the other two use — those explain why
+             the module is off, this one says something is available. The pill shape is
+             what carries that, not the colour alone: "not active" above it is grey, so
+             an outlined pill is the only thing in this column that reads as an offer.
 
              It states the offer WITHOUT a button, like everything else in this column:
              taking a module up is a tick in the decision modal, which is the single place
@@ -248,7 +253,10 @@
              below). Mutually exclusive with ``trial_expired`` by construction —
              ``trial_eligible`` requires that no subscription row exists, and that row is
              what ``trial_expired`` is read from. #}
-          <p class="text-xs font-medium text-[#2f8f95]">free trial available</p>
+          {# ``inline-block`` so the pill is only as wide as its text — a ``block`` one
+             would stretch to the column and stop looking like a pill. The line break
+             above it comes from ``block`` on "not active", not from here. #}
+          <span class="mt-1 inline-block rounded-full border border-[#7DE2E8] px-3 py-1 text-xs font-semibold text-[#2FBFC7] whitespace-nowrap">Free trial available</span>
           {% endif %}
         </div>
         {% endif %}
@@ -324,13 +332,15 @@
         {% endif %}
         {% endif %}
 
-        {# Running free trial: the dark trial pill and nothing else. There is deliberately
+        {# Running free trial: the gold trial pill and nothing else. There is deliberately
            no Cancel here, and none in the decision modal either — cancelling a free trial
            is not offered anywhere in the UI. A trial that is not wanted simply is not
            given a card, and it expires on its own date at no cost. #}
         {% elif card.subscription_status == 'trialing' %}
-        <span class="inline-block bg-[#1F2937] text-white text-xs font-semibold px-3.5 py-1.5 rounded-full shadow-sm whitespace-nowrap">
-          Free trial{% if card.period_end_short %} · ends {{ card.period_end_short }}{% endif %}
+        {# No ``shadow-sm``: the border carries the edge now, and a shadow under a fill
+           this pale reads as a smudge rather than a lift. #}
+        <span class="inline-block rounded-full border border-[#F0DC8C] bg-[#FFFDF0] px-3.5 py-1.5 text-xs font-semibold text-[#D6A400] whitespace-nowrap">
+          Free trial{% if card.period_end_short %} ends {{ card.period_end_short }}{% endif %}
         </span>
         {# The term is up and the subscription pass has not closed it out yet. A LABEL and
            nothing else: the card stays a running trial everywhere else, because the state
@@ -351,9 +361,14 @@
            for stays one deliberate click on the module it belongs to. The modal can also
            drop it; both routes run the same preview and confirmation. #}
         {% elif is_on %}
+        {# Quiet by design: a pale grey fill with a dark slate label, not the filled blue
+           it used to be. Cancelling is the destructive end of this card and the only
+           button on it, so a solid colour gave it the weight of the thing you are meant
+           to press. The hover darkens the fill — that, and the border, are what say it is
+           still a button. #}
         <button type="button" data-module-name="{{ card.name }}"
                 onclick="cancelSubscription(this, '{{ card.code }}')"
-                class="bg-[#93B1E5] hover:bg-[#7FA1DD] text-white text-xs font-semibold px-3.5 py-1.5 rounded-full shadow-sm transition-colors whitespace-nowrap">
+                class="rounded-full border border-[#E8EAEF] bg-[#F7F8FA] px-3.5 py-1.5 text-xs font-semibold text-[#3F4859] hover:bg-[#EDEFF3] transition-colors whitespace-nowrap">
           Cancel Subscription
         </button>
         {% if card.period_end_long %}
