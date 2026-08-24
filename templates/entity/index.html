@@ -66,6 +66,76 @@
         background-position: 200% 0;
       }
     }
+
+    /* Free-trial badge — Figma "Group 346" (the pill) wrapping "Group 345" (the tag).
+       Two elements because the two shapes differ: the outer is a plain pill and the
+       tag inside it is pointed. A ring or outline on one element would trace the
+       point instead of staying round.
+
+       The spec is an @2x export — pill 195x63 radius 33.5, tag 154x44 radius 8,
+       Inter 600 24px/29px, 8px dot — so every value below is that number times
+       --trial-badge-scale, which halves it to 1x. At the literal spec size the
+       badge's label would be 24px against the 17px company name beside it, and a
+       63px badge would out-height the 32px row it sits in. Set the scale to 1 to
+       render the spec's exact pixels. */
+    .trial-badge {
+      --trial-badge-scale: 0.5;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      /* Rectangle 9 */
+      height: calc(63px * var(--trial-badge-scale));
+      /* Group 345 is 154 wide inside a 195 pill: 41 of horizontal slack and 9.5 top
+         and bottom. Centring would split that slack evenly; the tag is nudged 6
+         further right instead, so the pill's rounded left end reads as the tag's
+         shoulder while the right end still clears the point. Written as padding
+         rather than a fixed width so a longer label grows the badge instead of
+         overflowing it. */
+      padding: calc(9.5px * var(--trial-badge-scale)) calc(14.5px * var(--trial-badge-scale))
+               calc(9.5px * var(--trial-badge-scale)) calc(26.5px * var(--trial-badge-scale));
+      border-radius: calc(33.5px * var(--trial-badge-scale));
+      background: rgba(79, 199, 199, 0.15);
+    }
+
+    .trial-badge__tag {
+      display: inline-flex;
+      align-items: center;
+      /* Rectangle 8 */
+      height: calc(44px * var(--trial-badge-scale));
+      border-radius: calc(8px * var(--trial-badge-scale));
+      background: #4FC7C7;
+      /* Free Trial */
+      font-family: 'Inter', ui-sans-serif, system-ui;
+      font-style: normal;
+      font-weight: 600;
+      font-size: calc(24px * var(--trial-badge-scale));
+      line-height: calc(29px * var(--trial-badge-scale));
+      color: #FFFFFF;
+      white-space: nowrap;
+      /* The dot sits at the rectangle's right edge in the artwork and the point is
+         beyond it, so the right padding carries the point's depth. */
+      padding: 0 calc(18px * var(--trial-badge-scale));
+      gap: calc(20px * var(--trial-badge-scale));
+      /* Border-radius still paints the left corners; the polygon then cuts the
+         right edge into the tag's point. Both apply — the clip runs after. */
+      clip-path: polygon(
+        0 0,
+        calc(100% - 14px * var(--trial-badge-scale)) 0,
+        100% 50%,
+        calc(100% - 14px * var(--trial-badge-scale)) 100%,
+        0 100%
+      );
+    }
+
+    /* Ellipse 1 */
+    .trial-badge__dot {
+      flex-shrink: 0;
+      width: calc(8px * var(--trial-badge-scale));
+      height: calc(8px * var(--trial-badge-scale));
+      border-radius: 9999px;
+      background: #FFFFFF;
+    }
+
   </style>
 </head>
 <body class="min-h-screen font-inter antialiased">
@@ -132,6 +202,22 @@
               <a class="bg-white w-full min-h-[56px] py-3 px-4 flex justify-between items-center gap-2 border border-[#f6f6f8] rounded-[12px] text-[#1f2937] font-[600] hover:bg-gray-50 transition-colors shadow-md hover-lift" href="{{ url_for('entity.module_selector', entity_id=org.id) if org.id else url_for('entity.entity_list') }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
                 <span class="truncate flex-1 min-w-0 text-[17px]">{{ org.name }}</span>
                 <div class="flex items-center gap-1.5 flex-shrink-0">
+                  {# Free-trial pill, left of the module icons. One per card, not one
+                     per module: an entity on the bundle trials both modules at once,
+                     and two identical pills side by side would say nothing extra. The
+                     tooltip names the modules, which is what distinguishes a card
+                     trialing one of its two. trial_modules is already intersected
+                     with the enabled set, so this never labels a missing icon. #}
+                  {% if org.trial_modules %}
+                  <span class="trial-badge flex-shrink-0"
+                        title="Free trial: {{ org.trial_module_names | join(', ') }}"
+                        aria-label="Free trial: {{ org.trial_module_names | join(', ') }}">
+                    <span class="trial-badge__tag">
+                      Free Trial
+                      <span class="trial-badge__dot" aria-hidden="true"></span>
+                    </span>
+                  </span>
+                  {% endif %}
                   {# One badge per module the entity actually has. The resolver
                      behind org.modules is fail-closed, so a badge here means
                      the module is genuinely switched on. #}

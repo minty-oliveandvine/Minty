@@ -13,7 +13,9 @@ from sqlalchemy.orm import aliased
 from blueprints.entity import entity_bp
 from blueprints.entity.services.modules import (build_subscription_notices,
                                                 claim_subscription_notice,
-                                                get_enabled_modules_for_entities)
+                                                get_enabled_modules_for_entities,
+                                                get_trial_modules_for_entities,
+                                                module_display_names)
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
 from blueprints.shared.entity_display import build_entity_acronym
@@ -108,19 +110,37 @@ def entity_list():
     # icon is a claim that the module is paid for and usable.
     modules_by_entity = get_enabled_modules_for_entities([r.id for r in rows])
 
-    organizations = [
-        {
-            "id": r.id,
-            "name": r.name,
-            "status": r.status,
-            "modules": modules_by_entity.get(r.id, set()),
-            "last_accessed_display": _format_last_accessed(r.last_accessed_at),
-            "last_accessed_by": (
-                f"{r.first_name or ''} {r.last_name or ''}".strip() or None
-            ),
-        }
-        for r in rows
-    ]
+    # Which of those modules are running on a free trial — one query for the list.
+    # Intersected with the enabled set below so the badge can never claim a trial on
+    # a module whose icon isn't there: the two come from different tables, and the
+    # entitlement resolver is the one the request gate actually obeys.
+    trials_by_entity = get_trial_modules_for_entities([r.id for r in rows])
+    trial_labels = module_display_names(
+        {code for codes in trials_by_entity.values() for code in codes}
+    )
+
+    organizations = []
+    for r in rows:
+        modules = modules_by_entity.get(r.id, set())
+        trial_modules = trials_by_entity.get(r.id, set()) & modules
+        organizations.append(
+            {
+                "id": r.id,
+                "name": r.name,
+                "status": r.status,
+                "modules": modules,
+                "trial_modules": trial_modules,
+                # Named in the badge tooltip so a card showing two module icons and
+                # one badge says WHICH module the free trial belongs to.
+                "trial_module_names": sorted(
+                    trial_labels.get(code, code) for code in trial_modules
+                ),
+                "last_accessed_display": _format_last_accessed(r.last_accessed_at),
+                "last_accessed_by": (
+                    f"{r.first_name or ''} {r.last_name or ''}".strip() or None
+                ),
+            }
+        )
     return render_template("entity/index.html", organizations=organizations)
 
 
