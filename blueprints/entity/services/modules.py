@@ -234,6 +234,98 @@ def get_enabled_modules_for_entities(entity_ids: list[str]) -> dict[str, set[str
     return result
 
 
+def get_trial_modules_for_entities(entity_ids: list[str]) -> dict[str, set[str]]:
+    """Map each entity id to the set of module codes currently on a FREE TRIAL.
+
+    One query for the whole list. The per-entity path (``get_module_cards``) answers
+    the same question far more thoroughly, but it reads Stripe, the billing policy
+    and the payer's cycle for every entity it is asked about — repeating that once
+    per row on the "select company" page would put a payment-provider round trip
+    behind a page that only wants to draw a badge.
+
+    "On a free trial" is the module card's claim, minus the states a badge cannot
+    express:
+
+      * the row was NEVER billed (``first_billed_at is None``) — that is what
+        separates a trial from a paid module that is winding down, and both share
+        the ``scheduled_cancel`` phase;
+      * it is either running (``phase = trial``) or a CANCELLED trial, which stops
+        the conversion to paid without ending the free days (see
+        ``checkout.cancel_module``) and so is still a trial on screen;
+      * the free days have not run out — with the same ``TRIAL_CLOSING_WINDOW``
+        slack a running trial gets while it waits for the pass that closes it out,
+        so the badge does not blink off in the hour before the job converts it.
+
+    Fail-soft: any error yields no trials rather than an exception. A missing badge
+    costs a hint; a raise here costs the user the whole entity list.
+    """
+    if not entity_ids:
+        return {}
+
+    # Imported here, not at module scope: the subscription package imports back into
+    # the entity models, and this module is loaded early enough for that to bite.
+    from blueprints.subscription.constants import (PHASE_SCHEDULED_CANCEL,
+                                                   PHASE_TRIAL)
+    from blueprints.subscription.models.entity_module_subscription import         EntityModuleSubscription
+    from blueprints.subscription.services import clock
+
+    try:
+        now = clock.now()
+        rows = EntityModuleSubscription.query.filter(
+            EntityModuleSubscription.entity_id.in_(entity_ids),
+            EntityModuleSubscription.first_billed_at.is_(None),
+            EntityModuleSubscription.trial_end.isnot(None),
+            EntityModuleSubscription.phase.in_((PHASE_TRIAL, PHASE_SCHEDULED_CANCEL)),
+        ).all()
+    except Exception:
+        # The rollback is not optional. On Postgres a failed statement aborts the
+        # whole transaction, so swallowing this without resetting the session would
+        # turn a cosmetic lookup into a 500 several queries later in the same request.
+        db.session.rollback()
+        logger.exception("modules: could not read trial state for the entity list")
+        return {}
+
+    trials: dict[str, set[str]] = {}
+    for row in rows:
+        # Precedence rule 1 of ``access.access_end``: the app's own promise outranks
+        # the term. A cancelled trial carries its remaining days there.
+        ends_at = row.app_access_until or row.trial_end
+        if ends_at <= now and not (
+            row.phase == PHASE_TRIAL and (now - ends_at) <= TRIAL_CLOSING_WINDOW
+        ):
+            continue
+        trials.setdefault(row.entity_id, set()).add(
+            (row.function_code or "").upper()
+        )
+    return trials
+
+
+def module_display_names(codes) -> dict[str, str]:
+    """Human labels for module codes, from the catalog — ``{code: name}``.
+
+    ``entity_function.function_name`` is the source of truth for what a module is
+    called in the app (MODULE_DISPLAY deliberately holds no names), so the label is
+    read rather than hardcoded. Codes with no catalog row fall back to the code, the
+    same last resort ``get_module_cards`` uses.
+    """
+    codes = {(c or "").upper() for c in codes if c}
+    if not codes:
+        return {}
+    try:
+        rows = EntityFunction.query.filter(
+            EntityFunction.function_code.in_(codes)
+        ).all()
+    except Exception:
+        db.session.rollback()
+        logger.exception("modules: could not read module display names")
+        return {code: code for code in codes}
+    by_code = {
+        (r.function_code or "").upper(): (r.function_name or "").strip()
+        for r in rows
+    }
+    return {code: (by_code.get(code) or code) for code in codes}
+
+
 def get_module_cards(entity_id: str) -> list[dict]:
     """Build the module-settings cards for an entity, backend-driven.
 
