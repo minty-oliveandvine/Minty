@@ -62,6 +62,7 @@
       }
     }
   </script>
+{% if terms %}{% include 'legal/_terms_styles.html' %}{% endif %}
 </head>
 <body class="min-h-screen font-inter antialiased">
   {# Flash toasts + drain (canonical). #}
@@ -177,5 +178,29 @@
       showFlashMessages('This one is still on the way.', 'info');
     }
   </script>
+
+{# ---- Terms & Conditions gate -------------------------------------------
+   Rendered as a modal over this page when the person still owes an
+   acceptance. `terms` is None the rest of the time, so this costs nothing.
+
+   Not dismissible: no close button, no click-outside, no Escape. The only
+   ways out are Accept (records consent) or Decline (logs out). The real
+   enforcement is server-side in blueprints/legal/routes/gate.py — this modal
+   is the presentation of that gate, never a substitute for it. #}
+{% if terms %}
+{% with document=terms.document,
+        is_update=terms.is_update,
+        previous_version=terms.previous_version,
+        tc_show_hash=False %}
+<style>body { overflow: hidden !important; }</style>
+<div class="tc-modal-backdrop" role="dialog" aria-modal="true"
+     aria-label="Terms and Conditions">
+  <div class="tc-modal">
+    {% include 'legal/_terms_panel.html' %}
+  </div>
+</div>
+{% include 'legal/_terms_script.html' %}
+{% endwith %}
+{% endif %}
 </body>
 </html>

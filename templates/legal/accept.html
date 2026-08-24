@@ -1,160 +1,18 @@
 {% extends 'base/layout.html' %}
 
-{% block title %}— Terms of Use{% endblock %}
+{% block title %}— Terms & Conditions{% endblock %}
 
 {% block styles %}
-<style>
-  .accept-page { max-width: 780px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
-  .accept-page h1 { font-size: 1.5rem; margin: 0 0 0.5rem; }
-  .accept-lead { color: #4b5563; margin: 0 0 1.5rem; line-height: 1.6; }
-  .accept-update {
-    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;
-    padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.9rem;
-  }
-  .accept-draft {
-    background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px;
-    padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.9rem;
-  }
-  /* Scrollable rather than paginated: the whole document is present on the
-     page, so "I was not shown it" is not available as an argument. */
-  .accept-doc {
-    height: 380px; overflow-y: auto; border: 1px solid #e5e7eb;
-    border-radius: 6px; padding: 1.25rem; background: #fff; margin-bottom: 1.25rem;
-  }
-  .accept-doc h1 { font-size: 1.2rem; }
-  .accept-doc h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
-  .accept-doc p  { margin: 0 0 0.7rem; line-height: 1.6; font-size: 0.92rem; }
-  .accept-doc ul { margin: 0 0 0.9rem 1.2rem; }
-  .accept-doc li { margin-bottom: 0.3rem; line-height: 1.55; font-size: 0.92rem; }
-  .accept-check { display: flex; gap: 0.6rem; align-items: flex-start; margin-bottom: 1.25rem; }
-  .accept-check input {
-    margin-top: 0.25rem; width: 1.05rem; height: 1.05rem; flex: none;
-    accent-color: #36c3b4;
-  }
-  /* main.css sets a { text-decoration: none; color: var(--textColor) } globally,
-     which renders these as plain body text. Restore link styling so the two
-     documents are visibly reachable from the agreement line. */
-  .accept-check a {
-    color: #0f7a6e;
-    font-weight: 600;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  .accept-check a:hover { color: #36c3b4; }
-  .accept-actions { display: flex; align-items: center; gap: 1rem; }
-  .accept-btn {
-    background: #047857; color: #fff; border: 0; border-radius: 6px;
-    padding: 0.65rem 1.4rem; font-size: 0.95rem; cursor: pointer;
-  }
-  .accept-btn:disabled { background: #9ca3af; cursor: not-allowed; }
-  .accept-logout { color: #6b7280; font-size: 0.9rem; }
-  .accept-error { color: #b91c1c; font-size: 0.9rem; margin-top: 0.9rem; min-height: 1.2em; }
-  .accept-hash { margin-top: 2rem; font-size: 0.72rem; color: #9ca3af; word-break: break-all; }
-</style>
+{% include 'legal/_terms_styles.html' %}
 {% endblock %}
 
 {% block content %}
-<div class="accept-page">
-  <h1>{% if is_update %}We have updated our Terms of Use{% else %}Terms of Use{% endif %}</h1>
-
-  {% if is_update %}
-  <div class="accept-update">
-    You previously agreed to version <strong>{{ previous_version }}</strong>.
-    We have since made a meaningful change, so we are asking again. You can
-    read the version you agreed to before
-    <a href="{{ url_for('legal.terms_version', version=previous_version) }}" target="_blank" rel="noopener">here</a>.
-  </div>
-  {% else %}
-  <p class="accept-lead">
-    Please read and agree to the Terms of Use to continue using Minty.
-  </p>
-  {% endif %}
-
-  {% if not document.is_pinned %}
-  <div class="accept-draft">
-    <strong>Draft.</strong> This wording is not final, so this screen is for
-    testing only.
-  </div>
-  {% endif %}
-
-  <div class="accept-doc">{{ document.html | safe }}</div>
-
-  <label class="accept-check">
-    <!-- Starts unticked, always. A pre-ticked box is not agreement — the
-         person has to do something for it to mean anything. -->
-    <input type="checkbox" id="accept-box">
-    <span>
-      I agree to the
-      <a href="{{ url_for('legal.terms') }}" target="_blank" rel="noopener">Terms of Use</a>
-      and
-      <a href="{{ url_for('legal.privacy') }}" target="_blank" rel="noopener">Privacy Policy</a>.
-    </span>
-  </label>
-
-  <div class="accept-actions">
-    <button class="accept-btn" id="accept-submit" disabled>Accept and continue</button>
-    <!-- Always reachable. Someone who refuses must be able to leave; without
-         this the screen is a trap. Phase 4's allow-list must include logout
-         for the same reason. -->
-    <a class="accept-logout" href="{{ url_for('auth.logout') }}">Log out</a>
-  </div>
-
-  <div class="accept-error" id="accept-error"></div>
-
-  <div class="accept-hash">Document fingerprint (SHA-256): {{ document.sha256 }}</div>
+{# Standalone page mode. The gate normally sends people to the Select Company
+   list, where this same panel renders as a modal — this route remains the
+   fallback for anyone who arrives by a path that does not pass through
+   /entity, and the canonical URL for the acceptance flow. #}
+<div class="tc-page">
+  {% include 'legal/_terms_panel.html' %}
 </div>
-
-<script>
-  (function () {
-    var box = document.getElementById('accept-box');
-    var button = document.getElementById('accept-submit');
-    var error = document.getElementById('accept-error');
-
-    box.addEventListener('change', function () {
-      button.disabled = !box.checked;
-    });
-
-    button.addEventListener('click', function () {
-      if (!box.checked) { return; }
-      button.disabled = true;
-      error.textContent = '';
-
-      fetch('{{ url_for("legal.accept_submit") }}', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': '{{ csrf_token() }}'
-        },
-        body: JSON.stringify({
-          accepted: true,
-          terms_version: '{{ document.version }}'
-        })
-      })
-        .then(function (response) {
-          return response.json().then(function (body) {
-            return { status: response.status, body: body };
-          });
-        })
-        .then(function (result) {
-          if (result.status === 200) {
-            window.location.href = result.body.redirect_url;
-            return;
-          }
-          // The Terms changed while this page was open. Reload so they read and
-          // agree to what is actually live now, rather than filing a record
-          // against wording that has been replaced.
-          if (result.status === 409) {
-            window.location.reload();
-            return;
-          }
-          error.textContent = result.body.message || 'Something went wrong. Please try again.';
-          button.disabled = false;
-        })
-        .catch(function () {
-          error.textContent = 'Could not reach the server. Please try again.';
-          button.disabled = false;
-        });
-    });
-  })();
-</script>
+{% include 'legal/_terms_script.html' %}
 {% endblock %}

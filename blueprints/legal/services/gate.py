@@ -99,3 +99,51 @@ def take_intended_destination() -> str | None:
     this is the last place to catch it.
     """
     return safe_internal_path(session.pop(TERMS_NEXT_SESSION_KEY, None))
+
+
+def outstanding_terms_context() -> dict | None:
+    """Context for rendering the acceptance panel, or None if nothing is due.
+
+    The panel is drawn in two places — the standalone /legal/accept page and
+    the modal over the Select Company list — and both need exactly this set of
+    values. Building it here means the two can never disagree about whether
+    somebody still owes an acceptance, or about which version they last agreed
+    to.
+
+    Returns None when there is nothing to ask for: not logged in, no current
+    document (see the gate's fail-open reasoning), or already agreed. As a side
+    effect it re-syncs the session cache when the database says yes but the
+    session had not caught up.
+
+    Imports are local: this module is imported at request time by the gate,
+    which runs before *every* request, and pulling the models in at module
+    scope would give the legal service a load-time dependency on the ORM.
+    """
+    from flask_login import current_user
+
+    from blueprints.legal.services.consent import consents_for_user, has_consent
+
+    if not getattr(current_user, "is_authenticated", False):
+        return None
+
+    document = registry.get_current(registry.TERMS)
+    if document is None:
+        return None
+
+    if session_agreed_to_current():
+        return None
+
+    if has_consent(current_user.id):
+        mark_session_agreed()
+        return None
+
+    # "Out of date" and "never agreed" are both blocked, but they read very
+    # differently to the person: one is being asked again, the other for the
+    # first time. Only the former gets the "what changed" note.
+    previous = consents_for_user(current_user.id)
+    return {
+        "document": document,
+        "privacy_version": registry.current_version(registry.PRIVACY),
+        "is_update": bool(previous),
+        "previous_version": previous[0].terms_version if previous else None,
+    }

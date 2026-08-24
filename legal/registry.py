@@ -56,6 +56,22 @@ _LEGAL_DIR = os.path.dirname(os.path.abspath(__file__))
 CURRENT_TERMS_VERSION = os.environ.get("CURRENT_TERMS_VERSION", "beta-1")
 CURRENT_PRIVACY_VERSION = os.environ.get("CURRENT_PRIVACY_VERSION", "beta-1")
 
+# Whether an unpinned (draft) document shows its "this wording is not final"
+# banner on the acceptance screen.
+#
+# DEFAULTS TO ON, and should stay on anywhere real people are asked to agree.
+# The opt-out exists so a draft can be hidden for demos and screenshots without
+# PINNING the hash, which would assert the wording is final — a claim that is
+# untrue while beta-1 still contains [DATE], [INSERT EMAIL] and
+# [INSERT ADDRESS].
+#
+# Because it defaults to on, an environment that simply does not set it — a
+# fresh production deploy, say — still warns. Hiding the banner has to be a
+# deliberate act, recorded in that environment's config.
+SHOW_DRAFT_BANNER = os.environ.get(
+    "LEGAL_SHOW_DRAFT_BANNER", "1"
+).strip().lower() not in {"0", "false", "no", "off"}
+
 # Whether sign-up REFUSES to create an account without agreement.
 #
 # ON as of Phase 6. A sign-up that does not carry an explicit agreement to the
@@ -111,6 +127,16 @@ class LegalDocument:
     @property
     def is_pinned(self) -> bool:
         return _PINNED_HASHES.get((self.kind, self.version)) is not None
+
+    @property
+    def show_draft_notice(self) -> bool:
+        """Whether the acceptance screen should warn that this is a draft.
+
+        Kept as a property rather than a second template condition so every
+        render site — the standalone page and the modal over the entity list —
+        asks one question and cannot disagree about the answer.
+        """
+        return not self.is_pinned and SHOW_DRAFT_BANNER
 
 
 def _normalise(raw: str) -> str:

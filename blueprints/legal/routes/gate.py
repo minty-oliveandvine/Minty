@@ -68,6 +68,18 @@ ALLOWED_ENDPOINTS = frozenset(
         "auth.logout",
         # --- Dead ends that must not redirect into the gate ---------------
         "auth.no_permission",
+        # --- Where the gate sends people ----------------------------------
+        # The acceptance panel is rendered as a modal over the Select Company
+        # list, so this endpoint MUST be reachable without having agreed —
+        # otherwise the gate redirects to a page it blocks, which is a loop
+        # with no exit.
+        #
+        # The cost is that someone who has not agreed can load this one page
+        # and, by removing the modal in devtools, read their company NAMES.
+        # They still cannot ENTER any of them: every other entity route stays
+        # gated. That is a deliberate, bounded trade for putting the panel
+        # where the design asks for it.
+        "entity.entity_list",
         # --- The acceptance flow itself -----------------------------------
         # Listed one by one rather than allowing the whole `legal` blueprint.
         # That blueprint also carries product functionality (the consent
@@ -172,7 +184,11 @@ def require_terms_acceptance():
         # destination taken from the query string can be pointed off-site,
         # which would turn the acceptance screen into a phishing hop.
         remember_intended_destination(_intended_destination())
-        return redirect(url_for("legal.accept_page"))
+        # The Select Company list, which renders the acceptance panel as a
+        # modal over itself. /legal/accept still exists and still works; it is
+        # the fallback for anyone who arrives by a path that does not pass
+        # through here.
+        return redirect(url_for("entity.entity_list"))
 
     except Exception:
         # See the module docstring: an outage is worse than a briefly skipped

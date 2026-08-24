@@ -156,9 +156,13 @@ def test_login_endpoints_stay_reachable(blocked, db_session):
 # --------------------------------------------------------------------------
 
 def test_a_page_request_is_redirected_to_the_acceptance_screen(blocked, db_session):
+    """The gate sends people to the Select Company list, which renders the
+    acceptance panel as a modal over itself. /legal/accept still exists and
+    still works — it is the fallback for anyone arriving by a path that does
+    not pass through /entity."""
     response = blocked.get("/index", follow_redirects=False)
     assert response.status_code == 302
-    assert "/legal/accept" in response.headers["Location"]
+    assert "/entity" in response.headers["Location"]
 
 
 def test_a_json_request_gets_403_with_a_code_not_a_redirect(blocked, db_session):
@@ -315,7 +319,7 @@ def test_moving_the_version_re_gates_an_already_agreed_user(
     try:
         response = blocked.get("/index", follow_redirects=False)
         assert response.status_code == 302
-        assert "/legal/accept" in response.headers["Location"]
+        assert "/entity" in response.headers["Location"]
     finally:
         registry.CURRENT_TERMS_VERSION = original
         registry._DOCUMENTS.pop((registry.TERMS, "beta-2"), None)
