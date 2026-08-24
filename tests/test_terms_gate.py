@@ -165,6 +165,51 @@ def test_a_page_request_is_redirected_to_the_acceptance_screen(blocked, db_sessi
     assert "/entity" in response.headers["Location"]
 
 
+def test_a_blocked_user_can_reach_the_page_the_gate_sends_them_to(
+    blocked, db_session
+):
+    """The redirect target must not itself be gated.
+
+    This is the loop the runbook calls the biggest risk in the design: the gate
+    sends people to /entity, and if /entity is gated too, /entity redirects to
+    /entity forever and nobody without a consent row can reach any page at all
+    — administrators included.
+
+    It is a 200 by design. The Terms panel renders as a MODAL over that page;
+    the enforcement is the tests below, not the modal.
+    """
+    assert blocked.get("/entity").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Exactly what a company card links to — the first thing anyone would
+        # click after deleting the modal in devtools.
+        "/entity/00000000-0000-0000-0000-000000000001/modules",
+        "/entity/00000000-0000-0000-0000-000000000001",
+        "/entity/00000000-0000-0000-0000-000000000001/enter",
+        "/entity/settings/users/00000000-0000-0000-0000-000000000001",
+    ],
+)
+def test_removing_the_modal_gets_you_nowhere(blocked, db_session, path):
+    """The modal is presentation; the gate is enforcement.
+
+    Anyone can delete a div in devtools. What stops them is that every route
+    behind it still refuses a user with no consent row, so clicking through
+    lands straight back on /entity with the modal rendered again.
+
+    If this ever starts returning 200, the acceptance screen has become
+    decorative and the whole feature is theatre.
+    """
+    response = blocked.get(path, follow_redirects=False)
+
+    assert response.status_code == 302, (
+        f"{path} served content to a user who has not accepted the Terms"
+    )
+    assert response.headers["Location"].endswith("/entity")
+
+
 def test_a_json_request_gets_403_with_a_code_not_a_redirect(blocked, db_session):
     """A redirect sent to a background request fails silently — the user sees
     nothing happen and has no clue why."""
