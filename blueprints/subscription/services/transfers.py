@@ -319,6 +319,12 @@ def incoming_transfers_payload(user_id) -> list[dict]:
             {
                 **_as_dict(offer),
                 "entity_name": getattr(entity, "name", None) or "",
+                # Where the company's subscription can be looked at before answering.
+                # A PATH, not a URL, and built here rather than in the frontend for the
+                # same reason the entity list's is: the route belongs to this app.
+                # MODULE_VIEW gates it at CASHIER, so the admin being asked to pay can
+                # read it — deciding is not the same as managing.
+                "settings_path": f"/entity/settings/module/{offer.entity_id}",
                 "from_name": _display_name(asker),
                 "quote": quote,
                 # What they inherit that is not being charged for today — free days now,
