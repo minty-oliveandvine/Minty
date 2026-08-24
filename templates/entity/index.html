@@ -67,19 +67,23 @@
       }
     }
 
-    /* Free-trial badge — Figma "Group 346" (the pill) wrapping "Group 345" (the tag).
-       Two elements because the two shapes differ: the outer is a plain pill and the
-       tag inside it is pointed. A ring or outline on one element would trace the
-       point instead of staying round.
+    /* Free-trial badge - Figma "Group 346" (the pill) wrapping "Group 345" (the tag).
+       The tag is the design's own SVG, used verbatim (see #trialBadgeTag below), so
+       the shape and the wordmark ARE the artwork rather than a reconstruction of it.
+       Two things made that the right call over CSS: the point is round-tipped and
+       its joins are filleted, which a clip-path polygon cannot express, and the
+       label ships as outlines, so the badge cannot reflow when Inter loads.
 
-       The spec is an @2x export — pill 195x63 radius 33.5, tag 154x44 radius 8,
-       Inter 600 24px/29px, 8px dot — so every value below is that number times
-       --trial-badge-scale, which halves it to 1x. At the literal spec size the
-       badge's label would be 24px against the 17px company name beside it, and a
-       63px badge would out-height the 32px row it sits in. Set the scale to 1 to
-       render the spec's exact pixels. */
+       The spec is an @2x export - pill 195x63 radius 33.5, tag 154x44 - so both
+       values below are that number times --trial-badge-scale, and ONE ratio resizes
+       the whole badge without any of its proportions drifting.
+
+       That ratio makes Rectangle 9 exactly as tall as the module icons beside it
+       (Tailwind h-7 = 28px), which is why it is written as the division rather than
+       a rounded decimal: change either number and the badge still lines up. The
+       spec's literal pixels are --trial-badge-scale: 1. */
     .trial-badge {
-      --trial-badge-scale: 0.5;
+      --trial-badge-scale: calc(28 / 63);
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -88,52 +92,19 @@
       /* Group 345 is 154 wide inside a 195 pill: 41 of horizontal slack and 9.5 top
          and bottom. Centring would split that slack evenly; the tag is nudged 6
          further right instead, so the pill's rounded left end reads as the tag's
-         shoulder while the right end still clears the point. Written as padding
-         rather than a fixed width so a longer label grows the badge instead of
-         overflowing it. */
+         shoulder while the right end still clears the point. */
       padding: calc(9.5px * var(--trial-badge-scale)) calc(14.5px * var(--trial-badge-scale))
                calc(9.5px * var(--trial-badge-scale)) calc(26.5px * var(--trial-badge-scale));
       border-radius: calc(33.5px * var(--trial-badge-scale));
       background: rgba(79, 199, 199, 0.15);
     }
 
+    /* Group 345, at the artwork's own 154:44. Both axes are set rather than left to
+       the viewBox so the tag cannot land a fraction of a pixel off the pill. */
     .trial-badge__tag {
-      display: inline-flex;
-      align-items: center;
-      /* Rectangle 8 */
+      display: block;
+      width: calc(154px * var(--trial-badge-scale));
       height: calc(44px * var(--trial-badge-scale));
-      border-radius: calc(8px * var(--trial-badge-scale));
-      background: #4FC7C7;
-      /* Free Trial */
-      font-family: 'Inter', ui-sans-serif, system-ui;
-      font-style: normal;
-      font-weight: 600;
-      font-size: calc(24px * var(--trial-badge-scale));
-      line-height: calc(29px * var(--trial-badge-scale));
-      color: #FFFFFF;
-      white-space: nowrap;
-      /* The dot sits at the rectangle's right edge in the artwork and the point is
-         beyond it, so the right padding carries the point's depth. */
-      padding: 0 calc(18px * var(--trial-badge-scale));
-      gap: calc(20px * var(--trial-badge-scale));
-      /* Border-radius still paints the left corners; the polygon then cuts the
-         right edge into the tag's point. Both apply — the clip runs after. */
-      clip-path: polygon(
-        0 0,
-        calc(100% - 14px * var(--trial-badge-scale)) 0,
-        100% 50%,
-        calc(100% - 14px * var(--trial-badge-scale)) 100%,
-        0 100%
-      );
-    }
-
-    /* Ellipse 1 */
-    .trial-badge__dot {
-      flex-shrink: 0;
-      width: calc(8px * var(--trial-badge-scale));
-      height: calc(8px * var(--trial-badge-scale));
-      border-radius: 9999px;
-      background: #FFFFFF;
     }
 
   </style>
@@ -143,6 +114,20 @@
      prior redirect (e.g. "Entity not found" / "Entity deleted successfully")
      so it can't leak forward to the dashboard. #}
   {% include 'components/flash_messages.html' %}
+
+  {# The free-trial tag, exactly as exported from Figma ("Group 345"): the pointed
+     plate, the "Free Trial" wordmark as outlines, and Ellipse 1. Defined ONCE and
+     drawn per card with <use> - inlining ~4KB of path data per row would put it on
+     the page as many times as the user has trialing entities. The accessible name
+     is NOT here: it lives on each card's wrapper, which is what says which modules
+     that entity is trialing. #}
+  <svg width="0" height="0" class="hidden" aria-hidden="true" focusable="false">
+    <symbol id="trialBadgeTag" viewBox="0 0 154 44" fill="none">
+      <path d="M0 8C0 3.58172 3.58172 0 8 0H134.233C136.823 0 139.253 1.25392 140.753 3.36497L150.705 17.365C152.678 20.1401 152.678 23.8599 150.705 26.635L140.753 40.635C139.253 42.7461 136.823 44 134.233 44H8C3.58173 44 0 40.4183 0 36V8Z" fill="#4FC7C7"/>
+      <path d="M17.2216 31V13.5455H28.4034V16.196H20.3835V20.9347H27.6364V23.5852H20.3835V31H17.2216ZM30.9602 31V17.9091H33.9517V20.0909H34.0881C34.3267 19.3352 34.7358 18.7528 35.3153 18.3438C35.9006 17.929 36.5682 17.7216 37.3182 17.7216C37.4886 17.7216 37.679 17.7301 37.8892 17.7472C38.1051 17.7585 38.2841 17.7784 38.4261 17.8068V20.6449C38.2955 20.5994 38.0881 20.5597 37.804 20.5256C37.5256 20.4858 37.2557 20.4659 36.9943 20.4659C36.4318 20.4659 35.9261 20.5881 35.4773 20.8324C35.0341 21.071 34.6847 21.4034 34.429 21.8295C34.1733 22.2557 34.0455 22.7472 34.0455 23.304V31H30.9602ZM45.7322 31.2557C44.4197 31.2557 43.2862 30.983 42.3317 30.4375C41.3828 29.8864 40.6527 29.108 40.1413 28.1023C39.63 27.0909 39.3743 25.9006 39.3743 24.5312C39.3743 23.1847 39.63 22.0028 40.1413 20.9858C40.6584 19.9631 41.38 19.1676 42.3061 18.5994C43.2322 18.0256 44.3203 17.7386 45.5703 17.7386C46.3771 17.7386 47.1385 17.8693 47.8544 18.1307C48.576 18.3864 49.2124 18.7841 49.7635 19.3239C50.3203 19.8636 50.7578 20.5511 51.076 21.3864C51.3942 22.2159 51.5533 23.2045 51.5533 24.3523V25.2983H40.8232V23.2188H48.5959C48.5902 22.6278 48.4624 22.1023 48.2124 21.642C47.9624 21.1761 47.6129 20.8097 47.1641 20.5426C46.7209 20.2756 46.2038 20.142 45.6129 20.142C44.9822 20.142 44.4283 20.2955 43.951 20.6023C43.4737 20.9034 43.1016 21.3011 42.8345 21.7955C42.5732 22.2841 42.4396 22.821 42.4339 23.4062V25.2216C42.4339 25.983 42.5732 26.6364 42.8516 27.1818C43.13 27.7216 43.5192 28.1364 44.0192 28.4261C44.5192 28.7102 45.1044 28.8523 45.7749 28.8523C46.2237 28.8523 46.63 28.7898 46.9936 28.6648C47.3572 28.5341 47.6726 28.3438 47.9396 28.0938C48.2067 27.8438 48.4084 27.5341 48.5447 27.1648L51.4254 27.4886C51.2436 28.25 50.897 28.9148 50.3857 29.483C49.88 30.0455 49.2322 30.483 48.4425 30.7955C47.6527 31.1023 46.7493 31.2557 45.7322 31.2557ZM59.9588 31.2557C58.6463 31.2557 57.5128 30.983 56.5582 30.4375C55.6094 29.8864 54.8793 29.108 54.3679 28.1023C53.8565 27.0909 53.6009 25.9006 53.6009 24.5312C53.6009 23.1847 53.8565 22.0028 54.3679 20.9858C54.8849 19.9631 55.6065 19.1676 56.5327 18.5994C57.4588 18.0256 58.5469 17.7386 59.7969 17.7386C60.6037 17.7386 61.3651 17.8693 62.081 18.1307C62.8026 18.3864 63.4389 18.7841 63.9901 19.3239C64.5469 19.8636 64.9844 20.5511 65.3026 21.3864C65.6207 22.2159 65.7798 23.2045 65.7798 24.3523V25.2983H55.0497V23.2188H62.8224C62.8168 22.6278 62.6889 22.1023 62.4389 21.642C62.1889 21.1761 61.8395 20.8097 61.3906 20.5426C60.9474 20.2756 60.4304 20.142 59.8395 20.142C59.2088 20.142 58.6548 20.2955 58.1776 20.6023C57.7003 20.9034 57.3281 21.3011 57.0611 21.7955C56.7997 22.2841 56.6662 22.821 56.6605 23.4062V25.2216C56.6605 25.983 56.7997 26.6364 57.0781 27.1818C57.3565 27.7216 57.7457 28.1364 58.2457 28.4261C58.7457 28.7102 59.331 28.8523 60.0014 28.8523C60.4503 28.8523 60.8565 28.7898 61.2202 28.6648C61.5838 28.5341 61.8991 28.3438 62.1662 28.0938C62.4332 27.8438 62.6349 27.5341 62.7713 27.1648L65.652 27.4886C65.4702 28.25 65.1236 28.9148 64.6122 29.483C64.1065 30.0455 63.4588 30.483 62.669 30.7955C61.8793 31.1023 60.9759 31.2557 59.9588 31.2557ZM73.7124 16.196V13.5455H87.6385V16.196H82.2436V31H79.1072V16.196H73.7124ZM88.8274 31V17.9091H91.8189V20.0909H91.9553C92.1939 19.3352 92.603 18.7528 93.1825 18.3438C93.7678 17.929 94.4354 17.7216 95.1854 17.7216C95.3558 17.7216 95.5462 17.7301 95.7564 17.7472C95.9723 17.7585 96.1513 17.7784 96.2933 17.8068V20.6449C96.1626 20.5994 95.9553 20.5597 95.6712 20.5256C95.3928 20.4858 95.1229 20.4659 94.8615 20.4659C94.299 20.4659 93.7933 20.5881 93.3445 20.8324C92.9013 21.071 92.5518 21.4034 92.2962 21.8295C92.0405 22.2557 91.9126 22.7472 91.9126 23.304V31H88.8274ZM98.343 31V17.9091H101.428V31H98.343ZM99.8942 16.0511C99.4055 16.0511 98.9851 15.8892 98.6328 15.5653C98.2805 15.2358 98.1044 14.8409 98.1044 14.3807C98.1044 13.9148 98.2805 13.5199 98.6328 13.196C98.9851 12.8665 99.4055 12.7017 99.8942 12.7017C100.388 12.7017 100.809 12.8665 101.156 13.196C101.508 13.5199 101.684 13.9148 101.684 14.3807C101.684 14.8409 101.508 15.2358 101.156 15.5653C100.809 15.8892 100.388 16.0511 99.8942 16.0511ZM108.368 31.2642C107.538 31.2642 106.791 31.1165 106.126 30.821C105.467 30.5199 104.945 30.0767 104.558 29.4915C104.178 28.9062 103.987 28.1847 103.987 27.3267C103.987 26.5881 104.124 25.9773 104.396 25.4943C104.669 25.0114 105.041 24.625 105.513 24.3352C105.984 24.0455 106.516 23.8267 107.107 23.679C107.703 23.5256 108.32 23.4148 108.956 23.3466C109.723 23.267 110.345 23.196 110.822 23.1335C111.3 23.0653 111.646 22.9631 111.862 22.8267C112.084 22.6847 112.195 22.4659 112.195 22.1705V22.1193C112.195 21.4773 112.004 20.9801 111.624 20.6278C111.243 20.2756 110.695 20.0994 109.979 20.0994C109.223 20.0994 108.624 20.2642 108.18 20.5938C107.743 20.9233 107.447 21.3125 107.294 21.7614L104.413 21.3523C104.641 20.5568 105.016 19.892 105.538 19.358C106.061 18.8182 106.7 18.4148 107.456 18.1477C108.212 17.875 109.047 17.7386 109.962 17.7386C110.592 17.7386 111.22 17.8125 111.845 17.9602C112.47 18.108 113.041 18.3523 113.558 18.6932C114.075 19.0284 114.49 19.4858 114.803 20.0653C115.121 20.6449 115.28 21.3693 115.28 22.2386V31H112.314V29.2017H112.212C112.024 29.5653 111.76 29.9062 111.419 30.2244C111.084 30.5369 110.661 30.7898 110.149 30.983C109.643 31.1705 109.05 31.2642 108.368 31.2642ZM109.169 28.9972C109.788 28.9972 110.325 28.875 110.78 28.6307C111.234 28.3807 111.584 28.0511 111.828 27.642C112.078 27.233 112.203 26.7869 112.203 26.304V24.7614C112.107 24.8409 111.942 24.9148 111.709 24.983C111.482 25.0511 111.226 25.1108 110.942 25.1619C110.658 25.2131 110.376 25.2585 110.098 25.2983C109.82 25.3381 109.578 25.3722 109.374 25.4006C108.913 25.4631 108.501 25.5653 108.138 25.7074C107.774 25.8494 107.487 26.0483 107.277 26.304C107.067 26.554 106.962 26.8778 106.962 27.2756C106.962 27.8438 107.169 28.2727 107.584 28.5625C107.999 28.8523 108.527 28.9972 109.169 28.9972ZM121.467 13.5455V31H118.382V13.5455H121.467Z" fill="white"/>
+      <circle cx="138.5" cy="22" r="4" fill="white"/>
+    </symbol>
+  </svg>
 
   <div class="flex min-h-screen items-center justify-center main-container">
     <!-- Phone card -->
@@ -209,13 +194,10 @@
                      trialing one of its two. trial_modules is already intersected
                      with the enabled set, so this never labels a missing icon. #}
                   {% if org.trial_modules %}
-                  <span class="trial-badge flex-shrink-0"
+                  <span class="trial-badge flex-shrink-0" role="img"
                         title="Free trial: {{ org.trial_module_names | join(', ') }}"
                         aria-label="Free trial: {{ org.trial_module_names | join(', ') }}">
-                    <span class="trial-badge__tag">
-                      Free Trial
-                      <span class="trial-badge__dot" aria-hidden="true"></span>
-                    </span>
+                    <svg class="trial-badge__tag" aria-hidden="true" focusable="false"><use href="#trialBadgeTag"/></svg>
                   </span>
                   {% endif %}
                   {# One badge per module the entity actually has. The resolver
