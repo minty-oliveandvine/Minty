@@ -435,13 +435,12 @@ def my_invoices_api():
 def _payment_methods_call(handler):
     """Run one payment-method action for the bearer's own account.
 
-    Every endpoint below has the same shape — authenticate, act, answer the fresh list —
-    and the same three failure modes, so they are written once here. ``PaymentMethodError``
-    carries a message written for the customer and the status to say it with (409 for the
-    two removal refusals, 422 for a bad expiry); anything else is a bug or Stripe being
-    down, and says so without leaking what broke.
+    Every endpoint below has the same shape — authenticate, act, answer the fresh list.
+    Only the AUTH and the CORS wrapper are this transport's own; the three shared failure
+    modes live in ``payment_methods.run``, which the onboarding twins and the settings
+    page's session routes call too.
     """
-    from blueprints.subscription.services.payment_methods import PaymentMethodError
+    from blueprints.subscription.services import payment_methods
 
     user_id = _user_id_from_bearer()
     if not user_id:
@@ -452,21 +451,8 @@ def _payment_methods_call(handler):
     if User.query.get(user_id) is None:
         return _unauthorized("no_user_claim", 403)
 
-    try:
-        payload = handler(user_id)
-    except PaymentMethodError as exc:
-        return _cors(make_response(jsonify({"error": exc.message}), exc.status))
-    except Exception:
-        current_app.logger.exception(
-            "payment methods API failed for user %s", user_id
-        )
-        return _cors(
-            make_response(
-                jsonify({"error": "Something got stuck on our end. Let's try again?"}),
-                500,
-            )
-        )
-    return _cors(make_response(jsonify(payload), 200))
+    payload, status = payment_methods.run(handler, user_id)
+    return _cors(make_response(jsonify(payload), status))
 
 
 def _pm_id() -> str:

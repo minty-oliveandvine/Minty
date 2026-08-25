@@ -68,6 +68,29 @@ class PaymentMethodError(Exception):
         self.status = status
 
 
+def run(handler, user_id) -> tuple[dict, int]:
+    """Run one payment-method action for ``user_id``. Answers ``(payload, status)``.
+
+    THE THREE FAILURE MODES every transport shares, written once. ``PaymentMethodError``
+    carries a message written for the customer and the status to say it with (409 for the
+    two removal refusals, 422 for a bad expiry); anything else is a bug or Stripe being
+    down, and says so without leaking what broke.
+
+    AUTH AND CORS ARE NOT HERE. They are the only things the transports actually differ
+    in — the bearer routes in ``routes.portal`` resolve a token and wrap the answer in
+    CORS headers, the onboarding twins do the same with a different origin, and the
+    session routes on the settings page do neither. Everything between was three copies
+    of this function waiting to drift.
+    """
+    try:
+        return handler(user_id), 200
+    except PaymentMethodError as exc:
+        return {"error": exc.message}, exc.status
+    except Exception:
+        logger.exception("payment methods: action failed for user {}", user_id)
+        return {"error": "Something got stuck on our end. Let's try again?"}, 500
+
+
 # --- Reading -----------------------------------------------------------------
 
 

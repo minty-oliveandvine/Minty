@@ -1,0 +1,239 @@
+{#
+  THE PAGE'S ONE CARD-CAPTURE DIALOG. Stripe Elements, in page, shared by:
+
+  * the lapsed-trial restart screen ("Use a different card" / "Add a card"), and
+  * the trial decision modal, when the payer has no card at all.
+
+  SHARED ON PURPOSE. The decision modal used to hand that second case to Stripe —
+  ``addPaymentMethod`` posted for a hosted URL and navigated away, so a payer answering
+  "keep my trial" lost the page mid-decision and had to re-make it on their return.
+  Bringing it in page meant an Elements form here anyway, and a second integration would
+  be a second place for the mandate wording, the ``terms.card`` suppression and the mount
+  ordering to drift apart.
+
+  Exposes exactly one global, ``window.openCardCapture()``, resolving:
+
+      { saved: true, paymentMethod: 'pm_...' }   saved and made the default
+      { saved: false }                           cancelled, or it could not be saved
+
+  THE CALLER decides what happens next — the restart screen reloads to re-render its
+  server-rendered card list, the decision modal carries straight on to record consent.
+  Baking either in here would make the component useless to the other.
+
+  Rendered whenever the viewer may manage this entity's subscription, not only when
+  something has lapsed: the decision modal needs it on an ordinary page.
+#}
+<div id="cardCaptureModal"
+     data-setup-intent-url="{{ url_for('entity.entity_settings_module_payment_methods_setup_intent', org_id=org.id) }}"
+     data-confirm-url="{{ url_for('entity.entity_settings_module_payment_methods_confirm', org_id=org.id) }}"
+     class="fixed inset-0 z-[120] hidden items-center justify-center overflow-y-auto overscroll-contain bg-[rgba(15,23,27,0.45)] p-5 backdrop-blur-[2px]">
+  <div role="dialog" aria-modal="true" aria-labelledby="cardCaptureTitle"
+       class="m-auto w-full max-w-[480px] rounded-[14px] border border-[#ececea] bg-white p-6 shadow-[0_20px_48px_rgba(0,0,0,0.22)]">
+
+    <div class="mb-[18px] flex items-start gap-3">
+      <div class="min-w-0">
+        <p id="cardCaptureTitle" class="mb-1.5 text-base font-bold text-[#1b1d1c]">
+          Add payment method
+        </p>
+        <p class="text-[13.5px] leading-[1.55] text-[#4a4d4b]">
+          You won't be charged for saving a card — nothing is charged until you confirm
+          on the screen behind.
+        </p>
+      </div>
+      <button type="button" id="cardCaptureClose"
+              class="ml-auto flex-none rounded-lg bg-transparent p-1 leading-none text-[#8a8d8b] hover:bg-[#f5f5f3] hover:text-[#4a4d4b] disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Close">
+        <span class="material-symbols-outlined text-[20px] leading-none">close</span>
+      </button>
+    </div>
+
+    <div id="cardCaptureMount" class="mt-1"></div>
+
+    {# The authorisation sentence, same wording as onboarding's ``.buynow-mandate``.
+
+       NOT fine print, and deliberately not shrunk below the text around it: it is the
+       sentence that says what saving a card lets Minty do later. Onboarding sets it at
+       13px for that reason and this matches.
+
+       ``(Details)`` IS INERT, exactly as it is in onboarding — and it has to be, because
+       the document it names does not exist. There is no Subscription Terms document in
+       ``legal/``; the only two are the Terms of Use and the Privacy Policy, and the Terms
+       currently say the opposite of what this sentence implies ("Minty is currently
+       provided free of charge during the beta period... If fees are introduced,
+       continued use of the Service may require acceptance of additional billing or
+       subscription terms", legal/terms/beta-1.md §11). Pointing this at /legal/terms
+       would send a payer who is about to be charged to a page telling them the service
+       is free. Left inert until that document is written. #}
+    <p class="mt-3.5 text-[13px] leading-[1.5] text-[#8a8d8b] [overflow-wrap:anywhere]">
+      By providing your payment method, you authorise Minty to charge applicable
+      subscription fees in accordance with the Subscription Terms.
+      <a href="#" onclick="return false;"
+         class="font-semibold text-[#1a9c92] underline underline-offset-2 hover:text-[#36c3b4]">(Details)</a>
+    </p>
+
+    {# Breaks anywhere: Stripe quotes the offending value back in its failures, and a
+       masked key is a hundred characters with no space in it — without a break
+       opportunity the paragraph runs out through the side of the dialog. #}
+    <p id="cardCaptureError"
+       class="mt-3.5 hidden rounded-[10px] border border-[#ffcccc] bg-[#fff1f1] px-3 py-2.5 text-[13px] leading-[1.5] text-[#b4231f] [overflow-wrap:anywhere]"
+       role="alert"></p>
+
+    <div class="mt-5 flex justify-end gap-2.5">
+      <button type="button" id="cardCaptureCancel"
+              class="inline-flex min-w-[108px] items-center justify-center rounded-[10px] border border-[#d9d9d6] bg-transparent px-5 py-3 text-sm font-semibold text-[#4a4d4b] transition-colors hover:bg-[#f5f5f3]">
+        Cancel
+      </button>
+      <button type="button" id="cardCaptureSave"
+              class="inline-flex min-w-[108px] items-center justify-center rounded-[10px] bg-gradient-to-r from-[#00CBC6] to-[#00D5BF] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(0,203,198,0.28)] transition-shadow hover:shadow-[0_8px_22px_rgba(0,203,198,0.4)] disabled:bg-[#d9d9d6] disabled:bg-none disabled:shadow-none">
+        Save card
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+(function () {
+  'use strict';
+
+  var modal = document.getElementById('cardCaptureModal');
+  if (!modal) return;
+
+  var csrf = (document.querySelector('meta[name="csrf_token"]') || {}).content || '';
+  var setupIntentUrl = modal.dataset.setupIntentUrl;
+  var confirmUrl = modal.dataset.confirmUrl;
+
+  var errorEl = document.getElementById('cardCaptureError');
+  var saveBtn = document.getElementById('cardCaptureSave');
+  var closeBtn = document.getElementById('cardCaptureClose');
+  var cancelBtn = document.getElementById('cardCaptureCancel');
+
+  // Cached at closure scope, NOT rebuilt per open: re-initialising Stripe tears down a
+  // mounted iframe, so a second open would show an empty form.
+  var stripe = null;
+  var elements = null;
+  var mounted = false;
+  var pending = null;
+
+  function post(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+      credentials: 'same-origin',
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: r.ok, data: data };
+      });
+    });
+  }
+
+  function fail(message) {
+    if (!errorEl) return;
+    errorEl.textContent = message || '';
+    errorEl.classList.toggle('hidden', !message);
+  }
+
+  function settle(result) {
+    var resolve = pending;
+    pending = null;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    if (saveBtn) saveBtn.disabled = false;
+    fail('');
+    if (resolve) resolve(result);
+  }
+
+  function mount() {
+    if (mounted) return Promise.resolve(true);
+    return post(setupIntentUrl, {}).then(function (res) {
+      if (!res.ok) { fail(res.data.error || 'Could not open the card form.'); return false; }
+      if (typeof Stripe === 'undefined') {
+        // Blocked by an extension or a proxy. Said out loud rather than left as an
+        // unhandled rejection on a form that is never going to appear.
+        fail('The card form could not load. Please allow js.stripe.com and reload.');
+        return false;
+      }
+      stripe = stripe || Stripe(res.data.publishable_key);
+      elements = stripe.elements({ clientSecret: res.data.client_secret });
+      // `terms.card: 'never'` suppresses Stripe's own mandate, which renders inside the
+      // iframe and names the STRIPE ACCOUNT rather than Minty. Suppressing it moves the
+      // disclosure onto the sentence in this dialog, so that sentence is NOT decoration
+      // and the two may not be removed separately.
+      elements.create('payment', { layout: 'tabs', terms: { card: 'never' } })
+              .mount('#cardCaptureMount');
+      mounted = true;
+      modal.dataset.setupIntent = res.data.setup_intent;
+      return true;
+    });
+  }
+
+  if (closeBtn) closeBtn.addEventListener('click', function () { settle({ saved: false }); });
+  if (cancelBtn) cancelBtn.addEventListener('click', function () { settle({ saved: false }); });
+
+  modal.addEventListener('click', function (event) {
+    // Backdrop only — a click that began inside the dialog must not dismiss it.
+    if (event.target === modal) settle({ saved: false });
+  });
+
+  document.addEventListener('keydown', function (event) {
+    // Guarded on `pending` so this listener is inert unless THIS dialog is the one open.
+    // Other dialogs on the page have their own Escape handling and must keep it.
+    if (event.key === 'Escape' && pending) settle({ saved: false });
+  });
+
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function () {
+      fail('');
+      if (!stripe || !elements) return;
+      saveBtn.disabled = true;
+      stripe.confirmSetup({
+        elements: elements,
+        confirmParams: { return_url: window.location.href },
+        redirect: 'if_required'
+      }).then(function (result) {
+        if (result.error) {
+          fail(result.error.message || 'That card could not be saved.');
+          saveBtn.disabled = false;
+          return;
+        }
+        // make_default is NOT optional: for a first card this is what creates the
+        // customer and attaches the method.
+        return post(confirmUrl, {
+          setup_intent: (result.setupIntent || {}).id || modal.dataset.setupIntent,
+          make_default: true
+        }).then(function (res) {
+          if (!res.ok) {
+            fail(res.data.error || 'That card could not be saved.');
+            saveBtn.disabled = false;
+            return;
+          }
+          var list = (res.data && res.data.methods) || [];
+          settle({
+            saved: true,
+            paymentMethod: (res.data && res.data.default_id)
+                           || (list[0] && list[0].id) || ''
+          });
+        });
+      }).catch(function () {
+        fail('That card could not be saved. Please try again.');
+        saveBtn.disabled = false;
+      });
+    });
+  }
+
+  window.openCardCapture = function () {
+    // One at a time. A second call while a dialog is open would strand the first
+    // caller's promise unresolved, and on this page that caller is mid-purchase.
+    if (pending) return Promise.resolve({ saved: false });
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    return new Promise(function (resolve) {
+      pending = resolve;
+      // Shown BEFORE mounting: Stripe measures its container, and mounting into a
+      // display:none box gives it a zero-width one to lay out in.
+      mount().then(function (ok) { if (!ok && pending) settle({ saved: false }); });
+    });
+  };
+})();
+</script>

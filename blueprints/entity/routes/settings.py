@@ -1275,6 +1275,15 @@ def entity_settings_module(org_id):
         else None
     )
 
+    # The lapsed-trial restart screen. None on an ordinary page, which is the single
+    # falsy check the template branches on. Computed AFTER ``can_manage_modules``,
+    # because a co-admin gets the naming fields and none of the Stripe reads behind them.
+    from blueprints.entity.services.modules import build_consent_takeover
+
+    consent_takeover = build_consent_takeover(
+        org_id, current_user.id, can_manage=can_manage_modules
+    )
+
     from_param = request.args.get("from")
     template = (
         "entity/settings_module_bills_ui.html"
@@ -1291,6 +1300,7 @@ def entity_settings_module(org_id):
         subscription_panel=subscription_panel,
         next_payment_date=next_payment_date,
         can_manage_modules=can_manage_modules,
+        consent_takeover=consent_takeover,
         subscription_payer=subscription_payer,
         # TEMPORARY, DEV ONLY. Gates the "add a payment method / confirm billing"
         # banner, which exists to reach those two flows directly while the trial
@@ -1381,13 +1391,37 @@ def entity_settings_module_authorize_billing(org_id):
     active subscription and paid checkout would happily bill it immediately).
 
     Idempotent: consent is once per entity.
+
+    Body: ``{"payment_method": "pm_..."}``, OPTIONAL. Absent means "whatever my account
+    default already is", which is what every caller sent before this existed and what
+    onboarding still sends.
+
+    When present it is nominated BEFORE consent is recorded, for the same reason the
+    restart route does it in that order: authorising a charge while the account still
+    points at a different card authorises one the payer was never shown.
+
+    NOTE WHAT NOMINATING MEANS. There is one card per payer — the engine only ever reads
+    ``invoice_settings.default_payment_method`` — so this is an ACCOUNT-WIDE change, not
+    a per-company one. Consent is per entity; the card is not. Any UI offering the choice
+    has to say so, and both of the ones that do say it on the screen.
     """
+    from blueprints.subscription.services import payment_methods
     from blueprints.subscription.services.checkout import (
         CheckoutError,
         authorize_entity_billing,
     )
 
     org = Entity.query.get_or_404(org_id)
+    pm_id = str((request.get_json(silent=True) or {}).get("payment_method") or "").strip()
+    try:
+        if pm_id:
+            # Routed through ``set_default``, which proves the method belongs to this
+            # caller: another payer's ``pm_...`` answers "not found" rather than being
+            # nominated.
+            payment_methods.set_default(current_user.id, pm_id)
+    except payment_methods.PaymentMethodError as exc:
+        return jsonify({"error": exc.message}), exc.status
+
     try:
         authorize_entity_billing(org, current_user)
     except CheckoutError as exc:
@@ -1399,6 +1433,299 @@ def entity_settings_module_authorize_billing(org_id):
             500,
         )
     return jsonify({"ok": True}), 200
+
+
+# --- The lapsed-trial restart screen -----------------------------------------
+#
+# Six routes serving ONE screen: four that manage the payer's cards from inside the page
+# (Minty had no card UI at all — the payer portal owns that, over bearer auth on another
+# origin), a quote, and the one that charges.
+#
+# ALL SIX carry the same guard stack as the money routes above, for the same reason:
+# ``MODULE_MANAGE`` says who may administer the entity, ``require_subscription_payer``
+# says whose card is about to be spent. ``org_id`` is unused by the four card handlers —
+# a card belongs to the PERSON, not the company — and is there purely so the guards have
+# an entity to scope to. Do not "tidy" it away.
+#
+# NOT csrf-exempt, unlike their bearer twins in ``subscription.routes.portal``. These are
+# cookie-authenticated, so they want CSRF; the page sends ``X-CSRFToken`` from the
+# ``csrf_token`` meta tag both settings templates carry.
+
+
+def _session_payment_methods(handler):
+    """Run one payment-method action for the signed-in user. Session auth, no CORS.
+
+    The third transport over ``payment_methods.run`` — the bearer one in
+    ``subscription.routes.portal`` and the onboarding one in ``entity.routes.create`` are
+    the other two, and all three now share the failure handling rather than each keeping
+    its own copy of it.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    payload, status = payment_methods.run(handler, current_user.id)
+    return jsonify(payload), status
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/payment-methods", methods=["GET"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_payment_methods(org_id):
+    """Every card saved on the payer's own account, default first."""
+    from blueprints.subscription.services import payment_methods
+
+    return _session_payment_methods(payment_methods.list_for_user)
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/payment-methods/setup-intent",
+    methods=["POST"],
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_payment_methods_setup_intent(org_id):
+    """Open a SetupIntent so the in-page card form can mount.
+
+    Creates no Stripe customer: an abandoned form must not leave one behind, so the
+    customer is made in ``confirm`` once Stripe says a card actually exists.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    return _session_payment_methods(payment_methods.start_setup)
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/payment-methods/confirm", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_payment_methods_confirm(org_id):
+    """Adopt the card the browser just confirmed. Body: ``{setup_intent, make_default?}``.
+
+    Nothing in the body is trusted — the intent is re-read from Stripe and refused unless
+    it carries this caller's own ``metadata.user_id`` stamp.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    body = request.get_json(silent=True) or {}
+    setup_intent = str(body.get("setup_intent") or "").strip()
+    make_default = bool(body.get("make_default"))
+
+    return _session_payment_methods(
+        lambda user_id: payment_methods.confirm_setup(
+            user_id, setup_intent, make_default=make_default
+        )
+    )
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/payment-methods/default", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_payment_methods_default(org_id):
+    """Nominate the card every future invoice is charged against.
+
+    Body: ``{payment_method}``. Account-wide, not per entity — renewals bill the payer.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    pm_id = str(
+        (request.get_json(silent=True) or {}).get("payment_method") or ""
+    ).strip()
+    return _session_payment_methods(
+        lambda user_id: payment_methods.set_default(user_id, pm_id)
+    )
+
+
+def _restart_state_and_codes(org_id, requested):
+    """``(state, codes, error)`` for the two restart routes — their shared front half.
+
+    The quote and the charge MUST resolve the submitted codes identically, or the payer
+    is shown one number and billed against another set. So it is resolved once, here, and
+    both routes call it.
+    """
+    from blueprints.subscription.services import consent
+
+    state = consent.lapsed_trial_for_entity(org_id, current_user.id)
+    if not state.get("mode"):
+        return (
+            state,
+            [],
+            (jsonify({"error": "There is nothing to restart for this company."}), 409),
+        )
+
+    codes = consent.codes_for_restart(state, requested)
+    if not codes:
+        return (
+            state,
+            [],
+            (jsonify({"error": "Choose at least one module to restart."}), 422),
+        )
+    return state, codes, None
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/restart-quote", methods=["GET"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_restart_quote(org_id):
+    """What restarting ``?codes=A,B`` would cost. READS ONLY.
+
+    The screen re-prices on every tick and this is what it asks. It runs the same
+    resolution as the charge, so the two can never name a different set of modules, and
+    quotes through ``preview_subscribe_modules`` — the same figure the charge itself
+    uses, rather than a price list that could disagree with it.
+    """
+    requested = [
+        part for part in (request.args.get("codes") or "").split(",") if part.strip()
+    ]
+    _state, codes, error = _restart_state_and_codes(org_id, requested)
+    if error:
+        return error
+
+    from blueprints.subscription.services.checkout import (CheckoutError,
+                                                           preview_subscribe_modules)
+
+    org = Entity.query.get_or_404(org_id)
+    try:
+        return jsonify(preview_subscribe_modules(org, current_user, codes)), 200
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("restart quote failed for %s", org_id)
+        return jsonify({"error": "Could not price that. Please try again."}), 500
+
+
+@entity_bp.route(
+    "/entity/settings/module/<string:org_id>/restart-billing", methods=["POST"]
+)
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage subscriptions for this entity.",
+)
+@require_subscription_payer(entity_arg="org_id")
+def entity_settings_module_restart_billing(org_id):
+    """Buy back a lapsed trial's modules. THIS CHARGES.
+
+    Body: ``{codes: [...], payment_method?}``.
+
+    The trial is over, so there is nothing to defer to. Unlike ``authorize-billing``,
+    which records consent and lets the term end on its own, this subscribes and takes the
+    payment now.
+
+    Order matters and each step has its own answer:
+
+    1. the entity must genuinely have a lapsed trial (409) — without it this URL would
+       charge a company that is running perfectly well;
+    2. the codes must be ones that actually lapsed (422) — the list comes from the
+       browser, so a module the entity never had must never become a charge;
+    3. the card is nominated BEFORE the charge (402 when there is none) — charging while
+       the account still points at a different card bills one the payer was never shown;
+    4. only then the subscribe, priced server-side from the resolved codes rather than
+       from any amount the client sent.
+
+    Consent lands through ``confirm_modules_checkout``, the same function every other
+    paid purchase writes it from — this screen adds no new consent site.
+    """
+    from blueprints.subscription.services import payment_methods
+    from blueprints.subscription.services.checkout import (CheckoutError,
+                                                           confirm_modules_checkout)
+
+    body = request.get_json(silent=True) or {}
+    _state, codes, error = _restart_state_and_codes(org_id, body.get("codes"))
+    if error:
+        return error
+
+    org = Entity.query.get_or_404(org_id)
+
+    pm_id = str(body.get("payment_method") or "").strip()
+    try:
+        if pm_id:
+            # Routed through ``set_default``, which proves the method belongs to this
+            # caller before acting on it: another payer's ``pm_...`` answers "not found"
+            # rather than being nominated.
+            payment_methods.set_default(current_user.id, pm_id)
+        if not _payer_has_card(current_user.id):
+            return jsonify({"error": "Add a card before restarting billing."}), 402
+    except payment_methods.PaymentMethodError as exc:
+        return jsonify({"error": exc.message}), exc.status
+
+    return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
+    complete_url = url_for(
+        "entity.entity_settings_module_checkout_complete", org_id=org_id, _external=True
+    ) + "?session_id={CHECKOUT_SESSION_ID}"
+    try:
+        result = confirm_modules_checkout(
+            org,
+            current_user,
+            success_url=complete_url,
+            cancel_url=return_url,
+            requested_codes=codes,
+        )
+    except CheckoutError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception:
+        logger.exception("restart billing failed for %s", org_id)
+        return (
+            jsonify({"error": "Could not restart billing. Please try again."}),
+            500,
+        )
+    if result.get("url"):
+        # The saved card could not be used after all, so Stripe collects a new one. Same
+        # answer the confirm-billing route gives, and the page follows it.
+        return jsonify({"url": result["url"]}), 200
+    return jsonify({"ok": True, "restarted": result.get("created", codes)}), 200
+
+
+def _payer_has_card(user_id) -> bool:
+    """Whether the payer has a default card.
+
+    Read AFTER any nomination above, so it sees the card just chosen rather than the
+    state before it.
+    """
+    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services.stripe_client import (
+        customer_default_payment_method,
+    )
+
+    customer_id = sub_store.customer_id_for_user(user_id)
+    return bool(customer_id and customer_default_payment_method(customer_id))
 
 
 @entity_bp.route(

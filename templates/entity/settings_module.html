@@ -153,9 +153,7 @@
 
       <!-- Main Content Area -->
       <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1">
-        <h1 class="text-2xl font-bold text-gray-900 mb-2">Module</h1>
-
-        {% include 'entity/partials/module_subscription_section.html' %}
+        {% include 'entity/partials/module_main_content.html' %}
       </div>
 
     </div>
@@ -164,6 +162,5 @@
   <script>
     PageTransition.init('.main-content', 'fadeIn', 10);
   </script>
-  {% include 'entity/partials/module_subscription_scripts.html' %}
 </body>
 </html>

@@ -922,14 +922,13 @@ def _billing_call(handler):
     """Run one payment-method action for the bearer's own account, CORS'd for onboarding.
 
     The onboarding twin of ``subscription.routes.portal._payment_methods_call``: same
-    contract, and the same three failure modes written once. ``PaymentMethodError``
-    carries a message meant for the customer and the status to say it with; anything
-    else is a bug or Stripe being down, and says so without naming what broke.
+    contract. Only the bearer check and this app's own CORS origin are its own — the
+    three shared failure modes live in ``payment_methods.run``.
 
     Note these act on the PAYER, not on an entity — a card belongs to the person, not to
     the company — so unlike the routes above there is no entity to check membership on.
     """
-    from blueprints.subscription.services.payment_methods import PaymentMethodError
+    from blueprints.subscription.services import payment_methods
 
     user_id = _user_id_from_bearer()
     if not user_id:
@@ -937,21 +936,10 @@ def _billing_call(handler):
         resp.status_code = 401
         return _cors(resp)
 
-    try:
-        payload = handler(user_id)
-    except PaymentMethodError as exc:
-        resp = jsonify({"error": exc.message})
-        resp.status_code = exc.status
-        return _cors(resp)
-    except Exception:
-        current_app.logger.exception(
-            "onboarding billing: payment-method action failed for user %s", user_id
-        )
-        resp = jsonify({"error": "Something got stuck on our end. Let's try again?"})
-        resp.status_code = 500
-        return _cors(resp)
-
-    return _cors(jsonify(payload))
+    payload, status = payment_methods.run(handler, user_id)
+    resp = jsonify(payload)
+    resp.status_code = status
+    return _cors(resp)
 
 
 @entity_bp.route("/api/onboarding/billing/payment-methods", methods=["GET", "OPTIONS"])
