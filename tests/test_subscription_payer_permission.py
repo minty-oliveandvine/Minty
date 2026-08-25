@@ -37,6 +37,16 @@ MONEY_ROUTES = [
     "payment-method",
     "renew",
     "manage-billing",
+    # The lapsed-trial restart screen. The four card routes do not name an entity in
+    # what they act on, but they are money-adjacent and carry the same guard stack, so
+    # they belong here: without the payer check a co-admin could nominate the card the
+    # restart is about to charge.
+    "payment-methods",
+    "payment-methods/setup-intent",
+    "payment-methods/confirm",
+    "payment-methods/default",
+    "restart-quote",
+    "restart-billing",
 ]
 
 

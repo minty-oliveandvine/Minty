@@ -1,0 +1,33 @@
+{#
+  THE NOTICE FOR SOMEONE WHO IS NOT THE PAYER, in either mode.
+
+  A flat banner and no form: ``require_subscription_payer`` would refuse the write, so
+  rendering the restart dialog for a co-admin would be a thing they could fill in and
+  never submit. Naming the payer is the one genuinely useful action available to them —
+  go and ask that person.
+
+  In flow rather than a dialog, deliberately. A dialog demands an answer, and this reader
+  has none to give.
+
+  The PAYER never sees this file: both modes give them the dialog
+  (module_restart_body.html) over the ordinary page.
+#}
+<div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+  <p class="text-sm font-semibold text-amber-900">
+    {% if consent_takeover.single %}
+      {{ consent_takeover.names[0] }} expired on {{ consent_takeover.lapsed[0].lapsed_on_long }}
+    {% else %}
+      {% for item in consent_takeover.lapsed %}{% if not loop.first %}{% if loop.last %} and {% else %}, {% endif %}{% endif %}{{ item.name }}{% endfor %}
+      have expired
+    {% endif %}
+  </p>
+  <p class="mt-1 text-xs text-amber-800">
+    {% if subscription_payer %}
+      Billing for {{ org.name }} is managed by
+      {{ subscription_payer.first_name or '' }} {{ subscription_payer.last_name or '' }}
+      ({{ subscription_payer.username }}) — they need to restart it.
+    {% else %}
+      The person who pays for {{ org.name }} needs to restart billing.
+    {% endif %}
+  </p>
+</div>

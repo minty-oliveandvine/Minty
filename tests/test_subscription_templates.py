@@ -259,33 +259,12 @@ def test_paid_variant_lists_modules_the_entity_does_not_have(app):
     assert "/checkout" in scripts
 
 
-def test_payment_method_banner_is_dev_only(app):
-    """TEMPORARY dev affordance — it must not reach a production page, where the
-    modal is the only route into add-card / confirm-billing."""
-    on, _ = _render_trial(app)
-    assert "Add payment method" in on
-
-    off, _ = _render_trial(app, dev_tools=False)
-    assert "Add payment method" not in off
-    assert "Confirm billing" not in off
-
-
-def test_stripe_portal_is_dev_only_too(app):
-    """The billing PORTAL moved off the panel and into the same dev-only banner. The
-    panel's own Manage subscription stays, but it opens the decision modal instead."""
-    paid_card = _trial_card("PETTY_CASH", "Petty Cash")
-    paid_card.update(subscription_status="active", needs_card=False)
-    paid = dict(_TRIAL_PANEL, primary_action="manage", subscribe_codes=[])
-
-    on, _ = _render_trial(app, module_cards=[paid_card], subscription_panel=paid)
-    assert "openManageBilling" in on
-    # In the banner, not the panel: the panel's action hook renders empty.
-    assert on.index("openManageBilling") < on.index("subscription-panel")
-
-    off, _ = _render_trial(
-        app, module_cards=[paid_card], subscription_panel=paid, dev_tools=False
-    )
-    assert "openManageBilling" not in off
+# The dev-only trial banner these two tests covered ("Add payment method" / "Confirm
+# billing" / the Stripe portal button) is GONE, along with the tests. Its own comment
+# said to delete it once those actions had real homes, and they now do: the decision
+# modal drives add-card and confirm-billing during a trial, and the restart screen
+# (module_restart_body.html) drives them once one has lapsed. ``dev_tools`` itself
+# survives for the cancellation charge below, which is a different affordance.
 
 
 def test_an_untried_module_says_its_free_trial_is_available(app):

@@ -275,6 +275,29 @@ def _trial_ending(ctx: dict) -> dict:
             "cta_label": "Add a payment method",
             "cta_url": settings_url(ctx.get("entity_id")),
         }
+    if ctx.get("needs_consent"):
+        # A CARD IS SAVED and this trial will still lapse. Until this branch existed
+        # these payers got the no-card copy above — told to add a payment method they
+        # could see on their own billing page, while the actual reason went unnamed.
+        # The cause is not obvious and has to be spelled out: one card serves every
+        # company on the account, so each company is authorised separately.
+        return {
+            "tone": "warn",
+            "subject": f"Action needed: confirm billing for {entity} by {ends}",
+            "heading": "Confirm billing to keep your subscription",
+            "lede": (
+                f"The free trial for {mods} on {entity} ends on {ends}. Your saved card "
+                f"is shared with your other companies, so it won't be charged for this "
+                f"one until you confirm — and access will stop on that date instead."
+            ),
+            "facts": _trial_facts(entity, mods, ends, amount, currency),
+            "body": [
+                "Confirming takes a moment and charges nothing today — the first "
+                "payment is taken when the trial actually ends."
+            ],
+            "cta_label": "Confirm billing",
+            "cta_url": settings_url(ctx.get("entity_id")),
+        }
     return {
         "tone": "neutral",
         "subject": f"{entity}'s free trial ends {ends}",

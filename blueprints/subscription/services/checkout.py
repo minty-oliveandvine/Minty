@@ -1081,7 +1081,13 @@ def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict
                 "trial_end": min(row.trial_end for row in rows),
                 "amount": amount,
                 "currency": currency,
-                "needs_card": not _trial_will_convert(entity_id, payer),
+                # TWO reasons a trial will not convert, and the email has to be able
+                # to tell them apart. ``_trial_will_convert`` collapses them into one
+                # boolean, which made the no-card copy fire at payers who HAVE a card
+                # and were only missing this company's consent — telling them to add a
+                # card they already had, while the real fix went unnamed.
+                "needs_card": not _trial_has_card(payer),
+                "needs_consent": not store.has_billing_consent(entity_id, payer),
             }
             events.append((
                 payer,
@@ -1119,6 +1125,24 @@ def _notify_module():
     from blueprints.subscription.services import notify
 
     return notify
+
+
+def _trial_has_card(payer_user_id) -> bool:
+    """Whether the payer has a card the trial conversion could charge.
+
+    Half of ``_trial_will_convert``, split out so the ending-soon email can name WHICH
+    half is missing. Any failure answers False, for the same reason the conjunction does:
+    nagging a customer who was fine is a far smaller harm than letting a trial they
+    wanted lapse in silence.
+    """
+    try:
+        customer_id = _resolve_customer_id(payer_user_id)
+        return bool(customer_id and trial_payment_method(customer_id))
+    except Exception:
+        logger.exception(
+            "trial: could not determine whether payer {} has a card", payer_user_id
+        )
+        return False
 
 
 def _trial_will_convert(entity_id, payer_user_id) -> bool:

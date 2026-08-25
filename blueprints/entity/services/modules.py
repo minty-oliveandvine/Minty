@@ -1219,6 +1219,116 @@ def _extension_charges(cards: list[dict], fmt, bundle_codes=None, bundle_name=""
     ]
 
 
+def build_consent_takeover(
+    entity_id, user_id, *, can_manage: bool, access_state=None
+) -> dict | None:
+    """The restart screen for an entity whose trial lapsed, or None.
+
+    Two shapes come out of one builder because they are one screen in two frames:
+    ``mode="takeover"`` replaces the page when nothing live is left, ``mode="panel"``
+    sits above the module cards when another module is still trialing. The condition
+    itself lives in ``subscription.services.consent`` — this only dresses it.
+
+    ``access_state`` is the ``{code: bool}`` gate map, resolved from ``_enabled_state``
+    when not supplied. It is a parameter so a test can state the gate directly instead of
+    building an ``entity_function_map``, and so a future caller that already holds the map
+    can hand it over rather than reading it a second time.
+
+    ``can_act`` is carried SEPARATELY from ``mode``. A co-admin must never be shown this
+    screen — ``require_subscription_payer`` would refuse the write, so it would be a form
+    that cannot submit — but the page still needs to know a restart is outstanding so it
+    can name the payer who has to do it.
+
+    Returns None when there is nothing lapsed, so the caller can pass it straight to the
+    template and let a single falsy check pick the ordinary page.
+    """
+    from blueprints.subscription.services import consent
+
+    state = consent.lapsed_trial_for_entity(
+        entity_id, user_id if can_manage else None, access_state=access_state
+    )
+    if not state.get("mode"):
+        return None
+
+    view = {
+        "mode": state["mode"],
+        "can_act": bool(can_manage),
+        "lapsed": state["lapsed"],
+        "payer_user_id": state.get("payer_user_id"),
+        "has_card": state.get("has_card", False),
+        "single": len(state["lapsed"]) == 1,
+        "names": [item["name"] for item in state["lapsed"]],
+        "quote": None,
+        "methods": None,
+    }
+    for item in view["lapsed"]:
+        item["lapsed_on_long"] = _fmt_day_month_year(item["lapsed_on"])
+
+    # Everything below costs a Stripe round trip, and NONE of it is any use to someone
+    # who cannot act on it. A co-admin gets the naming fields above and nothing more.
+    if not can_manage:
+        return view
+
+    view["quote"] = _restart_quote(entity_id, user_id, view["lapsed"])
+    view["methods"] = _restart_methods(user_id)
+    return view
+
+
+def _restart_quote(entity_id, user_id, lapsed) -> dict | None:
+    """What restarting every lapsed module would cost, for the first render.
+
+    Priced through ``preview_subscribe_modules`` — the same figure the charge itself
+    uses — so the number on the screen and the number billed come from one calculation.
+    The page re-asks the ``restart-quote`` route whenever a box is ticked; this exists
+    only so the first paint needs no round trip.
+
+    None on any failure. The page then shows its boxes with the amount pending and
+    fetches it, which is a slower screen rather than a broken one — and far better than
+    a takeover that renders no price at all.
+    """
+    from models.db import Entity, User
+
+    try:
+        from blueprints.subscription.services.checkout import preview_subscribe_modules
+
+        entity = Entity.query.get(str(entity_id))
+        user = User.query.get(str(user_id))
+        if entity is None or user is None:
+            return None
+        return preview_subscribe_modules(
+            entity, user, [item["code"] for item in lapsed]
+        )
+    except Exception:
+        db.session.rollback()
+        logger.exception(
+            "modules: could not price the restart for {}; the page will fetch it",
+            entity_id,
+        )
+        return None
+
+
+def _restart_methods(user_id) -> dict:
+    """The payer's saved cards for the in-page picker.
+
+    An empty wallet is NOT an error and must not read as one: ``has_account`` false is
+    the ordinary state of a payer whose trial never captured a card, and the screen shows
+    the add-card form alone. A genuine failure answers the same shape, because the page
+    can still fetch the list itself — the one thing it must never do is imply the cards
+    are gone.
+    """
+    empty = {"has_account": False, "default_id": None, "methods": [], "total": 0}
+    try:
+        from blueprints.subscription.services import payment_methods
+
+        return payment_methods.list_for_user(user_id)
+    except Exception:
+        logger.exception(
+            "modules: could not read saved cards for payer {}; the page will fetch them",
+            user_id,
+        )
+        return empty
+
+
 def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_display: str | None) -> dict | None:
     """The "Your subscription" panel model, from the already-built cards + summary.
 
@@ -1768,7 +1878,38 @@ def build_subscription_notices(entity_id: str, user_id) -> dict:
             )
             continue
 
-        # 2. A trial that will NOT convert. Two different fixes, so two kinds — a
+        # 2. The trial ALREADY lapsed and the gate is off. This state was silent: a
+        #    payer could lose a module and never be told, because branch 3 below only
+        #    fires while a trial is still running and there was nothing after it. The
+        #    restart screen on the settings page can fix it, so the notice is the thing
+        #    that gets them there.
+        #
+        #    Reuses ``needs_card`` rather than inventing a kind: the billing frontend
+        #    types NoticeKind as a closed union and renders every kind generically, so a
+        #    new one would arrive there unhandled.
+        #
+        #    NAMES THE MODULE, and has to. An entity can be part-lapsed with another
+        #    trial still running, and a notice implying the whole company is down would
+        #    be wrong for the half that is fine.
+        if card.get("trial_expired") and not card.get("has_access"):
+            ended = card.get("access_end_long") or card.get("trial_end_long")
+            items.append(
+                {
+                    "kind": "needs_card",
+                    "severity": "critical",
+                    "module": name,
+                    "module_code": code,
+                    "title": f"{name} has expired",
+                    "detail": (
+                        (f"Its free trial ended {ended}. " if ended else "")
+                        + "Restart billing to get it back."
+                    ),
+                    "deadline": ended,
+                }
+            )
+            continue
+
+        # 3. A trial that will NOT convert. Two different fixes, so two kinds — a
         #    payer with a card saved still has to authorise THIS company before it
         #    can be charged (see checkout._convert_due_trial).
         if card.get("needs_card"):
@@ -1799,7 +1940,7 @@ def build_subscription_notices(entity_id: str, user_id) -> dict:
             )
             continue
 
-        # 3. Winding down — cancelled but still inside the paid period.
+        # 4. Winding down — cancelled but still inside the paid period.
         if card.get("pending_cancel") and card.get("access_end_long"):
             items.append(
                 {
@@ -1816,7 +1957,7 @@ def build_subscription_notices(entity_id: str, user_id) -> dict:
             )
             continue
 
-        # 4. A healthy trial that will convert. Not a problem — but the first charge
+        # 5. A healthy trial that will convert. Not a problem — but the first charge
         #    is a surprise if nobody said it was coming, so it carries its date for
         #    the whole trial rather than only near the end.
         period_end = card.get("period_end")

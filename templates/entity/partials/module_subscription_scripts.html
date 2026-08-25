@@ -81,6 +81,20 @@
         <span class="text-sm text-gray-700">Card</span>
         <span id="billingConfirmCard" class="text-sm font-medium text-gray-900"></span>
       </div>
+
+      {# The same row, but choosable. Shown instead of the read-only one when the caller
+         passes a card list — the payer picks the card BEFORE authorising rather than
+         having to leave, change a default elsewhere and come back.
+
+         Note the card is still account-level today: the engine reads
+         ``invoice_settings.default_payment_method`` and nothing else, so this nominates
+         for the account. Per-company cards are a planned change; when they land, this
+         control is already in the right place and only what it posts to has to move. #}
+      <div id="billingConfirmCardPick" class="mt-2 hidden">
+        <label for="billingConfirmCardSelect" class="block text-sm text-gray-700">Card</label>
+        <select id="billingConfirmCardSelect"
+                class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#54d3da] focus:outline-none focus:ring-1 focus:ring-[#54d3da]"></select>
+      </div>
     </div>
 
     <p id="billingConfirmNote" class="mt-4 text-xs text-gray-500"></p>
@@ -414,6 +428,8 @@
       const cancelBtn = document.getElementById('billingConfirmCancel');
       const detail = document.getElementById('billingConfirmDetail');
       const cardRow = document.getElementById('billingConfirmCardRow');
+      const cardPickRow = document.getElementById('billingConfirmCardPick');
+      const cardPick = document.getElementById('billingConfirmCardSelect');
 
       document.getElementById('billingConfirmTitle').textContent = opts.title || 'Confirm billing';
       document.getElementById('billingConfirmBody').textContent = opts.body || '';
@@ -441,11 +457,30 @@
         planLine.classList.toggle('hidden', !opts.planLine);
         thenLine.textContent = opts.thenLine || '';
         thenLine.classList.toggle('hidden', !opts.thenLine);
-        if (opts.card) {
+        // A CHOICE when the caller supplied a list, a statement when it did not. The
+        // two are mutually exclusive: showing both would put the same fact on screen
+        // twice and leave it ambiguous which one the charge follows.
+        if (opts.cards && opts.cards.length) {
+          cardPick.innerHTML = '';
+          opts.cards.forEach(function (pm) {
+            const option = document.createElement('option');
+            option.value = pm.id;
+            option.textContent =
+              (pm.label || pm.brand || pm.id)
+              + (pm.expiry ? ' · expires ' + pm.expiry : '')
+              + (pm.id === opts.defaultCard ? ' · current default' : '');
+            option.selected = pm.id === opts.defaultCard;
+            cardPick.appendChild(option);
+          });
+          cardPickRow.classList.remove('hidden');
+          cardRow.classList.add('hidden');
+        } else if (opts.card) {
           document.getElementById('billingConfirmCard').textContent = opts.card;
           cardRow.classList.remove('hidden');
+          cardPickRow.classList.add('hidden');
         } else {
           cardRow.classList.add('hidden');
+          cardPickRow.classList.add('hidden');
         }
       } else {
         detail.classList.add('hidden');
@@ -464,7 +499,15 @@
         document.removeEventListener('keydown', onKey);
         resolve(result);
       }
-      function onOk() { close(true); }
+      function onOk() {
+        // An OBJECT when a card was chosen, plain true otherwise. Both are truthy, so
+        // every existing `if (!ok)` caller is unaffected — only the one that offered
+        // the choice looks inside.
+        const chosen = cardPickRow && !cardPickRow.classList.contains('hidden')
+          ? (cardPick.value || '')
+          : '';
+        close(chosen ? { card: chosen } : true);
+      }
       function onCancel() { close(false); }
 
       okBtn.addEventListener('click', onOk);
@@ -1088,6 +1131,30 @@
     if (gap === 'none') return 'nothing';  // already converting; nothing to ask for
 
     const price = fmtMoney(plan.sym, plan.amount) + '/mo';
+
+    // The saved cards, so the consent dialog can offer a CHOICE rather than telling the
+    // payer which card they are about to authorise. Best-effort: a failed read falls
+    // back to the old wording, because "confirm billing on your saved card" is still
+    // true and still better than refusing to let them confirm at all.
+    let wallet = { methods: [], default_id: null };
+    if (gap === 'consent') {
+      try {
+        const res = await fetch(
+          "{{ url_for('entity.entity_settings_module_payment_methods', org_id=org.id) }}",
+          { credentials: 'same-origin' }
+        );
+        if (res.ok) wallet = await res.json();
+      } catch (e) { /* falls through to the read-only wording */ }
+    }
+    const cards = wallet.methods || [];
+    const canChoose = gap === 'consent' && cards.length > 1;
+    // With exactly one card there is nothing to choose, but the payer should still be
+    // told WHICH card they are authorising — a confirmation that names no card asks
+    // them to agree to a charge they cannot check.
+    const onlyCard = gap === 'consent' && cards.length === 1
+      ? (cards[0].label || cards[0].brand || '')
+      : '';
+
     const ok = await openBillingConfirm(gap === 'card' ? {
       title: 'Save a card to keep ' + plan.name + '?',
       body: 'We’ll take you to Stripe to save a card. Nothing is charged today — your '
@@ -1098,10 +1165,19 @@
       confirmLabel: 'Save a card',
     } : {
       title: 'Confirm billing for this company?',
-      body: 'Your free trial converts to paid when it ends, charged to the card already '
-          + 'saved on your account.',
+      body: canChoose
+        ? 'Your free trial converts to paid when it ends, charged to the card you '
+          + 'choose below.'
+        : 'Your free trial converts to paid when it ends, charged to the card saved on '
+          + 'your account.',
       amount: price,
       amountLabel: endsOn ? 'From ' + endsOn : 'Monthly',
+      // Only offered with more than one card: a select holding a single option is a
+      // control that cannot be used, and it would carry the account-wide warning with
+      // it for a change the payer cannot actually make.
+      cards: canChoose ? cards : null,
+      card: onlyCard,
+      defaultCard: wallet.default_id,
       note: 'Nothing is charged today — the trial runs to the end either way. That card '
           + 'is shared with your other companies, and authorising it here doesn’t change '
           + 'how they’re billed.',
@@ -1110,12 +1186,30 @@
     if (!ok) return 'declined';
 
     if (gap === 'card') {
-      // Redirects to Stripe and comes back to this page with the card saved.
-      await window.addPaymentMethod(null);
-      return 'redirected';
+      // IN PAGE, via the shared capture dialog. This used to post for a hosted Stripe
+      // URL and navigate away, which lost the decision the payer was part-way through
+      // making — they came back to an unchanged modal and had to make it again.
+      //
+      // Saving a card is not consent on its own (the payer's card is shared across
+      // their companies), so a successful save falls THROUGH to the authorisation
+      // below rather than returning here. That is the whole point of doing it in page:
+      // the two halves of "keep this trial" now happen in one go.
+      if (typeof window.openCardCapture !== 'function') {
+        await window.addPaymentMethod(null);
+        return 'redirected';
+      }
+      const saved = await window.openCardCapture();
+      if (!saved || !saved.saved) return 'declined';
     }
     showBlockingLoader('Confirming billing…');
-    await postJson("{{ url_for('entity.entity_settings_module_authorize_billing', org_id=org.id) }}", {});
+    // The chosen card rides with the consent, and the route nominates it BEFORE
+    // recording — authorising a charge while the account still points at a different
+    // card authorises one the payer was never shown. Empty body when nothing was
+    // offered, which is exactly what this call sent before the picker existed.
+    await postJson(
+      "{{ url_for('entity.entity_settings_module_authorize_billing', org_id=org.id) }}",
+      ok && ok.card ? { payment_method: ok.card } : {}
+    );
     return 'done';
   }
 
