@@ -29,6 +29,10 @@ def register():
         # person was actually shown, rather than whatever is live by the time
         # they finish entering the code.
         terms_version=registry.current_version(registry.TERMS),
+        # The body itself, so the tick box can be gated on reading it rather
+        # than on clicking past a link. Same document object the acceptance
+        # gate renders, so the two screens cannot show different wording.
+        terms_document=registry.get_current(registry.TERMS),
     )
 
 

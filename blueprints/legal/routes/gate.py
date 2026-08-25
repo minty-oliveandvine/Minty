@@ -96,6 +96,10 @@ ALLOWED_ENDPOINTS = frozenset(
         "legal.privacy",
         "legal.privacy_version",
         "legal.current",
+        # The document body as JSON. The onboarding app reads this to show the
+        # Terms inline and gate its tick box on reaching the end — a
+        # cross-origin iframe cannot be scroll-tracked, so it needs the markup.
+        "legal.content",
     }
 )
 

@@ -62,6 +62,39 @@ def privacy_version(version):
     return _render(registry.PRIVACY, version)
 
 
+@legal_bp.route("/legal/content/<kind>")
+def content(kind):
+    """The rendered document as JSON, for a client that must show it inline.
+
+    WHY THIS EXISTS RATHER THAN AN IFRAME
+
+    The onboarding app runs on its own origin, so it cannot read the scroll
+    position of an <iframe> pointing at /legal/terms — the browser forbids it.
+    Its tick box is gated on the person actually reaching the end of the
+    document, and to do that it needs the markup itself.
+
+    The HTML is produced by legal.render, which escapes the source text BEFORE
+    applying markup, so what comes back is safe for the client to inject.
+    """
+    if kind not in (registry.TERMS, registry.PRIVACY):
+        abort(404)
+
+    document = registry.get_current(kind)
+    if document is None:
+        abort(404)
+
+    return jsonify(
+        {
+            "kind": kind,
+            "version": document.version,
+            "html": document.html,
+            "sha256": document.sha256,
+            "effective_date": document.effective_date,
+            "is_pinned": document.is_pinned,
+        }
+    )
+
+
 @legal_bp.route("/legal/current")
 def current():
     """Which version is live, for the sign-up screens.

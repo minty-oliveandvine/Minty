@@ -1,0 +1,150 @@
+{# Read-to-agree modal for a SIGN-UP page.
+
+   Same visual language as the post-login acceptance gate — it reuses
+   legal/_terms_styles.html — but a different job. The gate RECORDS consent
+   (POST /legal/accept) because the account already exists. Here nothing exists
+   yet, so this only ticks the page's tick box; the recording happens later,
+   server-side, when verify-code creates the account.
+
+   That is also why this one is dismissible: someone who will not agree simply
+   does not sign up. The gate is a trap by design; this is not.
+
+   Whatever includes this must also include legal/_terms_styles.html once.
+
+   Context it reads:
+     document              required — a legal.registry.LegalDocument
+     tc_target_checkbox    optional — id of the box to tick (default termsAccept) #}
+{% set _tc_box = tc_target_checkbox | default('termsAccept', true) %}
+<div class="tc-modal-backdrop" id="tc-read-backdrop" role="dialog" aria-modal="true"
+     aria-label="Terms and Conditions" hidden>
+  <div class="tc-modal">
+    <div class="tc-panel">
+      <div class="tc-grid">
+
+        <div class="tc-main">
+          <h1 class="tc-title">Terms &amp; Conditions</h1>
+          <p class="tc-lead">
+            Please review and accept our Terms &amp; Conditions and Privacy Policy to
+            finish setting up your account.
+          </p>
+
+          {% if document.show_draft_notice %}
+          <div class="tc-draft">
+            <strong>Draft.</strong> This wording is not final, so this screen is for
+            testing only.
+          </div>
+          {% endif %}
+
+          <div class="tc-card">
+            {% if document.effective_date %}
+            <p class="tc-updated">Last updated: {{ document.effective_date }}</p>
+            {% endif %}
+            <div class="tc-doc" id="tc-read-doc" tabindex="0">{{ document.html | safe }}</div>
+          </div>
+        </div>
+
+        <aside class="tc-side">
+          {# Decorative, so alt="" — a screen reader announcing it would come
+             between the person and the agreement they are being asked to make. #}
+          <img class="tc-illus-img"
+               src="{{ url_for('static', filename='img/minty_important_update.png') }}"
+               alt="" width="400" height="467" decoding="async">
+
+          <div class="tc-actions">
+            <button type="button" class="tc-cancel" id="tc-read-cancel">Cancel</button>
+            <button type="button" class="tc-accept" id="tc-read-agree" disabled>
+              Accept &amp; Continue
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </button>
+          </div>
+        </aside>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var backdrop = document.getElementById('tc-read-backdrop');
+    var scroller = document.getElementById('tc-read-doc');
+    var agree = document.getElementById('tc-read-agree');
+    var cancel = document.getElementById('tc-read-cancel');
+    var box = document.getElementById('{{ _tc_box }}');
+    if (!backdrop || !scroller || !agree || !box) { return; }
+
+    function atEnd() {
+      // Tolerance of 4px, not equality: sub-pixel layout and browser zoom mean
+      // scrollTop + clientHeight often lands a hair short of scrollHeight at
+      // the true bottom, which would leave the button disabled forever.
+      return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 4;
+    }
+
+    function check() {
+      // A document shorter than its box has nothing to scroll — without this
+      // those users could never satisfy the condition at all.
+      if (scroller.scrollHeight <= scroller.clientHeight + 4 || atEnd()) {
+        agree.disabled = false;
+      }
+    }
+
+    function open() {
+      backdrop.hidden = false;
+      document.body.style.overflow = 'hidden';
+      // Height is only knowable once it is on screen.
+      check();
+      scroller.focus();
+    }
+
+    function close() {
+      backdrop.hidden = true;
+      document.body.style.overflow = '';
+      box.focus();
+    }
+
+    scroller.addEventListener('scroll', function () {
+      if (atEnd()) { agree.disabled = false; }
+    }, { passive: true });
+    window.addEventListener('resize', check);
+
+    // The box is never ticked directly — clicking it opens the document, and
+    // only agreeing at the end of that sets it. UNTICKING is allowed without
+    // reading anything again: withdrawing agreement should never be a chore.
+    //
+    // NOTE THE INVERSION. By the time a click handler runs, the browser has
+    // ALREADY flipped .checked — so the state BEFORE the click is its
+    // opposite. Reading .checked directly here does precisely the wrong thing
+    // in both directions: ticking sails through unread, and un-ticking opens
+    // the modal.
+    box.addEventListener('click', function (event) {
+      var wasChecked = !box.checked;
+      if (wasChecked) { return; }   // un-ticking: let it happen
+      // Trying to tick. preventDefault reverts the browser's flip, so the box
+      // stays clear until they agree at the end of the document.
+      event.preventDefault();
+      open();
+    });
+
+    agree.addEventListener('click', function () {
+      box.checked = true;
+      // Dispatched so whatever the page has bound to the box — enabling the
+      // Verify button, inline validation — runs exactly as if a human ticked it.
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+      close();
+    });
+
+    if (cancel) { cancel.addEventListener('click', close); }
+
+    backdrop.addEventListener('click', function (event) {
+      if (event.target === backdrop) { close(); }
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !backdrop.hidden) { close(); }
+    });
+  })();
+</script>

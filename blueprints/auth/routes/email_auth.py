@@ -235,6 +235,39 @@ def email_verify_code():
                 ),
                 403,
             )
+        # This person already has an account, so nothing is being created —
+        # but they may still have ticked the Terms box on the way in. An
+        # invitee who was invited before, or who signed up and never finished,
+        # lands here rather than in the sign-up branch below.
+        #
+        # Honour the tick. Dropping it meant they agreed on the sign-in screen
+        # and were then immediately shown the acceptance gate anyway, which
+        # reads as the tick box being broken.
+        #
+        # Safe to call unconditionally: record_consent is idempotent (unique
+        # index on user_id + terms_version), so someone who had already agreed
+        # to this version gets their existing row back and nothing changes.
+        # _terms_consent_for_signup returns None unless the box was ticked AND
+        # the submitted version matches the live one, so a plain login records
+        # nothing.
+        login_terms_version, _ = _terms_consent_for_signup(data)
+        if login_terms_version:
+            from blueprints.legal.services.consent import record_consent
+            from models.db import db
+
+            try:
+                record_consent(
+                    user.id,
+                    source=SOURCE_SIGNUP_INVITE if invite_token else SOURCE_SIGNUP_OTP,
+                    version=login_terms_version,
+                )
+                db.session.commit()
+            except Exception as exc:  # noqa: BLE001 - never block a valid login
+                db.session.rollback()
+                logger.warning(
+                    f"Could not record login-time Terms consent for {user.id}: {exc}"
+                )
+
         # Don't login_user here — the cookie wouldn't stick on a cross-origin
         # POST response. Mint a same-origin handoff URL; the browser GETs it,
         # Flask logs the user in there and the cookie is set on a same-origin
