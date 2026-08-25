@@ -286,3 +286,155 @@ def test_the_register_page_stamps_the_version_it_showed(client):
     live by the time the code is entered."""
     body = client.get("/register").get_data(as_text=True)
     assert f'TERMS_VERSION = "{registry.CURRENT_TERMS_VERSION}"' in body
+
+
+# --------------------------------------------------------------------------
+# The login branch: an invitee who ALREADY has an account
+# --------------------------------------------------------------------------
+
+def _existing_user(app, db_session, email):
+    from models.db import User
+
+    with app.app_context():
+        row = User(
+            id=str(uuid.uuid4()),
+            username=email,
+            email=email,
+            first_name="Already",
+            last_name="Exists",
+            password="x",
+            approved=True,
+        )
+        db_session.session.add(row)
+        db_session.session.commit()
+        return row.id
+
+
+def test_a_ticked_box_is_recorded_even_when_the_account_already_exists(
+    app, client, db_session, monkeypatch
+):
+    """Regression: the invite tick box was being silently discarded.
+
+    An invitee who already has a Minty account — invited before, or signed up
+    and never finished — resolves to action == "login" rather than the sign-up
+    branch. That branch logged them straight in and never looked at
+    `terms_accepted`, so they ticked the box on the way in and were shown the
+    acceptance gate immediately afterwards. It read as the tick box being
+    broken, because from the user's side it was.
+    """
+    from blueprints.auth.routes import email_auth as route
+    from blueprints.legal.services.consent import consents_for_user, has_consent
+
+    email = f"reinvited-{uuid.uuid4().hex[:8]}@test.com"
+    user_id = _existing_user(app, db_session, email)
+
+    with app.app_context():
+        from models.db import User
+
+        user = User.query.get(user_id)
+        monkeypatch.setattr(
+            route,
+            "verify_email_otp",
+            lambda *_a, **_k: ({"action": "login", "user": user}, None, None),
+        )
+
+        response = client.post(
+            "/auth/email/verify-code",
+            json={
+                "email": email,
+                "code": "123456",
+                "terms_accepted": True,
+                "terms_version": registry.CURRENT_TERMS_VERSION,
+            },
+        )
+
+        assert response.status_code == 200
+        assert has_consent(user_id) is True
+
+        rows = consents_for_user(user_id)
+        assert len(rows) == 1
+        assert rows[0].terms_version == registry.CURRENT_TERMS_VERSION
+        # Server-side hash, never the client's word for it.
+        assert rows[0].document_hash == registry.get_current(registry.TERMS).sha256
+
+
+def test_a_plain_login_records_nothing(app, client, db_session, monkeypatch):
+    """The other half: logging in must not manufacture an agreement.
+
+    Only a request that actually carries a ticked box for the LIVE version is
+    recorded. Without this, every login would file a consent row nobody gave.
+    """
+    from blueprints.auth.routes import email_auth as route
+    from blueprints.legal.services.consent import has_consent
+
+    email = f"plainlogin-{uuid.uuid4().hex[:8]}@test.com"
+    user_id = _existing_user(app, db_session, email)
+
+    with app.app_context():
+        from models.db import User
+
+        user = User.query.get(user_id)
+        monkeypatch.setattr(
+            route,
+            "verify_email_otp",
+            lambda *_a, **_k: ({"action": "login", "user": user}, None, None),
+        )
+
+        response = client.post(
+            "/auth/email/verify-code",
+            json={"email": email, "code": "123456"},
+        )
+
+        assert response.status_code == 200
+        assert has_consent(user_id) is False
+
+
+# --------------------------------------------------------------------------
+# The read-to-agree modal on the sign-up page
+# --------------------------------------------------------------------------
+
+def test_the_register_page_carries_the_read_to_agree_modal(client):
+    """The tick box is not tickable directly — clicking it opens the document,
+    and only agreeing at the end of that sets it.
+
+    A Xero user meets the full Terms on the acceptance gate after login. Before
+    this, an OTP user only ever saw a link they would never click. Same product,
+    two very different standards of exposure.
+    """
+    body = client.get("/register").get_data(as_text=True)
+
+    assert 'id="tc-read-backdrop"' in body
+    assert 'id="tc-read-agree"' in body
+    # The document body itself is on the page — not a link to it.
+    assert 'id="tc-read-doc"' in body
+    assert "Minty Beta Terms of Use" in body
+
+
+def test_the_register_tick_box_reads_the_pre_click_state(client):
+    """Regression: the tick box did the opposite of what it should.
+
+    By the time a click handler runs, the browser has ALREADY flipped
+    `.checked`. Reading it directly meant ticking sailed straight through
+    unread while UN-ticking opened the modal — both backwards, and the first
+    one defeats the entire point of the read-to-agree gate.
+
+    The handler must derive the pre-click state (`!box.checked`).
+    """
+    body = client.get("/register").get_data(as_text=True)
+
+    assert "var wasChecked = !box.checked;" in body
+    # The naive form must not come back.
+    assert "if (box.checked) { return; }" not in body
+
+
+def test_the_register_modal_ships_both_lock_out_guards(client):
+    """The two ways this pattern strands people, both guarded.
+
+    A document shorter than its box can never be scrolled to the end, and an
+    exact bottom comparison never matches under browser zoom. Either one leaves
+    the agree button disabled forever with no way to sign up.
+    """
+    body = client.get("/register").get_data(as_text=True)
+
+    assert "scroller.scrollHeight <= scroller.clientHeight" in body
+    assert "<= 4" in body

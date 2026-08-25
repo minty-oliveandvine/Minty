@@ -451,6 +451,7 @@
       margin: 0;
     }
   </style>
+{% if terms_document %}{% include 'legal/_terms_styles.html' %}{% endif %}
 {% endblock %}
 {% block content %}
   <main class="auth-page">
@@ -577,6 +578,15 @@
       </p>
     </div>
   </main>
+
+{# Read-to-agree gate on the tick box. Renders nothing when there is no current
+   Terms document — sign-up must still work in that state, and the server-side
+   check in verify-code is what actually enforces agreement. #}
+{% if terms_document %}
+{% with document=terms_document, tc_target_checkbox='termsAccept' %}
+  {% include 'legal/_terms_read_modal.html' %}
+{% endwith %}
+{% endif %}
 {% endblock %}
 {% block footer %}
 {% endblock %}{% block scripts %}

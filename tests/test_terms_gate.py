@@ -368,3 +368,29 @@ def test_moving_the_version_re_gates_an_already_agreed_user(
     finally:
         registry.CURRENT_TERMS_VERSION = original
         registry._DOCUMENTS.pop((registry.TERMS, "beta-2"), None)
+
+
+def test_the_document_body_is_available_as_json(client):
+    """The onboarding app shows the Terms inline so it can gate its tick box on
+    reaching the end. It is a separate origin, so it cannot read the scroll
+    position of an iframe — it needs the markup itself.
+
+    No login: the person reading this has no account yet.
+    """
+    response = client.get("/legal/content/terms")
+    assert response.status_code == 200
+
+    body = response.get_json()
+    assert body["version"] == registry.CURRENT_TERMS_VERSION
+    assert body["sha256"] == registry.get_current(registry.TERMS).sha256
+    assert "<p>" in body["html"]
+
+
+def test_an_unknown_document_kind_is_not_served(client):
+    assert client.get("/legal/content/nonsense").status_code == 404
+
+
+def test_a_blocked_user_can_read_the_document_json(blocked, db_session):
+    """Allow-listed like the other legal routes — otherwise the gate blocks the
+    very text it is asking people to agree to."""
+    assert blocked.get("/legal/content/terms").status_code == 200
