@@ -41,6 +41,8 @@ from blueprints.xero.models.xero_report_sync import XeroReportSync  # noqa: E402
 from blueprints.subscription.models.user_stripe_customer import UserStripeCustomer  # noqa: E402
 from blueprints.subscription.models.entity_module_subscription import EntityModuleSubscription  # noqa: E402
 from blueprints.subscription.models.entity_billing_consent import EntityBillingConsent  # noqa: E402
+from blueprints.subscription.models.payer_billing_group import PayerBillingGroup  # noqa: E402
+from blueprints.subscription.models.entity_billing_group import EntityBillingGroup  # noqa: E402
 from blueprints.subscription.models.billing_plan import BillingPlan  # noqa: E402
 from blueprints.subscription.models.billing_policy import BillingPolicy  # noqa: E402
 from blueprints.subscription.models.subscription_audit_log import SubscriptionAuditLog  # noqa: E402
@@ -83,6 +85,8 @@ __all__ = [
     "UserStripeCustomer",
     "EntityModuleSubscription",
     "EntityBillingConsent",
+    "PayerBillingGroup",
+    "EntityBillingGroup",
     "BillingPlan",
     "BillingPolicy",
     "SubscriptionAuditLog",

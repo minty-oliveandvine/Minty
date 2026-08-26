@@ -257,6 +257,12 @@ def payer_portal(app, monkeypatch):
         monkeypatch.setattr(
             sub_store, "paid_through_for_user", lambda _u: paid_through
         )
+        # The screen reads it PER COMPANY now — each is billed on the card it was put on,
+        # and two rows of one payer can hold two different dates. Same value here: these
+        # cases describe an account with one card.
+        monkeypatch.setattr(
+            sub_store, "paid_through_for_entity", lambda _e: paid_through
+        )
         monkeypatch.setattr(
             sub_store, "billing_cycle_for_user", lambda _u: (anchor, "HKD")
         )

@@ -231,6 +231,11 @@ def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
     # 6. Without a saved card nothing can be charged AT ALL: ``start_billing_cycle``
     #    silently no-ops for a payer with no ``user_stripe_customer`` row, so the accept
     #    would fail at the charge having promised to succeed.
+    #
+    #    Having a card SAVED is checked here; having one nominated for this company is
+    #    not, and cannot be — the incoming payer chooses that as part of accepting, and
+    #    demanding it beforehand would ask them to point a card at a company they have not
+    #    yet agreed to take on. The accept refuses if they still have not.
     else:
         customer_id = store.customer_id_for_user(to_user_id)
         if not customer_id or not stripe_client.customer_default_payment_method(customer_id):
@@ -362,7 +367,9 @@ def quote_transfer(entity_id, *, to_user_id, at=None) -> dict | None:
 
     payer = store.payer_for_entity(entity_id)
     if at is None:
-        at = store.paid_through_for_user(payer) if payer else None
+        # What the OUTGOING payer's money covers for THIS company — the card it is billed
+        # on, not the account, which cannot answer for two cards at once.
+        at = store.paid_through_for_entity(entity_id) if payer else None
     if at is None:
         at = clock.now()
 
@@ -628,11 +635,36 @@ def _accept(offer, user_id, now) -> tuple[bool, str, dict | None]:
     # ``run_renewals`` advances ``paid_through`` on every successful renewal, so an offer
     # that outlived a cycle would otherwise bill a window the outgoing payer has since
     # paid for — a full duplicate charge.
-    at = _aware(store.paid_through_for_user(offer.from_user_id)) or now
+    # Read off the ENTITY: the days already bought for this company belong to the card the
+    # outgoing payer had it on, and their other cards say nothing about it.
+    at = _aware(store.paid_through_for_entity(offer.entity_id)) or now
 
     customer_id = store.customer_id_for_user(offer.to_user_id)
     if not customer_id:
         return False, "That billing account isn't set up to be charged.", None
+
+    # THE INCOMING PAYER'S CARD, nominated here if they have not chosen one.
+    #
+    # They cannot have chosen one BEFORE this point: the nomination is per (company,
+    # payer), and until they accept, the company is not theirs — ``payment_methods``
+    # refuses to let a non-payer point a card at somebody else's company. So the accept is
+    # the first moment the choice can exist, and it is made from their account default,
+    # which the blockers already required them to have and which the quote they are
+    # accepting was priced and shown against.
+    #
+    # This is not the silent fallback the rest of the engine refuses. It is written, once,
+    # as a consequence of an explicit "yes, bill me for this company" — recorded with its
+    # own source so it can be told apart later — and they can move it afterwards. The
+    # alternative is refusing an accept for want of a choice there was no way to make.
+    if store.billing_group_for_entity(entity_id, offer.to_user_id) is None:
+        from blueprints.subscription.services import stripe_client
+
+        default_card = stripe_client.customer_default_payment_method(customer_id)
+        if not default_card:
+            return False, "That billing account has no payment method to charge.", None
+        store.nominate_card_for_entity(
+            entity_id, offer.to_user_id, default_card, "transfer"
+        )
 
     # --- the journal write, committed BEFORE the external call ----------------------
     # Same shape as ``notify._claim``: a process that dies between the two must leave a
@@ -693,6 +725,17 @@ def _complete(offer, *, actor_user_id, now) -> tuple[bool, str, dict | None]:
     # "why was I billed for this in June" is asked most often by the person who no longer
     # pays — and it no longer authorises anything, because consent is asked per payer.
     store.record_billing_consent(entity_id, to_user_id, "transfer")
+    # The outgoing payer's CARD stops paying for it, for the same reason their consent
+    # stops authorising it. Deleted rather than left, because the nomination is what the
+    # charge paths resolve: leaving it would let a company that has changed hands go on
+    # naming a card belonging to someone who no longer pays for it. Their GROUP is left
+    # alone — other companies may still be on that card.
+    try:
+        store.clear_nomination_for_entity(entity_id, from_user_id)
+    except Exception:
+        logger.exception(
+            "transfer: could not clear the old payer's card nomination for {}", entity_id
+        )
 
     offer.status = STATUS_ACCEPTED
     offer.responded_at = now

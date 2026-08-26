@@ -31,6 +31,9 @@ class SubscriptionInvoice(db.Model):
         ),
         db.Index("ix_subscription_invoice_payer", "payer_user_id", "period_start"),
         db.Index("ix_subscription_invoice_external_id", "external_id"),
+        db.Index(
+            "ix_subscription_invoice_group", "billing_group_id", "period_start"
+        ),
         {"schema": "pettycashv2"},
     )
 
@@ -74,6 +77,16 @@ class SubscriptionInvoice(db.Model):
     # A CAPABILITY URL: its token is the authorisation, so it is served to the payer and
     # never logged.
     hosted_invoice_url = db.Column(db.String(500), nullable=True)
+
+    # WHICH GROUP — which card — this invoice was raised for. A renewal raises one
+    # invoice per ``payer_billing_group``, so "the payer's invoice for this period" is no
+    # longer a single document and both ``renewals._already_invoiced`` and
+    # ``dunning._current_period_key`` have to ask per group instead.
+    #
+    # No FK, like every other reference on this table: an invoice is history and must
+    # survive the group being closed. NULL on rows raised before per-entity cards, which
+    # is what those rows honestly mean — one card paid for everything.
+    billing_group_id = db.Column(db.String(36), nullable=True)
 
     # The double-billing guard. Nullable: a mid-period purchase has no natural key and
     # is guarded by the user waiting for the response instead.

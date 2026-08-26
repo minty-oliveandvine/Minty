@@ -130,7 +130,7 @@ def _restart_source() -> str:
     """
     src = open(SETTINGS, encoding="utf-8").read()
     start = src.index("def entity_settings_module_restart_billing(")
-    end = src.index("def _payer_has_card(", start)
+    end = src.index("def _entity_has_card(", start)
     body = src[start:end]
     body = body[body.index('"""', body.index('"""') + 3) + 3:]
     return "\n".join(
@@ -142,12 +142,12 @@ def _restart_source() -> str:
 
 
 def test_the_card_is_nominated_before_anything_is_charged():
-    """Recording a charge while the account still points at a different card would bill
+    """Recording a charge while the company still points at a different card would bill
     one the payer was never shown. Asserted on ORDER, because both calls being present
     says nothing about which ran first."""
     body = _restart_source()
 
-    assert body.index("set_default") < body.index("confirm_modules_checkout")
+    assert body.index("set_for_entity") < body.index("confirm_modules_checkout")
 
 
 def test_a_payer_with_no_card_is_refused_before_the_charge():
@@ -158,10 +158,10 @@ def test_a_payer_with_no_card_is_refused_before_the_charge():
 
 
 def test_the_codes_are_resolved_before_the_card_is_touched():
-    """A bad set must not leave a changed default card behind as a side effect."""
+    """A bad set must not leave a re-pointed company behind as a side effect."""
     body = _restart_source()
 
-    assert body.index("_restart_state_and_codes") < body.index("set_default")
+    assert body.index("_restart_state_and_codes") < body.index("set_for_entity")
 
 
 def test_the_charge_is_priced_from_the_resolved_codes():

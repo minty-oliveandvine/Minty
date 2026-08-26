@@ -80,6 +80,9 @@ def wallet(app, monkeypatch):
         "created_customers": [],
         "attached": [],
         "bills_forward": False,
+        # Companies nominated onto a card, by ``pm_...``. Empty is the ordinary case: a
+        # card nothing is billed to can be removed freely.
+        "billing_on": {},
     }
 
     monkeypatch.setattr(pm.clock, "now", lambda: NOW)
@@ -112,6 +115,10 @@ def wallet(app, monkeypatch):
     monkeypatch.setattr(pm, "forget_default_payment_method", lambda _c: None)
     monkeypatch.setattr(pm, "get_publishable_key", lambda: "pk_test_123")
     monkeypatch.setattr(pm, "_bills_forward", lambda _u: state["bills_forward"])
+    monkeypatch.setattr(
+        pm, "_companies_billing_on",
+        lambda _u, pm_id: list(state["billing_on"].get(pm_id, [])),
+    )
 
     def _create_customer(user_id, **fields):
         state["created_customers"].append((str(user_id), fields))
@@ -672,6 +679,31 @@ def test_a_refusal_reaches_the_page_with_its_reason(app, wallet, signed_in):
 
     assert response.status_code == 409
     assert "default" in response.get_json()["error"]
+
+
+def test_a_card_companies_are_billed_to_cannot_be_removed(app, wallet, signed_in):
+    """The refusal that costs real money if it is missing.
+
+    Detaching a card companies are nominated onto leaves them pointing at a ``pm_...``
+    Stripe no longer holds, and every one of their renewals fails into dunning on a date
+    nobody is watching. It outranks the default rule — nothing is billed to the default —
+    so it is checked first, and it NAMES the companies, because the fix is per company.
+    """
+    wallet["methods"] = [_card("pm_1"), _card("pm_2", last4="1111")]
+    wallet["default"] = "pm_2"
+    wallet["billing_on"] = {"pm_1": ["Acme Ltd", "Beta Co"]}
+
+    client = app.test_client()
+    response = client.post(
+        "/api/me/billing/payment-methods/remove",
+        json={"payment_method": "pm_1"},
+        headers={"Authorization": f"Bearer {_token(app, user_id='u1')}"},
+    )
+
+    assert response.status_code == 409
+    message = response.get_json()["error"]
+    assert "Acme Ltd" in message and "Beta Co" in message
+    assert wallet["detached"] == []
 
 
 def test_a_method_that_is_not_yours_is_a_404_from_the_endpoint_too(app, wallet, signed_in):

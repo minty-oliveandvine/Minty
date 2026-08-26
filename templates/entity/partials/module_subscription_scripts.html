@@ -48,10 +48,12 @@
   </div>
 </div>
 
-{# Billing confirmation dialog. The payer's card is shared across every company they
-   pay for, so the FIRST charge on a company has to be authorised explicitly — that's a
-   money decision and deserves the real amount and card on screen, which window.confirm
-   can't show. z-[110] puts it above the blocking loader (z-[100]).
+{# Billing confirmation dialog. The FIRST charge on a company has to be authorised
+   explicitly — a money decision, which deserves the real amount and the real card on
+   screen, and window.confirm can show neither. The card picker inside it is where this
+   company is put ON that card; the two are one step because agreeing to be billed and
+   saying what to bill are the same moment for the payer, even though they are two
+   records underneath. z-[110] puts it above the blocking loader (z-[100]).
 
    Same `hidden flex` pairing as the loader above: Tailwind emits `.hidden` after
    `.flex`, so it wins until the class is removed. #}
@@ -406,9 +408,9 @@
   // Subscribe to the given modules — one paid subscription each. With a saved
   // card the server creates them right away (reload to show them); with no card it
   // returns a setup-checkout url to capture one first (redirect).
-  // The payer's card is shared across every company they pay for, so the FIRST
-  // charge on a company has to be authorised explicitly — otherwise saving a card
-  // for company A silently pays for company B. The server answers
+  // The FIRST charge on a company has to be authorised explicitly, and it is the
+  // moment its card is chosen: consent says the payer may be billed for this
+  // company, the nomination says on which of their cards. The server answers
   // needs_confirmation instead of charging; this shows what will be billed and to
   // which card, and only then posts to confirm-billing.
   // Promise<boolean> — resolves true only on an explicit Confirm. Cancel, Escape and
@@ -1136,7 +1138,7 @@
     // payer which card they are about to authorise. Best-effort: a failed read falls
     // back to the old wording, because "confirm billing on your saved card" is still
     // true and still better than refusing to let them confirm at all.
-    let wallet = { methods: [], default_id: null };
+    let wallet = { methods: [], default_id: null, nominated_id: null };
     if (gap === 'consent') {
       try {
         const res = await fetch(
@@ -1173,14 +1175,15 @@
       amount: price,
       amountLabel: endsOn ? 'From ' + endsOn : 'Monthly',
       // Only offered with more than one card: a select holding a single option is a
-      // control that cannot be used, and it would carry the account-wide warning with
-      // it for a change the payer cannot actually make.
+      // control that cannot be used.
       cards: canChoose ? cards : null,
       card: onlyCard,
-      defaultCard: wallet.default_id,
-      note: 'Nothing is charged today — the trial runs to the end either way. That card '
-          + 'is shared with your other companies, and authorising it here doesn’t change '
-          + 'how they’re billed.',
+      // The card THIS company is already on, falling back to the account's main one.
+      // Preselecting the account default for a company billed to a different card would
+      // have the payer confirm a charge against a card they had not chosen for it.
+      defaultCard: wallet.nominated_id || wallet.default_id,
+      note: 'Nothing is charged today — the trial runs to the end either way. This '
+          + 'card is used for this company only; your others keep the cards they are on.',
       confirmLabel: 'Confirm billing',
     });
     if (!ok) return 'declined';

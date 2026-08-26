@@ -236,6 +236,13 @@ def test_attempts_remaining_never_goes_negative():
 
 
 class _Account:
+    """The payer's account: the anchor and the Stripe customer.
+
+    The retry clock and the paid-through belong to the CARD now — ``_wire_runner`` builds
+    a ``_Group`` from these same values, so an account with one card (which is every
+    account the backfill produced) reads exactly as it did.
+    """
+
     def __init__(self, *, started, attempts=0, paid_through=None, anchor=None):
         self.user_id = "u1"
         self.stripe_customer_id = "cus_1"
@@ -243,6 +250,18 @@ class _Account:
         self.dunning_attempts = attempts
         self.paid_through = paid_through
         self.anchor_at = anchor
+
+
+class _Group:
+    """One card of a payer, carrying that card's cycle and its collection state."""
+
+    def __init__(self, account, id="g1", card="pm_1"):
+        self.id = id
+        self.payer_user_id = account.user_id
+        self.stripe_payment_method_id = card
+        self.paid_through = account.paid_through
+        self.dunning_started_at = account.dunning_started_at
+        self.dunning_attempts = account.dunning_attempts
 
 
 ANCHOR = datetime(2027, 1, 8, 13, tzinfo=UTC)
@@ -259,30 +278,53 @@ ANCHOR = datetime(2027, 1, 8, 13, tzinfo=UTC)
 # immediately rather than retried, which is the whole point of the clamp. Pull these
 # apart again and every test below stops exercising the path it names.
 PAID_TO = FAILED_AT
-RENEWAL_INV = {"id": "in_r", "metadata": {"renewal_key": "renewal-u1-20270308"}}
+# The GROUP is in the key: one card, one invoice per period, and a payer with two
+# cards has two of them for the same month.
+RENEWAL_INV = {"id": "in_r", "metadata": {"renewal_key": "renewal-u1-20270308-g1"}}
 # next_period(ANCHOR, PAID_TO) — what a recovered payment buys.
 NEXT_PERIOD_END = datetime(2027, 4, 8, 13, tzinfo=UTC)
 
 
-def _wire_runner(monkeypatch, *, account, invoices=None, paid=True):
+def _wire_runner(monkeypatch, *, account, invoices=None, paid=True, group=None):
     from blueprints.subscription.services import billing_gateway, dunning, policy, store
 
     calls = {"paid_through": [], "ended": [], "attempts": 0, "retried": []}
+    group = group if group is not None else _Group(account)
     # The runner reads the live policy; these tests are about the runner, not the table.
     # Pinning it to the shipped defaults also keeps them out of an app context.
     monkeypatch.setattr(policy, "current", lambda: policy.DEFAULTS)
     monkeypatch.setattr(store, "accounts_in_dunning", lambda: [account])
+    monkeypatch.setattr(store, "groups_in_dunning", lambda: [group])
+    monkeypatch.setattr(store, "billing_groups_for_payer", lambda uid: [group])
+    monkeypatch.setattr(store, "billing_group", lambda gid: group)
+    monkeypatch.setattr(store, "customer_mapping_for_user", lambda uid: account)
     monkeypatch.setattr(
         store, "set_paid_through",
         lambda uid, until: calls["paid_through"].append((uid, until)),
+    )
+    # Recorded under the PAYER, so the assertions below read the same whether the cycle
+    # lives on the account or on its one card.
+    monkeypatch.setattr(
+        store, "set_group_paid_through",
+        lambda gid, until: calls["paid_through"].append((account.user_id, until)),
     )
     monkeypatch.setattr(
         store, "end_dunning",
         lambda uid, status="active": calls["ended"].append((uid, status)),
     )
     monkeypatch.setattr(
+        store, "end_group_dunning",
+        lambda gid, *, status="active": calls["ended"].append(
+            (account.user_id, status)
+        ),
+    )
+    monkeypatch.setattr(
         store, "record_dunning_attempt",
         lambda uid: calls.__setitem__("attempts", calls["attempts"] + 1),
+    )
+    monkeypatch.setattr(
+        store, "record_group_dunning_attempt",
+        lambda gid: calls.__setitem__("attempts", calls["attempts"] + 1),
     )
     monkeypatch.setattr(
         billing_gateway, "open_invoices",
@@ -290,7 +332,8 @@ def _wire_runner(monkeypatch, *, account, invoices=None, paid=True):
     )
     monkeypatch.setattr(
         billing_gateway, "retry_invoice",
-        lambda iid: calls["retried"].append(iid) or (paid, None if paid else "declined"),
+        lambda iid, pm=None: calls["retried"].append(iid)
+        or (paid, None if paid else "declined"),
     )
     return dunning, calls
 
@@ -315,8 +358,13 @@ def test_the_cycle_is_advanced_BEFORE_dunning_is_cleared(monkeypatch):
     order: list = []
     from blueprints.subscription.services import store
 
-    monkeypatch.setattr(store, "set_paid_through", lambda u, t: order.append("paid"))
-    monkeypatch.setattr(store, "end_dunning", lambda u, status="active": order.append("ended"))
+    monkeypatch.setattr(
+        store, "set_group_paid_through", lambda g, t: order.append("paid")
+    )
+    monkeypatch.setattr(
+        store, "end_group_dunning",
+        lambda g, *, status="active": order.append("ended"),
+    )
 
     dunning.collect_due(day(1))
 
@@ -368,7 +416,7 @@ def test_a_failed_retry_advances_nothing(monkeypatch):
 # the account is only recovered when the CURRENT period is settled.
 
 # A renewal for the period BEFORE the one the cycle is on — an abandoned give-up bill.
-STALE_INV = {"id": "in_stale", "metadata": {"renewal_key": "renewal-u1-20270208"}}
+STALE_INV = {"id": "in_stale", "metadata": {"renewal_key": "renewal-u1-20270208-g1"}}
 
 
 def test_paying_a_STALE_renewal_collects_without_recovering(monkeypatch):

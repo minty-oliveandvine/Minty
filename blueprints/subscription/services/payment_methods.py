@@ -1,17 +1,23 @@
-"""The payer's saved payment methods — the read model and the four writes behind them.
+"""The payer's saved payment methods — the read model and the writes behind them.
 
-ONE ACCOUNT, ONE SHELF. ``user_stripe_customer`` is a single row per payer carrying one
-currency, one anchor, one ``paid_through`` and one dunning clock, and every method here
-hangs off that one Stripe customer. ``renewals`` builds a single invoice per payer with a
-line per entity, and ``billing_gateway.issue_invoice(customer_id, ...)`` charges the
-CUSTOMER — so there is exactly one card in play, however many companies are on the bill.
-The methods listed are therefore the payer's, not any entity's, and promoting one changes
-what renews EVERY company on the account.
+ONE SHELF, SEVERAL COMPANIES ON IT. The methods here belong to the PAYER: they hang off
+one Stripe customer, and that has not changed. What has changed is which of them gets
+charged for what. Each company is nominated onto one saved method — the pair is a
+``payer_billing_group``, which owns that card's ``paid_through`` and its own dunning
+clock — and ``renewals`` raises one invoice per group rather than one per payer.
 
-A card saved PER ENTITY has no home and nothing that would charge it. It would also not
-stop at storage: different cards mean different payment outcomes per entity, which means a
-per-entity ``paid_through`` — the per-row copy that was deliberately removed because it
-drifted between one payer's entities (see ``access.access_end``).
+So there are two different writes on this screen, and the difference matters:
+
+* ``set_for_entity`` puts ONE company on a card. This is the write with billing
+  consequences now, and they are confined to that company.
+* ``set_default`` still exists but means less than it used to. It nominates nothing: it
+  is the card offered first when a company is being put on one, and the account's answer
+  to "which of these is the main one". Renewals do not read it.
+
+NO SILENT FALLBACK. A company with no nomination is not billed on the default — it is not
+billed at all, and the charge paths report it (see ``store.card_for_entity``). Inheriting
+a card quietly is exactly how one card came to pay for every company here in the first
+place.
 
 WHAT IS ACTUALLY STORED WHERE. Stripe holds the card; this application holds an id. The
 number is typed into Stripe Elements in the browser and confirmed straight against a
@@ -19,12 +25,12 @@ SetupIntent — it never touches this process, this database or these logs, whic
 keeps the application out of PCI scope. Moving the management UI in-app does not move the
 card in-app, and nothing here should ever be extended to accept a PAN.
 
-WHY THE SHELF EXISTS AT ALL. The billing engine only ever consulted
+WHY THE SHELF EXISTS AT ALL. The billing engine once consulted only
 ``invoice_settings.default_payment_method``: one card, set at capture, replaced by
-sending the payer to Stripe's hosted form. That is still the card that gets charged — the
-default is the ONLY method with any billing meaning. The others are there so a payer can
-add next year's card before this year's expires, and switch on their own date rather than
-on a failed renewal.
+sending the payer to Stripe's hosted form. The shelf outlived that, and now holds the
+cards companies are nominated onto — several of them in use at once, plus the ones a
+payer saves ahead of an expiry so they can switch on their own date rather than on a
+failed renewal.
 
 THE TWO REFUSALS. Both exist because the account is live and unattended money depends on
 it:
@@ -294,6 +300,67 @@ def _bills_forward(user_id) -> bool:
         return True
 
 
+def _companies_billing_on(user_id, payment_method_id: str) -> list[str]:
+    """Names of the companies this card is due to be charged for. Empty is the safe case.
+
+    Only ones still BILLING FORWARD count — ``access.is_billing_forward``, the same
+    question the renewal runner asks about what goes on the next invoice, so the refusal
+    and the charge cannot disagree. A cancelled company keeps its nomination as history
+    and must not block the payer from tidying up a card.
+
+    Fails CLOSED like ``_bills_forward``: if this cannot be read it claims the card is in
+    use. A refusal the payer can retry is a far smaller harm than detaching the card three
+    companies renew on.
+    """
+    from blueprints.subscription.services import access
+
+    try:
+        group = None
+        for candidate in sub_store.billing_groups_for_payer(user_id):
+            if candidate.stripe_payment_method_id == payment_method_id:
+                group = candidate
+                break
+        if group is None:
+            return []
+        entity_ids = sub_store.entity_ids_in_group(group.id)
+        if not entity_ids:
+            return []
+        live = {
+            str(row.entity_id)
+            for row in sub_store.module_rows_for_payer(user_id)
+            if str(row.entity_id) in entity_ids
+            and access.is_billing_forward(phase=getattr(row, "phase", None) or "")
+        }
+        if not live:
+            return []
+        from models.db import Entity
+
+        rows = Entity.query.filter(Entity.id.in_(sorted(live))).all()
+        return sorted((e.name or "").strip() or str(e.id) for e in rows)
+    except Exception:
+        logger.exception(
+            "payment methods: could not read what {} is billing for payer {}",
+            payment_method_id, user_id,
+        )
+        return ["your subscriptions"]
+
+
+def _still_billing_message(names: list[str]) -> str:
+    """The refusal, naming the companies — because the fix is per company.
+
+    Listed rather than counted: the payer has to go and move each one onto another card,
+    and "3 companies" does not tell them which. Capped so a payer with thirty does not get
+    a paragraph.
+    """
+    shown = names[:3]
+    rest = len(names) - len(shown)
+    listed = ", ".join(shown) + (f" and {rest} more" if rest > 0 else "")
+    return (
+        f"{listed} {'is' if len(names) == 1 else 'are'} billed to this payment method. "
+        "Move them to another card first, then remove it."
+    )
+
+
 def list_for_user(user_id) -> dict:
     """Every method saved on the payer's account, with the default marked.
 
@@ -527,15 +594,85 @@ def _owned(user_id, payment_method_id: str) -> tuple[str, dict]:
 
 
 def set_default(user_id, payment_method_id: str) -> dict:
-    """Nominate the method every future invoice is charged against. Returns the list.
+    """Make one method the account's main card. Returns the list.
 
-    This is the ONE write on this screen with billing consequences, and they are
-    account-wide: renewals bill the payer, so promoting a card here changes what charges
-    every company on the account, not one of them.
+    NOMINATES NOTHING. Renewals read the card each company was put on
+    (``store.card_for_entity``), never this, so promoting here changes what is charged for
+    exactly nothing that is already running. What it does change is what every card picker
+    offers FIRST, and therefore what the next company nominated is likely to end up on.
+
+    It used to be the one write on this screen with billing consequences, and they were
+    account-wide. ``set_for_entity`` is that write now, and its consequences stop at one
+    company.
     """
     customer_id, _pm = _owned(user_id, payment_method_id)
     set_customer_default_payment_method(customer_id, payment_method_id)
     return list_for_user(user_id)
+
+
+# --- The card ONE company is billed on ---------------------------------------
+
+
+def _payer_of(user_id, entity_id) -> str:
+    """Refuse unless ``user_id`` is the payer for ``entity_id``. Returns the payer id.
+
+    THE AUTHORISATION for the per-entity write, and it is deliberately the same test that
+    gates every other change to a subscription (``store.may_manage_subscription`` asks it
+    too): the person whose card is about to be spent on a company is the person who pays
+    for it. Being an admin of the company is not enough — an admin who does not pay could
+    otherwise move someone else's billing onto a card of their choosing.
+    """
+    if not entity_id:
+        raise PaymentMethodError("No company was given.", status=400)
+    payer = sub_store.payer_for_entity(entity_id)
+    if payer is None:
+        raise PaymentMethodError(
+            "That company has no subscription to bill yet.", status=409
+        )
+    if str(payer) != str(user_id):
+        # Same wording as an unknown company on purpose: whether somebody else pays for a
+        # given company is not this endpoint's to disclose.
+        raise PaymentMethodError("That company couldn't be found.", status=404)
+    return str(payer)
+
+
+def for_entity(user_id, entity_id) -> dict:
+    """The saved methods, plus which one THIS company is billed on.
+
+    ``nominated_id`` is the answer the picker needs and ``default_id`` is the fallback it
+    preselects when there is no nomination yet — the account's main card, offered rather
+    than assumed. They are returned separately because the difference is the whole point:
+    one is what will be charged for this company, the other is only a suggestion.
+    """
+    _payer_of(user_id, entity_id)
+    payload = list_for_user(user_id)
+    group = sub_store.billing_group_for_entity(entity_id, user_id)
+    payload["entity_id"] = str(entity_id)
+    payload["nominated_id"] = group.stripe_payment_method_id if group else None
+    return payload
+
+
+def set_for_entity(user_id, entity_id, payment_method_id: str,
+                   *, source: str = "chosen") -> dict:
+    """Put one company on one saved card. Returns the list, with the new nomination.
+
+    THE write with billing consequences, and they are confined: from here on this
+    company's renewals, purchases and trial conversion are charged to this card, and
+    nothing else the payer owns moves.
+
+    Ownership is proven BEFORE the entity is looked at — ``_owned`` compares the method's
+    customer against the one resolved from the caller, so another payer's ``pm_...``
+    answers "not found" rather than being nominated onto anything.
+
+    Consent is NOT written here. "You may bill me for this company" and "on this card" are
+    two different statements: a payer changing their own card is not re-authorising the
+    relationship, and rewriting the consent record would lose when they actually agreed to
+    it.
+    """
+    _owned(user_id, payment_method_id)
+    payer = _payer_of(user_id, entity_id)
+    sub_store.nominate_card_for_entity(entity_id, payer, payment_method_id, source)
+    return for_entity(user_id, entity_id)
 
 
 def _valid_expiry(exp_month, exp_year) -> tuple[int, int]:
@@ -630,10 +767,20 @@ def remove(user_id, payment_method_id: str) -> dict:
         m for m in list_payment_methods(customer_id) if m.get("id") != payment_method_id
     ]
 
+    # FIRST, because it is the one that costs real money. A card companies are nominated
+    # onto is the card their renewals are charged to; detaching it leaves them with a
+    # ``pm_...`` Stripe no longer holds, and every one of their renewals fails into
+    # dunning on a date nobody is watching. The default rule below is bookkeeping by
+    # comparison — nothing is billed to the default.
+    billing_on_it = _companies_billing_on(user_id, payment_method_id)
+    if billing_on_it:
+        raise PaymentMethodError(
+            _still_billing_message(billing_on_it), status=409
+        )
     if payment_method_id == default_id and others:
         raise PaymentMethodError(
-            "That's the payment method your invoices are charged to. Make another one "
-            "the default first, then remove it.",
+            "That's the account's main payment method. Make another one the default "
+            "first, then remove it.",
             status=409,
         )
     if not others and _bills_forward(user_id):

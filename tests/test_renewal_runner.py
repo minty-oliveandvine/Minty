@@ -39,6 +39,25 @@ class _Row:
         self.billed_through = billed_through
 
 
+class _Group:
+    """A ``payer_billing_group``: one card, and the cycle that card owns.
+
+    ``entities`` None means "every company this payer has", which is the shape of every
+    account before a second card is nominated — and therefore the shape the tests written
+    before per-entity cards still describe.
+    """
+
+    def __init__(self, id="g1", payer_user_id="u1", card="pm_1",
+                 paid_through=PAID_THROUGH, entities=None):
+        self.id = id
+        self.payer_user_id = payer_user_id
+        self.stripe_payment_method_id = card
+        self.paid_through = paid_through
+        self.dunning_started_at = None
+        self.dunning_attempts = 0
+        self.entities = entities
+
+
 class _Plan:
     def __init__(self, name="Super Minty", amount=40000, currency="HKD"):
         self.display_name = name
@@ -60,18 +79,61 @@ class _Record:
 
 
 def _wire(monkeypatch, *, accounts=None, rows=None, plan=_Plan(), issued=None,
-          existing=None, found=None, extensions=None):
+          existing=None, found=None, extensions=None, groups=None):
     """Mock the store and the gateway; return (renewals, calls).
 
     ``existing`` is the LOCAL row for this period's key (the guard). ``found`` is what
     the processor returns if the runner ever has to fall back to scanning it.
+
+    ``groups`` are the cards. Left out, each account gets ONE holding everything it has,
+    which is what the backfill produces and what every account looked like before a
+    second card could be nominated — so the cases below keep describing the same money.
+    ``calls["paid_through"]`` and ``calls["dunning"]`` still record the PAYER, so those
+    assertions read the same either way; the group is recorded alongside for the cases
+    that are about containment.
     """
     from blueprints.subscription.services import billing_gateway, renewals, store
 
     accounts = accounts if accounts is not None else [_Account()]
     rows = rows if rows is not None else [_Row()]
+    if groups is None:
+        groups = [
+            _Group(id=f"g_{a.user_id}", payer_user_id=a.user_id,
+                   card=f"pm_{a.user_id}", paid_through=a.paid_through)
+            for a in accounts
+        ]
+
+    def _group(group_id):
+        return next((g for g in groups if str(g.id) == str(group_id)), None)
+
+    def _entities_in(group_id):
+        group = _group(group_id)
+        if group is None:
+            return set()
+        if group.entities is not None:
+            return {str(e) for e in group.entities}
+        # Everything the row mock hands back, exactly as ``module_rows_for_payer`` does
+        # here: it answers the same rows for any payer, and a group that filtered them by
+        # payer would leave a second account with no companies and nothing to bill.
+        return {str(r.entity_id) for r in rows}
+
+    def _group_for_entity(entity_id, payer_user_id=None):
+        for group in groups:
+            if payer_user_id and str(group.payer_user_id) != str(payer_user_id):
+                continue
+            if str(entity_id) in _entities_in(group.id):
+                return group
+        return None
 
     monkeypatch.setattr(store, "accounts_with_billing", lambda: accounts)
+    monkeypatch.setattr(store, "groups_with_billing", lambda: list(groups))
+    monkeypatch.setattr(
+        store, "billing_groups_for_payer",
+        lambda uid: [g for g in groups if str(g.payer_user_id) == str(uid)],
+    )
+    monkeypatch.setattr(store, "billing_group", _group)
+    monkeypatch.setattr(store, "entity_ids_in_group", _entities_in)
+    monkeypatch.setattr(store, "billing_group_for_entity", _group_for_entity)
     monkeypatch.setattr(store, "module_rows_for_payer", lambda uid: rows)
     monkeypatch.setattr(store, "billing_plan_for_codes", lambda codes: plan)
     # Cancel-extensions owed but not yet collected; none unless a test says otherwise.
@@ -86,7 +148,8 @@ def _wire(monkeypatch, *, accounts=None, rows=None, plan=_Plan(), issued=None,
     )
 
     calls = {"paid_through": [], "dunning": [], "issued": [], "lookups": [],
-             "marked": [], "keys": [], "discarded": [], "settled": []}
+             "marked": [], "keys": [], "discarded": [], "settled": [],
+             "group_paid_through": [], "group_dunning": []}
     monkeypatch.setattr(
         store, "invoice_for_key",
         lambda key: calls["keys"].append(key) or existing,
@@ -109,6 +172,19 @@ def _wire(monkeypatch, *, accounts=None, rows=None, plan=_Plan(), issued=None,
     monkeypatch.setattr(
         store, "begin_dunning", lambda uid, when: calls["dunning"].append((uid, when))
     )
+
+    def _group_paid_through(group_id, until):
+        group = _group(group_id)
+        calls["group_paid_through"].append((str(group_id), until))
+        calls["paid_through"].append((group.payer_user_id if group else None, until))
+
+    def _group_dunning(group_id, when):
+        group = _group(group_id)
+        calls["group_dunning"].append((str(group_id), when))
+        calls["dunning"].append((group.payer_user_id if group else None, when))
+
+    monkeypatch.setattr(store, "set_group_paid_through", _group_paid_through)
+    monkeypatch.setattr(store, "begin_group_dunning", _group_dunning)
     monkeypatch.setattr(
         billing_gateway, "find_invoice_by_metadata",
         lambda cid, k, v: calls["lookups"].append((cid, v)) or found,
@@ -288,7 +364,7 @@ def test_the_guard_is_a_local_lookup_not_a_scan_of_the_processor(monkeypatch):
 
     renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
-    assert calls["keys"] == ["renewal-u1-20270208"]    # asked the index
+    assert calls["keys"] == ["renewal-u1-20270208-g_u1"]  # asked the index
     assert calls["lookups"] == []                      # never asked Stripe
     assert calls["issued"]
 
@@ -305,7 +381,7 @@ def test_a_reservation_that_was_never_confirmed_sent_asks_the_processor(monkeypa
 
     result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
 
-    assert calls["lookups"] == [("cus_u1", "renewal-u1-20270208")]
+    assert calls["lookups"] == [("cus_u1", "renewal-u1-20270208-g_u1")]
     assert calls["issued"] == []                       # it was already charged
     assert result["skipped"][0]["reason"] == "already invoiced; adopted"
     # And the row is completed, so the next run needs no scan at all.
@@ -773,3 +849,187 @@ def test_a_naive_claim_does_not_stop_the_run(monkeypatch):
 
     assert calls["issued"] == []
     assert calls["paid_through"] == [("u1", PERIOD_END)]
+
+
+# --- one payer, two cards --------------------------------------------------------
+#
+# The whole point of a per-entity payment method. A payer with two cards is billed twice
+# for one period — once per card, each for its own companies — and the two outcomes are
+# independent. Everything above this line describes an account with a single card, which
+# is what the backfill leaves behind and still the common case.
+
+
+def _two_cards():
+    """Two companies of one payer, on two different cards."""
+    return dict(
+        rows=[_Row(entity_id="e1"), _Row(entity_id="e2")],
+        groups=[
+            _Group(id="gA", card="pm_A", entities=["e1"]),
+            _Group(id="gB", card="pm_B", entities=["e2"]),
+        ],
+    )
+
+
+def test_two_cards_raise_two_invoices_each_charged_to_its_own(monkeypatch):
+    """One invoice per CARD, not per payer — and each names the card it is charged to.
+
+    Set on the invoice rather than by moving the customer default, which would repoint
+    every other company of this payer mid-run.
+    """
+    renewals, calls = _wire(monkeypatch, **_two_cards())
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert len(result["issued"]) == 2
+    charged = {kw["payment_method"]: inv for _cid, inv, kw in calls["issued"]}
+    assert set(charged) == {"pm_A", "pm_B"}
+    # Each document carries only its own card's company.
+    assert {line.entity_id for line in charged["pm_A"].lines} == {"e1"}
+    assert {line.entity_id for line in charged["pm_B"].lines} == {"e2"}
+    # And each advances its own cycle, not the account's.
+    assert sorted(g for g, _until in calls["group_paid_through"]) == ["gA", "gB"]
+
+
+def test_the_two_invoices_do_not_collide_on_the_idempotency_key(monkeypatch):
+    """The group is IN the key, and has to be.
+
+    Under a payer-and-period key the second card's invoice would be refused as a
+    double-bill of the first — so one card's companies would simply never be charged, and
+    the guard that exists to prevent overcharging would be causing free service.
+    """
+    renewals, calls = _wire(monkeypatch, **_two_cards())
+
+    renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    keys = [kw["idempotency_key"] for _cid, _inv, kw in calls["issued"]]
+    assert sorted(keys) == [
+        "renewal-u1-20270208-gA", "renewal-u1-20270208-gB",
+    ]
+    assert len(set(keys)) == 2
+
+
+def test_a_decline_on_one_card_leaves_the_other_alone(monkeypatch):
+    """CONTAINMENT — the reason the cycle and the dunning clock moved onto the card.
+
+    Card B declines, card A clears. Only B goes into collection; A's company is paid for
+    and stays up. Under one clock per payer, B failing put every company of this payer
+    into the past-due grace window and then terminated them for a debt that was not
+    theirs.
+    """
+    def _issue(cid, invoice, **kw):
+        paid = kw.get("payment_method") == "pm_A"
+        return {"id": "in_A" if paid else "in_B",
+                "status": "paid" if paid else "open"}
+
+    renewals, calls = _wire(monkeypatch, **_two_cards())
+    from blueprints.subscription.services import billing_gateway
+
+    monkeypatch.setattr(
+        billing_gateway, "issue_invoice",
+        lambda cid, inv, **kw: calls["issued"].append((cid, inv, kw)) or _issue(cid, inv, **kw),
+    )
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert [e["billing_group_id"] for e in result["issued"]] == ["gA"]
+    assert [e["billing_group_id"] for e in result["failed"]] == ["gB"]
+    # Only the failing card collects, and only the paying one advances.
+    assert [g for g, _when in calls["group_dunning"]] == ["gB"]
+    assert [g for g, _until in calls["group_paid_through"]] == ["gA"]
+
+
+def test_a_card_that_is_not_due_yet_is_not_billed_with_the_one_that_is(monkeypatch):
+    """Each card buys its own periods, so each comes due on its own date."""
+    later = PERIOD_END + timedelta(days=40)
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_Row(entity_id="e1"), _Row(entity_id="e2")],
+        groups=[
+            _Group(id="gA", card="pm_A", entities=["e1"]),
+            _Group(id="gB", card="pm_B", entities=["e2"], paid_through=later),
+        ],
+    )
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert [e["billing_group_id"] for e in result["issued"]] == ["gA"]
+    assert [kw["payment_method"] for _cid, _inv, kw in calls["issued"]] == ["pm_A"]
+
+
+def test_a_card_with_no_cycle_of_its_own_is_never_due(monkeypatch):
+    """A NULL ``paid_through`` is skipped — and that is why moving a company between
+    cards has to carry its paid days across.
+
+    Without the carry, re-pointing a company at a freshly nominated card would leave that
+    card with no cycle, this check would skip it every day, and the company would run on
+    unbilled with no invoice ever raised to notice the absence of.
+    """
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_Row(entity_id="e1")],
+        groups=[_Group(id="gNew", card="pm_new", entities=["e1"], paid_through=None)],
+    )
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert calls["issued"] == []
+    assert result == {"planned": [], "issued": [], "failed": [], "skipped": []}
+
+
+def test_moving_a_company_hands_its_cycle_to_the_new_card(monkeypatch):
+    """``store._carry_paid_days``, at the branch that needs no database.
+
+    The card it left had bought days up to a date; the card it joins has never collected.
+    The new card takes the cycle over at exactly that instant — no gap, and no period
+    charged twice.
+    """
+    from types import SimpleNamespace
+
+    from blueprints.subscription.services import store
+
+    leaving = SimpleNamespace(id="gA", paid_through=PERIOD_END)
+    joining = SimpleNamespace(id="gB", paid_through=None)
+
+    store._carry_paid_days("e1", leaving, joining)
+
+    assert joining.paid_through == PERIOD_END
+
+
+def test_a_card_already_paid_further_ahead_keeps_its_own_date(monkeypatch):
+    """The company joins the cycle the card is already on rather than winding it back.
+
+    Winding it back would re-bill every OTHER company on that card for days it had
+    already collected — one moved company must not reopen a settled period for the rest.
+    """
+    from types import SimpleNamespace
+
+    from blueprints.subscription.services import store
+
+    later = PERIOD_END + timedelta(days=30)
+    leaving = SimpleNamespace(id="gA", paid_through=PERIOD_END)
+    joining = SimpleNamespace(id="gB", paid_through=later)
+
+    store._carry_paid_days("e1", leaving, joining)
+
+    assert joining.paid_through == later
+
+
+def test_a_company_on_no_card_is_not_billed_on_someone_elses(monkeypatch):
+    """No nomination is not "use the default" — it is not billed at all, and says so.
+
+    A silent fallback is how one card came to pay for every company in the first place.
+    The alternative to skipping is charging a card the payer never chose for it.
+    """
+    renewals, calls = _wire(
+        monkeypatch,
+        rows=[_Row(entity_id="e1"), _Row(entity_id="e_orphan")],
+        groups=[_Group(id="gA", card="pm_A", entities=["e1"])],
+    )
+
+    result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
+
+    assert len(calls["issued"]) == 1
+    _cid, invoice, kw = calls["issued"][0]
+    assert kw["payment_method"] == "pm_A"
+    assert {line.entity_id for line in invoice.lines} == {"e1"}
+    assert "e_orphan" not in str(result)

@@ -79,6 +79,16 @@ class _Plan:
         self.currency = "HKD"
 
 
+class _Group:
+    """The card this company is billed on. A conversion charges it, and nothing else."""
+
+    def __init__(self, id="g1", card="pm_1", paid_through=None):
+        self.id = id
+        self.payer_user_id = "u1"
+        self.stripe_payment_method_id = card
+        self.paid_through = paid_through
+
+
 def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
     """Wire the store, the biller and the access gate; return (checkout, calls).
 
@@ -105,6 +115,20 @@ def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
     monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_1")
     monkeypatch.setattr(checkout, "trial_payment_method", lambda cid: "pm_1")
+    # The card this company is nominated onto. Present by default: these tests are about
+    # conversion mechanics, and a company with no nomination is not charged at all — a
+    # rule with its own case below.
+    # ``paid_through`` follows the anchor: a payer with a cycle has been charged, and the
+    # charge that anchored them was on this card. A card that has never collected is a
+    # real state — a payer nominating a SECOND one — and it has its own case below.
+    group = _Group(paid_through=anchor)
+    monkeypatch.setattr(
+        store, "billing_group_for_entity", lambda eid, uid=None: group
+    )
+    monkeypatch.setattr(
+        store, "set_group_paid_through",
+        lambda gid, until: calls["paid_through"].append(("u1", until)),
+    )
     monkeypatch.setattr(checkout, "_billed_codes_in_house", lambda eid: set())
 
     monkeypatch.setattr(
@@ -134,9 +158,10 @@ def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
     )
     monkeypatch.setattr(
         changes, "issue_change",
-        lambda cid, eid, name, before, after, period, at: calls["charged"].append(
+        lambda cid, eid, name, before, after, period, at, **kw: calls["charged"].append(
             {"customer": cid, "entity": eid, "before": set(before), "after": set(after),
-             "start": period.start, "end": period.end}
+             "start": period.start, "end": period.end,
+             "card": getattr(kw.get("group"), "stripe_payment_method_id", None)}
         ) or {"id": "in_1", "status": "paid" if paid else "open"},
     )
     monkeypatch.setattr(
@@ -480,6 +505,65 @@ def test_due_trial_expires_when_the_entity_never_consented_to_billing(monkeypatc
     assert calls["access"] == [("e1", "BILL", False)]
 
 
+def test_due_trial_expires_when_no_card_is_nominated_for_the_entity(monkeypatch):
+    """Consent says the payer may be billed for this company; it does not say on WHICH
+    card. There is deliberately no fallback to the account default, so an unnominated
+    company converting would charge a card the payer never chose for it — unattended,
+    with nobody in the loop to notice. Expire instead; the settings page asks."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import changes, store
+
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row()])
+    monkeypatch.setattr(store, "billing_group_for_entity", lambda eid, uid=None: None)
+
+    def _boom(*a, **k):
+        raise AssertionError("must not bill a company with no card nominated")
+
+    monkeypatch.setattr(changes, "issue_change", _boom)
+
+    result = checkout.convert_or_expire_due_trials()
+
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert calls["writes"][-1][3]["phase"] == "expired"
+    assert calls["access"] == [("e1", "BILL", False)]
+
+
+def test_a_conversion_is_charged_to_the_card_the_company_is_on(monkeypatch):
+    """Not the account default, and not whichever card the payer used last."""
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(
+        store, "billing_group_for_entity",
+        lambda eid, uid=None: _Group(id="g2", card="pm_second", paid_through=_ANCHOR),
+    )
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    checkout.convert_or_expire_due_trials()
+
+    assert calls["charged"][0]["card"] == "pm_second"
+
+
+def test_a_second_card_gets_its_own_cycle_started(monkeypatch):
+    """The payer is anchored already, but THIS card has collected nothing.
+
+    ``due_renewals`` skips a NULL ``paid_through`` outright, so leaving it unset would
+    mean the new card silently never renewed — the company would run on, unbilled.
+    """
+    checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
+    from blueprints.subscription.services import store
+
+    monkeypatch.setattr(
+        store, "billing_group_for_entity",
+        lambda eid, uid=None: _Group(id="g2", card="pm_second", paid_through=None),
+    )
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+
+    checkout.convert_or_expire_due_trials()
+
+    assert calls["paid_through"] == [("u1", _PERIOD_END)]
+
+
 def test_a_cancelled_trial_expires_instead_of_converting(monkeypatch):
     """Cancelling a trial keeps its free days but must never turn into a charge — that
     IS what cancelling means. Even with a card on file AND consent for the entity, a
@@ -591,6 +675,8 @@ def test_module_card_surfaces_an_app_level_trial(app, monkeypatch):
     monkeypatch.setattr(modules_mod, "_entity_customer_id", lambda eid: None)
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [_TrialRow()])
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: None)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: None)
     monkeypatch.setattr(f"{_CATALOG}.available_plans", lambda: [])
     monkeypatch.setattr(
         "blueprints.subscription.services.stripe_client.customer_default_payment_method",

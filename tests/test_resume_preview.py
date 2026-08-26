@@ -73,6 +73,8 @@ def _wire(monkeypatch, rows, *, covered):
     monkeypatch.setattr(store, "billing_cycle_for_user", lambda uid: (ANCHOR, "HKD"))
     monkeypatch.setattr(store, "paid_through_for_user",
                         lambda uid: datetime(2026, 9, 13, 12, tzinfo=UTC))
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: datetime(2026, 9, 13, 12, tzinfo=UTC))
     monkeypatch.setattr(checkout, "_billed_codes_in_house", lambda eid: set(covered))
 
     def _plan(codes):

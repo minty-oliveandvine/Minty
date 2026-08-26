@@ -34,6 +34,10 @@ NOW = FAILED_AT + timedelta(hours=2)
 
 
 class _Account:
+    """The payer's account. The anchor and the Stripe customer stayed here; the retry
+    clock and the paid-through moved onto the CARD — see ``_Group``, which ``_wire``
+    builds from these same values so the cases below still read as one account."""
+
     def __init__(self, *, started=FAILED_AT, attempts=0, paid_through=PAID_THROUGH):
         self.user_id = "u1"
         self.anchor_at = datetime(2027, 1, 8, 13, tzinfo=UTC)
@@ -43,15 +47,33 @@ class _Account:
         self.dunning_attempts = attempts
 
 
+class _Group:
+    """The one card this payer bills on, carrying the account's collection state."""
+
+    def __init__(self, account, id="g1", card="pm_1"):
+        self.id = id
+        self.payer_user_id = account.user_id
+        self.stripe_payment_method_id = card
+        self.paid_through = account.paid_through
+        self.dunning_started_at = account.dunning_started_at
+        self.dunning_attempts = account.dunning_attempts
+
+
 def _wire(app, monkeypatch, *, account, invoices=None, paid=True, reason="ok",
-          card="pm_1"):
+          card="pm_1", group=None):
     """Point the store, the gateway and the card lookup at fakes; return (dunning, calls)."""
     from blueprints.subscription.services import billing_gateway, clock, dunning, store
 
     calls = {"attempts": 0, "ended": [], "settled": [], "retried": []}
+    group = group if group is not None else (_Group(account) if account else None)
 
     monkeypatch.setattr(clock, "now", lambda: NOW)
     monkeypatch.setattr(store, "customer_mapping_for_user", lambda uid: account)
+    monkeypatch.setattr(store, "billing_groups_for_payer", lambda uid: [group])
+    monkeypatch.setattr(
+        store, "billing_group_for_entity", lambda eid, uid=None: group
+    )
+    monkeypatch.setattr(store, "billing_group", lambda gid: group)
     # Patched BY DOTTED PATH: retry_now imports it inside the function, so a reference
     # captured here would not be the one it ends up calling.
     monkeypatch.setattr(
@@ -60,27 +82,32 @@ def _wire(app, monkeypatch, *, account, invoices=None, paid=True, reason="ok",
         lambda cid: card,
     )
 
-    def _attempt(uid):
+    def _attempt(_group_id):
         calls["attempts"] += 1
-        account.dunning_attempts = int(account.dunning_attempts or 0) + 1
-        return account.dunning_attempts
+        group.dunning_attempts = int(group.dunning_attempts or 0) + 1
+        return group.dunning_attempts
 
-    monkeypatch.setattr(store, "record_dunning_attempt", _attempt)
+    monkeypatch.setattr(store, "record_group_dunning_attempt", _attempt)
     monkeypatch.setattr(
-        store, "end_dunning",
-        lambda uid, *, status="active": calls["ended"].append((uid, status)),
+        store, "end_group_dunning",
+        lambda gid, *, status="active": calls["ended"].append(
+            (account.user_id, status)
+        ),
     )
     monkeypatch.setattr(
         dunning, "_settle_period",
-        lambda acct, inv: calls["settled"].append(inv["id"] if inv else None),
+        lambda acct, grp, inv: calls["settled"].append(inv["id"] if inv else None),
     )
     monkeypatch.setattr(
         billing_gateway, "open_invoices",
         lambda cid: [] if invoices is None else invoices,
     )
 
-    def _retry(invoice_id):
+    def _retry(invoice_id, payment_method=None):
+        # The card is passed now: an invoice names the one that declined, so a retry
+        # that does not say otherwise re-charges it.
         calls["retried"].append(invoice_id)
+        calls.setdefault("retried_on", []).append(payment_method)
         return paid, reason
 
     monkeypatch.setattr(billing_gateway, "retry_invoice", _retry)
@@ -119,6 +146,27 @@ def test_a_successful_retry_settles_the_period_before_clearing_dunning(app, monk
 
     assert calls["settled"] == ["in_1"]
     assert calls["ended"] == [("u1", "active")]
+
+
+def test_pay_now_charges_the_card_the_company_is_on_TODAY(app, monkeypatch):
+    """The card on the invoice is the one that declined; the card on the group is the one
+    the payer has since chosen.
+
+    ``issue_invoice`` pins the card onto the document, so a retry that does not name one
+    re-charges the dead card — every attempt, however many times it was replaced. Pay now
+    exists precisely for the customer who has just fixed their card, so charging the old
+    one would make the button useless in its only real use case.
+    """
+    account = _Account()
+    group = _Group(account, card="pm_replacement")
+    dunning, calls = _wire(
+        app, monkeypatch, account=account, invoices=INVOICES, group=group
+    )
+
+    with app.app_context():
+        assert dunning.retry_now("u1", "e1")["status"] == "paid"
+
+    assert calls["retried_on"] == ["pm_replacement"]
 
 
 def test_a_decline_leaves_the_account_in_dunning(app, monkeypatch):
@@ -256,8 +304,10 @@ def test_no_billing_account_is_not_an_error(app, monkeypatch):
 
 # _Account: anchor 2027-01-08, paid_through 2027-02-08 => the current period starts
 # 2027-02-08 (``renewals.period_key`` is derived from the period START).
-CURRENT_INV = {"id": "in_now", "metadata": {"renewal_key": "renewal-u1-20270208"}}
-STALE_INV = {"id": "in_old", "metadata": {"renewal_key": "renewal-u1-20261208"}}
+# The GROUP is in the renewal key now: a payer with two cards raises two invoices for
+# one period, so the key has to say which card owes this one.
+CURRENT_INV = {"id": "in_now", "metadata": {"renewal_key": "renewal-u1-20270208-g1"}}
+STALE_INV = {"id": "in_old", "metadata": {"renewal_key": "renewal-u1-20261208-g1"}}
 
 
 def test_it_charges_the_CURRENT_period_not_the_oldest_open_invoice(app, monkeypatch):

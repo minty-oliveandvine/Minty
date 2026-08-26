@@ -532,11 +532,11 @@ def my_payment_method_confirm_api():
     "/api/me/billing/payment-methods/default", methods=["POST", "OPTIONS"]
 )
 def my_payment_method_default_api():
-    """Make one saved method the default. Body: ``{payment_method}``.
+    """Make one saved method the account's main card. Body: ``{payment_method}``.
 
-    ACCOUNT-WIDE by construction. Invoices are raised against the payer's customer, so the
-    default decides what charges every company on the account — there is no per-entity card
-    to set, and the UI says so where the choice is made.
+    NOMINATES NOTHING. Each company is billed on the card it was put on — see
+    ``entity-payment-method`` below — so this changes what is charged for nothing that is
+    already running. It decides which card the pickers offer first.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -546,6 +546,46 @@ def my_payment_method_default_api():
     payment_method = _pm_id()
     return _payment_methods_call(
         lambda user_id: payment_methods.set_default(user_id, payment_method)
+    )
+
+
+@subscription_bp.route(
+    "/api/me/billing/entity-payment-method", methods=["GET", "POST", "OPTIONS"]
+)
+def my_entity_payment_method_api():
+    """The card ONE company is billed on. Read it, or change it.
+
+    GET  ``?entity=<id>``          -> the saved methods, plus ``nominated_id``
+    POST ``{entity, payment_method}`` -> put that company on that card
+
+    THE ONE WRITE ON THIS SURFACE WITH BILLING CONSEQUENCES, and they stop at the company
+    named: its renewals, its purchases and its trial conversion are charged here from now
+    on, and nothing else the payer owns moves. The account default is a suggestion by
+    comparison.
+
+    Two proofs, both inside the service and both required: the method must belong to the
+    caller's own customer (``_owned``), and the caller must be the company's PAYER
+    (``_payer_of``) — being an admin of it is not enough, or an admin who pays nothing
+    could move someone else's billing onto a card of their choosing.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    if request.method == "GET":
+        entity_id = str(request.args.get("entity") or "").strip()
+        return _payment_methods_call(
+            lambda user_id: payment_methods.for_entity(user_id, entity_id)
+        )
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = str(payload.get("entity") or "").strip()
+    payment_method = str(payload.get("payment_method") or "").strip()
+    return _payment_methods_call(
+        lambda user_id: payment_methods.set_for_entity(
+            user_id, entity_id, payment_method
+        )
     )
 
 

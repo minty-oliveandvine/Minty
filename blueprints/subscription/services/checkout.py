@@ -143,8 +143,10 @@ def _has_active_subscription(entity_id, function_code: str) -> bool:
         phase=row.phase,
         trial_end=getattr(row, "trial_end", None),
         app_access_until=getattr(row, "app_access_until", None),
-        # From the ACCOUNT: one payer has one cycle, and the per-row copy drifts.
-        period_end=store.paid_through_for_user(getattr(row, "payer_user_id", None)),
+        # From the CARD this company is billed on — its own money bought its own days.
+        # Not the per-row copy, which drifts, and no longer the account: a payer with two
+        # cards has two answers, and one of them can be past due while the other is not.
+        period_end=store.paid_through_for_entity(entity_id),
         past_due_grace_days=policy.current().past_due_window_days,
     )
 
@@ -519,8 +521,44 @@ def authorize_entity_billing(entity, user) -> dict:
 
     Idempotent (consent is once per entity), so a double-click is harmless.
     """
-    store.record_billing_consent(entity.id, getattr(user, "id", None), "confirmed")
+    user_id = getattr(user, "id", None)
+    store.record_billing_consent(entity.id, user_id, "confirmed")
+    _ensure_nominated(entity.id, user_id)
     return {"ok": True}
+
+
+def _ensure_nominated(entity_id, user_id) -> None:
+    """Put this company on the payer's main card if it is on none.
+
+    THE BACKSTOP FOR CONSENT WITHOUT A CARD. Consenting and nominating are two records,
+    and every screen that asks for one asks for the other in the same step — but the
+    callers that do not (onboarding's Buy now, which sets the account default and then
+    authorises) would otherwise leave a company authorised to be billed and billed to
+    nothing. Its trial would expire at term end having been told it would convert.
+
+    NOT the silent fallback the charge paths refuse. This runs at the moment the payer
+    says "yes, bill me for this company", against the card they were shown, and writes it
+    down where they can see and change it. The refusal is about the unattended jobs
+    guessing later, with nobody in the loop.
+
+    Never overwrites an existing nomination, and never raises: consent is recorded either
+    way, and a company that ends up on no card is reported by the charge paths rather than
+    losing the payer's agreement over a Stripe hiccup.
+    """
+    if not entity_id or not user_id:
+        return
+    try:
+        if store.billing_group_for_entity(entity_id, user_id) is not None:
+            return
+        customer_id = store.customer_id_for_user(user_id)
+        card = customer_default_payment_method(customer_id) if customer_id else None
+        if not card:
+            return
+        store.nominate_card_for_entity(entity_id, user_id, card, "confirmed")
+    except Exception:
+        logger.exception(
+            "billing: could not nominate a card for entity {} at consent", entity_id
+        )
 
 
 def confirm_modules_checkout(
@@ -541,7 +579,12 @@ def confirm_modules_checkout(
     that consent exists, takes the charge path. It still routes to a setup Checkout if
     the card vanished between the two calls.
     """
-    store.record_billing_consent(entity.id, getattr(user, "id", None), "confirmed")
+    user_id = getattr(user, "id", None)
+    store.record_billing_consent(entity.id, user_id, "confirmed")
+    # The card they were shown, written down before the charge that reads it — see
+    # ``_ensure_nominated``. The routes that carry a picker have already nominated the
+    # chosen one, so this only fires for the paths that never asked.
+    _ensure_nominated(entity.id, user_id)
     return start_modules_checkout(
         entity, user, success_url, cancel_url, requested_codes
     )
@@ -599,8 +642,23 @@ def _save_setup_checkout_card(entity, session_id: str) -> tuple[str, str, dict]:
     # asked to confirm, which would be nonsense.
     store.record_billing_consent(entity.id, meta.get("user_id"), "card")
 
-    # Make the captured card the default so subscriptions (and future invoices)
-    # bill it — including a trial that converts to paid at the end of its term.
+    # ...and it is the choice of CARD for it, by the same reasoning. The Checkout was
+    # opened for this company and this is the card typed into it, so this is the company
+    # being put on that card — recorded as a separate fact from the consent, because a
+    # payer moving it later must not rewrite when they agreed to be billed.
+    #
+    # REQUIRED, not a nicety: nothing charges a company with no card nominated, so
+    # without this the payer would finish setup, be told they were subscribed, and never
+    # be billed.
+    payer_user_id = meta.get("user_id") or store.payer_for_entity(entity.id)
+    if payer_user_id:
+        store.nominate_card_for_entity(
+            entity.id, payer_user_id, payment_method, "capture"
+        )
+
+    # The captured card also becomes the account's main one — the card offered first the
+    # next time a company is put on one. It is no longer what gets charged; the
+    # nomination above is.
     set_customer_default_payment_method(customer_id, payment_method)
     return customer_id, payment_method, session
 
@@ -1127,15 +1185,21 @@ def _notify_module():
     return notify
 
 
-def _trial_has_card(payer_user_id) -> bool:
-    """Whether the payer has a card the trial conversion could charge.
+def _trial_has_card(payer_user_id, entity_id=None) -> bool:
+    """Whether THIS company has a card the trial conversion could charge.
 
     Half of ``_trial_will_convert``, split out so the ending-soon email can name WHICH
     half is missing. Any failure answers False, for the same reason the conjunction does:
     nagging a customer who was fine is a far smaller harm than letting a trial they
     wanted lapse in silence.
+
+    Asked of the COMPANY once one is named. A payer with three cards saved and none of
+    them put on this company still cannot be billed for it — "they have a card somewhere"
+    was the right question only while every payer had exactly one.
     """
     try:
+        if entity_id is not None:
+            return bool(store.card_for_entity(entity_id, payer_user_id))
         customer_id = _resolve_customer_id(payer_user_id)
         return bool(customer_id and trial_payment_method(customer_id))
     except Exception:
@@ -1158,7 +1222,7 @@ def _trial_will_convert(entity_id, payer_user_id) -> bool:
         customer_id = _resolve_customer_id(payer_user_id)
         if not customer_id:
             return False
-        if not trial_payment_method(customer_id):
+        if not _trial_has_card(payer_user_id, entity_id):
             return False
         return bool(store.has_billing_consent(entity_id, payer_user_id))
     except Exception:
@@ -1224,7 +1288,11 @@ def _convert_due_trials(entity_id, rows) -> tuple[list, list]:
     customer_id = _resolve_customer_id(payer_user_id)
     if not customer_id:
         return [], rows
-    payment_method = trial_payment_method(customer_id)
+    # The card THIS company was put on. Not the account default: there is no fallback, so
+    # an unnominated company has nothing to charge and its trial ends rather than
+    # converting onto a card nobody chose for it. ``_bill_module_change_in_house`` refuses
+    # it a second time; this is the early exit that keeps the row out of the biller.
+    payment_method = store.card_for_entity(entity_id, payer_user_id)
     if not payment_method:
         return [], rows
     # The payer's card is shared across every entity they pay for, so a card alone is
@@ -1329,9 +1397,7 @@ def _billed_codes_in_house(entity_id) -> set[str]:
     # None drops the winding-down module from the set, which is the pre-existing
     # behaviour — it can overcharge a wind-down overlap, never undercharge.
     try:
-        paid_through = (
-            store.paid_through_for_user(payer_user_id) if payer_user_id else None
-        )
+        paid_through = store.paid_through_for_entity(entity_id)
     except Exception:
         logger.exception(
             "billing: could not read paid_through for entity {}; pricing its change "
@@ -1581,6 +1647,18 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
         # Raised but unpaid. Do not raise a second document against the same window.
         return _failed("There's already an unpaid invoice for this handover.")
 
+    # WHICH CARD the incoming payer is charged on: the one they nominated for THIS
+    # company. Required, not defaulted — the accept blockers ask for it up front, and
+    # reaching here without one means charging a card they never chose for a company they
+    # are only now taking on.
+    group = store.billing_group_for_entity(entity_id, payer_user_id)
+    if group is None:
+        logger.error(
+            "transfer: entity {} has no payment method nominated for payer {}",
+            entity_id, payer_user_id,
+        )
+        return _failed("Choose a payment method for this company before taking it on.")
+
     # The memo states the actual span — "12 Sept to 1 Oct, 19 of 30 days" — which the
     # invoice's own period_start/period_end cannot, because they record the payer's whole
     # period. Without it the customer sees a part-month charge with no explanation of why.
@@ -1598,9 +1676,12 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
                 period,
                 at,
             ),
-            metadata={"transfer_key": idempotency_key, "entity_id": str(entity_id)},
+            metadata={"transfer_key": idempotency_key, "entity_id": str(entity_id),
+                      "billing_group": str(group.id)},
             idempotency_key=idempotency_key,
             payer_user_id=payer_user_id,
+            payment_method=group.stripe_payment_method_id,
+            billing_group_id=group.id,
         )
     except Exception as exc:
         logger.exception(
@@ -1626,11 +1707,11 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
         return _failed("That payment didn't go through. Check the card and try again.")
 
     # ESTABLISH the cycle, never ADVANCE one that exists — the same rule, and the same
-    # reason, as ``_bill_module_change_in_house``: ``paid_through`` is the ACCOUNT's
-    # marker, and moving it for one entity's charge announces that every other entity on
-    # the account is settled too, silently cancelling their renewal.
+    # reason, as ``_bill_module_change_in_house``: ``paid_through`` is the CARD's marker
+    # for every company on it, and moving it for one company's charge announces that the
+    # others are settled too, silently cancelling their renewal.
     if first_charge:
-        store.set_paid_through(payer_user_id, period.end)
+        store.set_group_paid_through(group.id, period.end)
 
     return {"paid": True, "period_end": period.end, "invoice_id": result.get("id"),
             "amount": invoice.total, "currency": invoice.currency, "reason": None}
@@ -1655,6 +1736,20 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
     from blueprints.subscription.services.billing import period_containing
 
     now = clock.now()
+    # WHICH CARD. Resolved before anything is priced, because there is no fallback: a
+    # company with no nomination is not billed on the account default, it is not billed at
+    # all. Returning None here is the same answer as a declined card — the caller expires
+    # the trial or tells the customer — which is right, because in both cases the money
+    # was not collected and the modules must not be handed over.
+    group = store.billing_group_for_entity(entity_id, payer_user_id)
+    if group is None:
+        logger.error(
+            "billing: entity {} has no payment method nominated; refusing to charge "
+            "payer {} on a card they did not choose for it",
+            entity_id, payer_user_id,
+        )
+        return None
+
     anchor, _currency = store.billing_cycle_for_user(payer_user_id)
     # Whether this is the payer's FIRST charge, which is what decides below whether the
     # account's cycle may be written. The anchor answers it without a second read: it is
@@ -1677,7 +1772,8 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
 
     try:
         invoice = changes.issue_change(
-            customer_id, entity_id, name, current, current | codes, period, now
+            customer_id, entity_id, name, current, current | codes, period, now,
+            group=group,
         )
     except Exception as exc:
         logger.exception(
@@ -1713,22 +1809,23 @@ def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,
         _void_unpaid_conversion(invoice.get("id"), entity_id)
         return None
 
-    # ESTABLISH the payer's cycle; never ADVANCE one that already exists.
+    # ESTABLISH the card's cycle; never ADVANCE one that already exists.
     #
-    # This charge covered ONE entity, but ``paid_through`` is the ACCOUNT's marker and
-    # ``renewals.due_renewals`` reads it to decide whether the payer owes anything at
-    # all. Moving it forward here announced that every OTHER entity on the account was
-    # settled for the new period too. A trial converting exactly on a period boundary
-    # therefore cancelled that day's renewal for its siblings, and they went unbilled
-    # for the month — silently, because a payer who is not due raises no invoice to
-    # notice the absence of. Only a renewal covers every entity, so only a renewal may
-    # move this.
+    # This charge covered ONE entity, but ``paid_through`` is the CARD's marker for every
+    # company on it, and ``renewals.due_renewals`` reads it to decide whether that card
+    # owes anything at all. Moving it forward here announced that every OTHER company on
+    # the same card was settled for the new period too. A trial converting exactly on a
+    # period boundary therefore cancelled that day's renewal for its siblings, and they
+    # went unbilled for the month — silently, because a card that is not due raises no
+    # invoice to notice the absence of. Only a renewal covers every company on the card,
+    # so only a renewal may move this.
     #
-    # The first charge on a payer is the exception: they have no cycle yet, and
-    # ``due_renewals`` skips a NULL ``paid_through`` outright, so leaving it unset would
-    # mean the account never renewed at all.
-    if first_charge:
-        store.set_paid_through(payer_user_id, period.end)
+    # The first charge is the exception: the card has no cycle yet, and ``due_renewals``
+    # skips a NULL ``paid_through`` outright, so leaving it unset would mean it never
+    # renewed at all. Judged on the GROUP, not the payer: a payer who nominates a second
+    # card is anchored already, but that card has collected nothing and starts here.
+    if first_charge or group.paid_through is None:
+        store.set_group_paid_through(group.id, period.end)
     return period.end
 
 
@@ -2083,7 +2180,9 @@ def _reprice_pending_extensions(
     now = clock.now()
     rows = list(store.module_rows_for_entity(entity.id))
     anchor, _currency = store.billing_cycle_for_user(payer_user_id)
-    paid_through = store.paid_through_for_user(payer_user_id)
+    # The anchor is the payer's — one cycle — but what has been PAID FOR belongs to the
+    # card this company is on.
+    paid_through = store.paid_through_for_entity(entity.id)
     if anchor is None or paid_through is None:
         return
 
@@ -2162,7 +2261,9 @@ def _paid_cancel_terms(entity, user, code: str, row, also_cancelling=()) -> dict
         raise CheckoutError(f"Module {code} isn't currently subscribed.", status=409)
 
     anchor, currency = store.billing_cycle_for_user(payer_user_id)
-    paid_through = store.paid_through_for_user(payer_user_id)
+    # Priced against what THIS company is paid through — the card it is billed on — while
+    # the period boundaries still come from the payer's one anchor.
+    paid_through = store.paid_through_for_entity(entity.id)
     if anchor is None or paid_through is None:
         raise CheckoutError("This entity has no billing account yet.", status=409)
 
@@ -2487,16 +2588,29 @@ def preview_subscribe_modules(entity, user, codes) -> dict:
         # is named in that case for the same reason ``_billing_confirmation`` names it:
         # authorising a charge without saying which card it lands on is half a disclosure.
         "needs_consent": not store.has_billing_consent(entity.id, payer_user_id),
-        "card": _preview_card_display(payer_user_id),
+        "card": _preview_card_display(payer_user_id, entity.id),
     }
 
 
-def _preview_card_display(payer_user_id) -> str | None:
-    """"Visa ending 4242" for the payer's saved card, or None. Never raises: this only
-    decorates a dialog, and a Stripe hiccup must not stop the customer subscribing."""
+def _preview_card_display(payer_user_id, entity_id=None) -> str | None:
+    """"Visa ending 4242" for the card THIS company will be charged on, or None.
+
+    The company's nomination, falling back to the account's main card only when there is
+    no company in the question at all. That fallback is a DISPLAY convenience and not a
+    billing one: nothing charges an unnominated company, so a dialog naming the account
+    default for one would be describing a charge that will not happen. Which is why the
+    caller passes the entity.
+
+    Never raises: this only decorates a dialog, and a Stripe hiccup must not stop the
+    customer subscribing.
+    """
     try:
-        customer_id = store.customer_id_for_user(payer_user_id) if payer_user_id else None
-        method = customer_default_payment_method(customer_id) if customer_id else None
+        method = store.card_for_entity(entity_id) if entity_id else None
+        if method is None and entity_id is None:
+            customer_id = (
+                store.customer_id_for_user(payer_user_id) if payer_user_id else None
+            )
+            method = customer_default_payment_method(customer_id) if customer_id else None
         card = payment_method_display(method) if method else None
     except Exception:
         logger.exception(

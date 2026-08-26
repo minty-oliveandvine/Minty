@@ -53,6 +53,8 @@ def _blocked(app, monkeypatch, *, row, paid_through):
     monkeypatch.setattr(store, "module_row", lambda eid, code: row)
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
 
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     with app.app_context():
         return checkout._has_active_subscription("e1", "PETTY_CASH")
 

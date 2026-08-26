@@ -138,11 +138,16 @@ def _memo_for(entity_name: str, before_codes, after_codes, invoice: Invoice,
 
 def issue_change(customer_id: str, entity_id, entity_name: str, before_codes,
                  after_codes, period: Period, at: datetime,
-                 *, collect: bool = True) -> dict | None:
+                 *, collect: bool = True, group=None) -> dict | None:
     """Build and collect the change. Returns the invoice, or None if nothing was owed.
 
     Refuses to bill the same change twice: an invoice already carrying this change's key
     means an earlier run charged it and died before recording the result.
+
+    ``group`` is the billing group this company is on, and therefore the CARD the change
+    is charged to. It is passed rather than looked up because the caller has already
+    resolved it — and has already refused to charge anything when there is none, which is
+    the only correct answer: there is no default to fall back to.
     """
     from blueprints.subscription.services import billing_gateway
 
@@ -172,11 +177,18 @@ def issue_change(customer_id: str, entity_id, entity_name: str, before_codes,
         )
         return existing
 
+    metadata = {"change_key": key, "entity_id": str(entity_id)}
+    if group is not None:
+        metadata["billing_group"] = str(group.id)
     return billing_gateway.issue_invoice(
         customer_id,
         invoice,
         memo=_memo_for(entity_name, before_codes, after_codes, invoice, period, at),
-        metadata={"change_key": key, "entity_id": str(entity_id)},
+        metadata=metadata,
         idempotency_key=key,
         collect=collect,
+        payment_method=(
+            group.stripe_payment_method_id if group is not None else None
+        ),
+        billing_group_id=(group.id if group is not None else None),
     )
