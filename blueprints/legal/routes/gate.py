@@ -68,6 +68,17 @@ ALLOWED_ENDPOINTS = frozenset(
         "auth.logout",
         # --- Dead ends that must not redirect into the gate ---------------
         "auth.no_permission",
+        # --- Arriving on an invite link -----------------------------------
+        # This route renders nothing. It validates the token and bounces to
+        # the onboarding sign-in page, which carries its own Terms tick box
+        # (see _terms_consent_for_signup in blueprints/auth/routes/email_auth.py),
+        # and acceptance is still enforced at auth.email_handoff and on every
+        # entity route afterwards. So gating it protects nothing — it only
+        # makes the invite link silently do nothing for anyone who has not
+        # agreed yet, which is the largest group of people who ever receive
+        # one. Deliberately NOT extended to invitation.xero_not_connected:
+        # that one renders a template and stays gated.
+        "invitation.accept_invitation_page",
         # --- Where the gate sends people ----------------------------------
         # The acceptance panel is rendered as a modal over the Select Company
         # list, so this endpoint MUST be reachable without having agreed —
@@ -100,6 +111,9 @@ ALLOWED_ENDPOINTS = frozenset(
         # Terms inline and gate its tick box on reaching the end — a
         # cross-origin iframe cannot be scroll-tracked, so it needs the markup.
         "legal.content",
+        # Asked by the sign-in screen before anyone is logged in, to decide
+        # whether an invitee still needs the tick box at all.
+        "legal.invite_terms_status",
     }
 )
 
