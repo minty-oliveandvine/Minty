@@ -165,6 +165,40 @@ def test_a_page_request_is_redirected_to_the_acceptance_screen(blocked, db_sessi
     assert "/entity" in response.headers["Location"]
 
 
+def test_an_invite_link_is_not_swallowed_by_the_gate(blocked, db_session):
+    """The accept route renders nothing.
+
+    It validates the token and bounces to the onboarding sign-in page, which
+    carries its own Terms tick box — and acceptance is still enforced at
+    auth.email_handoff and on every entity route afterwards. So gating it
+    protects nothing; it only makes the invite link silently do nothing for
+    people who have not agreed yet, which is most of the people who ever
+    receive one.
+
+    The failure being guarded is a 302 to /entity, which means the gate
+    intercepted and the route never ran.
+    """
+    response = blocked.get(
+        "/invitation/accept/nonexistent-token", follow_redirects=False
+    )
+
+    assert not response.headers.get("Location", "").endswith("/entity"), (
+        "the Terms gate swallowed the invite link — the accept route never ran"
+    )
+
+
+def test_the_xero_not_connected_page_stays_gated(blocked, db_session):
+    """Deliberately NOT allow-listed alongside the accept route: this one
+    renders a template, so it is content like any other."""
+    response = blocked.get(
+        "/invitation/xero-not-connected/00000000-0000-0000-0000-000000000001",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/entity")
+
+
 def test_a_blocked_user_can_reach_the_page_the_gate_sends_them_to(
     blocked, db_session
 ):
@@ -394,3 +428,73 @@ def test_a_blocked_user_can_read_the_document_json(blocked, db_session):
     """Allow-listed like the other legal routes — otherwise the gate blocks the
     very text it is asking people to agree to."""
     assert blocked.get("/legal/content/terms").status_code == 200
+
+
+# --------------------------------------------------------------------------
+# Invite terms-status: don't ask someone who already agreed
+# --------------------------------------------------------------------------
+
+def test_invite_terms_status_defaults_to_required(client, db_session):
+    """No token, unknown token, no such user — all answer 'still required'.
+
+    Fails safe on purpose. Asking someone to accept twice is an annoyance;
+    skipping someone who never agreed is a missing consent record, which is the
+    thing this feature exists to prevent.
+    """
+    assert client.get("/legal/invite-terms-status").get_json()["terms_required"] is True
+    assert (
+        client.get("/legal/invite-terms-status?invite=not-a-real-token")
+        .get_json()["terms_required"]
+        is True
+    )
+    # Even a database failure must answer "required" rather than 500 the
+    # sign-in screen or wave someone through unasked.
+    from unittest.mock import patch
+
+    with patch(
+        "blueprints.invitation.models.invitation.Invitation.query",
+        new_callable=lambda: property(lambda self: (_ for _ in ()).throw(RuntimeError("db down"))),
+    ):
+        response = client.get("/legal/invite-terms-status?invite=anything")
+    assert response.status_code == 200
+    assert response.get_json()["terms_required"] is True
+
+
+def test_invite_terms_status_is_false_once_that_user_has_agreed(
+    app, client, db_session, user_id
+):
+    """The bug this fixes: an existing user, invited to another entity, was
+    shown the tick box again for Terms they had already accepted."""
+    import uuid as _uuid
+
+    from blueprints.invitation.models.invitation import Invitation
+    from blueprints.legal.services.consent import record_consent
+    from models.db import User
+
+    with app.app_context():
+        email = User.query.get(user_id).email
+        db_session.session.add(
+            Invitation(
+                id=str(_uuid.uuid4()),
+                email=email,
+                token="tok-" + _uuid.uuid4().hex,
+                status="pending",
+                entity_id=str(_uuid.uuid4()),
+                role="cashier",
+            )
+        )
+        db_session.session.commit()
+        token = Invitation.query.filter_by(email=email).first().token
+
+        # Before agreeing: still required.
+        assert client.get(
+            f"/legal/invite-terms-status?invite={token}"
+        ).get_json()["terms_required"] is True
+
+        record_consent(user_id, source="gate")
+        db_session.session.commit()
+
+    # After agreeing: not required — no second tick box.
+    assert client.get(
+        f"/legal/invite-terms-status?invite={token}"
+    ).get_json()["terms_required"] is False
