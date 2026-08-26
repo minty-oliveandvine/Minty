@@ -58,9 +58,9 @@
    Same `hidden flex` pairing as the loader above: Tailwind emits `.hidden` after
    `.flex`, so it wins until the class is removed. #}
 <div id="billingConfirmModal"
-     class="fixed inset-0 bg-black bg-opacity-40 z-[110] hidden flex items-center justify-center p-4"
+     class="dlg-overlay-in fixed inset-0 bg-black bg-opacity-40 z-[110] hidden flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="billingConfirmTitle">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+  <div class="dlg-in bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
     <h2 id="billingConfirmTitle" class="text-lg font-bold text-gray-900">Confirm billing</h2>
     <p id="billingConfirmBody" class="mt-3 text-sm text-gray-700"></p>
 
@@ -86,16 +86,32 @@
 
       {# The same row, but choosable. Shown instead of the read-only one when the caller
          passes a card list — the payer picks the card BEFORE authorising rather than
-         having to leave, change a default elsewhere and come back.
+         having to leave, change a default elsewhere and come back. What it posts is a
+         per-company nomination: this company goes on that card and nothing else the payer
+         owns moves.
 
-         Note the card is still account-level today: the engine reads
-         ``invoice_settings.default_payment_method`` and nothing else, so this nominates
-         for the account. Per-company cards are a planned change; when they land, this
-         control is already in the right place and only what it posts to has to move. #}
+         THE SAME ROWS AS EVERYWHERE ELSE, not a <select>. It was a dropdown, which meant
+         this screen described a card in a third vocabulary ("· expires 04/29 · current
+         default"), showed no flags at all, and so let a payer authorise a charge against
+         an EXPIRED card without ever saying it had expired. #}
       <div id="billingConfirmCardPick" class="mt-2 hidden">
-        <label for="billingConfirmCardSelect" class="block text-sm text-gray-700">Card</label>
-        <select id="billingConfirmCardSelect"
-                class="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-[#54d3da] focus:outline-none focus:ring-1 focus:ring-[#54d3da]"></select>
+        <div class="flex items-baseline justify-between gap-3">
+          <span class="text-sm font-semibold text-gray-900">Billing accounts</span>
+          <button type="button" id="billingConfirmCardToggle"
+                  class="hidden bg-transparent p-0 text-[13.5px] font-semibold text-[#1a9c92] hover:underline"
+                  aria-expanded="false" aria-controls="billingConfirmCardRows">
+            Change
+          </button>
+        </div>
+        <div id="billingConfirmCardRows" class="mt-2 grid gap-2"></div>
+        {# THE WAY OUT OF A LIST WITH NOTHING RIGHT IN IT, and it was missing here while
+           every other picker had it. A payer whose only saved card had expired could
+           read that it had expired on this screen and still have no way to add another
+           without abandoning the decision they were part-way through. #}
+        <button type="button" id="billingConfirmAddCard"
+                class="mt-2.5 bg-transparent p-0 text-[13.5px] font-semibold text-[#1a9c92] hover:underline">
+          New billing account
+        </button>
       </div>
     </div>
 
@@ -130,9 +146,9 @@
    z-[110], the same level as billingConfirmModal: above the blocking loader (100) and
    above the decision modal (95), which stays open behind it while a module is unticked. #}
 <div id="cancelSubModal"
-     class="fixed inset-0 bg-black bg-opacity-40 z-[110] hidden flex items-center justify-center p-4"
+     class="dlg-overlay-in fixed inset-0 bg-black bg-opacity-40 z-[110] hidden flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="cancelSubTitle">
-  <div class="no-scrollbar bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+  <div class="dlg-in no-scrollbar bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
     <div class="flex h-10 w-10 items-center justify-center rounded-full bg-[#FDECEC]">
       <span class="text-lg font-bold text-[#E5484D]" aria-hidden="true">!</span>
     </div>
@@ -234,9 +250,9 @@
 <div id="subDecisionModal"
      data-trial-end="{{ trial_end or '' }}"
      data-next-payment="{{ next_payment_date or '' }}"
-     class="fixed inset-0 bg-black bg-opacity-40 z-[95] hidden flex items-center justify-center p-4"
+     class="dlg-overlay-in fixed inset-0 bg-black bg-opacity-40 z-[95] hidden flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="subDecisionTitle">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+  <div class="dlg-in bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
     <h2 id="subDecisionTitle" class="text-lg font-bold text-gray-900">Choose your modules</h2>
     <p id="subDecisionIntro" class="mt-1.5 text-sm text-gray-500"></p>
 
@@ -418,6 +434,185 @@
   // treated as a no; this authorises real charges, so the default must be "don't".
   // Falls back to window.confirm if the markup isn't on the page, rather than silently
   // resolving true and billing someone.
+  // The card rows inside the confirmation. Built here rather than server-rendered because
+  // the wallet is fetched when the dialog is about to open, not when the page was drawn.
+  //
+  // TOKEN-FOR-TOKEN THE RESTART SCREEN'S ROWS (module_restart_body.html), which are in turn
+  // onboarding's `.buynow-pm`: line #d9d9d6, accent #36c3b4, accent-soft #e6f7f4, radius
+  // 10px. A payer meets this list in three places and it should not look like three
+  // products. The classes are applied in JS rather than through a `:has()` rule because
+  // this page compiles Tailwind in the browser and a selector the CDN build does not know
+  // is a silently unstyled row.
+  const CONFIRM_CHOSEN = ['border-[#36c3b4]', 'bg-[#e6f7f4]'];
+  const CONFIRM_UNCHOSEN = ['border-[#d9d9d6]', 'bg-white', 'hover:bg-[#fbfbfa]'];
+
+  function confirmPill(text, cls) {
+    return '<span class="rounded-full border px-2 py-0.5 text-[11.5px] font-bold '
+         + 'tracking-[0.02em] whitespace-nowrap ' + cls + '">' + text + '</span>';
+  }
+
+  // The payer's saved cards, read when a dialog is about to offer them.
+  //
+  // BEST-EFFORT BY DESIGN. A failed read falls back to the read-only wording, because
+  // "charged to the card saved on your account" is still true and still better than
+  // refusing to let the customer subscribe over a Stripe hiccup — the server names the
+  // card in its preview either way, and the charge does not depend on this list.
+  const EMPTY_WALLET = { methods: [], default_id: null, nominated_id: null };
+
+  async function loadWallet() {
+    try {
+      const res = await fetch(
+        "{{ url_for('entity.entity_settings_module_payment_methods', org_id=org.id) }}",
+        { credentials: 'same-origin' }
+      );
+      if (res.ok) return await res.json();
+    } catch (e) { /* falls through to the empty wallet */ }
+    return EMPTY_WALLET;
+  }
+
+  // The options the rows were last built from, so the add-card link can rebuild them
+  // against a freshly read wallet without the caller being involved.
+  let confirmCardOpts = null;
+
+  function buildCardRows(opts) {
+    const rows = document.getElementById('billingConfirmCardRows');
+    const toggle = document.getElementById('billingConfirmCardToggle');
+    const cards = opts.cards || [];
+    confirmCardOpts = opts;
+    rows.innerHTML = '';
+
+    cards.forEach(function (pm) {
+      const chosen = pm.id === opts.defaultCard;
+      const label = document.createElement('label');
+      label.className =
+        'restart-pmrow flex cursor-pointer items-center gap-3 rounded-[10px] border '
+        + 'px-3.5 py-3 transition-colors '
+        + (chosen ? CONFIRM_CHOSEN : CONFIRM_UNCHOSEN).join(' ');
+
+      // The flag rail, same pills in the same order as the restart screen and the payer
+      // portal. The expired one is the reason this stopped being a <select>: a dropdown
+      // let a payer authorise a charge against a card that cannot be charged.
+      let flags = '';
+      if (pm.id === opts.nominatedCard) {
+        flags += confirmPill('Billing this', 'border-[#b9e7de] bg-[#e6f7f4] text-[#0f7b6c]');
+      }
+      if (pm.id === opts.accountDefaultCard) {
+        flags += confirmPill('Default', 'border-[#b5ddbd] bg-[#d6edd9] text-[#267347]');
+      }
+      if (pm.expires_soon && !pm.expired) {
+        flags += confirmPill('Expiring soon', 'border-[#f2d59b] bg-[#fce6bd] text-[#9e690d]');
+      }
+      if (pm.expired) {
+        flags += confirmPill('Expired', 'border-[#ffcccc] bg-[#fff1f1] text-[#b4231f]');
+      }
+
+      const meta = pm.expiry
+        ? 'Expires ' + pm.expiry
+        : (pm.wallet_label || pm.brand_label || '');
+
+      label.innerHTML =
+        '<input type="radio" name="billing-confirm-card" class="h-4 w-4 cursor-pointer '
+        + 'accent-[#36c3b4]" value="' + pm.id + '"' + (chosen ? ' checked' : '') + '>'
+        + '<span class="flex min-w-0 flex-col gap-0.5">'
+        +   '<span class="truncate text-sm font-semibold text-[#1b1d1c]">'
+        +     (pm.label || pm.brand || pm.id)
+        +   '</span>'
+        +   '<span class="truncate text-[12.5px] text-[#8a8d8b]">' + meta + '</span>'
+        + '</span>'
+        + '<span class="ml-auto flex flex-none items-center gap-1.5 '
+        +   'max-[560px]:flex-col max-[560px]:items-end">' + flags + '</span>';
+
+      rows.appendChild(label);
+    });
+
+    // Collapsed to the chosen card, and only collapsible at all with more than one: a
+    // "Change" over a single row is a control that cannot do anything. Rows are HIDDEN
+    // rather than removed so the radio group keeps its keyboard navigation.
+    const many = cards.length > 1;
+    toggle.classList.toggle('hidden', !many);
+    toggle.textContent = 'Change';
+    toggle.setAttribute('aria-expanded', 'false');
+    paintConfirmRows(false);
+
+    if (many && !toggle.dataset.wired) {
+      toggle.dataset.wired = '1';
+      toggle.addEventListener('click', function () {
+        const open = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+        toggle.textContent = open ? 'Change' : 'Done';
+        paintConfirmRows(!open);
+      });
+      rows.addEventListener('change', function () {
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.textContent = 'Change';
+        paintConfirmRows(false);
+      });
+    }
+
+    wireConfirmAddCard();
+  }
+
+  // "New billing account", from inside the confirmation.
+  //
+  // IN PAGE, on top of this dialog (capture is z-120, this is z-110) rather than a
+  // navigation: the payer is part-way through a decision, and sending them to Stripe to
+  // come back and make it again is how the trial-decision modal used to lose it.
+  //
+  // The new card is PRESELECTED on return. It is the one they just went and typed in, so
+  // preselecting anything else would ask them to choose it a second time.
+  function wireConfirmAddCard() {
+    const add = document.getElementById('billingConfirmAddCard');
+    if (!add || add.dataset.wired) return;
+    add.dataset.wired = '1';
+    add.addEventListener('click', async function () {
+      if (typeof window.openCardCapture !== 'function') {
+        // No in-page dialog on this page. The hosted flow navigates away, which loses the
+        // decision — better to say so than to take the payer somewhere they cannot get
+        // back from.
+        return;
+      }
+      add.disabled = true;
+      try {
+        const saved = await window.openCardCapture();
+        if (!saved || !saved.saved) return;
+        const res = await fetch(
+          "{{ url_for('entity.entity_settings_module_payment_methods', org_id=org.id) }}",
+          { credentials: 'same-origin' }
+        );
+        if (!res.ok) return;
+        const wallet = await res.json();
+        const opts = confirmCardOpts || {};
+        opts.cards = wallet.methods || [];
+        opts.nominatedCard = wallet.nominated_id;
+        opts.accountDefaultCard = wallet.default_id;
+        opts.defaultCard =
+          saved.paymentMethod || wallet.nominated_id || wallet.default_id;
+        buildCardRows(opts);
+      } catch (e) {
+        // The card may well have saved; the list simply could not be re-read. Left as it
+        // was rather than cleared — a picker that empties itself after a successful save
+        // reads as the save having failed.
+      } finally {
+        add.disabled = false;
+      }
+    });
+  }
+
+  // Repaint the chosen highlight and re-collapse. Split out because it runs on build, on
+  // every toggle and on every change of selection.
+  function paintConfirmRows(expanded) {
+    const rows = document.getElementById('billingConfirmCardRows');
+    const labels = Array.prototype.slice.call(rows.querySelectorAll('label'));
+    const many = labels.length > 1;
+    labels.forEach(function (label) {
+      const input = label.querySelector('input[type="radio"]');
+      const chosen = !!(input && input.checked);
+      CONFIRM_CHOSEN.forEach(function (c) { label.classList.toggle(c, chosen); });
+      CONFIRM_UNCHOSEN.forEach(function (c) { label.classList.toggle(c, !chosen); });
+      label.classList.toggle('hidden', many && !expanded && !chosen);
+    });
+  }
+
   function openBillingConfirm(opts) {
     const modal = document.getElementById('billingConfirmModal');
     if (!modal) {
@@ -431,7 +626,8 @@
       const detail = document.getElementById('billingConfirmDetail');
       const cardRow = document.getElementById('billingConfirmCardRow');
       const cardPickRow = document.getElementById('billingConfirmCardPick');
-      const cardPick = document.getElementById('billingConfirmCardSelect');
+      const cardRows = document.getElementById('billingConfirmCardRows');
+      const cardToggle = document.getElementById('billingConfirmCardToggle');
 
       document.getElementById('billingConfirmTitle').textContent = opts.title || 'Confirm billing';
       document.getElementById('billingConfirmBody').textContent = opts.body || '';
@@ -463,17 +659,7 @@
         // two are mutually exclusive: showing both would put the same fact on screen
         // twice and leave it ambiguous which one the charge follows.
         if (opts.cards && opts.cards.length) {
-          cardPick.innerHTML = '';
-          opts.cards.forEach(function (pm) {
-            const option = document.createElement('option');
-            option.value = pm.id;
-            option.textContent =
-              (pm.label || pm.brand || pm.id)
-              + (pm.expiry ? ' · expires ' + pm.expiry : '')
-              + (pm.id === opts.defaultCard ? ' · current default' : '');
-            option.selected = pm.id === opts.defaultCard;
-            cardPick.appendChild(option);
-          });
+          buildCardRows(opts);
           cardPickRow.classList.remove('hidden');
           cardRow.classList.add('hidden');
         } else if (opts.card) {
@@ -505,8 +691,9 @@
         // An OBJECT when a card was chosen, plain true otherwise. Both are truthy, so
         // every existing `if (!ok)` caller is unaffected — only the one that offered
         // the choice looks inside.
-        const chosen = cardPickRow && !cardPickRow.classList.contains('hidden')
-          ? (cardPick.value || '')
+        const picked = cardRows.querySelector('input[name="billing-confirm-card"]:checked');
+        const chosen = cardPickRow && !cardPickRow.classList.contains('hidden') && picked
+          ? (picked.value || '')
           : '';
         close(chosen ? { card: chosen } : true);
       }
@@ -666,6 +853,15 @@
     }
     const cur = p.currency ? p.currency + ' ' : '';
     const monthly = cur + p.monthly_formatted + '/mo';
+
+    // THE PICKER, on the dialog that takes the money. This named the card in a read-only
+    // line and gave no way to change it — on the one screen in the flow where the charge
+    // happens as it closes, which is the last moment the choice is free to make. It also
+    // named it in a fourth vocabulary ("visa ending 5556"); the server builds that string
+    // from the same helper the rows use now.
+    const wallet = await loadWallet();
+    const cards = wallet.methods || [];
+
     return openBillingConfirm({
       title: 'Subscribe to ' + p.label,
       body: 'Add ' + p.label + ' to start your subscription. Payment from today and '
@@ -680,9 +876,18 @@
         ? ' · ' + p.modules.join(' & ') : ''),
       thenLine: 'then ' + monthly
         + (p.saving_formatted ? ' · save ' + cur + p.saving_formatted + '/mo vs separate' : ''),
-      // Named only when this click is also the consent — otherwise the company is
-      // already authorised and which card it sits on is not the decision being made.
-      card: p.needs_consent ? p.card : null,
+      // CHOOSABLE whenever there is anything to choose between. Money moves here, so
+      // which card it comes off is part of the decision even when the company is already
+      // authorised — a payer who has just added a second card and wants this purchase on
+      // it should not have to cancel, go elsewhere and come back.
+      cards: cards.length ? cards : null,
+      // The read-only line, still, when the wallet could not be read. Named only when
+      // this click is also the consent, as before.
+      card: cards.length ? null : (p.needs_consent ? p.card : null),
+      // The card THIS company is on, falling back to the account's main one.
+      defaultCard: wallet.nominated_id || wallet.default_id,
+      nominatedCard: wallet.nominated_id,
+      accountDefaultCard: wallet.default_id,
       confirmLabel: 'Continue',
       dismissLabel: 'Not now',
     });
@@ -761,23 +966,45 @@
     });
   }
 
-  async function doCheckout(codes, btn) {
+  //
+  // ``restoreLabel`` is what goes back on the button on any exit that leaves the page in
+  // place. Passed in when the CALLER already relabelled it — the decision modal writes
+  // "Please wait…" before it gets here, and reading textContent at this point would put
+  // "Please wait…" back on a button that has finished waiting.
+  async function doCheckout(codes, btn, restoreLabel) {
     if (!codes.length) { notifyError('No modules to subscribe to.'); return; }
-    if (!(await confirmSubscribe(codes))) {
-      if (btn) { btn.disabled = false; }
+    const orig = restoreLabel !== undefined
+      ? restoreLabel
+      : (btn ? btn.textContent : '');
+    // BUSY BEFORE THE FIRST AWAIT, not after it. `confirmSubscribe` reads the wallet and
+    // prices the purchase — two network round-trips — before its dialog appears, and the
+    // button used to sit through both of them enabled and reading "Save changes". Long
+    // enough to look broken, and long enough to press twice.
+    if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+    const ok = await confirmSubscribe(codes);
+    if (!ok) {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
       return;                       // nothing posted, nothing charged
     }
-    const orig = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+    // The chosen card rides with the purchase, and the route nominates it BEFORE
+    // charging. An object when a card was picked, plain true otherwise — an empty body
+    // is exactly what this sent before the dialog had a picker.
+    const card = ok && ok.card ? { payment_method: ok.card } : {};
     showBlockingLoader('Setting up your subscription…');
     try {
-      const data = await postJson("{{ url_for('entity.entity_settings_module_checkout', org_id=org.id) }}", { codes: codes });
+      const data = await postJson(
+        "{{ url_for('entity.entity_settings_module_checkout', org_id=org.id) }}",
+        Object.assign({ codes: codes }, card)
+      );
       if (data.url) { window.location.href = data.url; return; }
       if (data.needs_confirmation) {
         // No second dialog: the one above already named the amount, the plan and — for a
         // company being authorised — the card. Asking again, in different words, for the
         // same decision reads as a bug and trains people to click through disclosures.
-        const done = await postJson("{{ url_for('entity.entity_settings_module_confirm_billing', org_id=org.id) }}", { codes: codes });
+        const done = await postJson(
+          "{{ url_for('entity.entity_settings_module_confirm_billing', org_id=org.id) }}",
+          Object.assign({ codes: codes }, card)
+        );
         if (done.url) { window.location.href = done.url; return; }
       }
       window.location.reload();
@@ -1135,27 +1362,14 @@
     const price = fmtMoney(plan.sym, plan.amount) + '/mo';
 
     // The saved cards, so the consent dialog can offer a CHOICE rather than telling the
-    // payer which card they are about to authorise. Best-effort: a failed read falls
-    // back to the old wording, because "confirm billing on your saved card" is still
-    // true and still better than refusing to let them confirm at all.
-    let wallet = { methods: [], default_id: null, nominated_id: null };
-    if (gap === 'consent') {
-      try {
-        const res = await fetch(
-          "{{ url_for('entity.entity_settings_module_payment_methods', org_id=org.id) }}",
-          { credentials: 'same-origin' }
-        );
-        if (res.ok) wallet = await res.json();
-      } catch (e) { /* falls through to the read-only wording */ }
-    }
+    // payer which card they are about to authorise.
+    const wallet = gap === 'consent' ? await loadWallet() : EMPTY_WALLET;
     const cards = wallet.methods || [];
-    const canChoose = gap === 'consent' && cards.length > 1;
-    // With exactly one card there is nothing to choose, but the payer should still be
-    // told WHICH card they are authorising — a confirmation that names no card asks
-    // them to agree to a charge they cannot check.
-    const onlyCard = gap === 'consent' && cards.length === 1
-      ? (cards[0].label || cards[0].brand || '')
-      : '';
+    // ANY saved card gets the list, not just two or more. It used to take more than one,
+    // because a <select> holding a single option is a control that cannot be used — the
+    // rows that replaced it are perfectly readable at one, and they name the card in the
+    // same words, with the same flags, as every other screen the payer meets it on.
+    const canChoose = gap === 'consent' && cards.length > 0;
 
     const ok = await openBillingConfirm(gap === 'card' ? {
       title: 'Save a card to keep ' + plan.name + '?',
@@ -1174,14 +1388,16 @@
           + 'your account.',
       amount: price,
       amountLabel: endsOn ? 'From ' + endsOn : 'Monthly',
-      // Only offered with more than one card: a select holding a single option is a
-      // control that cannot be used.
       cards: canChoose ? cards : null,
-      card: onlyCard,
       // The card THIS company is already on, falling back to the account's main one.
       // Preselecting the account default for a company billed to a different card would
       // have the payer confirm a charge against a card they had not chosen for it.
       defaultCard: wallet.nominated_id || wallet.default_id,
+      // The two flags, kept apart from the preselection above: which card this company is
+      // on is not the same fact as which one the account offers first, and on the row where
+      // they differ that difference is the thing worth seeing.
+      nominatedCard: wallet.nominated_id,
+      accountDefaultCard: wallet.default_id,
       note: 'Nothing is charged today — the trial runs to the end either way. This '
           + 'card is used for this company only; your others keep the cards they are on.',
       confirmLabel: 'Confirm billing',
@@ -1259,6 +1475,22 @@
       hideBlockingLoader();
       btn.disabled = false;
       btn.textContent = orig;
+    }
+
+    // NOTHING TICKED DIFFERENTLY IS NOT A SAVE. Reopening the modal and pressing the
+    // button without touching a box used to fall all the way through to
+    // ``window.location.reload()`` — a full page load to redraw the state already on
+    // screen, which on a slow connection is a long blank pause after a button that
+    // appeared to do nothing.
+    //
+    // It is also why "Please wait…" never appeared: with every list empty there is not a
+    // single ``await`` between setting the label and reloading, so the browser never gets
+    // a frame in which to paint it. The label was never the bug; the work it was
+    // announcing did not exist.
+    if (!remove.length && !renew.length && !keptTrials.length
+        && !startTrials.length && !add.length) {
+      closeSubDecision();
+      return;
     }
 
     btn.disabled = true;
@@ -1385,8 +1617,14 @@
     // through the ordinary checkout — which may redirect to Stripe or raise the
     // first-charge confirmation. Last, for the same reason removals were first.
     if (add.length) {
-      restore();
-      await doCheckout(add.map(function (i) { return i.code; }), btn);
+      // The loader goes, because a priced dialog is about to open and it must not open
+      // behind a full-screen "Updating your subscription…". THE BUTTON DOES NOT: it stays
+      // disabled and reading "Please wait…" straight through into doCheckout, which owns
+      // it from here and puts `orig` back on any exit that leaves the page up. Restoring
+      // it first is what left it live and reading "Save changes" for the two round-trips
+      // before the dialog appeared.
+      hideBlockingLoader();
+      await doCheckout(add.map(function (i) { return i.code; }), btn, orig);
       return;
     }
 

@@ -1316,6 +1316,34 @@ def entity_settings_module(org_id):
 
 
 
+def _nominate_if_given(org_id, payload):
+    """Put this company on the card the dialog named, BEFORE anything is charged.
+
+    Body key ``payment_method``, optional. Absent leaves the company on whatever card it
+    is already on, which is what every caller sent before the purchase dialog grew a
+    picker.
+
+    Routed through ``set_for_entity``, which proves both halves: the method belongs to
+    this caller, and this caller is the company's payer. Another payer's ``pm_...``
+    answers "not found" rather than being nominated onto anything.
+
+    Returns an error response to return, or None to carry on. Charging first and
+    nominating after would bill the card the company was already on — which, on the one
+    dialog that takes money as it closes, is a charge against a card the payer was
+    looking at a different one to.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    pm_id = str((payload or {}).get("payment_method") or "").strip()
+    if not pm_id:
+        return None
+    try:
+        payment_methods.set_for_entity(current_user.id, org_id, pm_id)
+    except payment_methods.PaymentMethodError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    return None
+
+
 @entity_bp.route("/entity/settings/module/<string:org_id>/checkout", methods=["POST"])
 @login_required
 @require_entity_access(entity_arg="org_id")
@@ -1342,6 +1370,9 @@ def entity_settings_module_checkout(org_id):
     org = Entity.query.get_or_404(org_id)
     payload = request.get_json(silent=True) or {}
     codes = payload.get("codes") or []
+    error = _nominate_if_given(org_id, payload)
+    if error:
+        return error
     return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
     # Setup checkout returns here so the subscriptions can be created once the card
     # is saved; Stripe substitutes the real id for {CHECKOUT_SESSION_ID}.
@@ -1769,6 +1800,9 @@ def entity_settings_module_confirm_billing(org_id):
     org = Entity.query.get_or_404(org_id)
     payload = request.get_json(silent=True) or {}
     codes = payload.get("codes") or []
+    error = _nominate_if_given(org_id, payload)
+    if error:
+        return error
     return_url = url_for("entity.entity_settings_module", org_id=org_id, _external=True)
     complete_url = url_for(
         "entity.entity_settings_module_checkout_complete", org_id=org_id, _external=True

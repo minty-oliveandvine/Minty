@@ -676,6 +676,90 @@ def test_authorize_records_consent_for_this_entity_and_charges_nothing(
     assert store.has_billing_consent(entity_id, "u2") is False
 
 
+def test_authorize_nominates_the_card_it_was_given(app, db_session, monkeypatch):
+    """Buy now names the card rather than leaving Minty to infer one.
+
+    The sheet used to make every card it captured the ACCOUNT DEFAULT and rely on
+    ``_ensure_nominated`` finding it again from there — which re-pointed what every other
+    company that payer owns would be offered, as a side effect of confirming one. Sending
+    the id says which card THIS company goes on and moves nothing else.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    entity_id = _entity_with_member(db_session)
+    seen = {}
+
+    def _set_for_entity(user_id, ent, pm_id, *, source="chosen"):
+        seen.update(user_id=user_id, entity_id=str(ent), payment_method=pm_id)
+        return {"methods": [], "nominated_id": pm_id}
+
+    monkeypatch.setattr(payment_methods, "set_for_entity", _set_for_entity)
+
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/authorize",
+        json={"entity_id": entity_id, "payment_method": "pm_chosen"},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 200
+    assert seen == {
+        "user_id": "u1",
+        "entity_id": str(entity_id),
+        "payment_method": "pm_chosen",
+    }
+
+
+def test_authorize_nominates_before_it_records_consent(app, db_session, monkeypatch):
+    """Order, not just presence. Consent recorded while the company still points at a
+    different card authorises a charge the payer was never shown, so a nomination that
+    fails must take the consent down with it."""
+    from blueprints.subscription.services import checkout, payment_methods, store
+
+    entity_id = _entity_with_member(db_session)
+
+    def _refuse(*a, **k):
+        raise payment_methods.PaymentMethodError(
+            "That payment method couldn't be found.", status=404
+        )
+
+    monkeypatch.setattr(payment_methods, "set_for_entity", _refuse)
+    monkeypatch.setattr(
+        checkout,
+        "authorize_entity_billing",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("consent must not be recorded when the card is refused")
+        ),
+    )
+
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/authorize",
+        json={"entity_id": entity_id, "payment_method": "pm_someone_elses"},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 404
+    assert store.has_billing_consent(entity_id, "u1") is False
+
+
+def test_authorize_without_a_card_still_works(app, db_session):
+    """The id is OPTIONAL. An older client that does not send one still gets consent, and
+    ``_ensure_nominated`` backstops the card the way it always did."""
+    entity_id = _entity_with_member(db_session)
+    from blueprints.subscription.services import store
+
+    client = app.test_client()
+    res = client.post(
+        "/api/onboarding/billing/authorize",
+        json={"entity_id": entity_id},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 200
+    assert store.has_billing_consent(entity_id, "u1") is True
+
+
 def test_authorize_is_idempotent(app, db_session):
     """A double-click, or a sheet re-opened before the status read caught up."""
     from blueprints.subscription.models.entity_billing_consent import (

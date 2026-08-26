@@ -107,10 +107,10 @@
        and the list is a control they only need when they want to change something, not
        every time they read the price. #}
     <div class="flex items-baseline justify-between gap-3">
-      <h3 class="text-sm font-semibold text-gray-900">Card to charge</h3>
+      <h3 class="text-sm font-semibold text-gray-900">Billing accounts</h3>
       {% if consent_takeover.methods and consent_takeover.methods.methods | length > 1 %}
         <button type="button" id="restartCardToggle"
-                class="bg-transparent p-0 text-[13px] font-semibold text-[#1a9c92] hover:underline"
+                class="bg-transparent p-0 text-[13.5px] font-semibold text-[#1a9c92] hover:underline"
                 aria-expanded="false" aria-controls="restartCardRows">
           Change
         </button>
@@ -143,23 +143,43 @@
               <span class="text-[12.5px] text-[#8a8d8b]">
                 {%- if pm.expiry %}Expires {{ pm.expiry }}
                 {%- else %}{{ pm.wallet_label or pm.brand_label or '' }}{% endif -%}
-                {%- if pm.id == methods.nominated_id %} · Billing this company
-                {%- elif pm.id == methods.default_id %} · Account default{% endif -%}
               </span>
             </span>
-            {# An expired card can be selected and WOULD be charged. Said here rather
+            {# The flag rail. What a card IS to this company and to the account, then how
+               close it is to not working — one pill each, in this order, and the same rail
+               in the same order in onboarding's sheet and the payer portal. They used to be
+               words appended to the expiry, which read as part of the date.
+
+               An expired card can still be selected and WOULD be charged. Said here rather
                than at the failed payment. #}
-            {% if pm.expired %}
-              <span class="ml-auto flex-none rounded-full border border-[#ffcccc] bg-[#fff1f1] px-2 py-0.5 text-[11.5px] font-bold tracking-[0.02em] text-[#b4231f]">
-                Expired
-              </span>
-            {% endif %}
+            <span class="ml-auto flex flex-none items-center gap-1.5 max-[560px]:flex-col max-[560px]:items-end">
+              {% if pm.id == methods.nominated_id %}
+                <span class="rounded-full border border-[#b9e7de] bg-[#e6f7f4] px-2 py-0.5 text-[11.5px] font-bold tracking-[0.02em] whitespace-nowrap text-[#0f7b6c]">
+                  Billing this
+                </span>
+              {% endif %}
+              {% if pm.id == methods.default_id %}
+                <span class="rounded-full border border-[#b5ddbd] bg-[#d6edd9] px-2 py-0.5 text-[11.5px] font-bold tracking-[0.02em] whitespace-nowrap text-[#267347]">
+                  Default
+                </span>
+              {% endif %}
+              {% if pm.expires_soon and not pm.expired %}
+                <span class="rounded-full border border-[#f2d59b] bg-[#fce6bd] px-2 py-0.5 text-[11.5px] font-bold tracking-[0.02em] whitespace-nowrap text-[#9e690d]">
+                  Expiring soon
+                </span>
+              {% endif %}
+              {% if pm.expired %}
+                <span class="rounded-full border border-[#ffcccc] bg-[#fff1f1] px-2 py-0.5 text-[11.5px] font-bold tracking-[0.02em] whitespace-nowrap text-[#b4231f]">
+                  Expired
+                </span>
+              {% endif %}
+            </span>
           </label>
         {% endfor %}
       </div>
       <button type="button" id="restartAddCardToggle"
               class="mt-2.5 bg-transparent p-0 text-[13.5px] font-semibold text-[#1a9c92] hover:underline">
-        Use a different card
+        New billing account
       </button>
     {% else %}
       <p class="mt-2 text-sm text-[#4a4d4b]">
@@ -167,7 +187,7 @@
       </p>
       <button type="button" id="restartAddCardToggle"
               class="mt-3 inline-flex items-center justify-center gap-2 rounded-[10px] bg-gradient-to-r from-[#00CBC6] to-[#00D5BF] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(0,203,198,0.28)] transition-shadow hover:shadow-[0_8px_22px_rgba(0,203,198,0.4)]">
-        Add a card
+        New billing account
       </button>
     {% endif %}
   </div>

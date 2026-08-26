@@ -66,9 +66,9 @@ def _takeover(mode="takeover", *, can_act=True, single=True):
         "single": single,
         "names": [item["name"] for item in lapsed],
         "quote": {"charged_today_formatted": "HK$400",
-                  "monthly_formatted": "HK$400", "card": "Visa ending 4242"},
+                  "monthly_formatted": "HK$400", "card": "Visa •••• 4242"},
         "methods": {"has_account": True, "default_id": "pm_1", "total": 1,
-                    "methods": [{"id": "pm_1", "label": "Visa ending 4242",
+                    "methods": [{"id": "pm_1", "label": "Visa •••• 4242",
                                  "brand": "Visa", "expiry": "04/2030"}]},
     }
 
@@ -77,7 +77,7 @@ def _two_cards():
     """A payer with more than one saved card — the case the list collapses for."""
     state = _takeover()
     state["methods"]["methods"].append(
-        {"id": "pm_2", "label": "Mastercard ending 4444", "brand": "Mastercard",
+        {"id": "pm_2", "label": "Mastercard •••• 4444", "brand": "Mastercard",
          "expiry": "04/2031"}
     )
     state["methods"]["total"] = 2
@@ -345,13 +345,24 @@ def test_the_details_link_goes_nowhere_on_purpose(app):
     assert "/legal/terms" not in details
 
 
-def test_the_card_dialog_says_saving_charges_nothing(app):
-    """The amount is right there on the screen behind, so a card form in front of it
-    has to say which of the two the button does."""
+def test_the_card_dialog_says_where_the_card_number_goes(app):
+    """One sentence, the same in all three apps.
+
+    It used to say saving charges nothing — true, and it is what a form in front of a
+    priced screen most obviously raises. It was unified away in favour of the question a
+    card form raises everywhere it appears, which is where the number ends up; what may be
+    charged, and when, is left to the mandate below it. If the reassurance is wanted back
+    it belongs BESIDE this line, not instead of it.
+    """
     html = _render(app, _takeover())
 
-    assert "be charged for saving a card" in html
-    assert "nothing is charged until you confirm" in html
+    assert "held by our payment provider, Stripe" in html
+    # Not "never stored by Minty" — the template wraps mid-phrase, and an assertion that
+    # spans the break breaks on a reflow that changed nothing a payer can see.
+    assert "never stored" in html
+    # The mandate is still the thing that says a charge may follow, and it is not optional
+    # — Stripe's own is suppressed with terms.card:'never'.
+    assert "you authorise Minty to charge applicable" in html
 
 
 def test_the_card_dialog_matches_the_onboarding_sheet(app):
@@ -396,7 +407,8 @@ def test_an_empty_wallet_gets_its_own_way_in(app):
     html = _render(app, empty)
 
     assert 'id="restartAddCardToggle"' in html
-    assert "Add a card" in html
+    # The same words as every other picker's way in, empty wallet or full.
+    assert "New billing account" in html
     assert "no card saved" in html
 
 
@@ -539,8 +551,21 @@ def test_the_decision_modal_can_choose_a_card(app):
     from there — the payer had to leave, change it elsewhere and come back."""
     scripts = _scripts(app)
 
-    assert 'id="billingConfirmCardSelect"' in scripts
+    assert 'id="billingConfirmCardRows"' in scripts
     assert "payment_method: ok.card" in scripts
+
+
+def test_the_card_choice_is_rows_and_not_a_dropdown(app):
+    """A <select> described a card in its own vocabulary and could show no flags at all,
+    so a payer could authorise a charge against an EXPIRED card with nothing saying so."""
+    scripts = _scripts(app)
+
+    assert "billingConfirmCardSelect" not in scripts, "the dropdown is gone"
+    assert 'name="billing-confirm-card"' in scripts, "radio rows in its place"
+    # The same pills, in the same order, as the restart screen and the payer portal.
+    for flag in ("Billing this", "Default", "Expiring soon", "Expired"):
+        assert flag in scripts, flag
+    assert "pm.expired" in scripts
 
 
 def test_the_card_is_chosen_before_the_charge_is_authorised(app):
@@ -548,7 +573,7 @@ def test_the_card_is_chosen_before_the_charge_is_authorised(app):
     recorded — and the route nominates it before recording, not after."""
     scripts = _scripts(app)
 
-    assert scripts.index("billingConfirmCardSelect") < scripts.index("payment_method: ok.card")
+    assert scripts.index("billingConfirmCardRows") < scripts.index("payment_method: ok.card")
 
     routes = open("blueprints/entity/routes/settings.py", encoding="utf-8").read()
     body = routes[
@@ -558,14 +583,18 @@ def test_the_card_is_chosen_before_the_charge_is_authorised(app):
     assert body.index("set_for_entity") < body.index("authorize_entity_billing(org")
 
 
-def test_a_single_card_is_named_rather_than_offered(app):
-    """Nothing to choose between, but a confirmation that names no card asks the payer
-    to agree to a charge they cannot check."""
+def test_a_single_card_is_shown_in_the_same_list_as_several(app):
+    """A confirmation that names no card asks the payer to agree to a charge they cannot
+    check. It used to name a lone card in a read-only line, because a <select> holding one
+    option is unusable — a row list is not, so one card gets the same list as seven and is
+    described in the same words, with the same flags."""
     scripts = _scripts(app)
 
-    assert "cards.length === 1" in scripts
-    assert "card: onlyCard" in scripts
-    assert "cards.length > 1" in scripts, "and the picker only above that"
+    assert "cards.length > 0" in scripts, "any saved card gets the list"
+    assert "onlyCard" not in scripts, "no separate read-only line for a single card"
+    # Only the COLLAPSE toggle is gated on there being more than one: "Change" over a
+    # one-row list is a control that cannot do anything.
+    assert "const many = cards.length > 1;" in scripts
 
 
 def test_the_card_choice_does_not_change_the_old_confirm_contract(app):
