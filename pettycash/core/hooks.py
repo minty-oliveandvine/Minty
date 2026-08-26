@@ -341,8 +341,21 @@ def init_app(app, db):
             user_id_in_session = session.get("_user_id")
             if user_id_in_session and not current_user.is_authenticated:
                 logger.info(
-                    "Detected expired user session (cookie present, user not authenticated)"
+                    "Detected expired user session (cookie present, user not "
+                    "authenticated) user_id={} endpoint={}",
+                    user_id_in_session,
+                    request.endpoint,
                 )
+                # Drop the dead identity. Detecting a session that cannot be
+                # used and then LEAVING it in the cookie means the very next
+                # request lands in this same branch — and because the redirect
+                # target below is itself guarded here, that is an infinite
+                # redirect the person can only escape by clearing site data.
+                # Clearing is what turns "logged out" back into a state the
+                # browser can recover from on its own.
+                for key in ("_user_id", "_fresh", "_id"):
+                    session.pop(key, None)
+
                 if (
                     request.headers.get("X-Requested-With") == "XMLHttpRequest"
                     or request.is_json
@@ -356,6 +369,14 @@ def init_app(app, db):
                             }),
                         401,
                     )
+                # NEVER redirect the login page to itself. ``auth.home`` is
+                # "/", and this hook runs on "/" too, so a redirect here is a
+                # loop with no exit — the ERR_TOO_MANY_REDIRECTS every URL on
+                # the domain used to give once a session went stale. ``static``
+                # and unmatched URLs (endpoint is None) are exempt for the same
+                # reason: neither should be turned into a trip through login.
+                if request.endpoint in (None, "static", "auth.home"):
+                    return None
                 flash("Your session ran out. Mind logging back in?", "warning")
                 return redirect(url_for("auth.home"))
 

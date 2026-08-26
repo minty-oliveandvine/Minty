@@ -10,7 +10,8 @@ Read-only by design — nothing here writes a consent record. Accepting happens
 at `/legal/accept` (Phase 3), which does require a login.
 """
 
-from flask import abort, jsonify, render_template, url_for
+from flask import abort, jsonify, render_template, request, url_for
+from loguru import logger
 
 from blueprints.legal import legal_bp
 from legal import registry
@@ -60,6 +61,61 @@ def privacy():
 @legal_bp.route("/legal/privacy/<version>")
 def privacy_version(version):
     return _render(registry.PRIVACY, version)
+
+
+@legal_bp.route("/legal/invite-terms-status")
+def invite_terms_status():
+    """Whether the person an invite was sent to still owes a Terms acceptance.
+
+    The sign-in screen cannot tell on its own. It knows an email, but not
+    whether that email already has an account, and the server is the only side
+    that knows whether that account has already agreed. Without this, every
+    invitee was shown the tick box — including people who accepted the Terms
+    months ago, who then had to read and agree a second time for no reason.
+
+    KEYED ON THE INVITE TOKEN, NEVER A RAW EMAIL.
+
+    An email-keyed version of this endpoint would be an account-enumeration
+    oracle: anyone could ask "does this address have a Minty account?" for any
+    address they liked. The token is a secret already bound to one address —
+    whoever holds it received the invitation — so answering for that address
+    reveals nothing they did not already have.
+
+    FAILS SAFE. Anything unclear — no token, unknown token, no such user —
+    answers "yes, still required". Asking someone to accept twice is a small
+    annoyance; skipping someone who never agreed is a missing consent record,
+    which is the thing this whole feature exists to prevent.
+    """
+    from blueprints.auth.services.identity import resolve_user_by_email
+    from blueprints.invitation.models.invitation import Invitation
+    from blueprints.legal.services.consent import has_consent
+
+    required = True
+    token = (request.args.get("invite") or "").strip()
+
+    if token:
+        try:
+            invitation = Invitation.query.filter_by(
+                token=token, status="pending"
+            ).first()
+            if invitation is not None:
+                user = resolve_user_by_email(invitation.email)
+                if user is not None:
+                    required = not has_consent(user.id)
+        except Exception:
+            # Same fail-safe direction as everything else here: a database blip
+            # must leave the tick box in place, not 500 the sign-in screen and
+            # not wave someone through unasked. `required` is still True.
+            logger.exception(
+                "invite-terms-status lookup failed; treating Terms as required"
+            )
+
+    return jsonify(
+        {
+            "terms_required": required,
+            "terms_version": registry.current_version(registry.TERMS),
+        }
+    )
 
 
 @legal_bp.route("/legal/content/<kind>")
