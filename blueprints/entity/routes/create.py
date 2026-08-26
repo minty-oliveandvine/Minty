@@ -1037,13 +1037,26 @@ def onboarding_billing_set_default():
 
 @entity_bp.route("/api/onboarding/billing/authorize", methods=["POST", "OPTIONS"])
 def onboarding_billing_authorize():
-    """Record consent to bill THIS entity. Body: ``{entity_id}``. Charges nothing.
+    """Record consent to bill THIS entity. Charges nothing.
+
+    Body: ``{entity_id, payment_method?}``.
 
     This is what "Buy now" actually buys. The 30-day trial still runs its full term; what
     changes is what happens at the end of it — ``checkout.convert_or_expire_due_trials``
     converts a trial to paid only when the payer has BOTH a card and a consent row for the
     entity, and lets it lapse otherwise. So this is the difference between "converts" and
     "expires", not between "trial" and "charged now".
+
+    ``payment_method`` is nominated BEFORE consent is recorded, exactly as the in-app twin
+    ``entity_settings_module_authorize_billing`` does it: authorising a charge while the
+    company still points at a different card authorises one the payer was never shown.
+
+    IT IS WHAT LETS ONBOARDING STOP SETTING THE ACCOUNT DEFAULT. The sheet used to make
+    every card it captured the payer's default and let ``checkout._ensure_nominated`` find
+    it again from there — which repointed every other company the payer owned as a side
+    effect of confirming one. Sending the id explicitly says which card this company goes
+    on and moves nothing else. Absent, ``_ensure_nominated`` still backstops the older
+    clients.
 
     Consent is recorded before the trials exist — onboarding starts those at finalize — and
     that is fine: consent is per entity, not per subscription, and outlives the wizard.
@@ -1064,11 +1077,26 @@ def onboarding_billing_authorize():
     if err:
         return err
 
+    from blueprints.subscription.services import payment_methods
     from blueprints.subscription.services.checkout import (
         CheckoutError,
         authorize_entity_billing,
     )
     from models.db import User
+
+    pm_id = str(payload.get("payment_method") or "").strip()
+    try:
+        if pm_id:
+            # Routed through ``set_for_entity``, which proves both halves: the method
+            # belongs to this caller, and this caller is the company's payer. Another
+            # payer's ``pm_...`` answers "not found" rather than being nominated. Being a
+            # member of the entity — all ``_entity_for_member`` above established — is
+            # deliberately not enough to spend somebody else's card.
+            payment_methods.set_for_entity(user_id, entity.id, pm_id)
+    except payment_methods.PaymentMethodError as exc:
+        resp = jsonify({"error": exc.message})
+        resp.status_code = exc.status
+        return _cors(resp)
 
     try:
         authorize_entity_billing(entity, User.query.get(str(user_id)))

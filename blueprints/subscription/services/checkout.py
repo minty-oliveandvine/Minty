@@ -2593,7 +2593,7 @@ def preview_subscribe_modules(entity, user, codes) -> dict:
 
 
 def _preview_card_display(payer_user_id, entity_id=None) -> str | None:
-    """"Visa ending 4242" for the card THIS company will be charged on, or None.
+    """"Visa •••• 4242" for the card THIS company will be charged on, or None.
 
     The company's nomination, falling back to the account's main card only when there is
     no company in the question at all. That fallback is a DISPLAY convenience and not a
@@ -2619,7 +2619,16 @@ def _preview_card_display(payer_user_id, entity_id=None) -> str | None:
         return None
     if not card:
         return None
-    return f"{card.get('brand') or 'card'} ending {card.get('last4') or '••••'}"
+    # THE SAME WORDS AS EVERY CARD ROW IN THE PRODUCT. It used to read "visa ending 5556"
+    # — a lowercase brand and a fourth way of saying the same thing, on the one dialog
+    # that takes money the moment it is confirmed. Built from the same helper the picker
+    # rows use so the two cannot drift again.
+    from blueprints.subscription.services.payment_methods import _brand_label
+
+    last4 = card.get("last4")
+    if not last4:
+        return _brand_label(card.get("brand"))
+    return f"{_brand_label(card.get('brand'))} •••• {last4}"
 
 
 def preview_reinstate_modules(entity, user, codes) -> dict:

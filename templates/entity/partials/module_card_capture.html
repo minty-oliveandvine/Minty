@@ -26,18 +26,22 @@
 <div id="cardCaptureModal"
      data-setup-intent-url="{{ url_for('entity.entity_settings_module_payment_methods_setup_intent', org_id=org.id) }}"
      data-confirm-url="{{ url_for('entity.entity_settings_module_payment_methods_confirm', org_id=org.id) }}"
-     class="fixed inset-0 z-[120] hidden items-center justify-center overflow-y-auto overscroll-contain bg-[rgba(15,23,27,0.45)] p-5 backdrop-blur-[2px]">
+     class="dlg-overlay-in fixed inset-0 z-[120] hidden items-center justify-center overflow-y-auto overscroll-contain bg-[rgba(15,23,27,0.45)] p-5 backdrop-blur-[2px]">
   <div role="dialog" aria-modal="true" aria-labelledby="cardCaptureTitle"
-       class="m-auto w-full max-w-[480px] rounded-[14px] border border-[#ececea] bg-white p-6 shadow-[0_20px_48px_rgba(0,0,0,0.22)]">
+       class="dlg-in m-auto w-full max-w-[480px] rounded-[14px] border border-[#ececea] bg-white p-6 shadow-[0_20px_48px_rgba(0,0,0,0.22)]">
 
     <div class="mb-[18px] flex items-start gap-3">
       <div class="min-w-0">
-        <p id="cardCaptureTitle" class="mb-1.5 text-base font-bold text-[#1b1d1c]">
-          Add payment method
+        <p id="cardCaptureTitle" class="mb-1.5 text-lg font-bold text-[#1b1d1c]">
+          New billing account
         </p>
-        <p class="text-[13.5px] leading-[1.55] text-[#4a4d4b]">
-          You won't be charged for saving a card — nothing is charged until you confirm
-          on the screen behind.
+        {# The same sentence in all three apps. It answers the question a card form
+           actually raises — where the number goes — rather than what this particular
+           dialog does next, which is the one thing that differs between the three places
+           it opens from. What IS charged, and when, is the mandate's job below. #}
+        <p class="text-[13.5px] leading-[1.5] text-[#4a4d4b]">
+          Card details are held by our payment provider, Stripe — they are never stored
+          by Minty.
         </p>
       </div>
       <button type="button" id="cardCaptureClose"
@@ -47,7 +51,30 @@
       </button>
     </div>
 
+    {# THE PLACEHOLDER THE PAYER PORTAL SHOWS while the setup intent is being fetched and
+       Stripe's iframe is coming up — the same three pulsing bars, in the same greys.
+
+       This dialog used to open onto an empty 480px box for the length of a network
+       round-trip, which reads as a dialog that has failed rather than one that is
+       loading. It is also the ONLY motion either of the React dialogs has: neither
+       animates open, so this is what "the same transition" means.
+
+       A SIBLING of the mount points, never a wrapper around them. Stripe measures the
+       container it is mounting into, and a display:none box gives it a zero-width one to
+       lay out in — the same reason the dialog is shown before ``mount()`` is called. #}
+    <div id="cardCaptureSkeleton" class="mt-6 space-y-3" aria-live="polite" aria-busy="true">
+      <div class="h-11 animate-pulse rounded-lg bg-[#EEF1F4]"></div>
+      <div class="h-11 animate-pulse rounded-lg bg-[#F3F5F7]"></div>
+      <div class="h-11 animate-pulse rounded-lg bg-[#F3F5F7]"></div>
+    </div>
+
     <div id="cardCaptureMount" class="mt-1"></div>
+
+    {# The billing name and address the issuer checks, in Stripe's own Address Element.
+       Collected here rather than left out: the payer portal prints both on the saved card,
+       and a method saved without them shows blanks there a payer has nowhere to fill in.
+       The card Element above is told not to ask for the same two fields. #}
+    <div id="cardCaptureAddress" class="mt-4"></div>
 
     {# The authorisation sentence, same wording as onboarding's ``.buynow-mandate``.
 
@@ -64,7 +91,8 @@
        subscription terms", legal/terms/beta-1.md §11). Pointing this at /legal/terms
        would send a payer who is about to be charged to a page telling them the service
        is free. Left inert until that document is written. #}
-    <p class="mt-3.5 text-[13px] leading-[1.5] text-[#8a8d8b] [overflow-wrap:anywhere]">
+    <p id="cardCaptureMandate"
+       class="mt-3.5 hidden text-[13px] leading-[1.5] text-[#8a8d8b] [overflow-wrap:anywhere]">
       By providing your payment method, you authorise Minty to charge applicable
       subscription fees in accordance with the Subscription Terms.
       <a href="#" onclick="return false;"
@@ -75,17 +103,20 @@
        masked key is a hundred characters with no space in it — without a break
        opportunity the paragraph runs out through the side of the dialog. #}
     <p id="cardCaptureError"
-       class="mt-3.5 hidden rounded-[10px] border border-[#ffcccc] bg-[#fff1f1] px-3 py-2.5 text-[13px] leading-[1.5] text-[#b4231f] [overflow-wrap:anywhere]"
+       class="mt-3.5 hidden rounded-[10px] border border-[#ffcccc] bg-[#fff1f1] px-3 py-2.5 text-[13.5px] leading-[1.5] text-[#b4231f] [overflow-wrap:anywhere]"
        role="alert"></p>
 
-    <div class="mt-5 flex justify-end gap-2.5">
+    {# Hidden with the mandate until the form is up, as the portal hides them: a Save
+       button over a blank box is one a payer will press, and it can do nothing yet. The
+       close X stays live throughout, so the dialog is never a trap. #}
+    <div id="cardCaptureActions" class="mt-5 hidden justify-end gap-2.5">
       <button type="button" id="cardCaptureCancel"
               class="inline-flex min-w-[108px] items-center justify-center rounded-[10px] border border-[#d9d9d6] bg-transparent px-5 py-3 text-sm font-semibold text-[#4a4d4b] transition-colors hover:bg-[#f5f5f3]">
         Cancel
       </button>
       <button type="button" id="cardCaptureSave"
               class="inline-flex min-w-[108px] items-center justify-center rounded-[10px] bg-gradient-to-r from-[#00CBC6] to-[#00D5BF] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(0,203,198,0.28)] transition-shadow hover:shadow-[0_8px_22px_rgba(0,203,198,0.4)] disabled:bg-[#d9d9d6] disabled:bg-none disabled:shadow-none">
-        Save card
+        Save
       </button>
     </div>
   </div>
@@ -104,6 +135,9 @@
   var confirmUrl = modal.dataset.confirmUrl;
 
   var errorEl = document.getElementById('cardCaptureError');
+  var skeleton = document.getElementById('cardCaptureSkeleton');
+  var mandateEl = document.getElementById('cardCaptureMandate');
+  var actionsEl = document.getElementById('cardCaptureActions');
   var saveBtn = document.getElementById('cardCaptureSave');
   var closeBtn = document.getElementById('cardCaptureClose');
   var cancelBtn = document.getElementById('cardCaptureCancel');
@@ -144,14 +178,34 @@
     if (resolve) resolve(result);
   }
 
+  // Three states for the body of the dialog, and the third is the one that is easy to
+  // forget: a form that never arrives. Left out, a failed setup-intent leaves the bars
+  // pulsing under an error message with no button to leave by — the close X would be the
+  // only way out of a dialog that is telling the payer something went wrong.
+  function showBody(state) {
+    if (skeleton) skeleton.classList.toggle('hidden', state !== 'loading');
+    if (mandateEl) mandateEl.classList.toggle('hidden', state !== 'form');
+    if (actionsEl) {
+      actionsEl.classList.toggle('hidden', state === 'loading');
+      actionsEl.classList.toggle('flex', state !== 'loading');
+    }
+    // Nothing to save when there is no form. Cancel stays, and is the way out.
+    if (saveBtn) saveBtn.disabled = state !== 'form';
+  }
+
   function mount() {
     if (mounted) return Promise.resolve(true);
     return post(setupIntentUrl, {}).then(function (res) {
-      if (!res.ok) { fail(res.data.error || 'Could not open the card form.'); return false; }
+      if (!res.ok) {
+        fail(res.data.error || 'Could not open the card form.');
+        showBody('failed');
+        return false;
+      }
       if (typeof Stripe === 'undefined') {
         // Blocked by an extension or a proxy. Said out loud rather than left as an
         // unhandled rejection on a form that is never going to appear.
         fail('The card form could not load. Please allow js.stripe.com and reload.');
+        showBody('failed');
         return false;
       }
       stripe = stripe || Stripe(res.data.publishable_key);
@@ -160,9 +214,17 @@
       // iframe and names the STRIPE ACCOUNT rather than Minty. Suppressing it moves the
       // disclosure onto the sentence in this dialog, so that sentence is NOT decoration
       // and the two may not be removed separately.
-      elements.create('payment', { layout: 'tabs', terms: { card: 'never' } })
-              .mount('#cardCaptureMount');
+      // `fields.billingDetails` off because the Address Element below collects the same
+      // two; left on, the payer fills name and address twice in one dialog.
+      elements.create('payment', {
+        layout: 'tabs',
+        terms: { card: 'never' },
+        fields: { billingDetails: { name: 'never', address: 'never' } }
+      }).mount('#cardCaptureMount');
+      elements.create('address', { mode: 'billing', display: { name: 'full' } })
+              .mount('#cardCaptureAddress');
       mounted = true;
+      showBody('form');
       modal.dataset.setupIntent = res.data.setup_intent;
       return true;
     });
@@ -197,11 +259,18 @@
           saveBtn.disabled = false;
           return;
         }
-        // make_default is NOT optional: for a first card this is what creates the
-        // customer and attaches the method.
+        // `make_default: false`. THIS DIALOG DOES NOT PROMOTE A CARD. The account default
+        // is account-wide and nominates nothing on its own (see payment_methods.set_default)
+        // — it is only what the pickers offer first — so a card captured for ONE company
+        // must not change what every other company's picker suggests. The screens that open
+        // this dialog nominate the chosen card themselves, through set_for_entity.
+        //
+        // A payer's FIRST card still becomes the default, decided server-side in
+        // confirm_setup: an account whose only method is not the default has nothing for
+        // dunning to point at. Promoting any later card is the payer portal's job.
         return post(confirmUrl, {
           setup_intent: (result.setupIntent || {}).id || modal.dataset.setupIntent,
-          make_default: true
+          make_default: false
         }).then(function (res) {
           if (!res.ok) {
             fail(res.data.error || 'That card could not be saved.');
@@ -228,6 +297,10 @@
     if (pending) return Promise.resolve({ saved: false });
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+    // Only on the first open. Stripe's iframe survives a close, so re-showing the
+    // placeholder over a form that is already there would be a flash of loading for
+    // something that has finished loading.
+    showBody(mounted ? 'form' : 'loading');
     return new Promise(function (resolve) {
       pending = resolve;
       // Shown BEFORE mounting: Stripe measures its container, and mounting into a
