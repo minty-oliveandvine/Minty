@@ -555,7 +555,7 @@ def test_the_card_is_chosen_before_the_charge_is_authorised(app):
         routes.index("def entity_settings_module_authorize_billing(") :
         routes.index("# --- The lapsed-trial restart screen")
     ]
-    assert body.index("set_default") < body.index("authorize_entity_billing(org")
+    assert body.index("set_for_entity") < body.index("authorize_entity_billing(org")
 
 
 def test_a_single_card_is_named_rather_than_offered(app):
@@ -578,14 +578,23 @@ def test_the_card_choice_does_not_change_the_old_confirm_contract(app):
     assert "function onCancel() { close(false); }" in scripts
 
 
-def test_no_account_wide_disclosure_is_shown(app):
-    """Deliberately not surfaced. The account-level card is a known interim state with a
-    per-company change planned, and warning about it now would age into a lie."""
+def test_the_choice_is_not_described_as_account_wide(app):
+    """It never was described that way, and now it must never be.
+
+    The disclosure was deliberately left off while a payer had one card and every such
+    choice really did repoint every company — a known interim state with the per-company
+    change already planned, where a warning would have aged into a lie. It has aged out
+    instead: choosing here nominates THIS company onto that card and moves nothing else,
+    so the warning would now be false rather than merely premature. Kept as an assertion
+    rather than deleted, because the sentence is still in git history and re-adding it
+    would be a plausible-looking mistake.
+    """
     card = _restart_card(_render(app, _takeover()))
     scripts = _scripts(app)
 
     assert "card for your whole billing account" not in card
     assert "card for your whole billing account" not in scripts
+    assert "every company" not in card
 
 
 # --- saving a card without leaving the page -----------------------------------

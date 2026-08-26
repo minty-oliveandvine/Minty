@@ -113,6 +113,8 @@ def _sweep(app, monkeypatch, row, *, paid_through):
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [row])
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
 
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     with app.app_context():
         return modules_mod.sweep_expired_module_access(), writes
 
@@ -208,6 +210,8 @@ def test_access_is_never_invented_without_a_subscription(app, monkeypatch):
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [])
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: None)
 
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: None)
     with app.app_context():
         summary = modules_mod.sweep_expired_module_access()
 

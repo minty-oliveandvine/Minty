@@ -418,15 +418,15 @@ def get_module_cards(entity_id: str) -> list[dict]:
             row.function_code.upper(): row
             for row in sub_store.module_rows_for_entity(entity_id)
         }
-        # The payer's cycle, read once. It lives on the billing ACCOUNT because a payer
-        # has one subscription and therefore one paid-through date - the per-row copy
-        # drifted apart between their entities, each only refreshed when its own entity
-        # was touched.
+        # What THIS company is paid through, read once. It lives on the card the company
+        # is billed on: a payer may hold several, each buying its own periods for its own
+        # companies. Not the per-row copy, which drifted apart between a payer's entities
+        # because each was only refreshed when its own entity was touched.
         payer_id = next(
             (row.payer_user_id for row in rows.values() if row.payer_user_id), None
         )
         if payer_id:
-            paid_through = sub_store.paid_through_for_user(payer_id)
+            paid_through = sub_store.paid_through_for_entity(entity_id)
     except Exception:
         logger.exception("modules: could not read module rows for entity {}", entity_id)
 
@@ -1270,7 +1270,7 @@ def build_consent_takeover(
         return view
 
     view["quote"] = _restart_quote(entity_id, user_id, view["lapsed"])
-    view["methods"] = _restart_methods(user_id)
+    view["methods"] = _restart_methods(user_id, entity_id)
     return view
 
 
@@ -1307,8 +1307,12 @@ def _restart_quote(entity_id, user_id, lapsed) -> dict | None:
         return None
 
 
-def _restart_methods(user_id) -> dict:
-    """The payer's saved cards for the in-page picker.
+def _restart_methods(user_id, entity_id) -> dict:
+    """The payer's saved cards for the in-page picker, with THIS company's marked.
+
+    ``nominated_id`` is what the picker preselects, falling back to ``default_id``. A
+    company billed to one card and preselected on another would have the payer confirm a
+    charge against a card they never chose for it.
 
     An empty wallet is NOT an error and must not read as one: ``has_account`` false is
     the ordinary state of a payer whose trial never captured a card, and the screen shows
@@ -1316,11 +1320,12 @@ def _restart_methods(user_id) -> dict:
     can still fetch the list itself — the one thing it must never do is imply the cards
     are gone.
     """
-    empty = {"has_account": False, "default_id": None, "methods": [], "total": 0}
+    empty = {"has_account": False, "default_id": None, "nominated_id": None,
+             "methods": [], "total": 0}
     try:
         from blueprints.subscription.services import payment_methods
 
-        return payment_methods.list_for_user(user_id)
+        return payment_methods.for_entity(user_id, entity_id)
     except Exception:
         logger.exception(
             "modules: could not read saved cards for payer {}; the page will fetch them",
@@ -2388,13 +2393,14 @@ def sweep_expired_module_access(payer_user_id=None) -> dict:
                 row.function_code.upper(): row
                 for row in sub_store.module_rows_for_entity(entity_id)
             }
-            # One payer, one cycle: the date access is measured against lives on the
-            # billing ACCOUNT, not on the rows, which drift apart between entities.
+            # The date access is measured against lives on the CARD this company is
+            # billed on — not on the rows, which drift apart between entities, and no
+            # longer on the account, which cannot answer for two cards at once.
             payer_id = next(
                 (r.payer_user_id for r in rows.values() if r.payer_user_id), None
             )
             paid_through = (
-                sub_store.paid_through_for_user(payer_id) if payer_id else None
+                sub_store.paid_through_for_entity(entity_id) if payer_id else None
             )
             enabled = _enabled_state(entity_id)
             for code in code_set:

@@ -279,6 +279,7 @@ def create_app():
     # the token's payer answers "not found" (see payment_methods._owned), so a forged
     # cross-site POST reaches nothing.
     from blueprints.subscription.routes.portal import (
+        my_entity_payment_method_api,
         my_invite_admin_api,
         my_payment_method_confirm_api,
         my_transfer_cancel_api,
@@ -295,6 +296,14 @@ def create_app():
     csrf.exempt(my_payment_method_default_api)
     csrf.exempt(my_payment_method_update_api)
     csrf.exempt(my_payment_method_remove_api)
+    # The per-entity nomination — the one write on this surface with billing consequences,
+    # and the one that was missed when it shipped: its POST answered 400 "CSRF token is
+    # missing" while its GET, being safe, went on returning 200, so the dialog read fine
+    # and only Save failed. Neither of its two proofs depends on this token: the method
+    # must belong to the caller's own customer (payment_methods._owned) and the caller
+    # must be the entity's PAYER (_payer_of), so a forged cross-site POST nominates
+    # nothing.
+    csrf.exempt(my_entity_payment_method_api)
     # The handover routes. NO TEST CAN CATCH A MISSING ONE — tests/conftest.py disables
     # CSRF entirely — so these are verified by hand and any new route here must be added
     # deliberately. Each still checks the caller: the service refuses unless the token's

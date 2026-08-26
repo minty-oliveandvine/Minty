@@ -150,6 +150,8 @@ def _wire(monkeypatch, *, rows, paid_through=None, now=None):
         lambda uid: (datetime(2027, 1, 8, 13, tzinfo=UTC), "HKD"),
     )
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     monkeypatch.setattr(
         store, "billing_plan_for_codes",
         lambda codes: _Plan(40000 if len(set(codes)) > 1 else 28000),

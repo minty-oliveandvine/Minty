@@ -1013,12 +1013,13 @@ def onboarding_billing_confirm():
     "/api/onboarding/billing/payment-methods/default", methods=["POST", "OPTIONS"]
 )
 def onboarding_billing_set_default():
-    """Nominate the card future invoices are charged against. Body: ``{payment_method}``.
+    """Make one card the account's main one. Body: ``{payment_method}``.
 
-    Account-wide by construction, and worth being clear about: a payer has ONE Stripe
-    customer carrying ONE default payment method, shared by every entity they pay for.
-    Choosing here re-points their other entities too. There is no per-entity card to set —
-    consent is the per-entity thing (see ``EntityBillingConsent``), the card is shared.
+    It nominates nothing by itself. Each company is billed on the card it was put on
+    (``EntityBillingGroup``), and this decides which card is offered first — including to
+    ``billing/authorize`` below, which puts the company being set up onto it. In the
+    wizard those two calls are one action, which is why choosing here still ends up
+    deciding what this company is billed to; it does not touch the ones already running.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))

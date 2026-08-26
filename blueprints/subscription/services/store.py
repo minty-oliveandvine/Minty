@@ -36,7 +36,9 @@ from blueprints.subscription.services.billing import plan_code
 from models.db import (
     BillingPlan,
     EntityBillingConsent,
+    EntityBillingGroup,
     EntityModuleSubscription,
+    PayerBillingGroup,
     SubscriptionAuditLog,
     SubscriptionInvoice,
     SubscriptionInvoiceLine,
@@ -285,13 +287,54 @@ def start_billing_cycle(user_id, anchor_at: datetime, currency: str) -> None:
 
 
 def paid_through_for_user(user_id) -> datetime | None:
-    """What the payer has paid for — the date access is measured against.
+    """The EARLIEST date anything on this payer's account is paid through.
 
-    Read from the ACCOUNT, never from a module row. A payer has one cycle, so one value;
-    the per-row period end this replaced was only ever refreshed when its own entity was
-    touched, and drifted apart between rows of the same payer.
+    An account-level question only — "when does something next bill for this person".
+    Per-entity questions must use ``paid_through_for_entity``: since a payer may hold
+    several cards, and each card buys its own period for its own companies, there is no
+    single date that is true of all of them.
+
+    Earliest rather than latest because the account-level uses are all "is anything due":
+    taking the furthest-ahead group would hide a lapsed one behind a healthy one.
+
+    Falls back to ``user_stripe_customer.paid_through`` when the payer has no groups,
+    which is every payer before the per-entity cards landed. That column is no longer
+    written; it is the pre-cutover record and the answer for an account the backfill
+    never reached.
     """
+    dates = [
+        group.paid_through
+        for group in billing_groups_for_payer(user_id)
+        if group.paid_through is not None
+    ]
+    if dates:
+        return min(dates)
     row = customer_mapping_for_user(user_id)
+    return row.paid_through if row is not None else None
+
+
+def paid_through_for_entity(entity_id) -> datetime | None:
+    """What THIS company is paid through — the date its access is measured against.
+
+    The card that pays for a company buys its periods, so the date lives on that card's
+    group. Two companies of one payer on two cards genuinely have two answers, and one of
+    them can be past due while the other is not; that containment is the whole point of
+    the grain.
+
+    This is NOT the per-row ``current_period_end`` that was removed for drifting. That one
+    was a copy refreshed only when its own entity happened to be touched, so three rows of
+    one payer held three different answers to ONE question. This is one answer per group,
+    written by the charge that collected it.
+
+    Falls back to the payer's account row for an entity with no nomination — a trial that
+    has never been billed, or data the backfill never reached. A BILLABLE entity in that
+    state is an error, and the charge paths say so rather than reading a date here.
+    """
+    group = billing_group_for_entity(entity_id)
+    if group is not None:
+        return group.paid_through
+    payer = payer_for_entity(entity_id)
+    row = customer_mapping_for_user(payer) if payer else None
     return row.paid_through if row is not None else None
 
 
@@ -551,6 +594,379 @@ def accounts_in_dunning() -> list[UserStripeCustomer]:
         .order_by(UserStripeCustomer.dunning_started_at)
         .all()
     )
+
+
+# --- Billing groups: one card, and everything it pays for ---------------------
+#
+# A payer used to have exactly one card, one ``paid_through`` and one dunning clock, all
+# on ``user_stripe_customer``. They now live per GROUP — one payment method plus the
+# companies nominated onto it — so that a card failing takes down only what that card
+# pays for. ``anchor_at`` and ``currency`` stay on the account: every group of a payer
+# renews on the same period boundaries, so it is one cycle billed as several invoices.
+#
+# The card is an ATTRIBUTE of the group, never its key. Replacing an expiring card is an
+# UPDATE of ``stripe_payment_method_id``; keying on the ``pm_...`` would make every
+# replacement a new group with a NULL ``paid_through``, which ``due_renewals`` skips —
+# the company would stop renewing with nothing raising.
+
+
+def billing_group(group_id) -> PayerBillingGroup | None:
+    """One group by id, or None."""
+    if not group_id:
+        return None
+    return PayerBillingGroup.query.filter_by(id=str(group_id)).one_or_none()
+
+
+def billing_groups_for_payer(user_id) -> list[PayerBillingGroup]:
+    """Every card this payer bills on, oldest first.
+
+    Oldest first is load-bearing in one place: an invoice raised before per-entity cards
+    carries no group, and ``dunning`` attributes those to the payer's FIRST group — which
+    after the backfill is the single group holding everything they had.
+    """
+    if not user_id:
+        return []
+    return (
+        PayerBillingGroup.query.filter_by(payer_user_id=str(user_id))
+        .order_by(PayerBillingGroup.created_at, PayerBillingGroup.id)
+        .all()
+    )
+
+
+def nomination_for_entity(entity_id, payer_user_id=None) -> EntityBillingGroup | None:
+    """The ``entity_billing_group`` row naming this company's card, or None.
+
+    Grain is (entity, payer), so the payer has to be part of the question. Omitting it
+    resolves the CURRENT payer from the module rows — the previous payer's nomination is
+    history and must never answer for the new one, which is the same trap
+    ``has_billing_consent`` was widened to avoid.
+    """
+    if not entity_id:
+        return None
+    payer = payer_user_id or payer_for_entity(entity_id)
+    if not payer:
+        return None
+    return EntityBillingGroup.query.filter_by(
+        entity_id=str(entity_id), payer_user_id=str(payer)
+    ).one_or_none()
+
+
+def billing_group_for_entity(entity_id, payer_user_id=None) -> PayerBillingGroup | None:
+    """The group — and therefore the card and the cycle — paying for this company."""
+    nomination = nomination_for_entity(entity_id, payer_user_id)
+    return billing_group(nomination.billing_group_id) if nomination else None
+
+
+def card_for_entity(entity_id, payer_user_id=None) -> str | None:
+    """The ``pm_...`` this company is billed on, or None if none is nominated.
+
+    None is NOT "use the account default". There is deliberately no fallback: a card
+    inherited silently is how one card came to pay for every company in the first place.
+    A billable entity answering None is an error for the caller to report and skip.
+    """
+    group = billing_group_for_entity(entity_id, payer_user_id)
+    return group.stripe_payment_method_id if group else None
+
+
+def nominate_card_for_entity(
+    entity_id, payer_user_id, payment_method_id, source: str = "chosen"
+) -> PayerBillingGroup:
+    """Put this company on this card. Creates the group if the payer has none on it.
+
+    Find-or-create rather than always-create: the group IS the card, so nominating a
+    second company onto a card the payer already bills on must join the existing cycle,
+    not open a second one against the same ``pm_...`` (which the unique index refuses
+    anyway).
+
+    A company already nominated is REPOINTED — the row is updated, never duplicated. The
+    group it leaves is kept even when it empties: it holds the ``paid_through`` for
+    periods that card actually collected, and an invoice that names it is history.
+    """
+    if not entity_id or not payer_user_id or not payment_method_id:
+        raise ValueError("entity, payer and payment method are all required")
+
+    payer = str(payer_user_id)
+    group = PayerBillingGroup.query.filter_by(
+        payer_user_id=payer, stripe_payment_method_id=str(payment_method_id)
+    ).one_or_none()
+    if group is None:
+        group = PayerBillingGroup(
+            id=_uuid(), payer_user_id=payer,
+            stripe_payment_method_id=str(payment_method_id),
+        )
+        db.session.add(group)
+        # FLUSHED BEFORE THE NOMINATION, and this is not optional: the nomination carries
+        # ``billing_group_id`` as a plain value rather than through a relationship, so the
+        # unit of work sees no dependency and batches the child INSERT first — straight
+        # into a foreign key violation.
+        db.session.flush()
+
+    nomination = nomination_for_entity(entity_id, payer)
+    if nomination is None:
+        nomination = EntityBillingGroup(
+            id=_uuid(), entity_id=str(entity_id), payer_user_id=payer,
+            billing_group_id=group.id, source=str(source)[:20],
+        )
+        db.session.add(nomination)
+    else:
+        leaving = billing_group(nomination.billing_group_id)
+        nomination.billing_group_id = group.id
+        nomination.source = str(source)[:20]
+        _carry_paid_days(entity_id, leaving, group)
+    db.session.commit()
+    logger.info(
+        "billing: entity {} is now billed on {} (payer {})",
+        entity_id, payment_method_id, payer,
+    )
+    return group
+
+
+def _carry_paid_days(entity_id, leaving, joining) -> None:
+    """The days a company has already been paid for travel with it to its new card.
+
+    A company moved between two of a payer's cards mid-cycle is the one case where the
+    two dates disagree, and both directions cost real money if it is left alone:
+
+    * THE NEW CARD HAS NO CYCLE AT ALL. ``due_renewals`` skips a NULL ``paid_through``
+      outright, so the company would simply never be billed again — it keeps running,
+      silently, for nothing. Seeded from the card it left, so the new one picks the cycle
+      up exactly where the old one stopped.
+    * THE NEW CARD IS BEHIND the days already bought. Its next renewal would charge for a
+      period the old card has already collected. ``billed_through`` is the claim that
+      suppresses exactly that — the same mechanism a handover uses, and honoured by the
+      same ``renewals.entities_covered_into``.
+
+    The remaining case, a new card paid FURTHER ahead than the company was, is left as
+    is: the company is covered to a date its own money did not reach, which is a handful
+    of free days on the payer's own account and the only alternative is billing them
+    twice for the overlap.
+
+    Never raises and never blocks the move. A card change that failed because of this
+    would leave a company pointing at a card the payer did not choose, which is worse
+    than a date that has to be corrected.
+    """
+    if leaving is None or joining is None or leaving.id == joining.id:
+        return
+    bought = leaving.paid_through
+    if bought is None:
+        return
+    if bought.tzinfo is None:
+        bought = bought.replace(tzinfo=timezone.utc)
+    try:
+        if joining.paid_through is None:
+            joining.paid_through = bought
+            logger.info(
+                "billing: group {} takes over the cycle at {} for entity {}",
+                joining.id, bought, entity_id,
+            )
+            return
+        joined = joining.paid_through
+        if joined.tzinfo is None:
+            joined = joined.replace(tzinfo=timezone.utc)
+        if joined >= bought:
+            return
+        # FORWARD-ONLY, enforced in the WHERE and not trusted from here, and on
+        # billing-forward rows only — a claim on a trial row is inert until it converts
+        # and then silently suppresses renewals nobody chose to skip.
+        EntityModuleSubscription.query.filter(
+            EntityModuleSubscription.entity_id == str(entity_id),
+            EntityModuleSubscription.phase.in_((PHASE_ACTIVE, PHASE_PAST_DUE)),
+            db.or_(
+                EntityModuleSubscription.billed_through.is_(None),
+                EntityModuleSubscription.billed_through < bought,
+            ),
+        ).update(
+            {EntityModuleSubscription.billed_through: bought},
+            synchronize_session=False,
+        )
+        logger.info(
+            "billing: entity {} carries days paid to {} onto group {}",
+            entity_id, bought, joining.id,
+        )
+    except Exception:
+        logger.exception(
+            "billing: could not carry the paid days for entity {} onto group {}",
+            entity_id, joining.id,
+        )
+
+
+def clear_nomination_for_entity(entity_id, payer_user_id) -> bool:
+    """Drop one payer's nomination for a company. Returns whether a row went.
+
+    Used by a handover: the outgoing payer's card must stop paying for a company that is
+    no longer theirs, exactly as their consent stops authorising it. The GROUP is left
+    alone — other companies may still be on that card, and its cycle is history either
+    way.
+    """
+    nomination = nomination_for_entity(entity_id, payer_user_id)
+    if nomination is None:
+        return False
+    db.session.delete(nomination)
+    db.session.commit()
+    return True
+
+
+def entity_ids_in_group(group_id) -> set[str]:
+    """Every company nominated onto this group's card."""
+    if not group_id:
+        return set()
+    rows = (
+        EntityBillingGroup.query.filter_by(billing_group_id=str(group_id))
+        .with_entities(EntityBillingGroup.entity_id)
+        .all()
+    )
+    return {str(row.entity_id) for row in rows}
+
+
+def groups_with_billing() -> list[PayerBillingGroup]:
+    """Groups whose payer has an anchor — i.e. a cycle exists to renew against.
+
+    The group twin of ``accounts_with_billing``, and it still asks the ACCOUNT about the
+    anchor: the cycle is per payer, so a group can only renew once its payer has one.
+    """
+    return (
+        PayerBillingGroup.query.join(
+            UserStripeCustomer,
+            UserStripeCustomer.user_id == PayerBillingGroup.payer_user_id,
+        )
+        .filter(UserStripeCustomer.anchor_at.isnot(None))
+        .order_by(PayerBillingGroup.created_at, PayerBillingGroup.id)
+        .all()
+    )
+
+
+def groups_in_dunning() -> list[PayerBillingGroup]:
+    """Cards with collection in progress, oldest failure first.
+
+    Oldest-first so a limited run always works on the groups closest to being given up
+    on — the ones where a missed attempt costs the most.
+    """
+    return (
+        PayerBillingGroup.query.filter(
+            PayerBillingGroup.dunning_started_at.isnot(None)
+        )
+        .order_by(PayerBillingGroup.dunning_started_at)
+        .all()
+    )
+
+
+def set_group_paid_through(group_id, until: datetime) -> None:
+    """Record what this CARD has paid for. Only ever moves FORWARD.
+
+    Same rule and same reason as the account-level write it replaces: a late or replayed
+    event carrying an older period must not claw back access already granted.
+    """
+    group = billing_group(group_id)
+    if group is None:
+        logger.warning("billing: no billing group {}", group_id)
+        return
+    if group.paid_through is not None and until <= group.paid_through:
+        return
+    group.paid_through = until
+    db.session.commit()
+
+
+def set_group_module_phase(
+    group_id, *, from_phase: str, to_phase: str,
+    skip_covered_at: datetime | None = None
+) -> int:
+    """Move the module rows of THIS GROUP'S companies from one phase to another.
+
+    The containment primitive. ``set_payer_module_phase`` moves everything the payer has,
+    which is the behaviour a second card exists to end: one declining card must not put a
+    company paid for by a different, healthy card into the past-due grace window and then
+    terminate it.
+
+    Everything else matches its payer-wide twin — only rows already IN ``from_phase``
+    move, and ``skip_covered_at`` spares rows whose ``billed_through`` reaches past that
+    instant (days a handover already collected).
+    """
+    entity_ids = entity_ids_in_group(group_id)
+    if not entity_ids:
+        return 0
+    group = billing_group(group_id)
+    query = EntityModuleSubscription.query.filter(
+        EntityModuleSubscription.entity_id.in_(sorted(entity_ids)),
+        EntityModuleSubscription.phase == from_phase,
+    )
+    if group is not None:
+        # A nomination outlives a handover as history; the rows now belong to someone
+        # else and are not this card's to move.
+        query = query.filter(
+            EntityModuleSubscription.payer_user_id == str(group.payer_user_id)
+        )
+    if skip_covered_at is not None:
+        query = query.filter(
+            db.or_(
+                EntityModuleSubscription.billed_through.is_(None),
+                EntityModuleSubscription.billed_through <= skip_covered_at,
+            )
+        )
+    moved = query.update(
+        {EntityModuleSubscription.phase: to_phase}, synchronize_session=False
+    )
+    db.session.commit()
+    if moved:
+        logger.info(
+            "dunning: moved {} module row(s) in group {} from {} to {}",
+            moved, group_id, from_phase, to_phase,
+        )
+    return moved
+
+
+def begin_group_dunning(group_id, failed_at: datetime) -> None:
+    """Record that THIS CARD has started failing. Does NOT restart an existing run.
+
+    The start time anchors the whole retry schedule, so a second failure arriving mid-run
+    must not move it — that would extend collection indefinitely, one failure at a time,
+    past the access grace window.
+    """
+    group = billing_group(group_id)
+    if group is None:
+        logger.warning("dunning: no billing group {}", group_id)
+        return
+    if group.dunning_started_at is None:
+        group.dunning_started_at = failed_at
+        group.dunning_attempts = 0
+    db.session.commit()
+    # The rows have to move too, or the past-due grace never applies: access is read from
+    # the module phase, not from the group.
+    set_group_module_phase(
+        group_id,
+        from_phase=PHASE_ACTIVE,
+        to_phase=PHASE_PAST_DUE,
+        skip_covered_at=failed_at,
+    )
+
+
+def record_group_dunning_attempt(group_id) -> int:
+    """Count a retry that has been MADE (whatever its outcome). Returns the new total."""
+    group = billing_group(group_id)
+    if group is None:
+        return 0
+    group.dunning_attempts = int(group.dunning_attempts or 0) + 1
+    db.session.commit()
+    return group.dunning_attempts
+
+
+def end_group_dunning(group_id, *, status: str = "active") -> None:
+    """Collection resolved for this card — paid (``active``) or given up on (``closed``).
+
+    Clears the schedule either way, so a later failure starts a fresh run rather than
+    inheriting a spent attempt count. On give-up the rows are LEFT past due: the debt is
+    real and unpaid, and access lapses when the grace runs out.
+    """
+    group = billing_group(group_id)
+    if group is None:
+        return
+    group.dunning_started_at = None
+    group.dunning_attempts = 0
+    db.session.commit()
+    if status == "active":
+        set_group_module_phase(
+            group_id, from_phase=PHASE_PAST_DUE, to_phase=PHASE_ACTIVE
+        )
+    logger.info("dunning: collection ended for group {} ({})", group_id, status)
 
 
 def upsert_module_row(
@@ -963,6 +1379,7 @@ def reserve_invoice(
     lines,
     memo=None,
     idempotency_key=None,
+    billing_group_id=None,
 ) -> SubscriptionInvoice | None:
     """Claim ``idempotency_key`` and record what is ABOUT to be sent. None if taken.
 
@@ -996,6 +1413,10 @@ def reserve_invoice(
         status="draft",
         memo=_fits(memo, 500),
         idempotency_key=str(idempotency_key) if idempotency_key else None,
+        # WHICH CARD this document belongs to. A payer now has one invoice per group per
+        # period, so "the payer's invoice for this period" is no longer a question with
+        # one answer — dunning has to chase the right one.
+        billing_group_id=str(billing_group_id) if billing_group_id else None,
     )
     for line in lines:
         record.lines.append(

@@ -83,7 +83,7 @@ def find_invoice_by_metadata(customer_id: str, key: str, value: str) -> dict | N
 
 
 def _reserve(customer_id, invoice: Invoice, lines, memo, idempotency_key,
-             payer_user_id):
+             payer_user_id, billing_group_id=None):
     """Claim the key and record what is about to be sent. See ``issue_invoice``.
 
     Returns the local row, or None if there is none to update — either because it could
@@ -107,6 +107,7 @@ def _reserve(customer_id, invoice: Invoice, lines, memo, idempotency_key,
             lines=lines,
             memo=memo,
             idempotency_key=idempotency_key,
+            billing_group_id=billing_group_id,
         )
     except Exception as exc:
         if idempotency_key:
@@ -246,8 +247,19 @@ def _capture_payment_method(record, invoice_id: str) -> None:
 def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None,
                   collect: bool = True, metadata: dict[str, str] | None = None,
                   idempotency_key: str | None = None,
-                  payer_user_id: str | None = None) -> dict:
+                  payer_user_id: str | None = None,
+                  payment_method: str | None = None,
+                  billing_group_id: str | None = None) -> dict:
     """Create, finalize and (by default) charge ``invoice`` for ``customer_id``.
+
+    ``payment_method`` NAMES THE CARD. Without it Stripe charges the customer's account
+    default, which is what every invoice used to do and is now wrong: a company is billed
+    to the card it was nominated onto, and its payer may hold several. It is set on the
+    invoice itself rather than by moving the customer default, because moving the default
+    to charge one company would repoint every other one mid-run.
+
+    ``billing_group_id`` records WHICH card locally, so dunning can find this document
+    again among the payer's other open invoices.
 
     The order matters. The invoice is created FIRST and each item attached to it by id,
     rather than letting items sit pending and be swept up later: a pending item lands on
@@ -281,7 +293,10 @@ def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None
         logger.info("billing: nothing to invoice for customer {}", customer_id)
         return {}
 
-    record = _reserve(customer_id, invoice, lines, memo, idempotency_key, payer_user_id)
+    record = _reserve(
+        customer_id, invoice, lines, memo, idempotency_key, payer_user_id,
+        billing_group_id,
+    )
 
     stripe = get_stripe()
     # Bound before the try so the failure path can name the document it left behind: a
@@ -289,6 +304,11 @@ def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None
     draft = None
     try:
         options = {"idempotency_key": idempotency_key} if idempotency_key else {}
+        # Omitted rather than passed as None: an explicit null would CLEAR the field, and
+        # a caller that has no card to name wants Stripe's own resolution (the customer
+        # default), not a document with the field wiped.
+        if payment_method:
+            options["default_payment_method"] = payment_method
         draft = stripe.Invoice.create(
             customer=customer_id,
             currency=invoice.currency,
@@ -357,13 +377,22 @@ def issue_invoice(customer_id: str, invoice: Invoice, *, memo: str | None = None
         ) from exc
 
 
-def retry_invoice(invoice_id: str) -> tuple[bool, str | None]:
+def retry_invoice(invoice_id: str,
+                  payment_method: str | None = None) -> tuple[bool, str | None]:
     """Attempt payment on an already-finalized invoice. Returns ``(paid, reason)``.
 
     Used by the dunning run. Returns rather than raises because a decline is the EXPECTED
     outcome here, not an error — a failed retry is data the schedule acts on, and raising
     would make the caller treat "the card was declined" the same as "the processor is
     down", which need opposite responses.
+
+    ``payment_method`` IS THE CARD TO TRY NOW, and passing it is what makes recovery
+    possible at all. ``issue_invoice`` pins the card onto the document, so Stripe would
+    otherwise keep retrying the very card that declined — for the whole retry schedule,
+    however many times the payer replaced it. (Before invoices named a card, ``pay`` fell
+    back to the customer default, and replacing that default healed the account by
+    accident.) The caller passes the group's CURRENT card, so a replacement is picked up
+    on the next retry. Omitted, Stripe falls back to whatever the invoice already names.
 
     An invoice that is already paid returns ``(True, None)``: someone may have paid it
     out of band between the attempt being scheduled and it running.
@@ -380,7 +409,9 @@ def retry_invoice(invoice_id: str) -> tuple[bool, str | None]:
             _settle(record, **_record_of(invoice))
             _capture_payment_method(record, invoice_id)
             return True, None
-        paid = stripe.Invoice.pay(invoice_id)
+        paid = stripe.Invoice.pay(
+            invoice_id, **({"payment_method": payment_method} if payment_method else {})
+        )
         record = _local(invoice_id)
         _settle(record, **_record_of(paid))
         # Recorded HERE as well as on the first charge, and this is the case that needs

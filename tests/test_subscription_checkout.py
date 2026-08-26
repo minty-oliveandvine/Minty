@@ -93,6 +93,16 @@ class _Plan:
         self.currency = "HKD"
 
 
+class _Group:
+    """The card a company is billed on, and the cycle that card owns."""
+
+    def __init__(self, id="g1", card="pm_1", paid_through=None):
+        self.id = id
+        self.payer_user_id = "u1"
+        self.stripe_payment_method_id = card
+        self.paid_through = paid_through
+
+
 class _ModuleRow:
     """Stand-in for an entity_module_subscription row (the fields the guard reads).
 
@@ -124,6 +134,8 @@ def _wire(monkeypatch, *, default_pm=None, module_rows=None, billed_codes=(),
     monkeypatch.setattr(policy, "current", lambda: _Policy())
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
 
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     monkeypatch.setattr(checkout, "_customer_id_for_entity", lambda eid: "cus_1")
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_1")
     monkeypatch.setattr(
@@ -148,6 +160,9 @@ def _wire(monkeypatch, *, default_pm=None, module_rows=None, billed_codes=(),
     # pricing mechanics. The consent gate is covered separately below.
     monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: True)
     monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
+    monkeypatch.setattr(
+        store, "nominate_card_for_entity", lambda eid, uid, pm, source="chosen": None
+    )
 
     calls = {"charged": [], "default_pm": [], "setup": [], "stamped": [],
              "mapped": [], "attached": [], "rows": [], "granted": [],
@@ -162,15 +177,27 @@ def _wire(monkeypatch, *, default_pm=None, module_rows=None, billed_codes=(),
         store, "set_paid_through",
         lambda uid, until: calls["paid_through"].append((uid, until)),
     )
+    # The card this company is nominated onto. ``paid_through`` mirrors the account's, so
+    # the cases below describe one card paying for everything — which is what an account
+    # looks like until somebody nominates a second.
+    group = _Group(paid_through=paid_through)
+    monkeypatch.setattr(
+        store, "billing_group_for_entity", lambda eid, uid=None: group
+    )
+    monkeypatch.setattr(
+        store, "set_group_paid_through",
+        lambda gid, until: calls["paid_through"].append(("u1", until)),
+    )
     monkeypatch.setattr(
         store, "billing_plan_for_codes",
         lambda codes: _Plan(40000 if len(set(codes)) > 1 else 28000),
     )
     monkeypatch.setattr(
         changes, "issue_change",
-        lambda cid, eid, name, before, after, period, at: calls["charged"].append(
+        lambda cid, eid, name, before, after, period, at, **kw: calls["charged"].append(
             {"customer": cid, "before": set(before), "after": set(after),
-             "start": period.start, "end": period.end}
+             "start": period.start, "end": period.end,
+             "card": getattr(kw.get("group"), "stripe_payment_method_id", None)}
         ) or {"id": "in_1", "status": "paid" if paid else "open"},
     )
     monkeypatch.setattr(

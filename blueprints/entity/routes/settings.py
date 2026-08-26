@@ -1392,18 +1392,18 @@ def entity_settings_module_authorize_billing(org_id):
 
     Idempotent: consent is once per entity.
 
-    Body: ``{"payment_method": "pm_..."}``, OPTIONAL. Absent means "whatever my account
-    default already is", which is what every caller sent before this existed and what
-    onboarding still sends.
+    Body: ``{"payment_method": "pm_..."}``, OPTIONAL. Absent leaves whatever card this
+    company is already on, which is what onboarding sends — it has just captured one, and
+    the capture nominated it.
 
-    When present it is nominated BEFORE consent is recorded, for the same reason the
-    restart route does it in that order: authorising a charge while the account still
-    points at a different card authorises one the payer was never shown.
+    When present it is nominated BEFORE consent is recorded: authorising a charge while
+    the company still points at a different card authorises one the payer was never shown.
 
-    NOTE WHAT NOMINATING MEANS. There is one card per payer — the engine only ever reads
-    ``invoice_settings.default_payment_method`` — so this is an ACCOUNT-WIDE change, not
-    a per-company one. Consent is per entity; the card is not. Any UI offering the choice
-    has to say so, and both of the ones that do say it on the screen.
+    NOMINATION IS PER COMPANY. It puts THIS company on that card and moves nothing else
+    the payer owns — a change from when the engine read only
+    ``invoice_settings.default_payment_method`` and every such choice was account-wide.
+    Consent and the card stay two separate records: consenting says the payer may be
+    billed for this company, the nomination says on what.
     """
     from blueprints.subscription.services import payment_methods
     from blueprints.subscription.services.checkout import (
@@ -1415,10 +1415,10 @@ def entity_settings_module_authorize_billing(org_id):
     pm_id = str((request.get_json(silent=True) or {}).get("payment_method") or "").strip()
     try:
         if pm_id:
-            # Routed through ``set_default``, which proves the method belongs to this
-            # caller: another payer's ``pm_...`` answers "not found" rather than being
-            # nominated.
-            payment_methods.set_default(current_user.id, pm_id)
+            # Routed through ``set_for_entity``, which proves both halves: the method
+            # belongs to this caller, and this caller is the company's payer. Another
+            # payer's ``pm_...`` answers "not found" rather than being nominated.
+            payment_methods.set_for_entity(current_user.id, org_id, pm_id)
     except payment_methods.PaymentMethodError as exc:
         return jsonify({"error": exc.message}), exc.status
 
@@ -1478,10 +1478,19 @@ def _session_payment_methods(handler):
 )
 @require_subscription_payer(entity_arg="org_id")
 def entity_settings_module_payment_methods(org_id):
-    """Every card saved on the payer's own account, default first."""
+    """Every card saved on the payer's own account, plus which one bills THIS company.
+
+    ``nominated_id`` is what the pickers on this page preselect, falling back to
+    ``default_id`` when the company has none yet — the account default is offered, never
+    assumed. Reading the list without it would preselect the account's main card for a
+    company billed to a different one, and the payer would confirm a charge against a card
+    that is not theirs to expect.
+    """
     from blueprints.subscription.services import payment_methods
 
-    return _session_payment_methods(payment_methods.list_for_user)
+    return _session_payment_methods(
+        lambda user_id: payment_methods.for_entity(user_id, org_id)
+    )
 
 
 @entity_bp.route(
@@ -1655,8 +1664,9 @@ def entity_settings_module_restart_billing(org_id):
        charge a company that is running perfectly well;
     2. the codes must be ones that actually lapsed (422) — the list comes from the
        browser, so a module the entity never had must never become a charge;
-    3. the card is nominated BEFORE the charge (402 when there is none) — charging while
-       the account still points at a different card bills one the payer was never shown;
+    3. the card is nominated for THIS COMPANY before the charge (402 when there is none)
+       — charging while it still points at a different card bills one the payer was never
+       shown, and there is no account default to fall back on;
     4. only then the subscribe, priced server-side from the resolved codes rather than
        from any amount the client sent.
 
@@ -1677,12 +1687,12 @@ def entity_settings_module_restart_billing(org_id):
     pm_id = str(body.get("payment_method") or "").strip()
     try:
         if pm_id:
-            # Routed through ``set_default``, which proves the method belongs to this
-            # caller before acting on it: another payer's ``pm_...`` answers "not found"
-            # rather than being nominated.
-            payment_methods.set_default(current_user.id, pm_id)
-        if not _payer_has_card(current_user.id):
-            return jsonify({"error": "Add a card before restarting billing."}), 402
+            # Routed through ``set_for_entity``, which proves the method belongs to this
+            # caller AND that this caller pays for the company before acting on it:
+            # another payer's ``pm_...`` answers "not found" rather than being nominated.
+            payment_methods.set_for_entity(current_user.id, org_id, pm_id)
+        if not _entity_has_card(org_id):
+            return jsonify({"error": "Choose a card before restarting billing."}), 402
     except payment_methods.PaymentMethodError as exc:
         return jsonify({"error": exc.message}), exc.status
 
@@ -1713,19 +1723,20 @@ def entity_settings_module_restart_billing(org_id):
     return jsonify({"ok": True, "restarted": result.get("created", codes)}), 200
 
 
-def _payer_has_card(user_id) -> bool:
-    """Whether the payer has a default card.
+def _entity_has_card(entity_id) -> bool:
+    """Whether THIS company has a card nominated for it.
 
-    Read AFTER any nomination above, so it sees the card just chosen rather than the
-    state before it.
+    Read AFTER any nomination above, so it sees the card just chosen rather than the state
+    before it.
+
+    Asks about the company, not the payer, because that is what will be charged. A payer
+    with three cards saved and none of them put on this company cannot be billed for it —
+    there is deliberately no account default to fall back on, so "has a card somewhere"
+    is not the question.
     """
     from blueprints.subscription.services import store as sub_store
-    from blueprints.subscription.services.stripe_client import (
-        customer_default_payment_method,
-    )
 
-    customer_id = sub_store.customer_id_for_user(user_id)
-    return bool(customer_id and customer_default_payment_method(customer_id))
+    return bool(sub_store.card_for_entity(entity_id))
 
 
 @entity_bp.route(
@@ -2083,7 +2094,9 @@ def entity_settings_module_retry_payment(org_id):
         return jsonify({"error": "This entity has no billing account."}), 409
 
     try:
-        result = retry_now(payer_id)
+        # The entity goes with it: a payer may hold several cards, and the debt to settle
+        # is the one on the card THIS company is billed to — not their oldest.
+        result = retry_now(payer_id, org_id)
     except Exception:
         logger.exception("retry-payment: collection failed for entity %s", org_id)
         return jsonify({"error": "We couldn't reach the card processor. Try again shortly."}), 502

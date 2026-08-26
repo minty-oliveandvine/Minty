@@ -206,11 +206,19 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
     stamped: list = []
     mapped: list = []
     consents: list = []
+    nominations: list = []
 
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: None)
     monkeypatch.setattr(
         store, "record_billing_consent",
         lambda eid, uid, source: consents.append((eid, uid, source)),
+    )
+    # Capturing a card in a Checkout opened FOR this company also puts the company on
+    # that card. Two records, one step: consent says the payer may be billed for it, the
+    # nomination says on what.
+    monkeypatch.setattr(
+        store, "nominate_card_for_entity",
+        lambda eid, uid, pm, source="chosen": nominations.append((eid, uid, pm, source)),
     )
     monkeypatch.setattr(
         checkout, "retrieve_checkout_session",
@@ -262,6 +270,10 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
     # Entering a card in THIS entity's Checkout is consent to bill it — otherwise the
     # payer would be asked to confirm again straight after typing their card.
     assert consents == [("e1", "u1", "card")]
+    # ...and it is the choice of card for it. Two records, one step. Without the second,
+    # the company would be authorised to be billed and billed to nothing — its renewal
+    # skipped and its trial expiring at term end having been told it would convert.
+    assert nominations == [("e1", "u1", "pm_new", "capture")]
 
 
 def test_complete_adopts_the_payers_existing_customer_over_a_duplicate(monkeypatch):
@@ -277,6 +289,9 @@ def test_complete_adopts_the_payers_existing_customer_over_a_duplicate(monkeypat
 
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_FIRST")
     monkeypatch.setattr(store, "record_billing_consent", lambda eid, uid, source: None)
+    monkeypatch.setattr(
+        store, "nominate_card_for_entity", lambda eid, uid, pm, source="chosen": None
+    )
     monkeypatch.setattr(
         checkout, "retrieve_checkout_session",
         lambda sid: {
@@ -450,6 +465,8 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
     monkeypatch.setattr(modules, "_entity_customer_id", lambda eid: "cus_1")
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [_Row()])
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: None)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: None)
     monkeypatch.setattr(f"{_CATALOG}.available_plans", lambda: [_plan()])
     # get_module_cards imports this lazily from stripe_client — patch it at the source.
     monkeypatch.setattr(

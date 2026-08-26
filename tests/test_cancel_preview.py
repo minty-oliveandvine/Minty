@@ -82,6 +82,8 @@ def _setup(monkeypatch, *, row, siblings=None, paid_through=_PAID_THROUGH):
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: rows)
     monkeypatch.setattr(store, "billing_cycle_for_user", lambda uid: (_ANCHOR, "HKD"))
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     monkeypatch.setattr(
         store, "billing_plan_for_codes",
         lambda codes: (

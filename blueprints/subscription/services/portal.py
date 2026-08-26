@@ -341,7 +341,6 @@ def build_payer_subscriptions(
 
     now = clock.now()
     grace_days = policy.current().past_due_window_days
-    paid_through = sub_store.paid_through_for_user(user_id)
     anchor_at, currency = sub_store.billing_cycle_for_user(user_id)
 
     by_entity: dict[str, dict] = {}
@@ -364,6 +363,10 @@ def build_payer_subscriptions(
     items: list[dict] = []
     for entity in entities:
         entity_rows = by_entity.get(str(entity.id), {})
+        # PER COMPANY, not per payer. Each is billed on the card it was nominated onto,
+        # and each card buys its own periods — so one row of this table can be past due
+        # while the one under it is paid up, which is exactly what the screen has to show.
+        paid_through = sub_store.paid_through_for_entity(str(entity.id))
         modules = []
         for code in MODULE_CODES:
             state = _module_state(

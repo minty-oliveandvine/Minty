@@ -93,6 +93,8 @@ def _wire(monkeypatch, db, *, rows=None, payer=OLD, dunning=(), admin=True,
     monkeypatch.setattr(store, "payer_for_entity", lambda eid: payer)
     monkeypatch.setattr(store, "payer_is_dunning", lambda uid: uid in dunning)
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: PAID_THROUGH)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: PAID_THROUGH)
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_new")
     monkeypatch.setattr(
         store, "transfer_entity_payer",
@@ -274,6 +276,10 @@ def test_the_handover_instant_is_read_at_accept_not_quoted_at_offer(db_session, 
 
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: moved)
 
+
+    # Same value per company: these cases describe an account with one card.
+
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: moved)
     transfers.respond_to_transfer(NEW, offer.id, accept=True)
 
     assert calls["charges"][0]["at"] == moved

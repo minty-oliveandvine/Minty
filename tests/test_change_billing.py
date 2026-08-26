@@ -214,6 +214,8 @@ def _stub_rows(monkeypatch, rows, paid_through=datetime(2026, 8, 28, 13, tzinfo=
 
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: rows)
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     monkeypatch.setattr(checkout.clock, "now", lambda: datetime(2026, 8, 20, 13, tzinfo=UTC))
 
 
@@ -336,6 +338,8 @@ def test_converting_a_trial_prices_it_against_what_the_entity_ALREADY_bills(monk
 
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: "cus_1")
     monkeypatch.setattr(checkout, "trial_payment_method", lambda cid: "pm_1")
+    # The card THIS company is nominated onto — what the conversion actually charges.
+    monkeypatch.setattr(store, "card_for_entity", lambda eid, uid=None: "pm_1")
     monkeypatch.setattr(store, "has_billing_consent", lambda eid, user_id=None: True)
     monkeypatch.setattr(f"{_CATALOG}.plan_for_module", lambda code: object())
     monkeypatch.setattr(checkout, "_finish_conversion", lambda *a, **k: None)

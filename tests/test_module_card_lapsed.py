@@ -105,6 +105,8 @@ def _card(app, monkeypatch, *, paid_through, row=None, has_access=False):
     monkeypatch.setattr(store, "module_rows_for_entity",
                         lambda eid: [row if row is not None else _PaidRow()])
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: paid_through)
+    # Same value per company: these cases describe an account with one card.
+    monkeypatch.setattr(store, "paid_through_for_entity", lambda _e: paid_through)
     monkeypatch.setattr(f"{_CATALOG}.available_plans", lambda: [])
     monkeypatch.setattr(
         "blueprints.subscription.services.stripe_client.customer_default_payment_method",

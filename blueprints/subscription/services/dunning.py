@@ -184,7 +184,43 @@ def attempts_remaining(
 # separate so the schedule stays testable without a database or a processor.
 
 
-def _settle_period(account, invoice) -> None:
+def _account_for(group):
+    """The billing account behind a group — for the anchor and the Stripe customer id.
+
+    Those two stayed on the payer when the cycle moved onto the card: every group of a
+    payer renews on the same period boundaries, and every invoice is still issued against
+    the one Stripe customer. Only the card charged, the date paid through and the retry
+    clock are the group's own.
+    """
+    from blueprints.subscription.services import store
+
+    return store.customer_mapping_for_user(group.payer_user_id)
+
+
+def _invoices_for_group(invoices: list[dict], group, groups) -> list[dict]:
+    """Narrow the payer's open invoices to the ones THIS card owes.
+
+    ``open_invoices`` asks the processor about a CUSTOMER, and a customer now carries one
+    document per card per period. Chasing the wrong one takes real money for a debt this
+    card does not have, and leaves the debt it does have open.
+
+    ``billing_group`` metadata is stamped on every invoice raised since per-entity cards
+    landed. AN INVOICE WITHOUT IT BELONGS TO THE PAYER'S FIRST GROUP — everything raised
+    before the cutover was charged to the one card they had, which the backfill turned
+    into exactly that group. Attributing them anywhere else would strand real debt on a
+    card that never owed it.
+    """
+    first = str(groups[0].id) if groups else None
+    mine = []
+    for invoice in invoices:
+        stamped = (invoice.get("metadata") or {}).get("billing_group")
+        owner = str(stamped) if stamped else first
+        if owner == str(group.id):
+            mine.append(invoice)
+    return mine
+
+
+def _settle_period(account, group, invoice) -> None:
     """Record the period a recovered payment covers.
 
     Only for RENEWAL invoices, and only on evidence. Dunning chases the payer's oldest
@@ -214,8 +250,10 @@ def _settle_period(account, invoice) -> None:
     if not paid_key:
         return
 
+    # The anchor is the PAYER'S — one cycle, several invoices — and the paid-through is
+    # this CARD'S, because that is what its own money bought.
     anchor = account.anchor_at
-    paid_through = account.paid_through
+    paid_through = group.paid_through
     if anchor is None or paid_through is None:
         return
     period = renewals.next_period(anchor, paid_through)
@@ -225,32 +263,32 @@ def _settle_period(account, invoice) -> None:
     # the cycle sits in August would advance August, handing over a free month for a bill
     # belonging to a period that ended long ago. Chained renewals still advance one at a
     # time, because the oldest unpaid period IS the one this computes.
-    if paid_key != renewals.period_key(account.user_id, period):
+    if paid_key != renewals.period_key(account.user_id, period, group.id):
         logger.info(
             "dunning: payer {} paid {} which covers an earlier period; leaving "
             "paid_through at {}",
             account.user_id, invoice.get("id"), paid_through,
         )
         return
-    store.set_paid_through(account.user_id, period.end)
+    store.set_group_paid_through(group.id, period.end)
 
 
-def _current_period_key(account) -> str | None:
-    """The ``renewal_key`` of the invoice for the period this payer is behind on.
+def _current_period_key(account, group) -> str | None:
+    """The ``renewal_key`` of the invoice for the period THIS CARD is behind on.
 
-    None when the account has never been billed (no anchor or no ``paid_through``), which
-    is also the answer to "which invoice recovers them" — there is no period to recover.
-    Callers fall back to the oldest open invoice in that case; a payer with no billing
+    None when the card has never collected (no anchor or no ``paid_through``), which is
+    also the answer to "which invoice recovers it" — there is no period to recover.
+    Callers fall back to the oldest open invoice in that case; a card with no billing
     history has no stale renewal for the fallback to pick up by mistake.
     """
     from blueprints.subscription.services import renewals
 
     anchor = account.anchor_at
-    paid_through = account.paid_through
+    paid_through = group.paid_through
     if anchor is None or paid_through is None:
         return None
     return renewals.period_key(
-        account.user_id, renewals.next_period(anchor, paid_through)
+        account.user_id, renewals.next_period(anchor, paid_through), group.id
     )
 
 
@@ -309,6 +347,11 @@ def _restore_access(user_id) -> None:
     Never raises. A recovery that collected the money is not undone because a follow-up
     write failed; the sweep is the backstop, and a swallowed error here is visible in the
     log rather than as a lost payment.
+
+    STILL THE WHOLE PAYER even though collection is now per card, and deliberately: the
+    sweep decides each company on its own dates and its own phase, so a company still past
+    due on the payer's OTHER card is left exactly where it is. Narrowing it to the
+    recovered group would only mean doing less work while the customer waits.
     """
     # ``logger`` is imported per-function throughout this module, and this one used to
     # rely on a module-level name that does not exist — so the except branch raised
@@ -327,6 +370,12 @@ def _restore_access(user_id) -> None:
 
 def collect_due(now, limit: int | None = None) -> dict:
     """Run one dunning cycle: retry what is due, give up on what is spent.
+
+    THE UNIT IS A CARD, not a payer. A payer holding two cards can be mid-collection on
+    one while the other is renewing normally, and only the failing card's companies are
+    past due — so the schedule, the attempt budget and the give-up deadline all belong to
+    the card. Under one clock per payer, one dead card put every company that payer paid
+    for into the grace window and then terminated them.
 
     Returns ``{"retried": [...], "recovered": [...], "collected": [...],
     "given_up": [...]}``.
@@ -357,35 +406,45 @@ def collect_due(now, limit: int | None = None) -> dict:
     collected: list[dict] = []
     given_up: list[dict] = []
 
-    accounts = store.accounts_in_dunning()
+    groups = store.groups_in_dunning()
     if limit:
-        accounts = accounts[:limit]
+        groups = groups[:limit]
 
-    for account in accounts:
+    for group in groups:
+        account = _account_for(group)
+        if account is None:
+            logger.warning(
+                "dunning: group {} has no billing account; skipping", group.id
+            )
+            continue
         user_id = account.user_id
-        started = account.dunning_started_at
-        attempts = int(account.dunning_attempts or 0)
-        entry = {"user_id": user_id, "attempts": attempts}
+        started = group.dunning_started_at
+        attempts = int(group.dunning_attempts or 0)
+        entry = {"user_id": user_id, "billing_group_id": group.id,
+                 "attempts": attempts}
         # The episode this entry belongs to, stamped now because ``end_dunning`` clears
         # ``dunning_started_at`` before the notification is composed. Without it a payer
         # who lapses, recovers, and lapses again months later would dedupe against the
         # first episode's email and hear nothing the second time.
-        entry["_episode"] = f"{user_id}:{started:%Y%m%dT%H%M%S}" if started else str(user_id)
-        # When this payer's past-due access actually runs out. The SAME expression
+        entry["_episode"] = (
+            f"{user_id}:{group.id}:{started:%Y%m%dT%H%M%S}"
+            if started else f"{user_id}:{group.id}"
+        )
+        # When THIS CARD's past-due access actually runs out. The SAME expression
         # ``access.access_end`` uses for a past-due module — ``paid_through`` plus the
         # window — so collection can never outlive entitlement however late the renewal
         # that started this ran. See ``give_up_at`` for the drift it closes.
         #
-        # A payer with no paid_through has never been billed and cannot be past due on a
+        # A card with no paid_through has never collected and cannot be past due on a
         # renewal; there is nothing to clamp against, so the unclamped deadline stands.
         access_ends_at = (
-            account.paid_through + timedelta(days=window)
-            if account.paid_through is not None
+            group.paid_through + timedelta(days=window)
+            if group.paid_through is not None
             else None
         )
         try:
             if should_give_up(now, started, window, access_ends_at):
-                store.end_dunning(user_id, status="closed")
+                store.end_group_dunning(group.id, status="closed")
                 given_up.append(entry)
                 continue
             if not should_attempt_now(
@@ -396,29 +455,40 @@ def collect_due(now, limit: int | None = None) -> dict:
                 # pays in the portal, so it stays in dunning until the deadline.
                 continue
 
-            invoices = billing_gateway.open_invoices(account.stripe_customer_id)
+            invoices = _invoices_for_group(
+                billing_gateway.open_invoices(account.stripe_customer_id),
+                group,
+                store.billing_groups_for_payer(user_id),
+            )
             if not invoices:
-                # Nothing outstanding — it was settled elsewhere (a portal payment, a
-                # manual charge). Dunning has no reason to continue, but the period it
-                # paid for still has to be recorded, or the customer has paid and is
-                # locked out until the next renewal run notices.
-                _settle_period(account, None)
-                store.end_dunning(user_id, status="active")
+                # Nothing outstanding on THIS card — it was settled elsewhere (a portal
+                # payment, a manual charge). Collection has no reason to continue, but the
+                # period it paid for still has to be recorded, or the customer has paid
+                # and is locked out until the next renewal run notices.
+                _settle_period(account, group, None)
+                store.end_group_dunning(group.id, status="active")
                 _restore_access(user_id)
                 recovered.append(entry)
                 continue
 
-            # Which invoice would actually recover this payer, decided BEFORE the charge:
+            # Which invoice would actually recover this card, decided BEFORE the charge:
             # afterwards the paid one is gone from the processor's open list and the
             # question cannot be asked again.
-            current = _current_period_invoice(invoices, _current_period_key(account))
+            current = _current_period_invoice(
+                invoices, _current_period_key(account, group)
+            )
 
             # The attempt is counted BEFORE it runs. If this process dies mid-retry the
             # slot is spent rather than replayed, which is the safe direction: a
             # double-charge is far worse than a skipped retry.
-            store.record_dunning_attempt(user_id)
+            store.record_group_dunning_attempt(group.id)
             target = invoices[0]
-            paid, reason = billing_gateway.retry_invoice(target["id"])
+            # THE GROUP'S CURRENT CARD, not the one the invoice was raised against.
+            # A payer whose card declined usually recovers by replacing it, and the
+            # document still names the dead one.
+            paid, reason = billing_gateway.retry_invoice(
+                target["id"], group.stripe_payment_method_id
+            )
             entry["invoice"] = target["id"]
             entry["reason"] = reason
             retried.append(entry)
@@ -428,7 +498,7 @@ def collect_due(now, limit: int | None = None) -> dict:
                 # for. Without it the money is collected and they stay unentitled until
                 # the next monthly run adopts the invoice by its idempotency key — a
                 # month of paying for nothing.
-                _settle_period(account, target)
+                _settle_period(account, group, target)
                 # Collecting is not recovering. The oldest open invoice is what policy
                 # charges, but the episode ends and access comes back only when the
                 # CURRENT period is settled — otherwise a returning customer pays a
@@ -441,7 +511,7 @@ def collect_due(now, limit: int | None = None) -> dict:
                 # would let one uncollectable stale debt lock a paying customer out for
                 # good.
                 if current is None or current["id"] == target["id"]:
-                    store.end_dunning(user_id, status="active")
+                    store.end_group_dunning(group.id, status="active")
                     _restore_access(user_id)
                     recovered.append(entry)
                 else:
@@ -453,7 +523,9 @@ def collect_due(now, limit: int | None = None) -> dict:
                         user_id, target["id"], current["id"],
                     )
         except Exception:
-            logger.exception("dunning: cycle failed for payer {}", user_id)
+            logger.exception(
+                "dunning: cycle failed for payer {} on group {}", user_id, group.id
+            )
 
     # After the cycle, never during it. A payer whose retry succeeds appears in both
     # ``retried`` and ``recovered``; mailing from inside the loop would send them a
@@ -516,8 +588,14 @@ def _notify_dunning(retried: list[dict], recovered: list[dict],
         entry.pop("_collected", None)
 
 
-def retry_now(user_id) -> dict:
-    """Collect this payer's outstanding invoice IMMEDIATELY, at their own request.
+def retry_now(user_id, entity_id=None) -> dict:
+    """Collect the outstanding invoice IMMEDIATELY, at the payer's own request.
+
+    ``entity_id`` names the company the button was pressed from, and through it the CARD
+    whose debt is settled. A payer with two cards can owe on one and be perfectly up to
+    date on the other; charging the wrong one takes money and restores nothing on the page
+    they are looking at. Omitting it takes the card that has been in collection longest —
+    the one closest to being given up on.
 
     The same collection ``collect_due`` performs, minus one thing: the schedule gate.
     ``should_attempt_now`` paces AUTOMATIC retries so a cron job does not hammer a card
@@ -574,32 +652,55 @@ def retry_now(user_id) -> dict:
         return {"status": "nothing_owed", "attempts": 0,
                 "invoice": None, "reason": None}
 
+    # WHICH CARD'S DEBT. The button is pressed from one company's settings page, so the
+    # debt to settle is the one on the card THAT company is billed to — not the payer's
+    # oldest, which may belong to companies this person is not even looking at. Without an
+    # entity the caller gets the card that has been in collection longest, which is the
+    # one closest to being given up on.
+    groups = store.billing_groups_for_payer(user_id)
+    group = (
+        store.billing_group_for_entity(entity_id, user_id) if entity_id else None
+    )
+    if group is None:
+        in_dunning = [g for g in groups if g.dunning_started_at is not None]
+        group = (
+            min(in_dunning, key=lambda g: g.dunning_started_at)
+            if in_dunning else (groups[0] if groups else None)
+        )
+    if group is None:
+        # No card nominated for this company, so there is nothing to charge and nothing
+        # to guess at — the customer's next step is to choose one, which is the control
+        # beside this button.
+        return {"status": "no_card", "attempts": 0, "invoice": None, "reason": None}
+
     now = clock.now()
     window = policy.current().past_due_window_days
-    started = account.dunning_started_at
-    attempts = int(account.dunning_attempts or 0)
+    started = group.dunning_started_at
+    attempts = int(group.dunning_attempts or 0)
     access_ends_at = (
-        account.paid_through + timedelta(days=window)
-        if account.paid_through is not None
+        group.paid_through + timedelta(days=window)
+        if group.paid_through is not None
         else None
     )
 
     # Only meaningful while collection is running: with no stamp there is no schedule to
     # have outrun, so there is no deadline to be past.
     if started is not None and should_give_up(now, started, window, access_ends_at):
-        store.end_dunning(user_id, status="closed")
+        store.end_group_dunning(group.id, status="closed")
         return {"status": "gave_up", "attempts": attempts,
                 "invoice": None, "reason": None}
 
-    invoices = billing_gateway.open_invoices(account.stripe_customer_id)
+    invoices = _invoices_for_group(
+        billing_gateway.open_invoices(account.stripe_customer_id), group, groups
+    )
     if not invoices:
-        # Nothing owed. If collection was running it was settled somewhere this code
-        # cannot see (a portal payment, a manual charge), so close it out and record what
-        # it paid for — otherwise the customer has paid and stays locked out until the
-        # next renewal run notices.
+        # Nothing owed on this card. If collection was running it was settled somewhere
+        # this code cannot see (a portal payment, a manual charge), so close it out and
+        # record what it paid for — otherwise the customer has paid and stays locked out
+        # until the next renewal run notices.
         if started is not None:
-            _settle_period(account, None)
-            store.end_dunning(user_id, status="active")
+            _settle_period(account, group, None)
+            store.end_group_dunning(group.id, status="active")
         return {"status": "nothing_owed", "attempts": attempts,
                 "invoice": None, "reason": None}
 
@@ -611,7 +712,7 @@ def retry_now(user_id) -> dict:
     #
     # No key means the payer has never been billed, so there is no stale renewal to pick
     # up by mistake and the single open invoice is what they came to pay.
-    key = _current_period_key(account)
+    key = _current_period_key(account, group)
     target = _manual_target(invoices, key)
     if target is None:
         # Something IS open, but nothing for the period they are behind on — an
@@ -636,20 +737,22 @@ def retry_now(user_id) -> dict:
     # Counted BEFORE it runs, exactly as the scheduled path does: if this request dies
     # mid-retry the slot is spent rather than replayed. A double-charge is far worse
     # than a skipped retry.
-    attempts = store.record_dunning_attempt(user_id)
+    attempts = store.record_group_dunning_attempt(group.id)
     invoice_id = target["id"]
-    paid, reason = billing_gateway.retry_invoice(invoice_id)
+    paid, reason = billing_gateway.retry_invoice(
+        invoice_id, group.stripe_payment_method_id
+    )
     logger.info(
         "dunning: manual retry for payer {} invoice {} -> {} ({})",
         user_id, invoice_id, "paid" if paid else "failed", reason,
     )
 
     if paid:
-        _settle_period(account, target)
+        _settle_period(account, group, target)
         # Only ends collection if it was running; a payer who paid an open invoice
         # without ever being dunned has nothing to clear.
         if started is not None:
-            store.end_dunning(user_id, status="active")
+            store.end_group_dunning(group.id, status="active")
         # Explicitly, and NOT only via ``end_dunning``. That call flips the module phase
         # back from past_due, but it is skipped entirely when there is no stamp — so a
         # payer with a real unpaid invoice and no dunning record (the case this function

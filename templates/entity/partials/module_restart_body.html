@@ -133,13 +133,18 @@
             <input type="radio" name="restart-card"
                    class="restart-card h-4 w-4 cursor-pointer accent-[#36c3b4]"
                    value="{{ pm.id }}"
-                   {% if pm.id == methods.default_id %}checked{% endif %}>
+                   {# The card THIS company is already on, falling back to the account's
+                      main one. Preselecting the default for a company billed to a
+                      different card would have the payer confirm a charge against a card
+                      they never chose for it. #}
+                   {% if pm.id == (methods.nominated_id or methods.default_id) %}checked{% endif %}>
             <span class="flex min-w-0 flex-col gap-0.5">
               <span class="restart-pm-label text-sm font-semibold text-[#1b1d1c]">{{ pm.label or pm.brand }}</span>
               <span class="text-[12.5px] text-[#8a8d8b]">
                 {%- if pm.expiry %}Expires {{ pm.expiry }}
                 {%- else %}{{ pm.wallet_label or pm.brand_label or '' }}{% endif -%}
-                {%- if pm.id == methods.default_id %} · Current default{% endif -%}
+                {%- if pm.id == methods.nominated_id %} · Billing this company
+                {%- elif pm.id == methods.default_id %} · Account default{% endif -%}
               </span>
             </span>
             {# An expired card can be selected and WOULD be charged. Said here rather

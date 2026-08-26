@@ -120,7 +120,9 @@ def entities_covered_past(user_id, period: Period) -> set[str]:
     return _covered_entities(user_id, period, through_end=True)
 
 
-def billable_codes_by_entity(user_id, period: Period | None = None) -> dict[str, set[str]]:
+def billable_codes_by_entity(
+    user_id, period: Period | None = None, *, group_id=None
+) -> dict[str, set[str]]:
     """{entity_id: {module codes}} this payer will be charged for next period.
 
     ``period`` drops the entities already charged for it — see ``entities_billed_in`` for
@@ -128,30 +130,57 @@ def billable_codes_by_entity(user_id, period: Period | None = None) -> dict[str,
     one carrying a transfer's claim over it. Omitting it answers the looser question "is
     there anything on this account at all", which is what ``due_renewals`` needs before a
     period has even been chosen.
+
+    ``group_id`` narrows it to the companies nominated onto ONE card, which is what a
+    renewal actually bills: one invoice per card, charged to that card. Omitting it
+    answers for the whole account, which no longer corresponds to a single document and
+    is used only for "is there anything here at all".
+
+    A company nominated onto NO card is excluded either way and logged. There is
+    deliberately no fallback to the account default — see ``store.card_for_entity`` — so
+    the alternative to skipping it is charging a card the payer never chose for it.
     """
     already = (
         entities_billed_in(user_id, period) | entities_covered_into(user_id, period)
         if period is not None
         else set()
     )
+    in_group = store.entity_ids_in_group(group_id) if group_id else None
     by_entity: dict[str, set[str]] = {}
+    unnominated: set[str] = set()
     for row in store.module_rows_for_payer(user_id):
         if not access.is_billing_forward(phase=row.phase):
             continue
-        if str(row.entity_id) in already:
+        entity_id = str(row.entity_id)
+        if entity_id in already:
             continue
-        by_entity.setdefault(str(row.entity_id), set()).add(
-            row.function_code.upper()
+        if in_group is not None:
+            if entity_id not in in_group:
+                continue
+        elif store.billing_group_for_entity(entity_id, user_id) is None:
+            unnominated.add(entity_id)
+            continue
+        by_entity.setdefault(entity_id, set()).add(row.function_code.upper())
+    for entity_id in sorted(unnominated):
+        logger.error(
+            "renewal: entity {} is billing forward but has no payment method "
+            "nominated; it will not be billed until one is chosen",
+            entity_id,
         )
     return by_entity
 
 
-def build_renewal(user_id, period: Period) -> Invoice | None:
-    """What this payer owes for ``period``, or None if they owe nothing.
+def build_renewal(user_id, period: Period, *, group_id=None) -> Invoice | None:
+    """What this CARD owes for ``period``, or None if it owes nothing.
 
-    Returns None rather than an empty invoice: a payer whose modules have all lapsed or
+    Returns None rather than an empty invoice: a card whose companies have all lapsed or
     gone to trial has nothing to collect, and issuing a zero invoice would put a
-    meaningless document in front of them every month.
+    meaningless document in front of the payer every month.
+
+    ``group_id`` is the card. One is built per group, so a payer with two cards gets two
+    invoices for the same period — each priced from its own companies and charged to its
+    own card. Omitting it prices the payer's whole account, which is what the shadow
+    reports and the tests written before per-entity cards still ask for.
 
     A combination the catalog cannot price is SKIPPED and logged, never guessed at. The
     alternative — falling back to a sum of standalone prices — silently overcharges by
@@ -160,7 +189,7 @@ def build_renewal(user_id, period: Period) -> Invoice | None:
     # NOT an early return on "nothing renewing": a payer whose last entity was
     # cancelled has no billable modules but may still owe a cancel-extension, and
     # bailing here would give those days away.
-    by_entity = billable_codes_by_entity(user_id, period)
+    by_entity = billable_codes_by_entity(user_id, period, group_id=group_id)
     names = _entity_names(by_entity.keys())
     entries: list[tuple[str, str, str, int]] = []
     currency = None
@@ -178,7 +207,7 @@ def build_renewal(user_id, period: Period) -> Invoice | None:
         entries.append((entity_id, names.get(entity_id, entity_id), plan.display_name,
                         plan.amount))
 
-    extensions = _pending_extension_lines(user_id, names)
+    extensions = _pending_extension_lines(user_id, names, group_id=group_id)
     if not entries and not extensions:
         return None
 
@@ -230,11 +259,32 @@ def _extension_product(code) -> str:
     return key.title().replace("_", " ")
 
 
-def _pending_extension_lines(user_id, names: dict[str, str]) -> list[Line]:
-    """Lines for cancel-extensions this payer owes but has not been billed for."""
+def _pending_extension_lines(
+    user_id, names: dict[str, str], *, group_id=None
+) -> list[Line]:
+    """Lines for cancel-extensions this payer owes but has not been billed for.
+
+    ``group_id`` puts each one on the invoice of the card its OWN company is billed to.
+    A cancellation fee belongs to the company it was charged for, so it rides that card's
+    document — not whichever of the payer's invoices happens to be raised first.
+
+    An extension for a company with no nomination left (the payer removed the card, or
+    the company was never nominated) rides the payer's FIRST group, so the charge is not
+    silently lost. It is money already promised in exchange for access already granted;
+    dropping it because a pointer is missing would give those days away.
+    """
+    if group_id:
+        in_group = store.entity_ids_in_group(group_id)
+        groups = store.billing_groups_for_payer(user_id)
+        is_first_group = bool(groups) and str(groups[0].id) == str(group_id)
     lines: list[Line] = []
     for row in store.pending_extensions_for_payer(user_id):
         entity_id = str(row.entity_id)
+        if group_id:
+            if entity_id not in in_group:
+                homeless = store.billing_group_for_entity(entity_id, user_id) is None
+                if not (homeless and is_first_group):
+                    continue
         name = names.get(entity_id) or _entity_names({entity_id}).get(entity_id, entity_id)
         lines.append(
             Line(
@@ -249,32 +299,44 @@ def _pending_extension_lines(user_id, names: dict[str, str]) -> list[Line]:
 
 
 def due_renewals(now: datetime) -> list:
-    """Payers whose current period has ended and who need their next invoice.
+    """Cards whose current period has ended and which need their next invoice.
 
-    Driven off the ACCOUNT's ``paid_through``, not a date derived from the anchor and not
-    the per-row copy. A derived period always contains "now" so it can never come due;
-    a per-row copy drifts between a payer's entities, and taking the oldest of several
+    Returns ``(account, group, paid_through)`` per due CARD. A payer with two cards can
+    have one due and one not — each buys its own periods for its own companies — so the
+    work list is per group, while the anchor that shapes the period stays on the account.
+
+    Driven off the group's stored ``paid_through``, not a date derived from the anchor and
+    not a per-row copy. A derived period always contains "now" so it can never come due; a
+    per-row copy drifts between a payer's entities, and taking the oldest of several
     disagreeing rows would re-bill a period already collected.
     """
     due = []
-    for account in store.accounts_with_billing():
-        if account.anchor_at is None or account.paid_through is None:
+    anchors = {
+        str(account.user_id): account for account in store.accounts_with_billing()
+    }
+    for group in store.groups_with_billing():
+        account = anchors.get(str(group.payer_user_id))
+        if account is None or account.anchor_at is None:
             continue  # nothing has ever been billed for this payer
-        if account.paid_through > now:
+        if group.paid_through is None:
+            continue  # this card has never collected; nothing to renew from
+        if group.paid_through > now:
             continue
-        if not billable_codes_by_entity(account.user_id) and not (
-            store.pending_extensions_for_payer(account.user_id)
+        if not billable_codes_by_entity(
+            account.user_id, group_id=group.id
+        ) and not _pending_extension_lines(
+            account.user_id, {}, group_id=group.id
         ):
-            # Nothing renewing AND nothing owed. A payer whose LAST entity was cancelled
-            # has no billable modules but still owes the extension they were promised
-            # access for — dropping them here would give those days away.
+            # Nothing renewing AND nothing owed on this card. A card whose LAST company
+            # was cancelled has no billable modules but still owes the extension the
+            # customer was promised access for — dropping it would give those days away.
             continue
-        due.append((account, account.paid_through))
+        due.append((account, group, group.paid_through))
     return due
 
 
-def period_key(user_id, period: Period) -> str:
-    """Stable id for "this payer's invoice for this period".
+def period_key(user_id, period: Period, group_id=None) -> str:
+    """Stable id for "this CARD's invoice for this period".
 
     Claimed under the UNIQUE index on ``subscription_invoice.idempotency_key`` before the
     charge, so a runner that crashes between charging and recording cannot bill the same
@@ -282,10 +344,20 @@ def period_key(user_id, period: Period) -> str:
     metadata — the latter is what ``_already_invoiced`` falls back to when a reservation
     was never confirmed sent.
 
-    Stable by construction: derived from the payer and the period START, so it survives
-    a process restart. Anything built off "now" would not.
+    THE GROUP IS PART OF THE KEY, and has to be: a payer with two cards raises two
+    invoices for one period, and under a payer-and-period key the second would collide
+    with the first and be refused as a double-bill — so one card's companies would simply
+    never be charged.
+
+    Omitting the group reproduces the old two-part key. That is what every invoice raised
+    before per-entity cards carries, and those keys are claimed forever (a voided invoice
+    keeps its row), so the two forms have to coexist rather than one replacing the other.
+
+    Stable by construction: derived from the payer, the group and the period START, so it
+    survives a process restart. Anything built off "now" would not.
     """
-    return f"renewal-{user_id}-{period.start:%Y%m%d}"
+    stem = f"renewal-{user_id}-{period.start:%Y%m%d}"
+    return f"{stem}-{group_id}" if group_id else stem
 
 
 def _already_invoiced(
@@ -360,16 +432,21 @@ ALL_PAYERS = _AllPayers()
 
 def run_renewals(now: datetime, *, scope, issue: bool = False,
                  limit: int | None = None) -> dict:
-    """Bill payers whose period has ended. SHADOW by default.
+    """Bill the CARDS whose period has ended. SHADOW by default.
 
     ``scope`` is required and has no default: either an iterable of user ids, or
-    ``ALL_PAYERS``. Omitting it is a TypeError rather than a full sweep.
+    ``ALL_PAYERS``. Omitting it is a TypeError rather than a full sweep. It still scopes
+    by PAYER even though the unit of work is now a card — "bill this person" is the
+    question an operator asks, and a payer's cards come along with them.
 
-    With ``issue=False`` this computes what each payer would be charged and changes
+    With ``issue=False`` this computes what each card would be charged and changes
     nothing — the safe way to run it against live data for a cycle and compare with what
     Stripe actually billed, before it is ever allowed to take money.
 
-    Returns ``{"planned": [...], "issued": [...], "failed": [...], "skipped": [...]}``.
+    Returns ``{"planned": [...], "issued": [...], "failed": [...], "skipped": [...]}``,
+    one entry per card rather than per payer: a payer with two cards appears twice, and
+    can legitimately be in ``issued`` and ``failed`` at once. That is the containment
+    working — the healthy card's companies are paid for and stay up.
 
     Ordering is deliberate and matters more than it looks:
 
@@ -377,12 +454,13 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
        on an earlier run that died before recording it — so ADOPT it, advance
        ``paid_through``, and charge nothing. This is the case a naive runner
        double-bills. See ``_already_invoiced``;
-    2. issue and collect;
-    3. only on success advance ``paid_through``. Advancing first would skip the period
-       forever if the charge then failed — the customer gets a free month and nothing
-       ever notices;
-    4. on failure start dunning, which is what turns a declined renewal into the retry
-       schedule rather than a silent lapse.
+    2. issue and collect, charged to THIS card;
+    3. only on success advance the card's ``paid_through``. Advancing first would skip the
+       period forever if the charge then failed — the customer gets a free month and
+       nothing ever notices;
+    4. on failure start dunning FOR THIS CARD, which is what turns a declined renewal into
+       the retry schedule rather than a silent lapse — and confines it to the companies
+       that card actually pays for.
     """
     from blueprints.subscription.services import billing_gateway
 
@@ -393,17 +471,18 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
 
     wanted = None if scope is ALL_PAYERS else {str(u) for u in scope}
     candidates = [
-        (account, paid_through)
-        for account, paid_through in due_renewals(now)
+        (account, group, paid_through)
+        for account, group, paid_through in due_renewals(now)
         if wanted is None or str(account.user_id) in wanted
     ]
 
-    for account, paid_through in candidates[: limit or None]:
+    for account, group, paid_through in candidates[: limit or None]:
         user_id = account.user_id
         period = next_period(account.anchor_at, paid_through)
-        invoice = build_renewal(user_id, period)
+        invoice = build_renewal(user_id, period, group_id=group.id)
         entry = {
             "user_id": user_id,
+            "billing_group_id": group.id,
             "period_start": period.start,
             "period_end": period.end,
             "total": invoice.total if invoice else 0,
@@ -426,11 +505,16 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
             # exclusion MUST be paired with the advance — suppressing the line while
             # leaving ``paid_through`` behind turns one avoided double-charge into a
             # guaranteed one, because the account stays due and is re-billed the next day.
+            #
+            # Both questions are asked of THIS CARD's companies only. Another card's
+            # entity covering its own period says nothing about whether this one is
+            # settled, and advancing on it would hand this card's companies a free month.
+            in_group = store.entity_ids_in_group(group.id)
             if issue and (
-                entities_billed_in(user_id, period)
-                or entities_covered_past(user_id, period)
+                (entities_billed_in(user_id, period) & in_group)
+                or (entities_covered_past(user_id, period) & in_group)
             ):
-                store.set_paid_through(user_id, period.end)
+                store.set_group_paid_through(group.id, period.end)
                 skipped.append({**entry, "reason": "already covered this period"})
             else:
                 skipped.append({**entry, "reason": "nothing billable"})
@@ -439,12 +523,19 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
             planned.append(entry)
             continue
 
-        key = period_key(user_id, period)
+        key = period_key(user_id, period, group.id)
         # Captured BEFORE issuing, so the rows closed out afterwards are exactly the ones
         # whose lines rode this invoice. Re-querying after would also catch anything
         # cancelled while the charge was in flight and mark it paid for free.
+        #
+        # Matched against the LINES rather than against the payer's whole pending set:
+        # with several cards in play an extension belonging to another card's company is
+        # still pending and must not be closed out by this document.
+        riding = {line.entity_id for line in invoice.lines}
         extension_ids = [
-            row.id for row in store.pending_extensions_for_payer(user_id)
+            row.id
+            for row in store.pending_extensions_for_payer(user_id)
+            if str(row.entity_id) in riding
         ]
         try:
             status = _already_invoiced(account.stripe_customer_id, key)
@@ -456,7 +547,7 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
                 # one is being chased by dunning with those lines still on it.
                 store.mark_extensions_invoiced(extension_ids)
                 if status == "paid":
-                    store.set_paid_through(user_id, period.end)
+                    store.set_group_paid_through(group.id, period.end)
                     skipped.append({**entry, "reason": "already invoiced; adopted"})
                 else:
                     skipped.append({**entry, "reason": "already invoiced; unpaid"})
@@ -474,11 +565,18 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
                     sum(1 for line in invoice.lines
                         if "access after cancellation" in line.product_name),
                 ),
-                metadata={"renewal_key": key},
+                # ``billing_group`` travels with the document so dunning can pick this
+                # one out of the payer's other open invoices later — a question that did
+                # not exist while a payer had one invoice per period.
+                metadata={"renewal_key": key, "billing_group": str(group.id)},
                 idempotency_key=key,
                 # Known here, so the gateway doesn't have to look up the payer the
                 # customer id came from in the first place.
                 payer_user_id=user_id,
+                # THE CARD. Set on the invoice rather than by moving the customer default,
+                # which would repoint every other company of this payer mid-run.
+                payment_method=group.stripe_payment_method_id,
+                billing_group_id=group.id,
             )
             # Closed out because the invoice CARRYING them was raised — not because it
             # was paid. An unpaid renewal is not a dropped charge: the invoice exists and
@@ -495,18 +593,24 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
             if result.get("id"):
                 store.mark_extensions_invoiced(extension_ids)
             if result.get("status") == "paid":
-                store.set_paid_through(user_id, period.end)
+                store.set_group_paid_through(group.id, period.end)
                 issued.append({**entry, "invoice": result.get("id")})
             else:
-                store.begin_dunning(user_id, now)
+                # THIS CARD only. The payer's other cards have their own periods and
+                # their own companies, and a decline here says nothing about them.
+                store.begin_group_dunning(group.id, now)
                 failed.append({**entry, "invoice": result.get("id"),
                                "status": result.get("status")})
         except Exception:
-            logger.exception("renewal: failed to bill payer {}", user_id)
+            logger.exception(
+                "renewal: failed to bill payer {} on group {}", user_id, group.id
+            )
             try:
-                store.begin_dunning(user_id, now)
+                store.begin_group_dunning(group.id, now)
             except Exception:
-                logger.exception("renewal: could not start dunning for {}", user_id)
+                logger.exception(
+                    "renewal: could not start dunning for group {}", group.id
+                )
             failed.append({**entry, "status": "error"})
 
     # Emails go out only after the whole batch has been billed and committed. Sending
@@ -526,18 +630,22 @@ def _notify_renewals(issued: list[dict], failed: list[dict]) -> None:
     """
     from blueprints.subscription.services import notify
 
+    # The GROUP is in the dedupe key for the same reason it is in the idempotency key: a
+    # payer with two cards has two outcomes for one period, and a payer-and-period key
+    # would silence the second — most damagingly when one card was paid and the other
+    # declined, which is exactly the message they need.
     events = []
     for entry in issued:
         period = Period(start=entry["period_start"], end=entry["period_end"])
         events.append(
             (entry["user_id"], notify.RENEWAL_PAID,
-             period_key(entry["user_id"], period), entry)
+             period_key(entry["user_id"], period, entry.get("billing_group_id")), entry)
         )
     for entry in failed:
         period = Period(start=entry["period_start"], end=entry["period_end"])
         events.append(
             (entry["user_id"], notify.RENEWAL_FAILED,
-             period_key(entry["user_id"], period), entry)
+             period_key(entry["user_id"], period, entry.get("billing_group_id")), entry)
         )
     notify.notify_many(events)
 

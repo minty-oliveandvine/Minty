@@ -39,7 +39,19 @@ class _Plan:
     currency = "HKD"
 
 
-def _wire(monkeypatch, *, anchor=ANCHOR, issued=None, raises=None, existing=None):
+class _Group:
+    """The card the INCOMING payer nominated for this company. Required, not defaulted:
+    a handover charges the person taking it on, and only on a card they chose for it."""
+
+    def __init__(self, id="g_new", card="pm_new"):
+        self.id = id
+        self.payer_user_id = "new-payer"
+        self.stripe_payment_method_id = card
+        self.paid_through = None
+
+
+def _wire(monkeypatch, *, anchor=ANCHOR, issued=None, raises=None, existing=None,
+          group=_Group()):
     """Mock the store and the gateway; return (checkout, calls)."""
     from blueprints.subscription.services import billing_gateway, checkout, renewals, store
 
@@ -48,8 +60,16 @@ def _wire(monkeypatch, *, anchor=ANCHOR, issued=None, raises=None, existing=None
     monkeypatch.setattr(store, "billing_cycle_for_user",
                         lambda uid: (anchor, "HKD"))
     monkeypatch.setattr(store, "billing_plan_for_codes", lambda codes: _Plan())
+    monkeypatch.setattr(store, "billing_group_for_entity",
+                        lambda eid, uid=None: group)
     monkeypatch.setattr(store, "set_paid_through",
                         lambda uid, until: calls["paid_through"].append((uid, until)))
+    # Recorded under the payer so the assertions read the same: the cycle that starts
+    # here is the new payer's card, and they have exactly one.
+    monkeypatch.setattr(
+        store, "set_group_paid_through",
+        lambda gid, until: calls["paid_through"].append(("new-payer", until)),
+    )
     monkeypatch.setattr(store, "start_billing_cycle",
                         lambda uid, at, cur: calls["anchored"].append((uid, at, cur)))
     monkeypatch.setattr(checkout, "_entity_invoice_name", lambda eid: "Bakery Ltd")
