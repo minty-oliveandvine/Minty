@@ -50,10 +50,14 @@ class SubscriptionEmailLog(db.Model):
     recipient = db.Column(db.String(200), nullable=True)
     status = db.Column(db.String(20), nullable=False, default=STATUS_FAILED)
     error = db.Column(db.String(500), nullable=True)
+    # No ``sent_at``. ``status`` already carries that fact and is the ONLY thing the
+    # dedupe reads — a second timestamp saying the same thing invites a later change to
+    # gate the skip on "has it a sent_at" instead, which is a different question the
+    # moment a row is written by anything but ``notify``. ``created_at`` is when the send
+    # was claimed, which is within milliseconds of when it went out.
     created_at = db.Column(
         db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
     )
-    sent_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     def __repr__(self):
         return f"<SubscriptionEmailLog {self.event} {self.dedupe_key} {self.status}>"

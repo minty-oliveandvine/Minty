@@ -19,6 +19,10 @@ UTC = timezone.utc
 NOW = datetime(2027, 8, 20, tzinfo=UTC)
 PAID_THROUGH = datetime(2027, 9, 12, tzinfo=UTC)
 PERIOD_END = datetime(2027, 10, 1, tzinfo=UTC)
+# The incoming payer's cycle anchor, as the charge reports it back. Distinct from every
+# other date here so a test that finds it on the offer row cannot be reading something
+# else that happens to match.
+ANCHOR = datetime(2027, 9, 1, tzinfo=UTC)
 
 OLD, NEW = "payer-old", "payer-new"
 ENTITY = "entity-1"
@@ -122,7 +126,8 @@ def _wire(monkeypatch, db, *, rows=None, payer=OLD, dunning=(), admin=True,
         if callable(charge):
             return charge(len(calls["charges"]))
         return charge or {"paid": True, "period_end": PERIOD_END, "invoice_id": "in_1",
-                          "amount": 19000, "currency": "HKD", "reason": None}
+                          "amount": 19000, "currency": "HKD", "anchor": ANCHOR,
+                          "reason": None}
 
     monkeypatch.setattr(checkout, "_bill_transfer_in_house", _charge)
 
@@ -265,6 +270,38 @@ def test_accept_charges_then_flips(db_session, monkeypatch):
     assert result["invoice_id"] == "in_1"
 
 
+def test_accept_records_the_cycle_the_entity_landed_on(db_session, monkeypatch):
+    """The anchor is per PAYER, so a handover moves the entity onto a different cycle.
+
+    Recorded alongside ``accepted_billed_through`` because it cannot be re-derived later:
+    the incoming payer's anchor is immutable, but a repair pass reading it back has no way
+    to tell an anchor that was established BY this accept from one that was already there.
+    """
+    transfers, _calls = _wire(monkeypatch, db_session)
+    offer = _offer(db_session, transfers)
+
+    transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    # Through ``_aware``, as every production read of these columns is: SQLite hands back
+    # a naive value for a ``timezone=True`` column, and the billing layer refuses those.
+    assert transfers._aware(offer.accepted_anchor_at) == ANCHOR
+    assert transfers._aware(offer.accepted_billed_through) == PERIOD_END, "unchanged"
+
+
+def test_a_decline_records_no_anchor(db_session, monkeypatch):
+    """Nothing was charged, so there is no cycle to claim the entity landed on."""
+    transfers, _calls = _wire(
+        monkeypatch, db_session,
+        charge={"paid": False, "period_end": None, "invoice_id": None, "amount": 0,
+                "currency": None, "anchor": None, "reason": "declined"},
+    )
+    offer = _offer(db_session, transfers)
+
+    transfers.respond_to_transfer(NEW, offer.id, accept=True)
+
+    assert offer.accepted_anchor_at is None
+
+
 def test_the_handover_instant_is_read_at_accept_not_quoted_at_offer(db_session, monkeypatch):
     """``paid_through`` advances on every successful renewal, so an offer that outlives a
     cycle would otherwise bill a window the old payer has since paid for."""
@@ -289,7 +326,8 @@ def test_a_decline_leaves_the_company_where_it_was(db_session, monkeypatch):
     transfers, calls = _wire(
         monkeypatch, db_session,
         charge={"paid": False, "period_end": None, "invoice_id": None, "amount": 0,
-                "currency": None, "reason": "That payment didn't go through."},
+                "currency": None, "anchor": None,
+                "reason": "That payment didn't go through."},
     )
     offer = _offer(db_session, transfers)
 
@@ -307,9 +345,10 @@ def test_a_retry_after_a_decline_uses_a_fresh_key(db_session, monkeypatch):
     key that did not change between attempts would be refused as "already claimed" and
     the customer could never retry after fixing their card."""
     outcomes = {1: {"paid": False, "period_end": None, "invoice_id": None, "amount": 0,
-                    "currency": None, "reason": "declined"},
+                    "currency": None, "anchor": None, "reason": "declined"},
                 2: {"paid": True, "period_end": PERIOD_END, "invoice_id": "in_2",
-                    "amount": 19000, "currency": "HKD", "reason": None}}
+                    "amount": 19000, "currency": "HKD", "anchor": ANCHOR,
+                    "reason": None}}
     transfers, calls = _wire(monkeypatch, db_session, charge=lambda n: outcomes[n])
     offer = _offer(db_session, transfers)
 

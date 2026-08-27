@@ -743,7 +743,6 @@ def notify(user_id, event: str, *, dedupe_key: str, context: dict | None = None)
             return False
 
         row.status = STATUS_SENT
-        row.sent_at = db.func.now()
         db.session.commit()
         logger.info("notify: sent {} to {} ({})", event, address, dedupe_key)
         return True

@@ -571,7 +571,14 @@ def upgrade():
             server_default=sa.func.now(),
             nullable=False,
         ),
-        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
+        # No ``sent_at``. It was here originally and was removed from this revision on
+        # 2026-08-27 rather than dropped by a later one: nothing in the chain referenced
+        # it, so editing the create is what keeps a fresh build and an existing database
+        # identical. Existing databases were ALTERed by hand at the same time — if you
+        # meet one that still has the column, that is the reason.
+        #
+        # ``status`` already carries the fact, and it is the only thing ``notify._claim``
+        # reads to decide a send has gone out.
         sa.ForeignKeyConstraint(
             ["user_id"], [f"{SCHEMA}.user.id"], ondelete="CASCADE"
         ),
