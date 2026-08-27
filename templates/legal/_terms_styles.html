@@ -129,6 +129,23 @@
   .tc-illus-img {
     width: 100%; height: auto; display: block; border-radius: 14px;
     aspect-ratio: 6 / 7; object-fit: cover; object-position: center;
+    /* The cat's feet sit at about 79% of the artwork's height, so the bottom
+       fifth of the file is empty canvas and the mascot floats a hand's width
+       above Cancel. cover cannot crop that band away (filling this taller box
+       means the full source height is always shown), so the image is slid
+       down over it instead.
+
+       A TRANSFORM rather than a margin, deliberately: it is the buttons'
+       placement that is right, and transforms do not touch layout, so the
+       actions stay exactly where they were and only the mascot moves. The
+       percentage resolves against the image's own height, so the shift tracks
+       the box at both the 420px page column and the 400px modal one.
+
+       pointer-events: none because the slid-down band now hangs over the
+       gap above Cancel — it is fully transparent, but without this it would
+       still swallow clicks aimed at the button beneath it. */
+    transform: translateY(19%);
+    pointer-events: none;
   }
 
   /* ---- Actions ---- */
