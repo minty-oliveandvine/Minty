@@ -232,6 +232,31 @@ def test_an_unanchored_payer_is_anchored_at_the_handover_not_at_now(monkeypatch)
     assert invoice.total == 30000
     # First charge on the account, so the cycle is ESTABLISHED here.
     assert calls["paid_through"] == [("new-payer", result["period_end"])]
+    # The anchor established HERE is what comes back, not the None it started as — this
+    # is the case the accept cannot re-derive later, because a second read cannot tell an
+    # anchor this charge created from one the payer already had.
+    assert result["anchor"] == AT
+
+
+def test_the_cycle_charged_against_is_reported_back(monkeypatch):
+    """The accept stamps ``accepted_anchor_at`` from this. Without it the offer row records
+    what was billed but not which cycle the entity landed on — and the anchor is per payer,
+    so a handover always moves it."""
+    checkout, _calls = _wire(monkeypatch)
+
+    result = _charge(checkout)
+
+    assert result["anchor"] == ANCHOR
+
+
+def test_a_failed_charge_reports_no_cycle(monkeypatch):
+    """Nothing was collected, so there is no cycle the entity can be said to be on."""
+    checkout, _calls = _wire(monkeypatch, issued={"id": "in_1", "status": "open"})
+
+    result = _charge(checkout)
+
+    assert result["paid"] is False
+    assert result["anchor"] is None
 
 
 def test_an_established_payer_s_cycle_is_never_advanced(monkeypatch):

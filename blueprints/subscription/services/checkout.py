@@ -1568,9 +1568,16 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
                             at, idempotency_key):
     """Charge the NEW payer for taking over ``entity_id`` from ``at``.
 
-    Returns ``{"paid", "period_end", "invoice_id", "amount", "currency", "reason"}``.
-    ``paid`` False means nothing was collected and the caller must not move the payer
-    pointer — the entity stays where it is.
+    Returns ``{"paid", "period_end", "invoice_id", "amount", "currency", "anchor",
+    "reason"}``. ``paid`` False means nothing was collected and the caller must not move
+    the payer pointer — the entity stays where it is.
+
+    ``anchor`` is the incoming payer's cycle anchor as it stood for THIS charge — the one
+    they already had, or the one established here on a first charge. It is returned so the
+    accept can record it: the anchor is per payer, so a handover moves the entity onto a
+    different cycle, and the offer screen has already told the nominee which case they are
+    in (``anchor_is_new``). Only meaningful when ``paid``; None on every failure, where
+    there is no charge for an anchor to belong to.
 
     Called at ACCEPT, before anything about the entity has been changed, and that ordering
     is the whole safety story. The accept cannot be one transaction (``store``'s helpers
@@ -1594,7 +1601,7 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
 
     def _failed(reason):
         return {"paid": False, "period_end": None, "invoice_id": None,
-                "amount": 0, "currency": None, "reason": reason}
+                "amount": 0, "currency": None, "anchor": None, "reason": reason}
 
     anchor, _currency = store.billing_cycle_for_user(payer_user_id)
     first_charge = anchor is None
@@ -1625,7 +1632,7 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
             entity_id, at, period.end,
         )
         return {"paid": True, "period_end": period.end, "invoice_id": None,
-                "amount": 0, "currency": None, "reason": None}
+                "amount": 0, "currency": None, "anchor": anchor, "reason": None}
 
     # ADOPT before charging. A previous attempt under this exact key may have collected
     # the money and died before the pointer moved — the crash window this whole design is
@@ -1642,7 +1649,8 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
         )
         return {"paid": True, "period_end": period.end,
                 "invoice_id": store.invoice_for_key(idempotency_key).external_id,
-                "amount": invoice.total, "currency": invoice.currency, "reason": None}
+                "amount": invoice.total, "currency": invoice.currency,
+                "anchor": anchor, "reason": None}
     if existing is not None:
         # Raised but unpaid. Do not raise a second document against the same window.
         return _failed("There's already an unpaid invoice for this handover.")
@@ -1714,7 +1722,8 @@ def _bill_transfer_in_house(entity_id, payer_user_id, customer_id: str, codes, *
         store.set_group_paid_through(group.id, period.end)
 
     return {"paid": True, "period_end": period.end, "invoice_id": result.get("id"),
-            "amount": invoice.total, "currency": invoice.currency, "reason": None}
+            "amount": invoice.total, "currency": invoice.currency,
+            "anchor": anchor, "reason": None}
 
 
 def _bill_module_change_in_house(entity_id, payer_user_id, customer_id: str,

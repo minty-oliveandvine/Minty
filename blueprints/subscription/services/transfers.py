@@ -697,6 +697,10 @@ def _accept(offer, user_id, now) -> tuple[bool, str, dict | None]:
         offer.status = STATUS_CHARGED
         offer.charge_invoice_id = result["invoice_id"]
         offer.accepted_billed_through = result["period_end"]
+        # The cycle they actually landed on. Recorded in the SAME commit as ``charged``,
+        # so a crash after this leaves the anchor with the money rather than a repair pass
+        # having to re-derive it — by which point the payer's anchor may have moved on.
+        offer.accepted_anchor_at = result["anchor"]
         offer.quoted_amount = result["amount"]
         offer.quoted_currency = result["currency"]
         db.session.commit()
