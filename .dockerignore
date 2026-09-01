@@ -6,3 +6,4 @@ __pycache__/
 node_modules/
 docker/Dockerfile
 !.dockerignore
+flask_session/

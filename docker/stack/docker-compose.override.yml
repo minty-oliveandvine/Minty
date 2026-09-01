@@ -1,0 +1,57 @@
+# Development overrides — applied automatically on top of docker-compose.yml
+# when you run compose from THIS directory:
+#
+#   cd docker/stack && docker compose up
+#
+# It bind-mounts the two Python repos into their containers and swaps gunicorn
+# for the auto-reloading dev servers, so a saved file is live immediately. The
+# two Next.js services already run their dev servers with bind mounts in the
+# base file, so nothing is needed for them here.
+#
+# To run the backends under gunicorn instead (closer to deployed behaviour),
+# skip this file explicitly:
+#
+#   docker compose -f docker-compose.yml up
+#
+# When invoking compose from somewhere else with -f, pass this file too or it
+# will not be applied:
+#
+#   docker compose -f docker/stack/docker-compose.yml \
+#                  -f docker/stack/docker-compose.override.yml up
+services:
+  minty:
+    environment:
+      FLASK_ENV: development
+      FLASK_DEBUG: "True"
+    volumes:
+      # Mount this repo into /app so local edits are seen live. The virtualenv
+      # lives at /opt/venv, outside /app, so it isn't shadowed; the anonymous
+      # volume below keeps a host-side .venv from leaking in.
+      - ${MINTY_PATH:-../..}:/app
+      - /app/.venv
+    command:
+      - "python"
+      - "-m"
+      - "flask"
+      - "--app"
+      - "main.py"
+      - "run"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "5001"
+      - "--debug"
+
+  billing-backend:
+    environment:
+      DEBUG: "True"
+    volumes:
+      # Dependencies are installed into site-packages, not /app, so mounting
+      # the repo over /app leaves them intact.
+      - ${BILLING_BACKEND_PATH:-../../../billing-backend}:/app
+      - /app/.venv
+    command:
+      - "python"
+      - "manage.py"
+      - "runserver"
+      - "0.0.0.0:8000"
