@@ -9,24 +9,19 @@ first available of three sources:
 
 1. **Stripe's** server time, captured from the ``Date`` header of a fetch made during
    this request. The same clock Stripe's own timestamps come from, so comparisons
-   against them are exact. NOTHING WRITES THIS ANY MORE — see below.
+   against them are exact.
 2. **The database's** clock — one ``SELECT now()`` against Postgres, cached per request.
 3. The process clock, as a last resort.
 
-Source 2 exists because source 1 was a SIDE EFFECT of a call made for another reason,
-and that call is gone. This module used to predict it: as billing moved in-house,
-``stripe_client.list_customer_subscriptions`` would stop being called, and with it the
-only writer of Stripe's time. That has now happened — the Stripe-Subscription helpers
-were deleted with the in-house billing cutover, so source 1 is a live reader with no
-writer and :func:`now` answers from the DATABASE in practice.
+Source 2 exists because source 1 is a SIDE EFFECT of calls made for other reasons, and
+those calls can move. It has already happened once: source 1 used to hang off
+``stripe_client.list_customer_subscriptions``, and when the in-house billing cutover
+deleted that function the only writer of Stripe's time went with it, silently. The
+capture now sits on three surviving reads instead of one — ``retrieve_customer``,
+``list_payment_methods`` and ``find_customer_by_user`` — so no single deletion can
+quietly retire it again. If they ALL go, source 2 still holds the line.
 
-That is the outcome this design was built for, not a regression. Without a second source
-the fallback would have been the host wall clock, silently, exactly when the trusted
-clock is most needed. :func:`record_http_date` is kept as the seam: any Stripe response
-can restore source 1 by handing it a ``Date`` header, and access decisions pick it up
-with no other change.
-
-The database is the right source to land on: it is a round trip already being made, on
+The database is the right second source: it is a round trip already being made, on
 infrastructure under the same control, and it is shared by every app instance — so two
 servers with differently-drifted clocks still agree, which per-host time cannot promise.
 
@@ -104,10 +99,16 @@ def now() -> datetime:
     Stripe's captured server time, else the database's, else the process clock — see
     the module docstring for why there are three.
 
-    The order matters: while Stripe's time is present it stays authoritative, because
-    every date it is compared against came from Stripe too. The database is what keeps
-    the answer trustworthy once those calls go away, instead of silently degrading to
-    the host's own clock.
+    The order matters, though the REASON for it changed with the in-house billing
+    cutover. It used to be coherence: every date being compared against came from Stripe,
+    so Stripe's clock was the one that produced them. Those dates now come from our own
+    Postgres, so that argument belongs to the database instead.
+
+    Stripe still goes first for a different and still-good reason: it is FREE. Its time
+    rode in on a call already made, whereas source 2 costs a ``SELECT now()``. Both are
+    externally-disciplined clocks that agree to well inside the day-granularity these
+    decisions turn on, so taking the one already in hand loses nothing. What neither may
+    degrade to unnoticed is the host's own wall clock, which is the whole point.
     """
     if has_app_context():
         recorded = getattr(g, _G_KEY, None)
