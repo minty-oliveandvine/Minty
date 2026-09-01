@@ -3,7 +3,7 @@
 ``access.is_subscribed`` answers "does this phase mean they hold it" and is right about
 that. What ``_has_active_subscription`` has to answer is "do they hold it *now*", and the
 phase cannot say: nothing transitions a lapsed paid module to ``expired``. The sweep
-revokes access without touching the phase, and ``end_dunning(status="closed")``
+revokes access without touching the phase, and ``end_group_dunning(status="closed")``
 deliberately leaves a given-up account ``past_due`` because the debt is real.
 
 So a customer whose subscription lapsed for non-payment was told, forever after, that they

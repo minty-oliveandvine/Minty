@@ -579,11 +579,13 @@ def _owned(user_id, payment_method_id: str) -> tuple[str, dict]:
 
     try:
         pm = retrieve_payment_method(payment_method_id)
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "payment methods: could not read {} for payer {}", payment_method_id, user_id
         )
-        raise PaymentMethodError("That payment method couldn't be found.", status=404)
+        raise PaymentMethodError(
+            "That payment method couldn't be found.", status=404
+        ) from exc
 
     pm_customer = (pm or {}).get("customer")
     if isinstance(pm_customer, dict):
@@ -685,12 +687,16 @@ def _valid_expiry(exp_month, exp_year) -> tuple[int, int]:
     """
     try:
         month, year = int(exp_month), int(exp_year)
-    except (TypeError, ValueError):
-        raise PaymentMethodError("Enter the expiry as a month and a year.", status=422)
+    except (TypeError, ValueError) as exc:
+        raise PaymentMethodError(
+            "Enter the expiry as a month and a year.", status=422
+        ) from exc
 
-    if not 1 <= month <= 12:
+    # 12 and 100 are calendar facts, not tunables: naming them MONTHS_IN_YEAR /
+    # CENTURY would read worse at the point of use than the numbers do.
+    if not 1 <= month <= 12:  # noqa: PLR2004
         raise PaymentMethodError("That expiry month doesn't exist.", status=422)
-    if year < 100:
+    if year < 100:  # noqa: PLR2004
         # "29" for 2029 — what a customer types into a two-box expiry field.
         year += 2000
     now = clock.now()

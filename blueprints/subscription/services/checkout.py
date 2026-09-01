@@ -38,8 +38,8 @@ from blueprints.subscription.services.catalog import PlanView
 
 # Stripe is the payment RAIL, not the biller: what survives here is card capture,
 # customer identity and the billing portal. Nothing that creates or edits a Stripe
-# SUBSCRIPTION is imported any more — those functions still exist in stripe_client,
-# but this module retired its last caller with the Stripe biller.
+# SUBSCRIPTION is imported any more, and those functions no longer exist — they were
+# deleted from stripe_client once this module retired their last caller.
 from blueprints.subscription.services.stripe_client import (
     attach_payment_method,
     create_billing_portal_session,
@@ -69,6 +69,11 @@ PAID_CANCEL_ACCESS_DAYS = 30
 
 # Length of the card-free onboarding trial, in days.
 TRIAL_PERIOD_DAYS = 30
+
+# What ``modules.set_entity_module`` returns on success. It answers with a Flask-style
+# ``(payload, status)`` pair rather than raising, so the access write has to be checked
+# against the code. Named because a bare 200 in a billing path reads as a magic number.
+HTTP_OK = 200
 
 
 class CheckoutError(Exception):
@@ -125,7 +130,7 @@ def _has_active_subscription(entity_id, function_code: str) -> bool:
     "Already has it" is asked of the PHASE **and** of whether access is still granted.
     The phase alone answers a question about the past: nothing transitions a lapsed paid
     module to ``expired`` — the sweep revokes access without touching the phase, and
-    ``end_dunning(status="closed")`` deliberately leaves a given-up account ``past_due``
+    ``end_group_dunning(status="closed")`` deliberately leaves a given-up card ``past_due``
     because the debt is real. So a customer whose subscription lapsed for non-payment was
     told forever after that they "already have an active subscription", and could never
     buy it back. ``is_subscribed``'s own reasoning is the fix: *cancelled / expired —
@@ -863,7 +868,7 @@ def _set_module_access(entity_id, function_code: str, enabled: bool) -> None:
         _data, status = set_entity_module(
             entity_id, function_code, enabled, actor="subscription"
         )
-        if status != 200:
+        if status != HTTP_OK:
             logger.warning(
                 "trial: access write for {} {} returned {}: {}",
                 entity_id,
@@ -1390,9 +1395,6 @@ def _billed_codes_in_house(entity_id) -> set[str]:
     """
     now = clock.now()
     rows = list(store.module_rows_for_entity(entity_id))
-    payer_user_id = next(
-        (r.payer_user_id for r in rows if getattr(r, "payer_user_id", None)), None
-    )
     # Best-effort: a failure here must not cost anyone their purchase. Falling back to
     # None drops the winding-down module from the set, which is the pre-existing
     # behaviour — it can overcharge a wind-down overlap, never undercharge.

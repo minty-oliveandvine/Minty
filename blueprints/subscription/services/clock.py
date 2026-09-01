@@ -9,17 +9,24 @@ first available of three sources:
 
 1. **Stripe's** server time, captured from the ``Date`` header of a fetch made during
    this request. The same clock Stripe's own timestamps come from, so comparisons
-   against them are exact.
+   against them are exact. NOTHING WRITES THIS ANY MORE — see below.
 2. **The database's** clock — one ``SELECT now()`` against Postgres, cached per request.
 3. The process clock, as a last resort.
 
-Source 2 exists because source 1 is a SIDE EFFECT of a call made for another reason. As
-billing moves in-house, ``list_customer_subscriptions`` stops being called — and with it
-the only writer of Stripe's time. Without a second source the fallback would be the host
-wall clock, silently, exactly when the trusted clock is most needed. Worse, during a
-partial migration it would vary per request depending on which code path ran first.
+Source 2 exists because source 1 was a SIDE EFFECT of a call made for another reason,
+and that call is gone. This module used to predict it: as billing moved in-house,
+``stripe_client.list_customer_subscriptions`` would stop being called, and with it the
+only writer of Stripe's time. That has now happened — the Stripe-Subscription helpers
+were deleted with the in-house billing cutover, so source 1 is a live reader with no
+writer and :func:`now` answers from the DATABASE in practice.
 
-The database is the right second source: it is a round trip already being made, on
+That is the outcome this design was built for, not a regression. Without a second source
+the fallback would have been the host wall clock, silently, exactly when the trusted
+clock is most needed. :func:`record_http_date` is kept as the seam: any Stripe response
+can restore source 1 by handing it a ``Date`` header, and access decisions pick it up
+with no other change.
+
+The database is the right source to land on: it is a round trip already being made, on
 infrastructure under the same control, and it is shared by every app instance — so two
 servers with differently-drifted clocks still agree, which per-host time cannot promise.
 
@@ -80,7 +87,7 @@ def database_now() -> datetime | None:
         from models.db import db
 
         value = db.session.execute(text("SELECT now()")).scalar()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a clock lookup must never break a request
         return None
     if value is None:
         return None

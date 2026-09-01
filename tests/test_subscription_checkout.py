@@ -173,10 +173,6 @@ def _wire(monkeypatch, *, default_pm=None, module_rows=None, billed_codes=(),
         store, "billing_cycle_for_user", lambda uid: (anchor, "HKD")
     )
     monkeypatch.setattr(store, "start_billing_cycle", lambda uid, at, cur: None)
-    monkeypatch.setattr(
-        store, "set_paid_through",
-        lambda uid, until: calls["paid_through"].append((uid, until)),
-    )
     # The card this company is nominated onto. ``paid_through`` mirrors the account's, so
     # the cases below describe one card paying for everything — which is what an account
     # looks like until somebody nominates a second.

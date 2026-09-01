@@ -149,10 +149,6 @@ def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
     )
     monkeypatch.setattr(store, "start_billing_cycle", _start_cycle)
     monkeypatch.setattr(
-        store, "set_paid_through",
-        lambda uid, until: calls["paid_through"].append((uid, until)),
-    )
-    monkeypatch.setattr(
         store, "billing_plan_for_codes",
         lambda codes: _Plan(40000 if len(set(codes)) > 1 else 28000),
     )

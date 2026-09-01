@@ -165,13 +165,6 @@ def _wire(monkeypatch, *, accounts=None, rows=None, plan=_Plan(), issued=None,
         store, "mark_extensions_invoiced",
         lambda ids: calls["marked"].append(list(ids)) or len(list(ids)),
     )
-    monkeypatch.setattr(
-        store, "set_paid_through",
-        lambda uid, until: calls["paid_through"].append((uid, until)),
-    )
-    monkeypatch.setattr(
-        store, "begin_dunning", lambda uid, when: calls["dunning"].append((uid, when))
-    )
 
     def _group_paid_through(group_id, until):
         group = _group(group_id)

@@ -359,7 +359,7 @@ def test_a_mid_period_charge_is_still_collectable(app, monkeypatch):
 
 
 def test_a_successful_manual_payment_switches_the_modules_back_on(app, monkeypatch):
-    """``end_dunning`` flips the phase, but it is skipped when there is no stamp — the
+    """``end_group_dunning`` flips the phase, but it is skipped when there is no stamp — the
     exact case this function exists to serve. So the payer paid and stayed switched off
     until the nightly sweep. The scheduled path always restored access explicitly; this
     one only appeared to, because dunning was usually running by the time anyone clicked.
