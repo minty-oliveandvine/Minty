@@ -5,10 +5,6 @@ layer and the optional cache model can import it without creating an import
 cycle through ``models.db``.
 """
 
-# Stripe subscription statuses that grant module access (combined with an
-# unexpired grace window at read time).
-ACTIVE_STATUSES = ("active", "trialing")
-
 # --- App-tracked lifecycle phases (entity_module_subscription.phase) ----------
 PHASE_TRIAL = "trial"
 PHASE_ACTIVE = "active"
@@ -16,14 +12,6 @@ PHASE_PAST_DUE = "past_due"
 PHASE_SCHEDULED_CANCEL = "scheduled_cancel"
 PHASE_CANCELLED = "cancelled"
 PHASE_EXPIRED = "expired"
-SUBSCRIPTION_PHASES = (
-    PHASE_TRIAL,
-    PHASE_ACTIVE,
-    PHASE_PAST_DUE,
-    PHASE_SCHEDULED_CANCEL,
-    PHASE_CANCELLED,
-    PHASE_EXPIRED,
-)
 
 # --- Cancel-extension lifecycle (entity_module_subscription.extension_state) ---
 # The extension covers the access days AFTER the billing anchor, so it bills ON the
@@ -35,16 +23,6 @@ SUBSCRIPTION_PHASES = (
 #   deleted / credited / refunded -> terminal undo outcomes
 EXT_PENDING = "pending"
 EXT_INVOICED = "invoiced"
-EXT_DELETED = "deleted"
-EXT_CREDITED = "credited"
-EXT_REFUNDED = "refunded"
-EXTENSION_STATES = (
-    EXT_PENDING,
-    EXT_INVOICED,
-    EXT_DELETED,
-    EXT_CREDITED,
-    EXT_REFUNDED,
-)
 
 # --- Audit actions (subscription_audit_log.action) ----------------------------
 AUDIT_CANCEL = "cancel"

@@ -26,7 +26,7 @@ place money can move from.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -96,7 +96,12 @@ MAX_PER_PAGE = 100
 # A date far past anything real, used to park rows with no date at the END of an
 # ascending sort. ``None`` cannot be compared against a datetime, and mapping it to
 # ``datetime.min`` would sort "nothing scheduled" above "due tomorrow".
-_NO_DATE = datetime.max
+# Aware, because every date it is sorted against is: the columns behind ``_next_date``
+# are all ``DateTime(timezone=True)``, so Postgres hands them back with a tzinfo and a
+# naive sentinel raises "can't compare offset-naive and offset-aware datetimes" the
+# moment one row has no date and another does. SQLite returns them naive, which is why
+# the suite never saw it.
+_NO_DATE = datetime.max.replace(tzinfo=timezone.utc)
 
 
 def _fmt(moment) -> str | None:
@@ -748,7 +753,7 @@ def _money(amount_minor, currency_code) -> str:
                 currency_code=currency_code.upper()
             ).first()
             symbol = (row.symbol if row and row.symbol else currency_code.upper())
-        except Exception:
+        except Exception:  # noqa: BLE001 - a missing symbol must not cost the amount
             db.session.rollback()
             symbol = currency_code.upper()
     space = " " if symbol[-1:].isalpha() else ""
@@ -941,8 +946,7 @@ def build_payer_invoices(
     the request that could reach another payer's history. ``entity_id`` narrows within
     that; an entity the caller does not pay for simply matches nothing.
     """
-    from blueprints.subscription.models.subscription_invoice import (
-        SubscriptionInvoice, SubscriptionInvoiceLine)
+    from blueprints.subscription.models.subscription_invoice import SubscriptionInvoice
 
     invoices = (
         SubscriptionInvoice.query.filter_by(payer_user_id=str(user_id))

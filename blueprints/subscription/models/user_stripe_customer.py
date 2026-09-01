@@ -53,7 +53,7 @@ class UserStripeCustomer(db.Model):
     paid_through = db.Column(db.DateTime(timezone=True), nullable=True)
     # No ``status`` column. It held active/past_due/closed and looked like the account's
     # state, but nothing ever read it: collection is driven by ``dunning_started_at``
-    # (see ``store.accounts_in_dunning``) and access by the module row's ``phase``. Two
+    # (see ``store.groups_in_dunning``) and access by the module row's ``phase``. Two
     # fields claiming to hold billing state, one of them decorative, is how they drift.
 
     # --- dunning: what COLLECTION needs between retries ---------------------------

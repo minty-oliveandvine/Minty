@@ -293,15 +293,10 @@ def _wire_runner(monkeypatch, *, account, invoices=None, paid=True, group=None):
     # The runner reads the live policy; these tests are about the runner, not the table.
     # Pinning it to the shipped defaults also keeps them out of an app context.
     monkeypatch.setattr(policy, "current", lambda: policy.DEFAULTS)
-    monkeypatch.setattr(store, "accounts_in_dunning", lambda: [account])
     monkeypatch.setattr(store, "groups_in_dunning", lambda: [group])
     monkeypatch.setattr(store, "billing_groups_for_payer", lambda uid: [group])
     monkeypatch.setattr(store, "billing_group", lambda gid: group)
     monkeypatch.setattr(store, "customer_mapping_for_user", lambda uid: account)
-    monkeypatch.setattr(
-        store, "set_paid_through",
-        lambda uid, until: calls["paid_through"].append((uid, until)),
-    )
     # Recorded under the PAYER, so the assertions below read the same whether the cycle
     # lives on the account or on its one card.
     monkeypatch.setattr(
@@ -309,18 +304,10 @@ def _wire_runner(monkeypatch, *, account, invoices=None, paid=True, group=None):
         lambda gid, until: calls["paid_through"].append((account.user_id, until)),
     )
     monkeypatch.setattr(
-        store, "end_dunning",
-        lambda uid, status="active": calls["ended"].append((uid, status)),
-    )
-    monkeypatch.setattr(
         store, "end_group_dunning",
         lambda gid, *, status="active": calls["ended"].append(
             (account.user_id, status)
         ),
-    )
-    monkeypatch.setattr(
-        store, "record_dunning_attempt",
-        lambda uid: calls.__setitem__("attempts", calls["attempts"] + 1),
     )
     monkeypatch.setattr(
         store, "record_group_dunning_attempt",

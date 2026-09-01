@@ -44,7 +44,10 @@ class EntityModuleSubscription(db.Model):
     )
 
     # --- lifecycle ---
-    phase = db.Column(db.String(30), nullable=False)  # see constants.SUBSCRIPTION_PHASES
+    phase = db.Column(db.String(30), nullable=False)
+    # One of: trial, active, past_due, scheduled_cancel, cancelled, expired.
+    # Each has a PHASE_* constant in ``constants``; there is no tuple of them all,
+    # because nothing validated against one.
     # Single access-end authority: trial end, cancel extension, or past-due grace.
     app_access_until = db.Column(db.DateTime(timezone=True), nullable=True)
 
@@ -93,7 +96,11 @@ class EntityModuleSubscription(db.Model):
     # successful charge, by termination and by trial expiry.
     billed_through = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
 
-    # --- cancel extension (see constants.EXTENSION_STATES) ---
+    # --- cancel extension ---
+    # ``extension_state`` is one of: pending, invoiced, or one of the terminal undo
+    # outcomes deleted / credited / refunded. Only pending and invoiced have constants
+    # (``EXT_PENDING`` / ``EXT_INVOICED``) -- the undo outcomes were written by the
+    # Stripe invoice-item path, which went with the in-house billing cutover.
     # The amount is recorded here and collected by the next renewal run, so cancelling
     # never depends on a card clearing. Under Stripe this was a pending invoice ITEM
     # swept onto the anchor invoice, and the row carried its id instead.

@@ -1274,3 +1274,28 @@ def test_the_handover_routes_answer_preflight_without_a_token(app):
         response = app.test_client().options(path)
         assert response.status_code == 204, path
         assert "Access-Control-Allow-Origin" in response.headers, path
+
+
+def test_sorting_by_next_billing_mixes_dated_and_undated_rows(app):
+    """A row with no next date must sort beside rows that have one.
+
+    This is the crash the SQLite-backed suite cannot otherwise see. The dates behind
+    ``_next_date`` come from ``trial_end`` / ``paid_through`` / ``app_access_until``,
+    all declared ``DateTime(timezone=True)`` — so Postgres hands them back AWARE while
+    SQLite hands them back naive. The undated rows are parked on a ``_NO_DATE``
+    sentinel, and while that sentinel was ``datetime.max`` (naive) the comparison blew
+    up with "can't compare offset-naive and offset-aware datetimes" the moment one
+    company had nothing scheduled and another did — a 500 on
+    ``GET /api/me/subscriptions?sort=next_billing`` in production only.
+
+    Aware datetimes are used here deliberately: they are what the real query returns.
+    """
+    from blueprints.subscription.services import portal
+
+    dated = {"_next_date": datetime(2026, 9, 1, tzinfo=timezone.utc)}
+    undated = {"_next_date": None}
+    rows = [undated, dated]
+
+    rows.sort(key=portal._sort_key("next_billing"))
+
+    assert rows == [dated, undated], "undated rows sort last, not first"

@@ -191,15 +191,3 @@ def bundle_plan() -> BundlePlanView | None:
         billing_interval=interval,
         billing_interval_count=count,
     )
-
-
-def invalidate(_customer_id=None) -> None:
-    """No-op. Kept so call sites that used to bust the Stripe cache still read cleanly.
-
-    ``stripe_state`` cached Products, Prices and Subscriptions per request and had to be
-    invalidated after every write. The catalog is a table read now — always current, with
-    nothing to stale — so the call has nothing to do. Left in place rather than removed
-    from a dozen call sites, where each deletion would be a chance to remove one that
-    still mattered.
-    """
-    return None

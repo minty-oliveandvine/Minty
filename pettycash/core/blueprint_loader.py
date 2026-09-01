@@ -19,6 +19,10 @@ _EXPECTED_BLUEPRINTS = frozenset(
         "blueprints.xero",
         "blueprints.invitation",
         "blueprints.legal",
+        # Registered without a url_prefix and carrying the 15 payer-portal API
+        # routes. Left out of this set, an import failure in routes/portal.py would
+        # drop every one of them at DEBUG and nothing would say so.
+        "blueprints.subscription",
     }
 )
 

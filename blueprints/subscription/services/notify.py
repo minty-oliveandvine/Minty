@@ -110,7 +110,7 @@ def _supports_dash() -> bool:
     # ``%-d`` is glibc; Windows strftime rejects it outright. These jobs run under Task
     # Scheduler on a Windows host, so the platform check is not academic.
     try:
-        datetime(2026, 3, 2).strftime("%-d")
+        datetime(2026, 3, 2).strftime("%-d")  # noqa: DTZ001 - probes strftime, not a moment
         return True
     except (ValueError, TypeError):
         return False
@@ -606,8 +606,11 @@ class InlineImageMessage(Message):
         if msg.get_content_type() != "multipart/mixed":
             return msg
         parts = msg.get_payload()
-        # parts[0] is the alternative body; anything after it is an attachment.
-        if len(parts) < 2 or not all(part.get("Content-ID") for part in parts[1:]):
+        # parts[0] is the alternative body; anything after it is an attachment. Fewer
+        # than a body plus one attachment means there is nothing to relate.
+        BODY_PLUS_ONE_ATTACHMENT = 2
+        if (len(parts) < BODY_PLUS_ONE_ATTACHMENT
+                or not all(part.get("Content-ID") for part in parts[1:])):
             return msg
         msg.set_type("multipart/related")
         # Names which part is the root document. Without it a strict client has to guess
@@ -661,7 +664,7 @@ def _claim(user_id, event: str, dedupe_key: str):
     db.session.add(row)
     try:
         db.session.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a lost dedupe race is somebody else's send
         # Almost certainly the unique constraint: a concurrent run claimed it first.
         # Either way somebody else owns this send.
         db.session.rollback()
@@ -754,8 +757,8 @@ def notify(user_id, event: str, *, dedupe_key: str, context: dict | None = None)
             from models.db import db as _db
 
             _db.session.rollback()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - already failing; the rollback is the salvage
+            logger.exception("notify: rollback after a failed {} send also failed", event)
         return False
 
 

@@ -338,7 +338,7 @@ def _manual_target(invoices: list[dict], key: str | None) -> dict | None:
 def _restore_access(user_id) -> None:
     """Switch this payer's modules back on now that the balance is settled.
 
-    ``_settle_period`` moves ``paid_through`` and ``end_dunning`` moves the phases, but
+    ``_settle_period`` moves ``paid_through`` and ``end_group_dunning`` moves the phases, but
     neither touches ``entity_function_map`` — and access is a separate write. Without
     this the money is collected, the subscription reads active, and the customer is
     still bounced off every page in it. The daily sweep would eventually notice, so this
@@ -422,7 +422,7 @@ def collect_due(now, limit: int | None = None) -> dict:
         attempts = int(group.dunning_attempts or 0)
         entry = {"user_id": user_id, "billing_group_id": group.id,
                  "attempts": attempts}
-        # The episode this entry belongs to, stamped now because ``end_dunning`` clears
+        # The episode this entry belongs to, stamped now because ``end_group_dunning`` clears
         # ``dunning_started_at`` before the notification is composed. Without it a payer
         # who lapses, recovers, and lapses again months later would dedupe against the
         # first episode's email and hear nothing the second time.
@@ -753,7 +753,7 @@ def retry_now(user_id, entity_id=None) -> dict:
         # without ever being dunned has nothing to clear.
         if started is not None:
             store.end_group_dunning(group.id, status="active")
-        # Explicitly, and NOT only via ``end_dunning``. That call flips the module phase
+        # Explicitly, and NOT only via ``end_group_dunning``. That call flips the module phase
         # back from past_due, but it is skipped entirely when there is no stamp — so a
         # payer with a real unpaid invoice and no dunning record (the case this function
         # goes out of its way to serve) paid, and was left switched off until the nightly

@@ -62,8 +62,6 @@ def _wire(monkeypatch, *, anchor=ANCHOR, issued=None, raises=None, existing=None
     monkeypatch.setattr(store, "billing_plan_for_codes", lambda codes: _Plan())
     monkeypatch.setattr(store, "billing_group_for_entity",
                         lambda eid, uid=None: group)
-    monkeypatch.setattr(store, "set_paid_through",
-                        lambda uid, until: calls["paid_through"].append((uid, until)))
     # Recorded under the payer so the assertions read the same: the cycle that starts
     # here is the new payer's card, and they have exactly one.
     monkeypatch.setattr(

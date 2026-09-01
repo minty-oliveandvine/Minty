@@ -45,21 +45,6 @@ def test_bad_header_leaves_host_clock(app):
     assert abs((val - datetime.now(UTC)).total_seconds()) < 2
 
 
-def test_stripe_client_records_date_header(app):
-    from blueprints.subscription.services import clock
-    from blueprints.subscription.services import stripe_client
-
-    class _Resp:
-        headers = {"Date": "Wed, 01 Jul 2026 12:00:00 GMT"}
-
-    class _Result:
-        last_response = _Resp()
-
-    with app.app_context():
-        stripe_client._record_server_time(_Result())
-        assert clock.now() == datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
-
-
 def test_grants_access_uses_trusted_clock(app):
     """With Stripe's server time pinned ahead of the host clock, access is decided by
     that clock, not the host clock.

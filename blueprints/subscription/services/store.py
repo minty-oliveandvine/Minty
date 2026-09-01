@@ -64,10 +64,6 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 # --- Payer (user) -> Stripe customer / subscription --------------------------
 
 
@@ -338,23 +334,6 @@ def paid_through_for_entity(entity_id) -> datetime | None:
     return row.paid_through if row is not None else None
 
 
-def set_paid_through(user_id, until: datetime) -> None:
-    """Record what the payer has paid for. Only ever moves FORWARD.
-
-    A late or replayed event carrying an older period must not claw back access the
-    customer has already been given — the refund case is a cancellation, which is
-    expressed by ``app_access_until`` rather than by winding this back.
-    """
-    row = customer_mapping_for_user(user_id)
-    if row is None:
-        logger.warning("billing: no billing account for user {}", user_id)
-        return
-    if row.paid_through is not None and until <= row.paid_through:
-        return
-    row.paid_through = until
-    db.session.commit()
-
-
 def pending_extensions_for_payer(user_id) -> list[EntityModuleSubscription]:
     """Cancel-extensions this payer owes but has not been billed for yet.
 
@@ -464,136 +443,6 @@ def entity_ids_with_billed_modules(user_id=None) -> set[str]:
         str(row.entity_id)
         for row in query.with_entities(EntityModuleSubscription.entity_id).all()
     }
-
-
-def set_payer_module_phase(
-    user_id, *, from_phase: str, to_phase: str, skip_covered_at: datetime | None = None
-) -> int:
-    """Move every one of a payer's module rows from one phase to another.
-
-    ``skip_covered_at`` excludes rows whose ``billed_through`` is still ahead of that
-    instant — days somebody has already paid for. Used by ``begin_dunning``: a payer
-    whose card fails has their rows marked past due, but an entity transferred TO them
-    was invoiced at accept and is paid for regardless of what their card did since.
-    Without the exclusion that entity joins a dunning run it has no debt in, and — because
-    ``end_dunning`` deliberately leaves rows past due when collection is given up — it is
-    then terminated by the access sweep on a debt that was never its own.
-
-    Exists because the module PHASE and the account's dunning state have to agree, and
-    only the account was being written. When a renewal failed, ``begin_dunning`` marked
-    the account and the rows stayed ``active`` — so ``access.access_end`` returned
-    ``paid_through`` with no grace and access died the same day the card did. The whole
-    ``PAST_DUE_GRACE_DAYS`` policy was unreachable for an in-house payer.
-
-    Under Stripe this transition arrived from the webhook mirror (``mirror.phase_for_view``
-    maps ``past_due`` -> the phase). In-house there is no webhook, so it happens here.
-
-    Narrow on purpose: it only moves rows that are IN ``from_phase``, so a trial, a
-    cancellation or an expiry is never swept up by a billing event that has nothing to
-    do with it. Returns the number of rows moved.
-    """
-    query = EntityModuleSubscription.query.filter(
-        EntityModuleSubscription.payer_user_id == str(user_id),
-        EntityModuleSubscription.phase == from_phase,
-    )
-    if skip_covered_at is not None:
-        query = query.filter(
-            db.or_(
-                EntityModuleSubscription.billed_through.is_(None),
-                EntityModuleSubscription.billed_through <= skip_covered_at,
-            )
-        )
-    moved = query.update(
-        {EntityModuleSubscription.phase: to_phase}, synchronize_session=False
-    )
-    db.session.commit()
-    if moved:
-        logger.info(
-            "dunning: moved {} module row(s) for payer {} from {} to {}",
-            moved, user_id, from_phase, to_phase,
-        )
-    return moved
-
-
-def begin_dunning(user_id, failed_at: datetime) -> None:
-    """Record that collection has started failing. Does NOT restart an existing run.
-
-    The start time anchors the whole retry schedule, so a second failure arriving mid-run
-    (a retry that also failed, or a duplicate webhook) must not move it — that would
-    extend dunning indefinitely, one failure at a time, past the access grace window.
-    """
-    row = customer_mapping_for_user(user_id)
-    if row is None:
-        logger.warning("dunning: no billing account for user {}", user_id)
-        return
-    if row.dunning_started_at is None:
-        row.dunning_started_at = failed_at
-        row.dunning_attempts = 0
-    db.session.commit()
-    # The rows have to move too, or the past-due grace never applies: access is read
-    # from the module phase, not from the account.
-    #
-    # ``skip_covered_at`` spares rows already paid for past this moment — an entity
-    # transferred to this payer and invoiced at accept. Their card failing says nothing
-    # about days that were collected before it did.
-    set_payer_module_phase(
-        user_id,
-        from_phase=PHASE_ACTIVE,
-        to_phase=PHASE_PAST_DUE,
-        skip_covered_at=failed_at,
-    )
-
-
-def record_dunning_attempt(user_id) -> int:
-    """Count a retry that has been MADE (whatever its outcome). Returns the new total.
-
-    Incremented on attempt rather than on failure: a retry that errored before reaching
-    the processor still consumed its slot, and not counting it would loop on the same
-    slot forever.
-    """
-    row = customer_mapping_for_user(user_id)
-    if row is None:
-        return 0
-    row.dunning_attempts = int(row.dunning_attempts or 0) + 1
-    db.session.commit()
-    return row.dunning_attempts
-
-
-def end_dunning(user_id, *, status: str = "active") -> None:
-    """Collection resolved — paid (``active``) or given up on (``closed``).
-
-    Clears the schedule either way, so a later failure starts a fresh run rather than
-    inheriting a spent attempt count.
-    """
-    row = customer_mapping_for_user(user_id)
-    if row is None:
-        return
-    row.dunning_started_at = None
-    row.dunning_attempts = 0
-    db.session.commit()
-    # Recovered: the money is in, so the rows go back to active and the grace window
-    # closes behind them. On give-up they are LEFT past_due — the debt is real and
-    # unpaid, and access lapses when the grace runs out (see access.access_end).
-    if status == "active":
-        set_payer_module_phase(user_id, from_phase=PHASE_PAST_DUE, to_phase=PHASE_ACTIVE)
-    # ``status`` is not stored: nothing read the column it used to write. It still
-    # distinguishes "they paid" from "we gave up", which is worth saying out loud.
-    logger.info("dunning: collection ended for payer {} ({})", user_id, status)
-
-
-def accounts_in_dunning() -> list[UserStripeCustomer]:
-    """Payers with collection in progress, oldest failure first.
-
-    Oldest-first so a limited run always works on the accounts closest to being given up
-    on — the ones where a missed attempt costs the most.
-    """
-    return (
-        UserStripeCustomer.query.filter(
-            UserStripeCustomer.dunning_started_at.isnot(None)
-        )
-        .order_by(UserStripeCustomer.dunning_started_at)
-        .all()
-    )
 
 
 # --- Billing groups: one card, and everything it pays for ---------------------
@@ -872,7 +721,7 @@ def set_group_module_phase(
 ) -> int:
     """Move the module rows of THIS GROUP'S companies from one phase to another.
 
-    The containment primitive. ``set_payer_module_phase`` moves everything the payer has,
+    The containment primitive. A payer-wide phase move (every module on every card at once)
     which is the behaviour a second card exists to end: one declining card must not put a
     company paid for by a different, healthy card into the past-due grace window and then
     terminate it.
@@ -1125,7 +974,7 @@ def transfer_entity_payer(entity_id, new_payer_user_id, *, billed_through=None) 
 def payer_is_dunning(user_id) -> bool:
     """Whether collection is currently failing for this payer.
 
-    The single-user form of ``accounts_in_dunning``. A transfer is refused while either
+    The single-user form of ``groups_in_dunning``. A transfer is refused while either
     side is in it: the outgoing payer because the debt is theirs and splitting it in half
     leaves it uncollectable, the incoming payer because they are in no state to take on
     another bill.
