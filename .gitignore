@@ -34,3 +34,7 @@ local_before_restore_*.dump
 # Flask instance folder — generated PDFs/DOCX of real reports, temp files.
 # Never commit: these contain customer financial data.
 instance/
+
+# Flask-Session FileSystemCache scratch dir (created when migrations run with
+# a non-database session backend; see docker/docker-entrypoint.sh).
+flask_session/

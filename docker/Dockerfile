@@ -20,7 +20,10 @@ RUN uv sync --active --frozen --no-dev --no-default-groups --no-install-project
 
 COPY . .
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# `sed` strips CRLF so the script still runs when the repo is checked out on
+# Windows with autocrlf.
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

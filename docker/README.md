@@ -150,22 +150,33 @@ This repository is **one piece of a larger system** made of separate repos:
 | Repo | What it is | Typical local port |
 |------|------------|--------------------|
 | **This repo** (pettycash) | Flask backend + database | app `5001`, db `5432` |
-| Billing backend | Separate service | — |
-| Billing frontend | Separate UI | `3000` (`FRONTEND_APP_URL`) |
-| Onboarding frontend | Separate UI | — |
+| Billing backend | Django API (Module 2) | `8000` (`BILLING_APP_URL`) |
+| Billing frontend | Next.js UI (Module 2) | `3000` (`FRONTEND_APP_URL`) |
+| Onboarding frontend | Next.js UI | `3001` (`ONBOARDING_APP_URL`) |
 
-The Docker setup in this folder starts **only this repo** (the Flask app and its
-database). The other three repos are cloned and run separately, each with their
-own setup.
+The Docker setup in **this** folder starts **only this repo** (the Flask app and
+its database) — handy when you're working on Module 1 alone.
+
+**Want all four at once?** Use [`stack/`](stack/README.md) instead:
+
+```bash
+cd docker/stack
+cp .env.example .env
+docker compose up --build
+```
+
+That brings up the Flask app, the billing backend, both Next.js UIs and one
+shared database, already wired to each other. It expects the four repos to be
+checked out side by side under a common parent folder.
 
 **Important — shared secret:** the billing backend must use the **same
 `SECRET_KEY`** as this repo, or JWTs won't verify across the two services. If you
 run billing locally too, make sure the `SECRET_KEY` in your `.env` here matches
-the one in the billing backend's config.
+the one in the billing backend's config. (The `stack/` setup handles this for
+you — it injects one key into both.)
 
-> A combined "run everything at once" setup (one command to start all four
-> repos) is planned as a separate orchestration repo. For now, start each repo
-> on its own.
+> The two setups use **separate database volumes**, so data does not carry over
+> between them. Pick one and stick with it.
 
 ---
 

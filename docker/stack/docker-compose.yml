@@ -1,0 +1,249 @@
+# Minty — the whole system, one command.
+#
+# Starts all four repos plus their shared PostgreSQL:
+#
+#   db                 PostgreSQL 15                   localhost:5432
+#   minty              Module 1 — Flask (this repo)    localhost:5001
+#   billing-backend    Module 2 — Django API           localhost:8000
+#   billing-frontend   Module 2 — Next.js UI           localhost:3000
+#   onboarding         Onboarding — Next.js UI         localhost:3001
+#
+# The four repos are checked out side by side under a common parent
+# (C:\Projects\New_Repo\...). Build contexts below reach out of this repo into
+# the siblings; override the *_PATH variables in .env if your layout differs.
+#
+# Run it from THIS directory so docker-compose.override.yml (hot-reload for the
+# two Python services) and .env are picked up automatically:
+#
+#   cd docker/stack
+#   cp .env.example .env
+#   docker compose up --build
+#
+# See README.md in this folder.
+#
+# Requires Docker Compose v2.24+ (for `env_file: required: false`).
+name: minty-stack
+
+services:
+  # ---------------------------------------------------------------------------
+  # Shared database. Module 1 (Flask) and Module 2 (Django) both live in the
+  # `pettycashv2` schema of this one database — that sharing is the whole point,
+  # so they must never be pointed at separate databases.
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: minty-stack-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-minty_ref}
+      POSTGRES_USER: ${POSTGRES_USER:-minty_ref_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minty_ref_pass}
+    ports:
+      # Host port is configurable so a locally-installed Postgres on 5432 doesn't
+      # clash. Override in .env, e.g. DB_HOST_PORT=5433. The services always
+      # reach the db internally on 5432 regardless of this setting.
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minty_ref_user} -d ${POSTGRES_DB:-minty_ref}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Module 1 — Flask. Owns the schema: its entrypoint creates `pettycashv2` and
+  # runs the Alembic migrations, so everything else waits for it to be healthy.
+  # ---------------------------------------------------------------------------
+  minty:
+    build:
+      context: ${MINTY_PATH:-../..}
+      dockerfile: docker/Dockerfile
+    container_name: minty-stack-app
+    restart: unless-stopped
+    env_file:
+      # Layered lowest-first; the `environment:` block below always wins over
+      # both. Your existing per-repo .env supplies the secrets (Stripe, Xero,
+      # mail, S3) so you don't have to copy them into the stack .env.
+      - path: ${MINTY_PATH:-../..}/.env
+        required: false
+      - path: ./.env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-development}
+      FLASK_DEBUG: ${FLASK_DEBUG:-False}
+      PYTHONUNBUFFERED: "1"
+      # SECRET_KEY is shared with billing-backend below — JWTs minted by Flask
+      # are verified by Django with this same key. They MUST match.
+      SECRET_KEY: ${SECRET_KEY:-minty_stack_shared_secret_key}
+      SESSION_SECRET: ${SESSION_SECRET:-minty_stack_session_secret}
+      WTF_CSRF_SECRET_KEY: ${WTF_CSRF_SECRET_KEY:-minty_stack_csrf_secret}
+      # `db` is the compose service name — Docker's internal DNS resolves it.
+      LOCAL_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-minty_ref_user}:${POSTGRES_PASSWORD:-minty_ref_pass}@db:5432/${POSTGRES_DB:-minty_ref}
+      RDS_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-minty_ref_user}:${POSTGRES_PASSWORD:-minty_ref_pass}@db:5432/${POSTGRES_DB:-minty_ref}
+      # Cross-module links. These end up in the browser's address bar (redirects
+      # and email links), so they are localhost URLs, NOT container names.
+      PUBLIC_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      FRONTEND_APP_URL: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      ONBOARDING_APP_URL: ${ONBOARDING_PUBLIC_URL:-http://localhost:3001}
+      BILLING_APP_URL: ${BILLING_BACKEND_PUBLIC_URL:-http://localhost:8000}
+      # Must be registered verbatim in the Xero app's redirect URI list.
+      XERO_REDIRECT_URI: ${XERO_REDIRECT_URI:-http://localhost:5001/callback}
+      S3_BUCKET: ${S3_BUCKET:-dummy-bucket}
+      S3_KEY: ${S3_KEY:-dummy-key}
+      S3_SECRET: ${S3_SECRET:-dummy-secret}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      # Off by default — see "Getting a schema" in README.md. The Alembic chain
+      # cannot currently build a database from empty.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
+    ports:
+      - "${MINTY_HOST_PORT:-5001}:5001"
+    healthcheck:
+      # Only turns healthy once the entrypoint has finished migrating and
+      # gunicorn is serving — which is exactly the gate billing-backend needs.
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    command:
+      - "gunicorn"
+      - "-w"
+      - "${GUNICORN_WORKERS:-4}"
+      - "-b"
+      - "0.0.0.0:5001"
+      - "main:app"
+
+  # ---------------------------------------------------------------------------
+  # Module 2 — Django API. Reads Flask's tables through `search_path=pettycashv2`,
+  # so it can only migrate after Flask has created that schema.
+  # ---------------------------------------------------------------------------
+  billing-backend:
+    build:
+      context: ${BILLING_BACKEND_PATH:-../../../billing-backend}
+      dockerfile: Dockerfile
+    container_name: minty-stack-billing-backend
+    restart: unless-stopped
+    env_file:
+      - path: ${BILLING_BACKEND_PATH:-../../../billing-backend}/.env
+        required: false
+      - path: ./.env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+      minty:
+        # Waits for the pettycashv2 schema and the Flask tables to exist.
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      PYTHONUNBUFFERED: "1"
+      # Same key as Flask above. A mismatch here means every cross-module
+      # handoff fails with an invalid-signature 401.
+      SECRET_KEY: ${SECRET_KEY:-minty_stack_shared_secret_key}
+      DEBUG: ${DJANGO_DEBUG:-True}
+      ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      POSTGRES_DB: ${POSTGRES_DB:-minty_ref}
+      POSTGRES_USER: ${POSTGRES_USER:-minty_ref_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minty_ref_pass}
+      DB_HOST: db
+      DB_PORT: "5432"
+      # Server-to-server only (chart sync, Xero token fetch) — never reaches a
+      # browser, so it uses the internal service name and skips the host network.
+      FLASK_APP_URL: http://minty:5001
+      XERO_TOKEN_SERVICE_URL: http://minty:5001/api/internal/xero/token
+      # Browser-facing redirect target, so localhost.
+      FRONTEND_APP_URL: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      # Both UIs call this API from the browser; both origins need CORS.
+      CORS_ALLOWED_ORIGINS: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000},${ONBOARDING_PUBLIC_URL:-http://localhost:3001}
+      S3_BUCKET: ${S3_BUCKET:-dummy-bucket}
+      S3_KEY: ${S3_KEY:-dummy-key}
+      S3_SECRET: ${S3_SECRET:-dummy-secret}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      # Off by default — see "Getting a schema" in README.md. The Alembic chain
+      # cannot currently build a database from empty.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
+    ports:
+      - "${BILLING_BACKEND_HOST_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=3).close()"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    command:
+      - "gunicorn"
+      - "-w"
+      - "${GUNICORN_WORKERS:-4}"
+      - "-b"
+      - "0.0.0.0:8000"
+      - "config.wsgi:application"
+
+  # ---------------------------------------------------------------------------
+  # Module 2 — Next.js UI. Runs the dev server with the source bind-mounted, so
+  # NEXT_PUBLIC_* values are read at runtime and editing a file reloads the page.
+  # ---------------------------------------------------------------------------
+  billing-frontend:
+    build:
+      context: ${BILLING_FRONTEND_PATH:-../../../billing-frontend}
+      dockerfile: docker/Dockerfile
+    container_name: minty-stack-billing-frontend
+    restart: unless-stopped
+    depends_on:
+      - billing-backend
+    environment:
+      # Everything below is fetched by the *browser*, so these must be host
+      # URLs. Container names would resolve inside the network but not on your
+      # machine, and every request from the page would fail.
+      NEXT_PUBLIC_MODULE2_BACKEND_URL: ${BILLING_BACKEND_PUBLIC_URL:-http://localhost:8000}
+      NEXT_PUBLIC_MODULE1_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      NEXT_PUBLIC_APP_ENV: ${NEXT_PUBLIC_APP_ENV:-development}
+      NODE_ENV: development
+      # Bind mounts on Windows/macOS don't deliver inotify events reliably.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${BILLING_FRONTEND_HOST_PORT:-3000}:3000"
+    volumes:
+      - ${BILLING_FRONTEND_PATH:-../../../billing-frontend}:/app
+      # Anonymous volumes keep the image's own node_modules / build cache
+      # instead of letting the host's shadow them.
+      - /app/node_modules
+      - /app/.next
+
+  # ---------------------------------------------------------------------------
+  # Onboarding — Next.js UI. Talks only to Flask (Module 1).
+  # ---------------------------------------------------------------------------
+  onboarding:
+    build:
+      context: ${ONBOARDING_PATH:-../../../onboarding}
+      dockerfile: docker/Dockerfile
+    container_name: minty-stack-onboarding
+    restart: unless-stopped
+    depends_on:
+      - minty
+    environment:
+      # Primary base URL used across the app (browser-facing → localhost).
+      NEXT_PUBLIC_MODULE1_API_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      # Legacy fallback still read by the auth pages; keep it on the same host.
+      NEXT_PUBLIC_API_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${ONBOARDING_HOST_PORT:-3001}:3001"
+    volumes:
+      - ${ONBOARDING_PATH:-../../../onboarding}:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  postgres_data:
