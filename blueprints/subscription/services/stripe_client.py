@@ -83,6 +83,38 @@ def get_stripe():
     return stripe
 
 
+# --- Trusted-clock capture ---------------------------------------------------
+
+
+def _record_server_time(stripe_result) -> None:
+    """Stash the ``Date`` header off a Stripe response as the trusted 'now'.
+
+    A SIDE EFFECT of a call being made for another reason, deliberately: it costs no
+    extra round trip, and it is what lets ``clock.now()`` answer without one either.
+    See ``services.clock`` for what the answer is used for and why the host's own wall
+    clock is not good enough.
+
+    Called from the READS that sit on the paths where access is decided --
+    ``retrieve_customer`` (and through it ``customer_default_payment_method``, on every
+    module-settings render), ``list_payment_methods`` and ``find_customer_by_user``. It
+    used to hang off ``list_customer_subscriptions``, which went with the Stripe biller;
+    when that happened the app silently fell back to the database clock, which is why
+    the capture is now spread across three calls instead of resting on one.
+
+    Best-effort by design: silently ignored if headers aren't available.
+    """
+    try:
+        last_response = getattr(stripe_result, "last_response", None)
+        headers = getattr(last_response, "headers", None) or {}
+        date_header = headers.get("Date") or headers.get("date")
+        if date_header:
+            from blueprints.subscription.services import clock
+
+            clock.record_http_date(date_header)
+    except Exception:  # noqa: BLE001, S110 - clock capture must never break a Stripe read
+        pass
+
+
 # --- Write helpers (checkout / trials / billing) -----------------------------
 
 
@@ -114,6 +146,7 @@ def find_customer_by_user(user_id: str):
         query=f"metadata['user_id']:'{user_id}'",
         limit=1,
     )
+    _record_server_time(result)
     data = result.get("data") or []
     return data[0] if data else None
 
@@ -123,7 +156,9 @@ def retrieve_customer(customer_id: str):
     if not customer_id:
         return None
     stripe_client = get_stripe()
-    return stripe_client.Customer.retrieve(customer_id)
+    customer = stripe_client.Customer.retrieve(customer_id)
+    _record_server_time(customer)
+    return customer
 
 
 def create_setup_checkout_session(
@@ -404,11 +439,9 @@ def list_payment_methods(customer_id: str | None) -> list:
     """
     if not customer_id:
         return []
-    return list(
-        get_stripe().PaymentMethod.list(
-            customer=customer_id, limit=100
-        ).auto_paging_iter()
-    )
+    result = get_stripe().PaymentMethod.list(customer=customer_id, limit=100)
+    _record_server_time(result)
+    return list(result.auto_paging_iter())
 
 
 def retrieve_payment_method(payment_method_id: str):

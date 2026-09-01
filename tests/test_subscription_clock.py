@@ -1,9 +1,12 @@
 """Trusted-clock tests: subscription access/grace decisions use Stripe's server
-time (captured from the subscription-fetch response Date header) instead of the host
-wall clock, falling back to the process clock when no Stripe response was seen."""
+time (captured from the Date header of the customer and payment-method reads)
+instead of the host wall clock, falling back to the database clock and then the
+process clock when no Stripe response was seen."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
+
+import pytest
 
 UTC = timezone.utc
 
@@ -86,3 +89,63 @@ def test_grants_access_uses_trusted_clock(app):
 # into ``grants_access`` rather than the host clock. It discovers its own entities from
 # the database, so pinning it needs entity/module fixtures — that belongs with the
 # sweep's own tests, not the clock's.
+
+
+_STRIPE_DATE = "Wed, 01 Jul 2026 12:00:00 GMT"
+_STRIPE_MOMENT = datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+
+
+class _Dated(dict):
+    """A Stripe result: a mapping that also carries ``last_response``, as the SDK's do."""
+
+    class last_response:  # noqa: N801 - mirrors the SDK attribute, not a class name
+        headers = {"Date": _STRIPE_DATE}
+
+    def auto_paging_iter(self):
+        return iter(self.get("data", []))
+
+
+def _fake_stripe():
+    class _Stripe:
+        class Customer:
+            @staticmethod
+            def retrieve(customer_id):
+                return _Dated({"id": customer_id})
+
+            @staticmethod
+            def search(query, limit):
+                return _Dated({"data": [{"id": "cus_1"}]})
+
+        class PaymentMethod:
+            @staticmethod
+            def list(customer, limit):
+                return _Dated({"data": [{"id": "pm_1"}]})
+
+    return _Stripe()
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda sc: sc.retrieve_customer("cus_1"),
+        lambda sc: sc.list_payment_methods("cus_1"),
+        lambda sc: sc.find_customer_by_user("u1"),
+    ],
+    ids=["retrieve_customer", "list_payment_methods", "find_customer_by_user"],
+)
+def test_every_capturing_stripe_read_records_the_date_header(app, monkeypatch, read):
+    """EACH of the three reads must pin the clock on its own.
+
+    Source 1 is a side effect of calls made for other reasons, so it dies quietly when
+    its host call is deleted -- which is exactly what happened when the in-house billing
+    cutover removed ``list_customer_subscriptions``, the single capture point at the
+    time. Parametrised rather than written once against whichever read is convenient:
+    deleting any one capture point must fail here, not degrade the clock in silence.
+    """
+    from blueprints.subscription.services import clock, stripe_client
+
+    monkeypatch.setattr(stripe_client, "get_stripe", _fake_stripe)
+
+    with app.app_context():
+        read(stripe_client)
+        assert clock.now() == _STRIPE_MOMENT
