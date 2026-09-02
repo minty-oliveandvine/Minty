@@ -123,58 +123,15 @@ def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
     trial, the nominee can be demoted or deactivated, a card can be removed — and nothing
     else would notice.
     """
-    from blueprints.subscription.services import stripe_client
-    from services.permission_policy import Role, role_at_least
-
+    # Built in FOUR groups, appended in the order the docstring above commits to. The
+    # sequence is the contract: callers answer with ``reasons[0]`` and the portal shows
+    # only the first, so reordering these lines changes what a refused payer is told.
     reasons: list[str] = []
     rows = store.rows_for_entity(entity_id)
 
-    # 1. Only the established payer may give the bill away. Strict identity, NOT
-    #    ``may_manage_subscription`` — that answers True when there is no payer at all,
-    #    which is the one case where there is nothing to hand over.
-    payer = store.payer_for_entity(entity_id)
-    if payer is None:
-        reasons.append("Nobody is being billed for this company yet, so there's nothing to hand over.")
-    elif str(payer) != str(from_user_id):
-        reasons.append("Only the person currently being billed can hand this company over.")
+    reasons += _blockers_caller(entity_id, from_user_id)
 
-    # 2. Debt splits in half. The arrears sit on the PAYER's account while the phase sits
-    #    on the row, so transferring mid-dunning gives the new payer a "payment due" card
-    #    with nothing owed on their account, and leaves the real debt uncollectable.
-    if store.payer_is_dunning(from_user_id):
-        reasons.append(
-            "There's a payment still being collected on this account. "
-            "Once that's settled the handover can go ahead."
-        )
-    elif any(row.phase == PHASE_PAST_DUE for row in rows):
-        reasons.append(
-            "This company has a payment outstanding. Settle it first, then hand it over."
-        )
-    if store.payer_is_dunning(to_user_id):
-        reasons.append(
-            "That person has a payment still being collected, so they can't take on "
-            "another company right now."
-        )
-
-    # 3. A pending cancel-extension is money the OUTGOING payer owes. It rides the module
-    #    row, so moving the row moves the debt onto the new payer's invoice — and makes it
-    #    uncollectable from the person who actually incurred it.
-    #    The remedy is UN-CANCELLING, not waiting. While the extension is still pending
-    #    nobody has been billed for it, so ``_reactivate_module_in_house`` simply deletes
-    #    the number — "no invoice item to remove, no credit note, no money moved in either
-    #    direction". Telling someone to wait for the next invoice sends them away for up
-    #    to a month to reach the same place one click would.
-    cancelling = [
-        row.function_code
-        for row in rows
-        if row.extension_state == EXT_PENDING and (row.extension_amount or 0) > 0
-    ]
-    if cancelling:
-        reasons.append(
-            "A module here is cancelling, and the charge for its last days hasn't been "
-            "billed yet. Un-cancel it and the charge goes away, then you can hand the "
-            "company over."
-        )
+    reasons += _blockers_money_settled(rows, from_user_id, to_user_id)
 
     # 4. A TRIAL IS NO LONGER A REFUSAL. It used to be, for three reasons, and all three
     #    have since been dealt with:
@@ -193,56 +150,9 @@ def transfer_blockers(entity_id, *, from_user_id, to_user_id) -> list[str]:
     #    trial stays once-per-entity, so the incoming payer inherits a spent trial rather
     #    than minting a fresh one.
 
-    # 4b. NOTHING LEFT AT ALL. An entity whose only modules are expired trials or finished
-    #     cancellations still names a payer on those dead rows, so every check above
-    #     passes — but there is nothing to hand over and nothing to charge.
-    #
-    #     A RUNNING TRIAL COUNTS as something to hand over even though it is not billing
-    #     forward: it is worth real money to the recipient and converts on their card. So
-    #     this asks the broader question than ``_billable_codes`` alone.
-    #
-    #     Caught HERE rather than at the accept because the difference is who finds out.
-    #     Left to the accept, the offer is allowed, the email goes out, and the recipient
-    #     is the one told it cannot happen — for a reason already true when it was sent.
-    if not _billable_codes(entity_id) and not _trial_rows(entity_id):
-        reasons.append(
-            "There's nothing active on this company to hand over. "
-            "Subscribe a module first, then it can be handed over."
-        )
+    reasons += _blockers_anything_to_hand_over(entity_id)
 
-    # 5. The bill can only sit with someone who could act on it — and who can sign in.
-    #    ``_admin_candidates`` checks the membership flags but not the account one, so a
-    #    deactivated admin still appears on the list this validates against.
-    membership = (
-        db.session.query(UserEntity.role)
-        .filter(
-            UserEntity.entity_id == str(entity_id),
-            UserEntity.user_id == str(to_user_id),
-            UserEntity.approved,
-        )
-        .first()
-    )
-    account = db.session.get(User, str(to_user_id))
-    if membership is None or not role_at_least(membership[0], Role.ADMIN.value):
-        reasons.append("That person needs to be an admin of this company first.")
-    elif account is None or not getattr(account, "approved", False):
-        reasons.append("That account isn't active, so it can't take on the billing.")
-
-    # 6. Without a saved card nothing can be charged AT ALL: ``start_billing_cycle``
-    #    silently no-ops for a payer with no ``user_stripe_customer`` row, so the accept
-    #    would fail at the charge having promised to succeed.
-    #
-    #    Having a card SAVED is checked here; having one nominated for this company is
-    #    not, and cannot be — the incoming payer chooses that as part of accepting, and
-    #    demanding it beforehand would ask them to point a card at a company they have not
-    #    yet agreed to take on. The accept refuses if they still have not.
-    else:
-        customer_id = store.customer_id_for_user(to_user_id)
-        if not customer_id or not stripe_client.customer_default_payment_method(customer_id):
-            reasons.append(
-                "That person needs a saved payment method before they can take over "
-                "the billing."
-            )
+    reasons += _blockers_recipient(entity_id, to_user_id)
 
     return reasons
 
@@ -946,3 +856,125 @@ def _as_dict(offer) -> dict:
         "billed_through": offer.accepted_billed_through,
         "invoice_id": offer.charge_invoice_id,
     }
+
+
+def _blockers_recipient(entity_id, to_user_id) -> list[str]:
+    """Whether the person being handed the bill can actually take it on.
+
+    Blocks 5 and 6 are ONE ``if/elif/else`` and stay together: the card is only worth
+    asking about once the recipient is an admin with a live account.
+    """
+    from blueprints.subscription.services import stripe_client
+    from services.permission_policy import Role, role_at_least
+
+    reasons: list[str] = []
+    # 5. The bill can only sit with someone who could act on it — and who can sign in.
+    #    ``_admin_candidates`` checks the membership flags but not the account one, so a
+    #    deactivated admin still appears on the list this validates against.
+    membership = (
+        db.session.query(UserEntity.role)
+        .filter(
+            UserEntity.entity_id == str(entity_id),
+            UserEntity.user_id == str(to_user_id),
+            UserEntity.approved,
+        )
+        .first()
+    )
+    account = db.session.get(User, str(to_user_id))
+    if membership is None or not role_at_least(membership[0], Role.ADMIN.value):
+        reasons.append("That person needs to be an admin of this company first.")
+    elif account is None or not getattr(account, "approved", False):
+        reasons.append("That account isn't active, so it can't take on the billing.")
+
+    # 6. Without a saved card nothing can be charged AT ALL: ``start_billing_cycle``
+    #    silently no-ops for a payer with no ``user_stripe_customer`` row, so the accept
+    #    would fail at the charge having promised to succeed.
+    #
+    #    Having a card SAVED is checked here; having one nominated for this company is
+    #    not, and cannot be — the incoming payer chooses that as part of accepting, and
+    #    demanding it beforehand would ask them to point a card at a company they have not
+    #    yet agreed to take on. The accept refuses if they still have not.
+    else:
+        customer_id = store.customer_id_for_user(to_user_id)
+        if not customer_id or not stripe_client.customer_default_payment_method(customer_id):
+            reasons.append(
+                "That person needs a saved payment method before they can take over "
+                "the billing."
+            )
+    return reasons
+
+def _blockers_anything_to_hand_over(entity_id) -> list[str]:
+    """Whether the company has anything worth handing over at all."""
+    reasons: list[str] = []
+    # 4b. NOTHING LEFT AT ALL. An entity whose only modules are expired trials or finished
+    #     cancellations still names a payer on those dead rows, so every check above
+    #     passes — but there is nothing to hand over and nothing to charge.
+    #
+    #     A RUNNING TRIAL COUNTS as something to hand over even though it is not billing
+    #     forward: it is worth real money to the recipient and converts on their card. So
+    #     this asks the broader question than ``_billable_codes`` alone.
+    #
+    #     Caught HERE rather than at the accept because the difference is who finds out.
+    #     Left to the accept, the offer is allowed, the email goes out, and the recipient
+    #     is the one told it cannot happen — for a reason already true when it was sent.
+    if not _billable_codes(entity_id) and not _trial_rows(entity_id):
+        reasons.append(
+            "There's nothing active on this company to hand over. "
+            "Subscribe a module first, then it can be handed over."
+        )
+    return reasons
+
+def _blockers_money_settled(rows, from_user_id, to_user_id) -> list[str]:
+    """Whether any money is still in flight on either side of the handover."""
+    reasons: list[str] = []
+    # 2. Debt splits in half. The arrears sit on the PAYER's account while the phase sits
+    #    on the row, so transferring mid-dunning gives the new payer a "payment due" card
+    #    with nothing owed on their account, and leaves the real debt uncollectable.
+    if store.payer_is_dunning(from_user_id):
+        reasons.append(
+            "There's a payment still being collected on this account. "
+            "Once that's settled the handover can go ahead."
+        )
+    elif any(row.phase == PHASE_PAST_DUE for row in rows):
+        reasons.append(
+            "This company has a payment outstanding. Settle it first, then hand it over."
+        )
+    if store.payer_is_dunning(to_user_id):
+        reasons.append(
+            "That person has a payment still being collected, so they can't take on "
+            "another company right now."
+        )
+
+    # 3. A pending cancel-extension is money the OUTGOING payer owes. It rides the module
+    #    row, so moving the row moves the debt onto the new payer's invoice — and makes it
+    #    uncollectable from the person who actually incurred it.
+    #    The remedy is UN-CANCELLING, not waiting. While the extension is still pending
+    #    nobody has been billed for it, so ``_reactivate_module_in_house`` simply deletes
+    #    the number — "no invoice item to remove, no credit note, no money moved in either
+    #    direction". Telling someone to wait for the next invoice sends them away for up
+    #    to a month to reach the same place one click would.
+    cancelling = [
+        row.function_code
+        for row in rows
+        if row.extension_state == EXT_PENDING and (row.extension_amount or 0) > 0
+    ]
+    if cancelling:
+        reasons.append(
+            "A module here is cancelling, and the charge for its last days hasn't been "
+            "billed yet. Un-cancel it and the charge goes away, then you can hand the "
+            "company over."
+        )
+    return reasons
+
+def _blockers_caller(entity_id, from_user_id) -> list[str]:
+    """Whether the caller is the person entitled to give the bill away."""
+    reasons: list[str] = []
+    # 1. Only the established payer may give the bill away. Strict identity, NOT
+    #    ``may_manage_subscription`` — that answers True when there is no payer at all,
+    #    which is the one case where there is nothing to hand over.
+    payer = store.payer_for_entity(entity_id)
+    if payer is None:
+        reasons.append("Nobody is being billed for this company yet, so there's nothing to hand over.")
+    elif str(payer) != str(from_user_id):
+        reasons.append("Only the person currently being billed can hand this company over.")
+    return reasons

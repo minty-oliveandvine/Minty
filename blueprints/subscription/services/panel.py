@@ -215,77 +215,7 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
 
     enabled = [c for c in cards if billed_forward(c)]
     if not enabled:
-        # Nothing billed forward — no live module, or every one of them winding down.
-        # Same shape as a live panel so the template needs no second layout: every
-        # module named and marked unbilled, and a real formatted zero rather than a
-        # blank, which would read as "we couldn't work it out" instead of "nothing".
-        owed = _empty_panel_next_invoice(cards, fmt)
-        return {
-            "state": "empty",
-            "is_empty": True,
-            "currency": symbol,
-            "lines": [
-                {
-                    "kind": "module",
-                    "label": card["name"],
-                    "amount": None,
-                    "billed": False,
-                }
-                for card in cards
-            ],
-            "is_bundle": False,
-            "note": None,
-            "total": fmt(Decimal(0)),
-            # Nothing enabled means nothing renews and no trial converts. A pending
-            # cancel-extension can still be owed here, so it is surfaced rather than
-            # silently dropped — that is a real charge on a panel that otherwise reads
-            # "nothing will be billed".
-            "next_invoice": owed,
-            "trial_conversions": [],
-            # Nothing renews and no trial converts, so the list is the owed extensions or
-            # nothing at all — named per module, exactly as on a live panel. Calling it
-            # "Renewal" here was wrong twice: nothing is renewing, and the one thing that
-            # IS charged is the cancellation that emptied the panel.
-            "upcoming_charges": _extension_charges(
-                cards, fmt, summary.get("bundle_codes"), bundle_name
-            ),
-            # A module winding down is excluded from the total — it bills no further —
-            # but the customer still HAS it until its access runs out. Saying only
-            # "nothing will be billed" over the top of that reads as "you have nothing",
-            # which is wrong on the exact screen they opened to check.
-            "winding_down": [
-                {"label": c["name"], "date": c.get("access_end_long")}
-                for c in cards
-                if c.get("pending_cancel")
-                and c.get("access_end_long")
-                # past_due carries pending_cancel too (one "winding down" flag serves
-                # both), but it is NOT billing no further — it is in arrears and will be
-                # retried. Listing it here printed "Not billed again" directly above the
-                # overdue charge for the same module.
-                and c.get("subscription_status") != "past_due"
-            ],
-            # What the panel actually renders for those: one sentence per cancellation
-            # rather than one row per module — see _winding_notices.
-            "winding_notices": _winding_notices(
-                cards, summary.get("bundle_codes"), bundle_name
-            ),
-            "footer": "No modules enabled — nothing will be billed.",
-            # The panel button is the ONLY way into the decision modal, so an empty panel
-            # still needs one whenever there is something to decide:
-            #   * a module winding down — re-ticking it is the undo, and withholding the
-            #     button would leave a cancellation with no way back;
-            #   * a module that could be taken up — an entity whose trials are spent has
-            #     nothing enabled and nothing cancelled, and this is its way back in. The
-            #     modal lists untried modules too; ticking one starts its free trial
-            #     rather than buying it, so this button is right either way.
-            # Only a company with no modules at all in the catalog gets no action.
-            "primary_action": (
-                "manage"
-                if any(c.get("pending_cancel") for c in cards)
-                else ("subscribe_stripe" if cards else None)
-            ),
-            "subscribe_codes": [],
-        }
+        return _empty_panel(cards, summary, symbol, bundle_name, fmt)
 
     # The anchor is pinned at the first charge, so its presence is exactly "has this
     # entity started paying" — the one bit that separates the trial panel from the paid.
@@ -303,296 +233,29 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
     # — trials that will convert, and paying entities — is "Manage subscription".
     needs_billing_setup = any(c.get("needs_card") for c in cards)
 
-    enabled_codes = sorted((c["code"] or "").upper() for c in enabled)
-    bundle_codes = sorted((code or "").upper() for code in (summary.get("bundle_codes") or []))
-    bundle_amount = summary.get("bundle_amount") or Decimal(0)
-    # The bundle IS the discount: when the enabled set is exactly the bundle's, it bills
-    # at the single bundle price. Mirrors get_subscription_summary / checkout.
-    is_bundle = bool(bundle_codes and len(enabled) > 1 and enabled_codes == bundle_codes)
+    _priced = _panel_pricing(cards, enabled, summary, bundle_name, state, fmt,
+                             billed_forward)
+    lines = _priced["lines"]
+    note = _priced["note"]
+    is_bundle = _priced["is_bundle"]
+    total_fmt = _priced["total_fmt"]
+    bundle_codes = _priced["bundle_codes"]
+    bundle_amount = _priced["bundle_amount"]
 
-    subtotal = sum((c["amount"] for c in enabled), Decimal(0))
-    total = bundle_amount if is_bundle else subtotal
-    saving = (subtotal - total) if is_bundle else Decimal(0)
+    _invoice = _panel_next_invoice(cards, enabled, bundle_codes, bundle_amount, fmt)
+    next_invoice = _invoice["next_invoice"]
+    next_invoice_at = _invoice["at"]
+    next_invoice_on = _invoice["on"]
+    recurring = _invoice["recurring"]
 
-    lines: list[dict] = []
-    if is_bundle:
-        lines.append(
-            {
-                "kind": "bundle",
-                "label": bundle_name,
-                "sublabel": " & ".join(c["name"] for c in enabled),
-                "original": fmt(subtotal),
-                "amount": fmt(total),
-            }
-        )
-    else:
-        # One line per canonical module — an unenabled one reads "Not billed" rather
-        # than vanishing, so the panel always shows the full picture.
-        for card in cards:
-            on = billed_forward(card)
-            lines.append(
-                {
-                    "kind": "module",
-                    "label": card["name"],
-                    "amount": (fmt(card["amount"]) + "/mo") if on else None,
-                    "billed": on,
-                }
-            )
+    trial_conversions = _panel_trial_conversions(enabled, fmt)
 
-    # The highlighted context line — what the price actually is, in plain words.
-    #
-    # The bundle line reads the same whether trialing or paid. It used to append "vs
-    # HK$280 each" once billing had started, which quoted a per-module price for a plan
-    # nobody is billed per module on — and the saving beside it already carries the
-    # comparison.
-    if is_bundle:
-        note = f"{bundle_name} price — save {fmt(saving)}"
-    else:
-        module = enabled[0]
-        price = fmt(module["amount"])
-        if state == "trialing":
-            after = module.get("period_end_short")
-            note = (
-                f"{module['name']} free trial — {price}/mo after {after}"
-                if after
-                else f"{module['name']} free trial — {price}/mo"
-            )
-        else:
-            note = f"{module['name']} subscription — {price}/mo."
-
-    total_fmt = fmt(total)
-
-    # --- What actually lands on the next invoice -------------------------------
-    #
-    # NOT the same set as ``total``. ``total`` is what the enabled modules COST per
-    # month, trials included, because the trial panel has to preview the price it will
-    # convert to. The invoice bills what ``access.is_billing_forward`` allows on the DAY
-    # IT IS RAISED — so a trial still running then is in the total and not on the bill.
-    # Quoting one figure for both would misstate whichever the customer was asking about.
-    paid = [
-        c for c in enabled if c.get("subscription_status") in ("active", "past_due")
-    ]
-    # The date the payer's cycle next bills: paid_through, carried on any active or
-    # past_due card. Absent while the entity has only trials — there is no cycle yet.
-    next_invoice_at = next(
-        (c.get("period_end") for c in paid if c.get("period_end")), None
-    )
-    next_invoice_on = next(
-        (c.get("period_end_long") for c in paid if c.get("period_end_long")), None
+    upcoming_charges = _panel_upcoming_charges(
+        cards, enabled, summary, bundle_name, bundle_codes, fmt,
+        next_invoice, next_invoice_at, next_invoice_on, recurring,
     )
 
-    # A trial that CONVERTS BEFORE the invoice date is active by the time it is raised,
-    # so the renewal bills it too — ``billable_codes_by_entity`` reads phases when the
-    # run fires, not when this page was rendered. Leaving them out quoted one module's
-    # price for an invoice that will charge the bundle: a trial ending 20 Aug is paid
-    # for by the 28 Aug invoice, and the panel said 280 against a real 400.
-    converts_before_invoice = [
-        c
-        for c in enabled
-        if c.get("subscription_status") == "trialing"
-        and not c.get("needs_card")
-        and c.get("period_end")
-        and next_invoice_at is not None
-        and c["period_end"] <= next_invoice_at
-    ]
-    on_invoice = paid + converts_before_invoice
-    invoiced_codes = sorted((c["code"] or "").upper() for c in on_invoice)
-    invoiced_is_bundle = bool(
-        bundle_codes and len(on_invoice) > 1 and invoiced_codes == bundle_codes
-    )
-    recurring = (
-        bundle_amount
-        if invoiced_is_bundle
-        else sum((c["amount"] for c in on_invoice), Decimal(0))
-    )
-    # Cancel-extensions ride the same invoice (renewals._pending_extension_lines), and
-    # they sit on modules that are winding down — which is exactly the set ``enabled``
-    # excludes. Read them off every card, or the figure understates what is charged.
-    extensions = sum((c.get("extension_amount") or Decimal(0) for c in cards), Decimal(0))
-    invoice_amount = recurring + extensions
-
-    next_invoice = None
-    if next_invoice_on and invoice_amount > 0:
-        next_invoice = {
-            "date": next_invoice_on,
-            "amount": fmt(invoice_amount),
-            # past_due means the date has already passed and the money is owed now.
-            "overdue": any(
-                c.get("subscription_status") == "past_due" for c in paid
-            ),
-            "includes_extension": extensions > 0,
-        }
-
-    # Trial conversions are listed SEPARATELY, one per trialing module, rather than
-    # folded into the next-invoice line. Two modules trialled on different days convert
-    # on different days, and an entity can hold a trial beside a paid module — so there
-    # are genuinely several dates, and collapsing them to one drops real information.
-    #
-    # The amount is quoted either way — it is what the module costs when the trial ends,
-    # and that is the number the customer is deciding against. ``will_convert`` carries
-    # whether it is actually going to be taken (no card, or no consent for this entity,
-    # means it expires instead), so the row can say "converts" versus "trial ends" and
-    # qualify the figure rather than withhold it. Hiding the price left the row reading
-    # "Not charged" with nothing to weigh the decision against.
-    trial_conversions = [
-        {
-            "label": c["name"],
-            "date": c.get("period_end_long"),
-            # WHAT IS CHARGED THAT DAY — not the monthly rate. For the conversion that
-            # starts the cycle those are the same number; for one landing mid-period they
-            # are not, and the monthly rate is the wrong one. A trial converting into a
-            # running cycle pays only the days left in it (the 65.83 shape), so quoting
-            # "280/mo" against that date named money that is not taken.
-            #
-            # A trial that will NOT convert keeps the monthly price: nothing is charged,
-            # so there is no day's figure, and the price is still what the decision to
-            # add a card is being weighed against.
-            "amount": fmt(
-                c["conversion_charge"]
-                if not c.get("needs_card")
-                else c["amount"]
-            ),
-            "will_convert": not c.get("needs_card"),
-        }
-        for c in enabled
-        if c.get("subscription_status") == "trialing" and c.get("period_end_long")
-    ]
-
-    # --- One date-ordered list of what will be charged, and when ----------------
-    #
-    # A trial converting mid-cycle and the renewal that follows are TWO charges on two
-    # dates, and both are real: the conversion collects the days between it and the cycle
-    # end, then the renewal bills the full month. Presenting them as separate blocks left
-    # the reader working out the order and whether one included the other; a single
-    # chronological list answers "what leaves my card, and when" in one pass.
-    #
-    # Non-converting trials are absent by construction — nothing is charged for a trial
-    # that expires, so it is not an upcoming charge. It still appears in the footer,
-    # which is where "add a card or lose this" belongs.
-    #
-    # GROUPED BY DAY, and a day whose conversions are exactly the bundle is ONE row naming
-    # the plan. Two modules converting together are billed as the bundle, not as two
-    # modules: the forecasts are computed sequentially, so the first carries a full period
-    # (280) and the second the net of the change into the bundle (120), and only their SUM
-    # (400) is a number the customer will recognise. Printed as two rows they had to add
-    # up a 280 and a 120 that appear nowhere on the invoice to check the 400 that does.
-    # Same rule the cancellation rows already follow (_extension_charges).
-    converting_by_day: dict = {}
-    for card in enabled:
-        if (
-            card.get("subscription_status") == "trialing"
-            and not card.get("needs_card")
-            and card.get("period_end")
-        ):
-            converting_by_day.setdefault(card["period_end"], []).append(card)
-
-    upcoming_charges = []
-    for at, same_day_cards in converting_by_day.items():
-        day_codes = sorted((c["code"] or "").upper() for c in same_day_cards)
-        day_amount = sum(
-            (c.get("conversion_charge") or Decimal(0) for c in same_day_cards), Decimal(0)
-        )
-        if bundle_codes and len(same_day_cards) > 1 and day_codes == bundle_codes:
-            rows = [(bundle_name, day_amount)]
-        else:
-            rows = [
-                (c["name"], c.get("conversion_charge") or Decimal(0))
-                for c in same_day_cards
-            ]
-        upcoming_charges.extend(
-            {
-                "at": at,
-                "date": same_day_cards[0].get("period_end_long"),
-                "label": f"{label} converts",
-                "amount": fmt(amount),
-                "overdue": False,
-                "note": None,
-            }
-            for label, amount in rows
-        )
-    # The renewal quotes the RECURRING figure only. Any cancel-extension riding the same
-    # invoice is listed beside it as its own row, so each line is one thing the customer
-    # can recognise; ``next_invoice`` still carries the combined total, because that is
-    # what the invoice will say.
-    if next_invoice_on and next_invoice_at and recurring > 0:
-        upcoming_charges.append(
-            {
-                "at": next_invoice_at,
-                "date": next_invoice_on,
-                "label": "Renewal",
-                "amount": fmt(recurring),
-                "overdue": bool(next_invoice and next_invoice["overdue"]),
-                "note": None,
-            }
-        )
-    # Cancellations are charged whether or not anything renews — including when the
-    # cancelled module was the last paid one, which is precisely when the panel used to
-    # drop the charge entirely.
-    upcoming_charges.extend(
-        _extension_charges(cards, fmt, summary.get("bundle_codes"), bundle_name)
-    )
-    # Sorted on the raw datetime — the formatted date sorts alphabetically, which would
-    # put 11 Sep before 28 Aug. A row with no date at all (an extension on a module whose
-    # period end never made it onto the card) goes last rather than blowing up the sort.
-    _dated = [e for e in upcoming_charges if e["at"] is not None]
-    _dated.sort(key=lambda e: e["at"])
-    upcoming_charges = _dated + [e for e in upcoming_charges if e["at"] is None]
-
-    if state == "trialing":
-        # Every trial here is pre-anchor, so "will any of them actually charge" decides
-        # whether the footer may name a figure at all.
-        converting = [
-            c
-            for c in enabled
-            if c.get("subscription_status") == "trialing"
-            and c.get("period_end_long")
-            and not c.get("needs_card")
-        ]
-        if not trial_conversions:
-            footer = f"You're on a free trial — first charge {total_fmt} when the trial ends."
-        elif not converting:
-            # Still names the price: "nothing will be charged" alone told them the
-            # outcome but not the stake, on the one screen where adding a card is the
-            # decision in front of them.
-            footer = (
-                f"Your free trial ends {trial_conversions[0]['date']} — "
-                f"{total_fmt}/mo after that, once a card is added."
-            )
-        else:
-            # The FIRST charge is the earliest conversion, and it bills only the modules
-            # converting on that DAY — not the combined total. Two trials started a
-            # fortnight apart convert a fortnight apart, so quoting the bundle price
-            # against the earlier date names money that is not taken until the later one.
-            # Sorted on the raw datetime; the formatted string sorts alphabetically.
-            #
-            # Summed from the per-module forecasts rather than re-priced here, so the
-            # footer and the rows above it cannot disagree about the same day's charge.
-            first_at = min(
-                c["period_end"] for c in converting if c.get("period_end")
-            ) if any(c.get("period_end") for c in converting) else None
-            same_day = [
-                c
-                for c in converting
-                if first_at is None or c.get("period_end") == first_at
-            ] or converting
-            first_charge_on = same_day[0]["period_end_long"]
-            first_amount = sum(
-                (c.get("conversion_charge") or Decimal(0) for c in same_day), Decimal(0)
-            )
-            footer = (
-                f"You're on a free trial — first charge {fmt(first_amount)} "
-                f"on {first_charge_on}."
-            )
-    else:
-        # NO FOOTER once billing has started — both halves of the old sentence are now
-        # said better elsewhere on the page. "Billed HK$400/mo" repeated the Total row
-        # directly above it, and "· next payment 28 Aug 2026" repeated the date card at
-        # the top of the page, which is where a customer looks for it. The template skips
-        # the paragraph entirely rather than printing an empty one.
-        #
-        # The trial and empty states keep theirs: those say something no other element
-        # on the panel does (when the first charge lands, or that nothing is billed).
-        footer = ""
+    footer = _panel_footer(state, enabled, trial_conversions, total_fmt, fmt)
 
     return {
         "state": state,
@@ -949,3 +612,418 @@ def _restart_methods(user_id, entity_id) -> dict:
             user_id,
         )
         return empty
+
+
+def _panel_footer(state, enabled, trial_conversions, total_fmt, fmt) -> str:
+    """The sentence under the panel, or "" once billing has started.
+
+    Extracted whole: the three trial cases below differ in what they are allowed to
+    NAME, not in how they are computed, and each carries the reason it says what it
+    says. Splitting them further would separate each rule from its justification.
+    """
+    if state == "trialing":
+        # Every trial here is pre-anchor, so "will any of them actually charge" decides
+        # whether the footer may name a figure at all.
+        converting = [
+            c
+            for c in enabled
+            if c.get("subscription_status") == "trialing"
+            and c.get("period_end_long")
+            and not c.get("needs_card")
+        ]
+        if not trial_conversions:
+            footer = f"You're on a free trial — first charge {total_fmt} when the trial ends."
+        elif not converting:
+            # Still names the price: "nothing will be charged" alone told them the
+            # outcome but not the stake, on the one screen where adding a card is the
+            # decision in front of them.
+            footer = (
+                f"Your free trial ends {trial_conversions[0]['date']} — "
+                f"{total_fmt}/mo after that, once a card is added."
+            )
+        else:
+            # The FIRST charge is the earliest conversion, and it bills only the modules
+            # converting on that DAY — not the combined total. Two trials started a
+            # fortnight apart convert a fortnight apart, so quoting the bundle price
+            # against the earlier date names money that is not taken until the later one.
+            # Sorted on the raw datetime; the formatted string sorts alphabetically.
+            #
+            # Summed from the per-module forecasts rather than re-priced here, so the
+            # footer and the rows above it cannot disagree about the same day's charge.
+            first_at = min(
+                c["period_end"] for c in converting if c.get("period_end")
+            ) if any(c.get("period_end") for c in converting) else None
+            same_day = [
+                c
+                for c in converting
+                if first_at is None or c.get("period_end") == first_at
+            ] or converting
+            first_charge_on = same_day[0]["period_end_long"]
+            first_amount = sum(
+                (c.get("conversion_charge") or Decimal(0) for c in same_day), Decimal(0)
+            )
+            footer = (
+                f"You're on a free trial — first charge {fmt(first_amount)} "
+                f"on {first_charge_on}."
+            )
+    else:
+        # NO FOOTER once billing has started — both halves of the old sentence are now
+        # said better elsewhere on the page. "Billed HK$400/mo" repeated the Total row
+        # directly above it, and "· next payment 28 Aug 2026" repeated the date card at
+        # the top of the page, which is where a customer looks for it. The template skips
+        # the paragraph entirely rather than printing an empty one.
+        #
+        # The trial and empty states keep theirs: those say something no other element
+        # on the panel does (when the first charge lands, or that nothing is billed).
+        footer = ""
+    return footer
+
+def _panel_trial_conversions(enabled, fmt) -> list[dict]:
+    """One row per trialing module: {label, date, amount, will_convert}."""
+    # Trial conversions are listed SEPARATELY, one per trialing module, rather than
+    # folded into the next-invoice line. Two modules trialled on different days convert
+    # on different days, and an entity can hold a trial beside a paid module — so there
+    # are genuinely several dates, and collapsing them to one drops real information.
+    #
+    # The amount is quoted either way — it is what the module costs when the trial ends,
+    # and that is the number the customer is deciding against. ``will_convert`` carries
+    # whether it is actually going to be taken (no card, or no consent for this entity,
+    # means it expires instead), so the row can say "converts" versus "trial ends" and
+    # qualify the figure rather than withhold it. Hiding the price left the row reading
+    # "Not charged" with nothing to weigh the decision against.
+    trial_conversions = [
+        {
+            "label": c["name"],
+            "date": c.get("period_end_long"),
+            # WHAT IS CHARGED THAT DAY — not the monthly rate. For the conversion that
+            # starts the cycle those are the same number; for one landing mid-period they
+            # are not, and the monthly rate is the wrong one. A trial converting into a
+            # running cycle pays only the days left in it (the 65.83 shape), so quoting
+            # "280/mo" against that date named money that is not taken.
+            #
+            # A trial that will NOT convert keeps the monthly price: nothing is charged,
+            # so there is no day's figure, and the price is still what the decision to
+            # add a card is being weighed against.
+            "amount": fmt(
+                c["conversion_charge"]
+                if not c.get("needs_card")
+                else c["amount"]
+            ),
+            "will_convert": not c.get("needs_card"),
+        }
+        for c in enabled
+        if c.get("subscription_status") == "trialing" and c.get("period_end_long")
+    ]
+    return trial_conversions
+
+def _empty_panel(cards, summary, symbol, bundle_name, fmt) -> dict:
+    """The panel for an entity with nothing billed forward.
+
+    Same SHAPE as a live panel so the template needs no second layout -- see the
+    caller's docstring for why this is a rendered state rather than a None.
+    """
+    # Nothing billed forward — no live module, or every one of them winding down.
+    # Same shape as a live panel so the template needs no second layout: every
+    # module named and marked unbilled, and a real formatted zero rather than a
+    # blank, which would read as "we couldn't work it out" instead of "nothing".
+    owed = _empty_panel_next_invoice(cards, fmt)
+    return {
+        "state": "empty",
+        "is_empty": True,
+        "currency": symbol,
+        "lines": [
+            {
+                "kind": "module",
+                "label": card["name"],
+                "amount": None,
+                "billed": False,
+            }
+            for card in cards
+        ],
+        "is_bundle": False,
+        "note": None,
+        "total": fmt(Decimal(0)),
+        # Nothing enabled means nothing renews and no trial converts. A pending
+        # cancel-extension can still be owed here, so it is surfaced rather than
+        # silently dropped — that is a real charge on a panel that otherwise reads
+        # "nothing will be billed".
+        "next_invoice": owed,
+        "trial_conversions": [],
+        # Nothing renews and no trial converts, so the list is the owed extensions or
+        # nothing at all — named per module, exactly as on a live panel. Calling it
+        # "Renewal" here was wrong twice: nothing is renewing, and the one thing that
+        # IS charged is the cancellation that emptied the panel.
+        "upcoming_charges": _extension_charges(
+            cards, fmt, summary.get("bundle_codes"), bundle_name
+        ),
+        # A module winding down is excluded from the total — it bills no further —
+        # but the customer still HAS it until its access runs out. Saying only
+        # "nothing will be billed" over the top of that reads as "you have nothing",
+        # which is wrong on the exact screen they opened to check.
+        "winding_down": [
+            {"label": c["name"], "date": c.get("access_end_long")}
+            for c in cards
+            if c.get("pending_cancel")
+            and c.get("access_end_long")
+            # past_due carries pending_cancel too (one "winding down" flag serves
+            # both), but it is NOT billing no further — it is in arrears and will be
+            # retried. Listing it here printed "Not billed again" directly above the
+            # overdue charge for the same module.
+            and c.get("subscription_status") != "past_due"
+        ],
+        # What the panel actually renders for those: one sentence per cancellation
+        # rather than one row per module — see _winding_notices.
+        "winding_notices": _winding_notices(
+            cards, summary.get("bundle_codes"), bundle_name
+        ),
+        "footer": "No modules enabled — nothing will be billed.",
+        # The panel button is the ONLY way into the decision modal, so an empty panel
+        # still needs one whenever there is something to decide:
+        #   * a module winding down — re-ticking it is the undo, and withholding the
+        #     button would leave a cancellation with no way back;
+        #   * a module that could be taken up — an entity whose trials are spent has
+        #     nothing enabled and nothing cancelled, and this is its way back in. The
+        #     modal lists untried modules too; ticking one starts its free trial
+        #     rather than buying it, so this button is right either way.
+        # Only a company with no modules at all in the catalog gets no action.
+        "primary_action": (
+            "manage"
+            if any(c.get("pending_cancel") for c in cards)
+            else ("subscribe_stripe" if cards else None)
+        ),
+        "subscribe_codes": [],
+    }
+
+
+def _panel_upcoming_charges(cards, enabled, summary, bundle_name, bundle_codes,
+                            fmt, next_invoice, next_invoice_at, next_invoice_on,
+                            recurring) -> list[dict]:
+    """Every charge coming, in the order it happens."""
+    # --- One date-ordered list of what will be charged, and when ----------------
+    #
+    # A trial converting mid-cycle and the renewal that follows are TWO charges on two
+    # dates, and both are real: the conversion collects the days between it and the cycle
+    # end, then the renewal bills the full month. Presenting them as separate blocks left
+    # the reader working out the order and whether one included the other; a single
+    # chronological list answers "what leaves my card, and when" in one pass.
+    #
+    # Non-converting trials are absent by construction — nothing is charged for a trial
+    # that expires, so it is not an upcoming charge. It still appears in the footer,
+    # which is where "add a card or lose this" belongs.
+    #
+    # GROUPED BY DAY, and a day whose conversions are exactly the bundle is ONE row naming
+    # the plan. Two modules converting together are billed as the bundle, not as two
+    # modules: the forecasts are computed sequentially, so the first carries a full period
+    # (280) and the second the net of the change into the bundle (120), and only their SUM
+    # (400) is a number the customer will recognise. Printed as two rows they had to add
+    # up a 280 and a 120 that appear nowhere on the invoice to check the 400 that does.
+    # Same rule the cancellation rows already follow (_extension_charges).
+    converting_by_day: dict = {}
+    for card in enabled:
+        if (
+            card.get("subscription_status") == "trialing"
+            and not card.get("needs_card")
+            and card.get("period_end")
+        ):
+            converting_by_day.setdefault(card["period_end"], []).append(card)
+
+    upcoming_charges = []
+    for at, same_day_cards in converting_by_day.items():
+        day_codes = sorted((c["code"] or "").upper() for c in same_day_cards)
+        day_amount = sum(
+            (c.get("conversion_charge") or Decimal(0) for c in same_day_cards), Decimal(0)
+        )
+        if bundle_codes and len(same_day_cards) > 1 and day_codes == bundle_codes:
+            rows = [(bundle_name, day_amount)]
+        else:
+            rows = [
+                (c["name"], c.get("conversion_charge") or Decimal(0))
+                for c in same_day_cards
+            ]
+        upcoming_charges.extend(
+            {
+                "at": at,
+                "date": same_day_cards[0].get("period_end_long"),
+                "label": f"{label} converts",
+                "amount": fmt(amount),
+                "overdue": False,
+                "note": None,
+            }
+            for label, amount in rows
+        )
+    # The renewal quotes the RECURRING figure only. Any cancel-extension riding the same
+    # invoice is listed beside it as its own row, so each line is one thing the customer
+    # can recognise; ``next_invoice`` still carries the combined total, because that is
+    # what the invoice will say.
+    if next_invoice_on and next_invoice_at and recurring > 0:
+        upcoming_charges.append(
+            {
+                "at": next_invoice_at,
+                "date": next_invoice_on,
+                "label": "Renewal",
+                "amount": fmt(recurring),
+                "overdue": bool(next_invoice and next_invoice["overdue"]),
+                "note": None,
+            }
+        )
+    # Cancellations are charged whether or not anything renews — including when the
+    # cancelled module was the last paid one, which is precisely when the panel used to
+    # drop the charge entirely.
+    upcoming_charges.extend(
+        _extension_charges(cards, fmt, summary.get("bundle_codes"), bundle_name)
+    )
+    # Sorted on the raw datetime — the formatted date sorts alphabetically, which would
+    # put 11 Sep before 28 Aug. A row with no date at all (an extension on a module whose
+    # period end never made it onto the card) goes last rather than blowing up the sort.
+    _dated = [e for e in upcoming_charges if e["at"] is not None]
+    _dated.sort(key=lambda e: e["at"])
+    upcoming_charges = _dated + [e for e in upcoming_charges if e["at"] is None]
+    return upcoming_charges
+
+def _panel_next_invoice(cards, enabled, bundle_codes, bundle_amount, fmt) -> dict:
+    """What the NEXT invoice will carry: ``{next_invoice, at, on, recurring}``.
+
+    Separate from the panel total on purpose -- see the comment below for why the
+    two sets differ and why quoting one figure for both misstates whichever the
+    customer was asking about.
+    """
+    # --- What actually lands on the next invoice -------------------------------
+    #
+    # NOT the same set as ``total``. ``total`` is what the enabled modules COST per
+    # month, trials included, because the trial panel has to preview the price it will
+    # convert to. The invoice bills what ``access.is_billing_forward`` allows on the DAY
+    # IT IS RAISED — so a trial still running then is in the total and not on the bill.
+    # Quoting one figure for both would misstate whichever the customer was asking about.
+    paid = [
+        c for c in enabled if c.get("subscription_status") in ("active", "past_due")
+    ]
+    # The date the payer's cycle next bills: paid_through, carried on any active or
+    # past_due card. Absent while the entity has only trials — there is no cycle yet.
+    next_invoice_at = next(
+        (c.get("period_end") for c in paid if c.get("period_end")), None
+    )
+    next_invoice_on = next(
+        (c.get("period_end_long") for c in paid if c.get("period_end_long")), None
+    )
+
+    # A trial that CONVERTS BEFORE the invoice date is active by the time it is raised,
+    # so the renewal bills it too — ``billable_codes_by_entity`` reads phases when the
+    # run fires, not when this page was rendered. Leaving them out quoted one module's
+    # price for an invoice that will charge the bundle: a trial ending 20 Aug is paid
+    # for by the 28 Aug invoice, and the panel said 280 against a real 400.
+    converts_before_invoice = [
+        c
+        for c in enabled
+        if c.get("subscription_status") == "trialing"
+        and not c.get("needs_card")
+        and c.get("period_end")
+        and next_invoice_at is not None
+        and c["period_end"] <= next_invoice_at
+    ]
+    on_invoice = paid + converts_before_invoice
+    invoiced_codes = sorted((c["code"] or "").upper() for c in on_invoice)
+    invoiced_is_bundle = bool(
+        bundle_codes and len(on_invoice) > 1 and invoiced_codes == bundle_codes
+    )
+    recurring = (
+        bundle_amount
+        if invoiced_is_bundle
+        else sum((c["amount"] for c in on_invoice), Decimal(0))
+    )
+    # Cancel-extensions ride the same invoice (renewals._pending_extension_lines), and
+    # they sit on modules that are winding down — which is exactly the set ``enabled``
+    # excludes. Read them off every card, or the figure understates what is charged.
+    extensions = sum((c.get("extension_amount") or Decimal(0) for c in cards), Decimal(0))
+    invoice_amount = recurring + extensions
+
+    next_invoice = None
+    if next_invoice_on and invoice_amount > 0:
+        next_invoice = {
+            "date": next_invoice_on,
+            "amount": fmt(invoice_amount),
+            # past_due means the date has already passed and the money is owed now.
+            "overdue": any(
+                c.get("subscription_status") == "past_due" for c in paid
+            ),
+            "includes_extension": extensions > 0,
+        }
+    return {
+        "next_invoice": next_invoice,
+        "at": next_invoice_at,
+        "on": next_invoice_on,
+        "recurring": recurring,
+    }
+
+def _panel_pricing(cards, enabled, summary, bundle_name, state, fmt,
+                   billed_forward) -> dict:
+    """The priced lines, the note above them and the formatted total.
+
+    ``subtotal`` and ``saving`` stay internal: they exist to justify the bundle line
+    and are never shown on their own.
+    """
+    enabled_codes = sorted((c["code"] or "").upper() for c in enabled)
+    bundle_codes = sorted((code or "").upper() for code in (summary.get("bundle_codes") or []))
+    bundle_amount = summary.get("bundle_amount") or Decimal(0)
+    # The bundle IS the discount: when the enabled set is exactly the bundle's, it bills
+    # at the single bundle price. Mirrors get_subscription_summary / checkout.
+    is_bundle = bool(bundle_codes and len(enabled) > 1 and enabled_codes == bundle_codes)
+
+    subtotal = sum((c["amount"] for c in enabled), Decimal(0))
+    total = bundle_amount if is_bundle else subtotal
+    saving = (subtotal - total) if is_bundle else Decimal(0)
+
+    lines: list[dict] = []
+    if is_bundle:
+        lines.append(
+            {
+                "kind": "bundle",
+                "label": bundle_name,
+                "sublabel": " & ".join(c["name"] for c in enabled),
+                "original": fmt(subtotal),
+                "amount": fmt(total),
+            }
+        )
+    else:
+        # One line per canonical module — an unenabled one reads "Not billed" rather
+        # than vanishing, so the panel always shows the full picture.
+        for card in cards:
+            on = billed_forward(card)
+            lines.append(
+                {
+                    "kind": "module",
+                    "label": card["name"],
+                    "amount": (fmt(card["amount"]) + "/mo") if on else None,
+                    "billed": on,
+                }
+            )
+
+    # The highlighted context line — what the price actually is, in plain words.
+    #
+    # The bundle line reads the same whether trialing or paid. It used to append "vs
+    # HK$280 each" once billing had started, which quoted a per-module price for a plan
+    # nobody is billed per module on — and the saving beside it already carries the
+    # comparison.
+    if is_bundle:
+        note = f"{bundle_name} price — save {fmt(saving)}"
+    else:
+        module = enabled[0]
+        price = fmt(module["amount"])
+        if state == "trialing":
+            after = module.get("period_end_short")
+            note = (
+                f"{module['name']} free trial — {price}/mo after {after}"
+                if after
+                else f"{module['name']} free trial — {price}/mo"
+            )
+        else:
+            note = f"{module['name']} subscription — {price}/mo."
+
+    total_fmt = fmt(total)
+    return {
+        "lines": lines,
+        "note": note,
+        "is_bundle": is_bundle,
+        "total_fmt": total_fmt,
+        "bundle_codes": bundle_codes,
+        "bundle_amount": bundle_amount,
+    }

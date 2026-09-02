@@ -74,13 +74,11 @@ def lapsed_trial_for_entity(entity_id, payer_user_id=None, *, access_state=None)
     decide the mode: a lapsed entity has to buy its modules back whichever of the two it
     was missing.
     """
-    from blueprints.entity.services.modules import (MODULE_CODES,
-                                                    TRIAL_CLOSING_WINDOW,
-                                                    _enabled_state,
+    # The phase constants and TRIAL_CLOSING_WINDOW moved with the classification loop to
+    # ``_classify_lapsed_rows``; what is still read here is the ORDER modules are listed
+    # in, the access map, and the catalog labels.
+    from blueprints.entity.services.modules import (MODULE_CODES, _enabled_state,
                                                     module_display_names)
-    from blueprints.subscription.constants import (PHASE_ACTIVE, PHASE_CANCELLED,
-                                                   PHASE_EXPIRED, PHASE_PAST_DUE,
-                                                   PHASE_SCHEDULED_CANCEL, PHASE_TRIAL)
     from blueprints.subscription.services import clock
     from blueprints.subscription.services import store as sub_store
 
@@ -97,58 +95,9 @@ def lapsed_trial_for_entity(entity_id, payer_user_id=None, *, access_state=None)
             access_state = _enabled_state(str(entity_id))
         now = clock.now()
 
-        lapsed: list[dict] = []
-        live_paid = False
-        live_trial = False
-
-        for row in rows:
-            code = (getattr(row, "function_code", None) or "").upper()
-            if code not in MODULE_CODES:
-                continue
-            phase = getattr(row, "phase", None) or ""
-            trial_end = getattr(row, "trial_end", None)
-            has_access = bool(access_state.get(code))
-
-            # A deliberate cancellation is not a lapse. Cancelling is the ONLY way out of
-            # a screen with no dismiss control, so taking the page over about a
-            # subscription the customer themselves ended would leave them no recourse.
-            if phase in (PHASE_SCHEDULED_CANCEL, PHASE_CANCELLED):
-                continue
-
-            if phase in (PHASE_ACTIVE, PHASE_PAST_DUE):
-                live_paid = True
-                continue
-
-            if phase == PHASE_TRIAL and has_access:
-                # Either genuinely running, or past its term with the gate still on
-                # (``app_trial_closing``). Both mean the customer is working and the next
-                # pass may yet convert them, so nothing may be sold about it either way.
-                live_trial = True
-                continue
-
-            if phase == PHASE_EXPIRED and has_access:
-                # ``expired`` with the gate still on is a repair the sweep has not made
-                # yet. Side with the gate, exactly as the module card does.
-                live_trial = True
-                continue
-
-            if phase not in (PHASE_TRIAL, PHASE_EXPIRED):
-                continue
-
-            if trial_end is None:
-                # Not a lapsed TRIAL, so there is no free period that ran out and
-                # nothing here knows what to offer.
-                continue
-
-            if phase == PHASE_TRIAL and (now - trial_end) <= TRIAL_CLOSING_WINDOW:
-                # Row still says ``trial`` and the term only just ran out: the gate went
-                # off before ``close-trials`` reached the row. Give the pass its window
-                # to convert rather than selling something that may be about to be
-                # charged anyway — the same bound the card uses for ``app_trial_closing``.
-                live_trial = True
-                continue
-
-            lapsed.append({"code": code, "lapsed_on": trial_end})
+        lapsed, live_paid, live_trial = _classify_lapsed_rows(
+            rows, access_state, now
+        )
 
         if not lapsed:
             return _closed(payer)
@@ -232,3 +181,77 @@ def codes_for_restart(state: dict, requested) -> list[str]:
         # submitted, which on a screen that takes money is the worst of both.
         return []
     return [code for code in MODULE_CODES if code in wanted]
+
+
+def _classify_lapsed_rows(rows, access_state, now):
+    """Sort an entity's module rows into ``(lapsed, live_paid, live_trial)``.
+
+    ``lapsed`` is the trials whose free period ran out with the gate already off --
+    the ones the restart screen offers to buy back. The two flags are the reasons NOT
+    to take the page over, and an entity can raise both at once, which is why they are
+    collected here and weighed by the caller rather than short-circuiting the loop.
+
+    Imported at call time, as the caller does: the suite patches ``MODULE_CODES`` and
+    ``TRIAL_CLOSING_WINDOW`` on ``entity.services.modules``, and binding them at import
+    would capture the real values and ignore the patch.
+    """
+    from blueprints.entity.services.modules import (MODULE_CODES,
+                                                    TRIAL_CLOSING_WINDOW)
+    from blueprints.subscription.constants import (PHASE_ACTIVE, PHASE_CANCELLED,
+                                                   PHASE_EXPIRED, PHASE_PAST_DUE,
+                                                   PHASE_SCHEDULED_CANCEL, PHASE_TRIAL)
+
+    lapsed: list[dict] = []
+    live_paid = False
+    live_trial = False
+
+    for row in rows:
+        code = (getattr(row, "function_code", None) or "").upper()
+        if code not in MODULE_CODES:
+            continue
+        phase = getattr(row, "phase", None) or ""
+        trial_end = getattr(row, "trial_end", None)
+        has_access = bool(access_state.get(code))
+
+        # A deliberate cancellation is not a lapse. Cancelling is the ONLY way out of
+        # a screen with no dismiss control, so taking the page over about a
+        # subscription the customer themselves ended would leave them no recourse.
+        if phase in (PHASE_SCHEDULED_CANCEL, PHASE_CANCELLED):
+            continue
+
+        if phase in (PHASE_ACTIVE, PHASE_PAST_DUE):
+            live_paid = True
+            continue
+
+        if phase == PHASE_TRIAL and has_access:
+            # Either genuinely running, or past its term with the gate still on
+            # (``app_trial_closing``). Both mean the customer is working and the next
+            # pass may yet convert them, so nothing may be sold about it either way.
+            live_trial = True
+            continue
+
+        if phase == PHASE_EXPIRED and has_access:
+            # ``expired`` with the gate still on is a repair the sweep has not made
+            # yet. Side with the gate, exactly as the module card does.
+            live_trial = True
+            continue
+
+        if phase not in (PHASE_TRIAL, PHASE_EXPIRED):
+            continue
+
+        if trial_end is None:
+            # Not a lapsed TRIAL, so there is no free period that ran out and
+            # nothing here knows what to offer.
+            continue
+
+        if phase == PHASE_TRIAL and (now - trial_end) <= TRIAL_CLOSING_WINDOW:
+            # Row still says ``trial`` and the term only just ran out: the gate went
+            # off before ``close-trials`` reached the row. Give the pass its window
+            # to convert rather than selling something that may be about to be
+            # charged anyway — the same bound the card uses for ``app_trial_closing``.
+            live_trial = True
+            continue
+
+        lapsed.append({"code": code, "lapsed_on": trial_end})
+
+    return lapsed, live_paid, live_trial
