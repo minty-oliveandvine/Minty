@@ -293,20 +293,18 @@ def paid_through_for_user(user_id) -> datetime | None:
     Earliest rather than latest because the account-level uses are all "is anything due":
     taking the furthest-ahead group would hide a lapsed one behind a healthy one.
 
-    Falls back to ``user_stripe_customer.paid_through`` when the payer has no groups,
-    which is every payer before the per-entity cards landed. That column is no longer
-    written; it is the pre-cutover record and the answer for an account the backfill
-    never reached.
+    Answers from the GROUPS only. There used to be a fallback to
+    ``user_stripe_customer.paid_through`` for a payer with no group; that column was the
+    superseded one-cycle-per-payer design and has been dropped, along with the fallback,
+    once the backfill guaranteed every payer a group. A payer with none now answers None,
+    which is the truthful answer rather than a stale one.
     """
     dates = [
         group.paid_through
         for group in billing_groups_for_payer(user_id)
         if group.paid_through is not None
     ]
-    if dates:
-        return min(dates)
-    row = customer_mapping_for_user(user_id)
-    return row.paid_through if row is not None else None
+    return min(dates) if dates else None
 
 
 def paid_through_for_entity(entity_id) -> datetime | None:
@@ -322,16 +320,13 @@ def paid_through_for_entity(entity_id) -> datetime | None:
     one payer held three different answers to ONE question. This is one answer per group,
     written by the charge that collected it.
 
-    Falls back to the payer's account row for an entity with no nomination — a trial that
-    has never been billed, or data the backfill never reached. A BILLABLE entity in that
-    state is an error, and the charge paths say so rather than reading a date here.
+    None for an entity with no nomination — a trial that has never been billed. This used
+    to fall back to the payer's account row; that column is gone with the one-cycle-per-payer
+    design it belonged to. A BILLABLE entity with no group is an error, and the charge paths
+    say so rather than reading a date here.
     """
     group = billing_group_for_entity(entity_id)
-    if group is not None:
-        return group.paid_through
-    payer = payer_for_entity(entity_id)
-    row = customer_mapping_for_user(payer) if payer else None
-    return row.paid_through if row is not None else None
+    return group.paid_through if group is not None else None
 
 
 def pending_extensions_for_payer(user_id) -> list[EntityModuleSubscription]:
@@ -974,15 +969,22 @@ def transfer_entity_payer(entity_id, new_payer_user_id, *, billed_through=None) 
 def payer_is_dunning(user_id) -> bool:
     """Whether collection is currently failing for this payer.
 
-    The single-user form of ``groups_in_dunning``. A transfer is refused while either
-    side is in it: the outgoing payer because the debt is theirs and splitting it in half
-    leaves it uncollectable, the incoming payer because they are in no state to take on
-    another bill.
+    The single-user form of ``groups_in_dunning``, and it reads the same place: ANY of the
+    payer's cards being in collection makes the payer so. It previously read
+    ``user_stripe_customer.dunning_started_at``, which nothing has written since the
+    per-card cutover -- so it answered False for a payer genuinely mid-collection and let
+    a handover through with the debt still outstanding.
+
+    A transfer is refused while either side is in it: the outgoing payer because the debt
+    is theirs and splitting it in half leaves it uncollectable, the incoming payer because
+    they are in no state to take on another bill.
     """
     if not user_id:
         return False
-    row = customer_mapping_for_user(user_id)
-    return bool(row is not None and row.dunning_started_at is not None)
+    return any(
+        group.dunning_started_at is not None
+        for group in billing_groups_for_payer(user_id)
+    )
 
 
 def rows_for_entity(entity_id) -> list[EntityModuleSubscription]:
