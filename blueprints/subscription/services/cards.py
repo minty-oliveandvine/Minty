@@ -79,33 +79,7 @@ def get_module_cards(entity_id: str) -> list[dict]:
         customer_id and customer_default_payment_method(customer_id)
     )
 
-    # ...but a card is not sufficient. The payer's card is shared across every entity
-    # they pay for, so THIS entity also needs its own billing consent before a trial
-    # here may convert to a charge (see checkout._convert_due_trials). An entity with a
-    # card but no consent gets the same nudge - otherwise its trial would quietly expire
-    # and the user would never learn why.
-    try:
-        # Asked about the entity's PAYER — the person whose card the nudge is about.
-        # After a handover the previous payer's consent is history and says nothing
-        # about whether this one has agreed, so a card-but-no-consent entity would
-        # otherwise stop showing the nudge and let its trial lapse unexplained.
-        has_billing_consent = sub_store.has_billing_consent(
-            entity_id, sub_store.payer_for_entity(entity_id)
-        )
-    except Exception:
-        # Best-effort: never fail the page over the nudge. Assume consent so we do not
-        # nag someone who has already given it.
-        #
-        # The rollback is NOT optional. On Postgres a failed statement aborts the whole
-        # transaction, and every later query in the request then dies with "current
-        # transaction is aborted" - so swallowing the Python exception without resetting
-        # the session turns one bad query into a 500 several calls away (it surfaced as
-        # an unrelated currency_info lookup failing).
-        db.session.rollback()
-        logger.exception(
-            "modules: could not read billing consent for {}; assuming consent", entity_id
-        )
-        has_billing_consent = True
+    has_billing_consent = _billing_consent_or_assume(entity_id, sub_store)
 
     will_convert = has_payment_method and has_billing_consent
 
@@ -116,25 +90,7 @@ def get_module_cards(entity_id: str) -> list[dict]:
     # trial was invisible to Stripe, and a module cancelled out of a bundle had no
     # Stripe view at all because its line had been swapped down. The row plus
     # ``access.py`` answers every question this card asks, from one source.
-    rows = {}
-    paid_through = None
-    payer_id = None
-    try:
-        rows = {
-            row.function_code.upper(): row
-            for row in sub_store.module_rows_for_entity(entity_id)
-        }
-        # What THIS company is paid through, read once. It lives on the card the company
-        # is billed on: a payer may hold several, each buying its own periods for its own
-        # companies. Not the per-row copy, which drifted apart between a payer's entities
-        # because each was only refreshed when its own entity was touched.
-        payer_id = next(
-            (row.payer_user_id for row in rows.values() if row.payer_user_id), None
-        )
-        if payer_id:
-            paid_through = sub_store.paid_through_for_entity(entity_id)
-    except Exception:
-        logger.exception("modules: could not read module rows for entity {}", entity_id)
+    rows, payer_id, paid_through = _module_rows_for_cards(entity_id, sub_store)
 
     # What this period was ALREADY PAID FOR. A trial converting alongside these is a
     # mid-period change priced against them; converting with nothing here just starts the
@@ -162,22 +118,7 @@ def get_module_cards(entity_id: str) -> list[dict]:
     # answer against the same window, and re-reading it per row is a lookup for nothing.
     grace_days = policy.current().past_due_window_days
 
-    # What the request gate would actually answer for this entity right now. The card
-    # has to agree with it: a module the user can already open must never render the
-    # "Start free trial" button, whatever the subscription rows say.
-    try:
-        access_state = entity_modules._enabled_state(entity_id)
-    except Exception:
-        # Same posture as the consent read above — the page must not 500 over one
-        # lookup, and the rollback is what stops a failed statement poisoning the rest
-        # of the request on Postgres. Assume NO access: that only ever suppresses a
-        # trial button, where assuming access would offer a trial on a module the user
-        # is already inside, which is the contradiction this field exists to prevent.
-        db.session.rollback()
-        logger.exception(
-            "modules: could not read module access for {}; assuming none", entity_id
-        )
-        access_state = {code: False for code in entity_modules.MODULE_CODES}
+    access_state = _access_state_or_deny(entity_id)
 
     cards: list[dict] = []
     for code in entity_modules.MODULE_CODES:
@@ -489,17 +430,7 @@ def get_module_cards(entity_id: str) -> list[dict]:
                 ),
             }
         )
-
-    # Second pass, once every card exists: the conversion charges are SEQUENTIAL and a
-    # per-card computation cannot see the trials it depends on.
-    for code, charge in _forecast_conversion_charges(
-        entity_id, payer_id, billed_now, cards
-    ).items():
-        for card in cards:
-            if (card["code"] or "").upper() == code:
-                card["conversion_charge"] = money.to_major(
-                    charge, card.get("currency_code")
-                )
+    _fill_conversion_charges(cards, entity_id, payer_id, billed_now)
     return cards
 
 def _forecast_conversion_charges(entity_id, payer_id, billed_now, cards) -> dict[str, int]:
@@ -726,3 +657,97 @@ def get_module_plan_catalog() -> dict:
         "bundle_currency": (bundle.currency_code or None) if bundle else None,
         "trial_period_days": policy.current().trial_days,
     }
+
+
+def _access_state_or_deny(entity_id) -> dict:
+    """What the request gate would answer for this entity right now, per module."""
+    # What the request gate would actually answer for this entity right now. The card
+    # has to agree with it: a module the user can already open must never render the
+    # "Start free trial" button, whatever the subscription rows say.
+    try:
+        access_state = entity_modules._enabled_state(entity_id)
+    except Exception:
+        # Same posture as the consent read above — the page must not 500 over one
+        # lookup, and the rollback is what stops a failed statement poisoning the rest
+        # of the request on Postgres. Assume NO access: that only ever suppresses a
+        # trial button, where assuming access would offer a trial on a module the user
+        # is already inside, which is the contradiction this field exists to prevent.
+        db.session.rollback()
+        logger.exception(
+            "modules: could not read module access for {}; assuming none", entity_id
+        )
+        access_state = {code: False for code in entity_modules.MODULE_CODES}
+    return access_state
+
+def _module_rows_for_cards(entity_id, sub_store):
+    """``(rows, payer_id, paid_through)`` for the entity, or empties on a bad read."""
+    rows = {}
+    paid_through = None
+    payer_id = None
+    try:
+        rows = {
+            row.function_code.upper(): row
+            for row in sub_store.module_rows_for_entity(entity_id)
+        }
+        # What THIS company is paid through, read once. It lives on the card the company
+        # is billed on: a payer may hold several, each buying its own periods for its own
+        # companies. Not the per-row copy, which drifted apart between a payer's entities
+        # because each was only refreshed when its own entity was touched.
+        payer_id = next(
+            (row.payer_user_id for row in rows.values() if row.payer_user_id), None
+        )
+        if payer_id:
+            paid_through = sub_store.paid_through_for_entity(entity_id)
+    except Exception:
+        logger.exception("modules: could not read module rows for entity {}", entity_id)
+    return rows, payer_id, paid_through
+
+def _billing_consent_or_assume(entity_id, sub_store) -> bool:
+    """Whether THIS entity is authorised to bill its payer's card.
+
+    Assumes consent when the read fails: the answer only drives a nudge, and nagging
+    someone who has already consented is the worse of the two wrong answers.
+    """
+    # ...but a card is not sufficient. The payer's card is shared across every entity
+    # they pay for, so THIS entity also needs its own billing consent before a trial
+    # here may convert to a charge (see checkout._convert_due_trials). An entity with a
+    # card but no consent gets the same nudge - otherwise its trial would quietly expire
+    # and the user would never learn why.
+    try:
+        # Asked about the entity's PAYER — the person whose card the nudge is about.
+        # After a handover the previous payer's consent is history and says nothing
+        # about whether this one has agreed, so a card-but-no-consent entity would
+        # otherwise stop showing the nudge and let its trial lapse unexplained.
+        has_billing_consent = sub_store.has_billing_consent(
+            entity_id, sub_store.payer_for_entity(entity_id)
+        )
+    except Exception:
+        # Best-effort: never fail the page over the nudge. Assume consent so we do not
+        # nag someone who has already given it.
+        #
+        # The rollback is NOT optional. On Postgres a failed statement aborts the whole
+        # transaction, and every later query in the request then dies with "current
+        # transaction is aborted" - so swallowing the Python exception without resetting
+        # the session turns one bad query into a 500 several calls away (it surfaced as
+        # an unrelated currency_info lookup failing).
+        db.session.rollback()
+        logger.exception(
+            "modules: could not read billing consent for {}; assuming consent", entity_id
+        )
+        has_billing_consent = True
+    return has_billing_consent
+
+
+def _fill_conversion_charges(cards, entity_id, payer_id, billed_now) -> None:
+    """Stamp each card's ``conversion_charge``, in MAJOR units, in place."""
+
+    # Second pass, once every card exists: the conversion charges are SEQUENTIAL and a
+    # per-card computation cannot see the trials it depends on.
+    for code, charge in _forecast_conversion_charges(
+        entity_id, payer_id, billed_now, cards
+    ).items():
+        for card in cards:
+            if (card["code"] or "").upper() == code:
+                card["conversion_charge"] = money.to_major(
+                    charge, card.get("currency_code")
+                )
