@@ -28,6 +28,7 @@ from flask import (current_app, flash, has_request_context, redirect, request,
 from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
+from blueprints.shared import bearer_api
 from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity, db)
@@ -357,7 +358,7 @@ def _resolve_user_entity_role(user_id, entity_id) -> str:
 
 
 def _frontend_origin() -> str:
-    return os.environ.get("FRONTEND_APP_URL", "http://localhost:3000").rstrip("/")
+    return bearer_api.frontend_origin()
 
 
 def billing_app_home_url(entity_id: str, org: Entity, user_id, *, from_bills: bool = False) -> str:
@@ -457,11 +458,7 @@ def _notice_cors(resp):
     allowance narrow and pins ``Vary: Origin`` so a cached response for one origin is
     never replayed to another.
     """
-    resp.headers["Access-Control-Allow-Origin"] = _frontend_origin()
-    resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-    return resp
+    return bearer_api.cors(resp, _frontend_origin(), methods="GET, OPTIONS")
 
 
 @entity_bp.route(

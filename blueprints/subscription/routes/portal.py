@@ -24,30 +24,24 @@ already holds, signed with this app's ``SECRET_KEY``. Two differences, both deli
 
 from __future__ import annotations
 
-import os
-
-import jwt
 from flask import current_app, jsonify, make_response, request
 
+from blueprints.shared import bearer_api
 from blueprints.subscription import subscription_bp
 
 
 def _frontend_origin() -> str:
-    return os.environ.get("FRONTEND_APP_URL", "http://localhost:3000").rstrip("/")
+    return bearer_api.frontend_origin()
 
 
 def _cors(resp):
     """Allow the Module 2 frontend to call this cross-origin (bearer-token auth).
 
-    Names the origin rather than leaning on the global flask-cors install, and pins
-    ``Vary: Origin`` so a response cached for one origin is never replayed to another.
-    Same contract as ``_notice_cors``.
+    The header set is ``shared.bearer_api.cors``; only the origin and the method list are
+    this surface's own. Kept as a local name so anything patching this module still
+    intercepts.
     """
-    resp.headers["Access-Control-Allow-Origin"] = _frontend_origin()
-    resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-    return resp
+    return bearer_api.cors(resp, _frontend_origin(), methods="GET, POST, OPTIONS")
 
 
 def _unauthorized(reason: str, status: int = 401):
@@ -85,20 +79,8 @@ def _guard():
 
 
 def _user_id_from_bearer() -> str | None:
-    """The ``user_id`` claim of a valid billing JWT, or None."""
-    header = request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
-        return None
-    try:
-        decoded = jwt.decode(
-            header[len("Bearer "):].strip(),
-            current_app.config.get("SECRET_KEY"),
-            algorithms=["HS256"],
-        )
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
-        return None
-    user_id = decoded.get("user_id")
-    return str(user_id) if user_id else None
+    """The ``user_id`` claim of a valid billing JWT, or None. See ``bearer_api``."""
+    return bearer_api.user_id_from_bearer()
 
 
 def _int_arg(name: str, default: int) -> int:

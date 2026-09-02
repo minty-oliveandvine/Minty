@@ -32,9 +32,13 @@ PUBLIC_URL = os.environ.get('PUBLIC_URL')
 
 ENV = os.environ.get('ENV')
 
-# Stripe — the live source of truth for the subscription module. The secret key
-# authorizes API calls (server-side only); the webhook secret verifies incoming
-# events; the publishable key is safe to expose to the frontend.
+# Stripe — the payment RAIL, not the source of truth: the local tables own the catalog
+# and every entity's subscription and access state. The secret key authorizes API calls
+# (server-side only); the publishable key is safe to expose to the frontend.
+#
+# There is no webhook secret here any more. The receiver was deleted with the Stripe
+# biller and nothing read the setting, so it was a configured value with no reader. The
+# .env files still carry a STRIPE_WEBHOOK_SECRET line; it is inert, and goes whenever
+# .env.example is next regenerated.
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY')
-STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')

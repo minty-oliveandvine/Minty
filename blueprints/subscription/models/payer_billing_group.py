@@ -41,9 +41,10 @@ SetupIntent; no PAN reaches this process, this table or these logs.
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import TimestampMixin
 
 
-class PayerBillingGroup(db.Model):
+class PayerBillingGroup(TimestampMixin, db.Model):
     __tablename__ = "payer_billing_group"
     __table_args__ = (
         # A payer must not hold two groups on one card: the same entity's renewal could
@@ -79,16 +80,6 @@ class PayerBillingGroup(db.Model):
     # ``services.dunning``. NULL = this card is not in collection.
     dunning_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
     dunning_attempts = db.Column(db.Integer, nullable=False, server_default="0")
-
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-        nullable=False,
-    )
 
     def __repr__(self):
         return (

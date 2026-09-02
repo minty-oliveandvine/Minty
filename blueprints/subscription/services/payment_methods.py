@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from blueprints.subscription.services import clock
+from blueprints.subscription.services import clock, display
 from blueprints.subscription.services import store as sub_store
 from blueprints.subscription.services.stripe_client import (
     attach_payment_method, create_customer_for_user, create_setup_intent,
@@ -101,8 +101,9 @@ def run(handler, user_id) -> tuple[dict, int]:
 
 
 def _fmt(moment) -> str | None:
-    """'15 Aug 2026' — the same zero-padded form the rest of the portal prints."""
-    return moment.strftime("%d %b %Y") if moment else None
+    """'15 Aug 2026' — the same zero-padded form the rest of the portal prints, and now
+    literally the same function: see ``display.day``."""
+    return display.day(moment)
 
 
 def _months_until(exp_year, exp_month, now) -> int | None:

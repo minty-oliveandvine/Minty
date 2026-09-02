@@ -1,7 +1,6 @@
 # Entity create routes.
 
 
-import os
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Protocol, cast
@@ -16,6 +15,7 @@ from iso4217 import Currency
 from loguru import logger
 
 from blueprints.entity import entity_bp
+from blueprints.shared import bearer_api
 from blueprints.entity.forms import CreateEntityForm
 from blueprints.entity.services.payment_methods import (
     list_sales_methods_grouped, replace_sales_methods)
@@ -30,7 +30,7 @@ class _PyCountryCountry(Protocol):
 # --- Onboarding handoff helpers -------------------------------------------
 
 def _onboarding_base_url() -> str:
-    return os.environ.get("ONBOARDING_APP_URL", "http://localhost:3001").rstrip("/")
+    return bearer_api.onboarding_origin()
 
 
 def _mint_onboarding_token(user_id) -> str:
@@ -87,27 +87,20 @@ def onboarding_launch_url(
 
 
 def _user_id_from_bearer():
-    """Decode the onboarding JWT from the Authorization header → user_id."""
-    header = request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
-        return None
-    token = header[len("Bearer "):].strip()
-    try:
-        decoded = jwt.decode(
-            token, current_app.config.get("SECRET_KEY"), algorithms=["HS256"]
-        )
-        return decoded.get("user_id")
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
-        return None
+    """Decode the onboarding JWT from the Authorization header -> user_id.
+
+    Now the shared decoder, which returns a STRING; this copy returned the raw claim.
+    """
+    return bearer_api.user_id_from_bearer()
 
 
 def _cors(resp):
-    """Allow the onboarding origin to call the API cross-origin (token auth)."""
-    resp.headers["Access-Control-Allow-Origin"] = _onboarding_base_url()
-    resp.headers["Vary"] = "Origin"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-    return resp
+    """Allow the onboarding origin to call the API cross-origin (token auth).
+
+    ``PUT`` beyond the portal's list: the wizard updates the entity in place."""
+    return bearer_api.cors(
+        resp, _onboarding_base_url(), methods="GET, POST, PUT, OPTIONS"
+    )
 
 
 def _resolve_country_code(value: str) -> str:

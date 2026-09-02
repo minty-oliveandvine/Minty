@@ -16,10 +16,15 @@ the bundle price). A customer is resolved entity -> payer user -> customer, so o
 payer's cycle spans every entity they own — which is why ``entity_id`` travels on the
 invoice LINE rather than being inferred from anything Stripe holds.
 
-This blueprint has no routes. The Stripe webhook receiver lived here and went with the
-subscription biller. The customer-facing actions (checkout, trial, billing portal,
-module toggle) hang off the entity settings routes and call into
-``blueprints.subscription.services``.
+Its routes are the PAYER PORTAL only -- fifteen bearer-token JSON endpoints under
+``/api/me/...``, called cross-origin by the Module 2 frontend and listed in
+``routes/portal.py``. (This docstring long said "this blueprint has no routes"; that was
+true when the Stripe webhook receiver went with the subscription biller, and stopped
+being true when the portal landed.)
+
+The SESSION-cookie surface is elsewhere: the customer-facing actions a signed-in admin
+takes -- checkout, trial, billing portal, module toggle -- hang off the entity settings
+routes and call into ``blueprints.subscription.services``.
 """
 from flask import Blueprint
 

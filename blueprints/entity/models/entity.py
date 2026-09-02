@@ -52,9 +52,13 @@ class Entity(db.Model):
     period_lock_date = db.Column(db.Date, nullable=True)
     end_of_year_lock_date = db.Column(db.Date, nullable=True)
     xero_tenant_name = db.Column(db.String(255), nullable=True)
-    # NOTE: no stripe_customer_id column — the entity's Stripe customer is resolved
-    # live from Stripe via the customer's metadata.entity_id (see
-    # subscription.services.stripe_state.customer_id_for_entity).
+    # NOTE: no stripe_customer_id column — the customer belongs to the PAYER, not the
+    # entity, so it resolves entity -> payer -> customer. Render paths read it from the
+    # local tables via ``entity.services.modules._entity_customer_id``; the billing paths
+    # use ``subscription.services.checkout._resolve_customer_id``, which adds a Stripe
+    # search fallback that is deliberately wrong for a render. (This note used to point at
+    # ``subscription.services.stripe_state``, deleted with the Stripe biller, and at a live
+    # Stripe lookup that no longer happens.)
     connected_by_user_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.user.id", ondelete="RESTRICT"),
