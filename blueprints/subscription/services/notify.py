@@ -100,20 +100,17 @@ def money(amount_minor, currency: str | None) -> str:
 
 
 def day(value) -> str:
-    """A date a human reads without parsing: ``12 Mar 2026``. Empty when unknown."""
+    """A date a human reads without parsing: ``12 Mar 2026``. Empty when unknown.
+
+    Formatted the way ``modules._fmt_day_month_year`` already did it: take the day as an
+    INT and let strftime handle only the parts it agrees about across platforms. This
+    used to probe for glibc's ``%-d`` at every call and fall back to
+    ``"%d %b %Y".lstrip("0")`` on Windows -- two code paths, a try/except and a bare
+    ``datetime`` literal, to reach the string an f-string gives directly.
+    """
     if not isinstance(value, datetime):
         return ""
-    return f"{value:%-d %b %Y}" if _supports_dash() else f"{value:%d %b %Y}".lstrip("0")
-
-
-def _supports_dash() -> bool:
-    # ``%-d`` is glibc; Windows strftime rejects it outright. These jobs run under Task
-    # Scheduler on a Windows host, so the platform check is not academic.
-    try:
-        datetime(2026, 3, 2).strftime("%-d")  # noqa: DTZ001 - probes strftime, not a moment
-        return True
-    except (ValueError, TypeError):
-        return False
+    return f"{value.day} {value:%b %Y}"
 
 
 def modules_phrase(codes) -> str:

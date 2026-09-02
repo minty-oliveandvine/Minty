@@ -30,8 +30,9 @@ PERIOD = Period(dt(2027, 2, 1), dt(2027, 3, 1))
 
 
 class _FakeCurrency:
-    def __init__(self, decimal_places):
+    def __init__(self, decimal_places, symbol=None):
         self.decimal_places = decimal_places
+        self.symbol = symbol
 
 
 class _FakeQuery:
@@ -57,9 +58,9 @@ def currencies(monkeypatch):
     import models.db
 
     table = {
-        "HKD": _FakeCurrency(2),
-        "JPY": _FakeCurrency(0),   # zero-decimal: 280 minor units IS 280 yen
-        "KWD": _FakeCurrency(3),   # three-decimal
+        "HKD": _FakeCurrency(2, "HK$"),   # a GLYPH: not spaced off the amount
+        "JPY": _FakeCurrency(0),          # zero-decimal, and no symbol recorded
+        "KWD": _FakeCurrency(3),          # three-decimal
     }
 
     class _FakeModel:
@@ -174,3 +175,53 @@ def test_the_default_stays_two_places_so_existing_callers_are_unaffected():
     """``places`` is keyword-only with a default: the oracle-figure tests in
     test_billing_engine call these positionally and must keep passing."""
     assert "400.00" in join_memo("E", "P", 40000, PERIOD, dt(2027, 2, 1))
+
+
+# --- the symbol, and how it joins the amount --------------------------------------
+#
+# The second half of the same split. ``entity.services.modules`` and the payer portal
+# each resolved the symbol themselves and each applied the code-vs-glyph spacing from
+# its own copy — and the two lookups had already drifted: only one upper-cased the code
+# before querying, and only one survived a database error.
+
+
+def test_symbol_comes_from_currency_info(app, currencies):
+    with app.app_context():
+        assert money.symbol("HKD") == "HK$"
+
+
+def test_symbol_falls_back_to_the_code_when_none_is_recorded(app, currencies):
+    """``currency_info`` records no symbol for plenty of currencies, which is why the
+    Invoices column has to be able to print "JPY 280" rather than nothing."""
+    with app.app_context():
+        assert money.symbol("JPY") == "JPY"
+        assert money.symbol("ZZZ") == "ZZZ"
+        assert money.symbol(None) == ""
+        assert money.symbol("") == ""
+
+
+def test_symbol_upper_cases_the_code_before_looking_it_up(app, currencies):
+    """The drift this closes: ``modules._currency_symbol`` queried the code verbatim, so
+    a lower-cased one missed the row and rendered "hkd" where a glyph existed."""
+    with app.app_context():
+        assert money.symbol("hkd") == "HK$"
+        assert money.symbol(" hkd ") == "HK$"
+
+
+def test_a_code_is_spaced_off_the_amount_and_a_glyph_is_not(app, currencies):
+    """The one-line rule both surfaces used to hold privately.
+
+    "HKD400" scans as a single token rather than a currency and an amount; "HK$ 400" is
+    not how a glyph is written. Both halves matter, so both are pinned.
+    """
+    assert money.join("HKD", "400.00") == "HKD 400.00"
+    assert money.join("HK$", "400.00") == "HK$400.00"
+    assert money.join("", "400.00") == "400.00"
+
+
+def test_format_with_symbol_uses_the_currencys_own_places(app, currencies):
+    """Symbol, spacing and precision together — what the payer portal prints."""
+    with app.app_context():
+        assert money.format_with_symbol(40000, "HKD") == "HK$400.00"
+        assert money.format_with_symbol(280, "JPY") == "JPY 280"
+        assert money.format_with_symbol(400000, "KWD") == "KWD 400.000"

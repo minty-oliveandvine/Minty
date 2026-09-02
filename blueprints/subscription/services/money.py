@@ -8,6 +8,11 @@ two-decimal currency — so the split went unnoticed. On a zero-decimal currency
 module card would read 280 while the memo explaining that very charge read 2.80, and
 the dialog asking the customer to authorise it read 2.80 as well.
 
+The SYMBOL half was split the same way and is now here too. ``entity.services.modules``
+looked the code up without upper-casing it and let a database error escape; the payer
+portal upper-cased and fell back. Both then applied the same code-vs-glyph spacing rule
+from their own copy of it. One currency renders one way now, wherever it is printed.
+
 Deliberately NOT in ``billing.py``. That module is pure arithmetic — no ORM, no clock,
 no Stripe — which is what makes the money rules testable without a database. So it takes
 ``decimal_places`` as a plain parameter and this module is what resolves one.
@@ -77,6 +82,48 @@ def decimal_places(currency_code: str | None) -> int:
     return places
 
 
+def symbol(currency_code: str | None) -> str:
+    """The display symbol for a currency, from ``currency_info``.
+
+    Falls back to the upper-cased CODE ("HKD") when no symbol is recorded, and to "" when
+    there is no currency at all. Never raises and never leaves a poisoned session behind:
+    a symbol lookup must not be the thing that costs the page its amount.
+
+    The code is upper-cased before the lookup. One of the two callers this replaces did
+    not, so a lowercase code missed the row and rendered the bare code even where a
+    symbol existed.
+    """
+    if not currency_code:
+        return ""
+    code = str(currency_code).strip().upper()
+
+    # Imported here for the same reason as in ``decimal_places``, and separately from the
+    # query so the handler below can rely on ``db`` being bound.
+    from models.db import CurrencyInfo, db
+
+    try:
+        row = CurrencyInfo.query.filter_by(currency_code=code).first()
+        if row is not None and row.symbol:
+            return row.symbol
+    except Exception:  # noqa: BLE001 - a missing symbol must not cost the amount
+        logger.exception("money: could not read a symbol for {}; using the code", code)
+        # The failed query leaves the session unusable for whatever the request does
+        # next, so this is salvage, not tidiness.
+        db.session.rollback()
+    return code
+
+
+def join(currency_symbol: str, text: str) -> str:
+    """Put a symbol in front of an already-formatted amount, spaced correctly.
+
+    A CODE is spaced off the number, a GLYPH is not: "HKD 400", but "HK$400". Without
+    this the panel read "HKD400", which scans as one token rather than a currency and an
+    amount. The same rule the onboarding app's ``money()`` applies.
+    """
+    space = " " if currency_symbol[-1:].isalpha() else ""
+    return f"{currency_symbol}{space}{text}"
+
+
 def to_major(amount_minor, currency_code: str | None) -> Decimal:
     """Minor units to a major-unit Decimal. HKD 28000 -> 280.00; JPY 280 -> 280."""
     if amount_minor is None:
@@ -93,3 +140,13 @@ def format_minor(amount_minor, currency_code: str | None) -> str:
     places = decimal_places(currency_code)
     value = abs(Decimal(int(amount_minor or 0))) / (Decimal(10) ** places)
     return f"{value:,.{places}f}"
+
+
+def format_with_symbol(amount_minor, currency_code: str | None) -> str:
+    """Minor units as "HK$400.00" / "HKD 400.00" -- symbol resolved, never hardcoded.
+
+    Always shows the currency's decimal places. For the surface that trims a whole
+    amount to "HK$400" instead, see ``entity.services.modules._fmt_money``: the two
+    share this module's symbol and spacing, and differ only in that trailing-zero rule.
+    """
+    return join(symbol(currency_code), format_minor(amount_minor, currency_code))
