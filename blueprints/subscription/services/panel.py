@@ -19,8 +19,12 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from loguru import logger
+
 from blueprints.entity.services import modules as entity_modules
 from blueprints.subscription.services import money
+from blueprints.subscription.services.display import day as fmt_day
+from models.db import EntityFunction, db
 
 
 def _empty_panel_next_invoice(cards: list[dict], fmt) -> dict | None:
@@ -629,3 +633,319 @@ def build_subscription_panel(cards: list[dict], summary: dict | None, anchor_dis
         "primary_action": "subscribe_stripe" if needs_billing_setup else "manage",
         "subscribe_codes": [c["code"] for c in enabled],
     }
+
+
+def get_subscription_summary(entity_id: str) -> dict:
+    """Build the subscription cost summary shown beside the module cards.
+
+    One line per module with a *continuing* subscription — i.e. one that will
+    actually be billed: active/trialing and NOT winding down (cancel-at-period-end
+    or cancelled). A cancelled module is dropped from the summary entirely. Lines
+    are priced from ``billing_plan`` via ``services.catalog``; when the continuing
+    modules are exactly the bundle's set the total is the single bundle price instead
+    (the bundle IS the discount — there is no coupon). Nothing is hardcoded, and it is
+    the same table the billing engine quotes from, so this and the invoice cannot
+    disagree.
+    The page renders this summary as-is and does NOT recompute it from the toggles.
+
+    Returns a dict shaped for the template:
+        {currency, lines: [{code, label, amount, currency_code}], subtotal,
+         bulk_discount, total, has_discount}
+    """
+    from blueprints.subscription.services import access, catalog, store
+
+    catalog_by_code = {
+        fn.function_code: fn
+        for fn in EntityFunction.query.filter(
+            EntityFunction.function_code.in_(entity_modules.MODULE_CODES)
+        ).all()
+    }
+    plans_by_code = {
+        plan.function_code.upper(): plan for plan in catalog.available_plans()
+    }
+
+    # The modules actually going to be charged again, read from the module rows rather
+    # than live Stripe. A trial contributes nothing (it is free right now) and a module
+    # winding down is excluded, so the summary reflects only the ongoing cost.
+    #
+    # The old version also required a stored period end still in the future. That check
+    # did not survive the move, and does not need to: it guarded against a period end
+    # that had lapsed without renewing, whereas the phase says directly whether the
+    # module is still being billed. Its one real effect was to drop a PAST-DUE payer
+    # from their own summary — showing them nothing owed at the moment they owe most.
+    continuing_codes = {
+        row.function_code.upper()
+        for row in store.module_rows_for_entity(entity_id)
+        if access.is_billing_forward(phase=row.phase)
+    }
+
+    lines: list[dict] = []
+    for code in entity_modules.MODULE_CODES:
+        if code.upper() not in continuing_codes:
+            continue
+        fn = catalog_by_code.get(code)
+        plan = plans_by_code.get(code.upper())
+        if plan is not None:
+            amount = money.to_major(plan.amount, plan.currency_code)
+            line_currency = plan.currency_code
+        else:
+            # No live plan for this module (not configured in Stripe yet) — show
+            # zero so the summary still renders rather than inventing a price.
+            amount = Decimal(0)
+            line_currency = None
+        label = fn.function_name if fn and fn.function_name else code
+        lines.append(
+            {"code": code, "label": label, "amount": amount, "currency_code": line_currency}
+        )
+
+    subtotal = sum((line["amount"] for line in lines), Decimal("0"))
+
+    # The bundle IS the discount: when the continuing modules are exactly the bundle's
+    # set, the entity bills the single bundle price instead of the standalone lines, and
+    # the saving is the difference. There is no coupon.
+    bundle = catalog.bundle_plan()
+    bundle_amount = (
+        money.to_major(bundle.amount, bundle.currency_code)
+        if bundle
+        else Decimal("0")
+    )
+    bundle_currency = (bundle.currency_code or "").upper() if bundle else None
+    line_codes = [ln["code"].upper() for ln in lines]
+    bundled = bool(bundle and len(lines) > 1 and bundle.covers(line_codes))
+
+    total = bundle_amount if bundled else subtotal
+    bulk_discount = (subtotal - total) if bundled else Decimal("0")
+
+    # Currency symbol for the summary, resolved live from the listed modules' Stripe
+    # plan currency (first one wins; falls back to the bundle's) — never hardcoded.
+    summary_currency_code = next(
+        (ln["currency_code"] for ln in lines if ln["currency_code"]),
+        bundle_currency,
+    )
+
+    return {
+        "currency": money.symbol(summary_currency_code),
+        # The CODE as well as the symbol: the symbol cannot tell a caller how many
+        # decimal places to render, and the billing panel needs to know.
+        "currency_code": summary_currency_code,
+        "lines": lines,
+        "subtotal": subtotal,
+        # Kept for the template: the saving vs paying for each module separately.
+        "bulk_discount": bulk_discount,
+        "total": total,
+        "has_discount": bulk_discount > 0,
+        # The bundle price + the modules it covers, exposed so the client-side "modules
+        # to subscribe" cart can preview exactly what checkout will bill: pick the
+        # bundle price when the selection is the bundle's set, else the sum of the
+        # standalone lines. Populated regardless of what's currently subscribed, so the
+        # preview works with no live subs.
+        "bundle_amount": bundle_amount,
+        "bundle_amount_formatted": f"{bundle_amount:,.2f}",
+        "bundle_codes": sorted(bundle.function_codes) if bundle else [],
+        "bundle_currency": bundle_currency,
+        # What to CALL the bundle. The trial-decision modal names the plan the customer
+        # is choosing, and it recomputes that name as modules are ticked, so it needs the
+        # name as data rather than as a string baked into a template.
+        "bundle_name": (bundle.display_name if bundle else None) or entity_modules.BUNDLE_DISPLAY_NAME,
+    }
+
+
+def get_billing_anchor(entity_id: str) -> str | None:
+    """The payer's billing anchor date, formatted for display, or None if unset.
+
+    The anchor lives on the billing ACCOUNT and is set once, at the first charge —
+    so it stays None while the entity is only on an app-level trial (a trial has no
+    cycle). The settings page shows None as "To Be Decided" and the real date once
+    the first paid module pins the cycle.
+    """
+    from blueprints.subscription.services import store as sub_store
+
+    payer_id = sub_store.payer_for_entity(entity_id)
+    if not payer_id:
+        return None
+    row = sub_store.customer_mapping_for_user(payer_id)
+    anchor = getattr(row, "anchor_at", None) if row else None
+    return fmt_day(anchor) if anchor else None
+
+
+def next_payment_from_panel(panel: dict | None) -> str | None:
+    """The date of the panel's next actual charge, or None if it has none scheduled.
+
+    THE FIRST ROW of ``upcoming_charges``, which is already sorted on the raw datetime.
+    The card at the top of the settings page and the list in the panel below it were two
+    separate answers to "when am I next charged", computed from different sources, and
+    they disagreed whenever anything but the renewal came first: a trial converting on the
+    20th is charged eight days before the renewal on the 28th, and the card named the 28th
+    — the SECOND charge — as the next one. Reading the card off the list makes that
+    impossible rather than merely unlikely.
+
+    OVERDUE ROWS ARE SKIPPED. ``past_due`` carries a ``paid_through`` that is already
+    behind us, so the earliest row can be a date in the PAST — which under the words "Next
+    payment date" is exactly the bug this card was rewritten to fix, and with none of the
+    red that makes the panel's own "Renewal — overdue" line legible as arrears. The debt
+    is stated there, properly, rather than silently here.
+
+    None when nothing is scheduled — a trial that will not convert, or every module
+    cancelled. The caller falls back to :func:`get_next_payment_date`.
+    """
+    for row in (panel or {}).get("upcoming_charges") or []:
+        if row.get("date") and not row.get("overdue"):
+            return row["date"]
+    return None
+
+
+def get_next_payment_date(entity_id: str) -> str | None:
+    """The payer's NEXT billing date, formatted for display, or None if there is no cycle.
+
+    The FALLBACK behind :func:`next_payment_from_panel` — what the settings card shows for
+    an entity with no charge of its own scheduled. The anchor itself is the wrong thing to
+    put in front of a customer: it is the ORIGINAL first-charge date and never moves, so a
+    payer anchored in July still reads "28 Jul 2026" in August — a date in the past,
+    labelled as when they will be billed. This projects the same cycle forward instead.
+
+    Derived from the anchor rather than from ``paid_through`` so the month-end clamp is
+    the same one the renewal runner bills on (``period_containing``: 31 Jan → 28 Feb →
+    back to 31 Mar), and so it can never quote a date that has already gone —
+    ``period_containing`` returns the period ``now`` is inside, whose END is by
+    construction still ahead.
+
+    None while the entity is only on an app-level trial: no charge has happened, so there
+    is no cycle to project and nothing honest to name. The page shows that as
+    "To Be Decided", same as before.
+    """
+    from blueprints.subscription.services import clock
+    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services.billing import period_containing
+
+    payer_id = sub_store.payer_for_entity(entity_id)
+    if not payer_id:
+        return None
+    anchor, _currency = sub_store.billing_cycle_for_user(payer_id)
+    if not anchor:
+        return None
+    try:
+        return fmt_day(period_containing(anchor, clock.now()).end)
+    except Exception:
+        # A date on a card must never cost anyone the page — the panel below it carries
+        # the same information per module.
+        logger.exception("modules: could not project the next payment date for {}", entity_id)
+        return None
+
+
+
+
+
+
+def build_consent_takeover(
+    entity_id, user_id, *, can_manage: bool, access_state=None
+) -> dict | None:
+    """The restart screen for an entity whose trial lapsed, or None.
+
+    Two shapes come out of one builder because they are one screen in two frames:
+    ``mode="takeover"`` replaces the page when nothing live is left, ``mode="panel"``
+    sits above the module cards when another module is still trialing. The condition
+    itself lives in ``subscription.services.consent`` — this only dresses it.
+
+    ``access_state`` is the ``{code: bool}`` gate map, resolved from ``_enabled_state``
+    when not supplied. It is a parameter so a test can state the gate directly instead of
+    building an ``entity_function_map``, and so a future caller that already holds the map
+    can hand it over rather than reading it a second time.
+
+    ``can_act`` is carried SEPARATELY from ``mode``. A co-admin must never be shown this
+    screen — ``require_subscription_payer`` would refuse the write, so it would be a form
+    that cannot submit — but the page still needs to know a restart is outstanding so it
+    can name the payer who has to do it.
+
+    Returns None when there is nothing lapsed, so the caller can pass it straight to the
+    template and let a single falsy check pick the ordinary page.
+    """
+    from blueprints.subscription.services import consent
+
+    state = consent.lapsed_trial_for_entity(
+        entity_id, user_id if can_manage else None, access_state=access_state
+    )
+    if not state.get("mode"):
+        return None
+
+    view = {
+        "mode": state["mode"],
+        "can_act": bool(can_manage),
+        "lapsed": state["lapsed"],
+        "payer_user_id": state.get("payer_user_id"),
+        "has_card": state.get("has_card", False),
+        "single": len(state["lapsed"]) == 1,
+        "names": [item["name"] for item in state["lapsed"]],
+        "quote": None,
+        "methods": None,
+    }
+    for item in view["lapsed"]:
+        item["lapsed_on_long"] = fmt_day(item["lapsed_on"])
+
+    # Everything below costs a Stripe round trip, and NONE of it is any use to someone
+    # who cannot act on it. A co-admin gets the naming fields above and nothing more.
+    if not can_manage:
+        return view
+
+    view["quote"] = _restart_quote(entity_id, user_id, view["lapsed"])
+    view["methods"] = _restart_methods(user_id, entity_id)
+    return view
+
+
+def _restart_quote(entity_id, user_id, lapsed) -> dict | None:
+    """What restarting every lapsed module would cost, for the first render.
+
+    Priced through ``preview_subscribe_modules`` — the same figure the charge itself
+    uses — so the number on the screen and the number billed come from one calculation.
+    The page re-asks the ``restart-quote`` route whenever a box is ticked; this exists
+    only so the first paint needs no round trip.
+
+    None on any failure. The page then shows its boxes with the amount pending and
+    fetches it, which is a slower screen rather than a broken one — and far better than
+    a takeover that renders no price at all.
+    """
+    from models.db import Entity, User
+
+    try:
+        from blueprints.subscription.services.checkout import preview_subscribe_modules
+
+        entity = Entity.query.get(str(entity_id))
+        user = User.query.get(str(user_id))
+        if entity is None or user is None:
+            return None
+        return preview_subscribe_modules(
+            entity, user, [item["code"] for item in lapsed]
+        )
+    except Exception:
+        db.session.rollback()
+        logger.exception(
+            "modules: could not price the restart for {}; the page will fetch it",
+            entity_id,
+        )
+        return None
+
+
+def _restart_methods(user_id, entity_id) -> dict:
+    """The payer's saved cards for the in-page picker, with THIS company's marked.
+
+    ``nominated_id`` is what the picker preselects, falling back to ``default_id``. A
+    company billed to one card and preselected on another would have the payer confirm a
+    charge against a card they never chose for it.
+
+    An empty wallet is NOT an error and must not read as one: ``has_account`` false is
+    the ordinary state of a payer whose trial never captured a card, and the screen shows
+    the add-card form alone. A genuine failure answers the same shape, because the page
+    can still fetch the list itself — the one thing it must never do is imply the cards
+    are gone.
+    """
+    empty = {"has_account": False, "default_id": None, "nominated_id": None,
+             "methods": [], "total": 0}
+    try:
+        from blueprints.subscription.services import payment_methods
+
+        return payment_methods.for_entity(user_id, entity_id)
+    except Exception:
+        logger.exception(
+            "modules: could not read saved cards for payer {}; the page will fetch them",
+            user_id,
+        )
+        return empty
