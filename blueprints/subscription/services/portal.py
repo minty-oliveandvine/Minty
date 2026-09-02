@@ -106,8 +106,9 @@ _NO_DATE = datetime.max.replace(tzinfo=timezone.utc)
 
 
 def _fmt(moment) -> str | None:
-    """'15 Aug 2026' — see ``display.day``, which ``payment_methods`` prints through too."""
-    return display.day(moment)
+    """'15 Aug 2026' — the PADDED form; this grid sets dates in a column. See
+    ``display.day_padded``, which ``payment_methods`` prints through too."""
+    return display.day_padded(moment)
 
 
 def _iso(moment) -> str | None:
