@@ -81,7 +81,6 @@ def sweep_expired_module_access(payer_user_id=None) -> dict:
     from blueprints.entity.services import modules as entity_modules
     from blueprints.subscription.services import access, checkout, clock, policy
     from blueprints.subscription.services import store as sub_store
-    from models.db import Entity
 
     code_set = set(entity_modules.MODULE_CODES)
     disabled: list[dict] = []
@@ -91,54 +90,7 @@ def sweep_expired_module_access(payer_user_id=None) -> dict:
     # revoke access for the tail of the batch under a rule the head never saw.
     grace_days = policy.current().past_due_window_days
 
-    # Two populations, because this reconciles in BOTH directions.
-    #
-    # Entities with a module switched on are the only ones that could need switching
-    # off. On its own that set made the sweep a one-way ratchet: a module revoked here
-    # left the candidate set permanently, so nothing could ever switch it back on — and
-    # nothing else does. An account that went past due, then paid, stayed locked out of
-    # a subscription it was being charged for, which is precisely the recovery dunning
-    # exists to deliver. So entities holding a BILLED module are candidates too, however
-    # their access flag currently reads.
-    module_fn_ids = [
-        fn.id
-        for fn in EntityFunction.query.filter(
-            EntityFunction.function_code.in_(entity_modules.MODULE_CODES)
-        ).all()
-    ]
-    entity_ids = (
-        {
-            row.entity_id
-            for row in EntityFunctionMap.query.filter(
-                EntityFunctionMap.entity_function_id.in_(module_fn_ids),
-                EntityFunctionMap.is_enabled.is_(True),
-            ).all()
-        }
-        if module_fn_ids
-        else set()
-    )
-    if payer_user_id is None:
-        entity_ids |= sub_store.entity_ids_with_billed_modules()
-    else:
-        mine = {
-            str(row.entity_id)
-            for row in sub_store.module_rows_for_payer(payer_user_id)
-        }
-        entity_ids = (entity_ids & mine) | sub_store.entity_ids_with_billed_modules(
-            payer_user_id
-        )
-
-    # Mid-onboarding entities are exempt (see docstring). Resolved in ONE query up
-    # front rather than per entity, so a long sweep can't straddle a finalize and
-    # judge the head of the batch by a different rule than the tail. Unfiltered by
-    # entity_ids on purpose: the set of in-flight onboardings is small, and an IN
-    # clause over every enabled entity is the part that would not scale.
-    onboarding_ids = {
-        row.id
-        for row in Entity.query.filter(Entity.status == "onboarding")
-        .with_entities(Entity.id)
-        .all()
-    }
+    entity_ids, onboarding_ids = _sweep_scope(payer_user_id, sub_store)
 
     for entity_id in entity_ids:
         if entity_id in onboarding_ids:
@@ -291,3 +243,67 @@ def _notify_access_revoked(disabled: list[dict]) -> None:
         for entity_id, bucket in by_entity.items()
     ]
     notify.notify_many(events)
+
+
+def _sweep_scope(payer_user_id, sub_store):
+    """Which entities this sweep looks at: ``(entity_ids, onboarding_ids)``.
+
+    Kept together because the two populations only make sense as a pair -- see the
+    comment below for why a one-way candidate set turned the sweep into a ratchet that
+    could revoke access and never give it back.
+
+    Imports at call time like the caller does: the suite patches ``MODULE_CODES`` on
+    ``entity.services.modules``, and binding it at import would ignore that.
+    """
+    from blueprints.entity.services import modules as entity_modules
+    from models.db import Entity
+
+    # Two populations, because this reconciles in BOTH directions.
+    #
+    # Entities with a module switched on are the only ones that could need switching
+    # off. On its own that set made the sweep a one-way ratchet: a module revoked here
+    # left the candidate set permanently, so nothing could ever switch it back on — and
+    # nothing else does. An account that went past due, then paid, stayed locked out of
+    # a subscription it was being charged for, which is precisely the recovery dunning
+    # exists to deliver. So entities holding a BILLED module are candidates too, however
+    # their access flag currently reads.
+    module_fn_ids = [
+        fn.id
+        for fn in EntityFunction.query.filter(
+            EntityFunction.function_code.in_(entity_modules.MODULE_CODES)
+        ).all()
+    ]
+    entity_ids = (
+        {
+            row.entity_id
+            for row in EntityFunctionMap.query.filter(
+                EntityFunctionMap.entity_function_id.in_(module_fn_ids),
+                EntityFunctionMap.is_enabled.is_(True),
+            ).all()
+        }
+        if module_fn_ids
+        else set()
+    )
+    if payer_user_id is None:
+        entity_ids |= sub_store.entity_ids_with_billed_modules()
+    else:
+        mine = {
+            str(row.entity_id)
+            for row in sub_store.module_rows_for_payer(payer_user_id)
+        }
+        entity_ids = (entity_ids & mine) | sub_store.entity_ids_with_billed_modules(
+            payer_user_id
+        )
+
+    # Mid-onboarding entities are exempt (see docstring). Resolved in ONE query up
+    # front rather than per entity, so a long sweep can't straddle a finalize and
+    # judge the head of the batch by a different rule than the tail. Unfiltered by
+    # entity_ids on purpose: the set of in-flight onboardings is small, and an IN
+    # clause over every enabled entity is the part that would not scale.
+    onboarding_ids = {
+        row.id
+        for row in Entity.query.filter(Entity.status == "onboarding")
+        .with_entities(Entity.id)
+        .all()
+    }
+    return entity_ids, onboarding_ids
