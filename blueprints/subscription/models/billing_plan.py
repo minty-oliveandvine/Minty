@@ -26,6 +26,7 @@ table.
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import TimestampMixin
 
 # ``plan_code`` — which builds the canonical ``code`` value below — lives in
 # ``services.billing`` rather than here. It is pure string canonicalisation with no
@@ -34,7 +35,7 @@ from models.db import db
 # early enough to trip the entity-models circular import.
 
 
-class BillingPlan(db.Model):
+class BillingPlan(TimestampMixin, db.Model):
     __tablename__ = "billing_plan"
     __table_args__ = {"schema": "pettycashv2"}
 
@@ -53,16 +54,6 @@ class BillingPlan(db.Model):
     # has been verified. See billing.period_containing.
     interval_months = db.Column(db.Integer, nullable=False, default=1)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
-
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-        nullable=False,
-    )
 
     def __repr__(self):
         return f"<BillingPlan {self.code} {self.amount} {self.currency}>"

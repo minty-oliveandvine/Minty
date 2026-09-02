@@ -30,9 +30,10 @@ this entity in June" is asked most often by the person who no longer pays.
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import CreatedAtMixin
 
 
-class EntityBillingConsent(db.Model):
+class EntityBillingConsent(CreatedAtMixin, db.Model):
     __tablename__ = "entity_billing_consent"
     __table_args__ = (
         # One consent per (entity, payer) — see the module docstring. Not on entity_id
@@ -61,10 +62,6 @@ class EntityBillingConsent(db.Model):
     # "confirmed" (accepted the in-app charge confirmation against a saved card).
     # Kept for support/audit: "why was I billed for this entity?"
     source = db.Column(db.String(20), nullable=False)
-
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
 
     def __repr__(self):
         return f"<EntityBillingConsent entity={self.entity_id} via={self.source}>"

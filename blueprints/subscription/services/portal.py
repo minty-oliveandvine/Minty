@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from blueprints.entity.services.modules import MODULE_CODES
+from blueprints.subscription.services import display
 from blueprints.subscription.constants import (PHASE_ACTIVE, PHASE_PAST_DUE,
                                                PHASE_SCHEDULED_CANCEL,
                                                PHASE_TRIAL)
@@ -105,8 +106,8 @@ _NO_DATE = datetime.max.replace(tzinfo=timezone.utc)
 
 
 def _fmt(moment) -> str | None:
-    """'15 Aug 2026' — zero-padded day, as the design prints it."""
-    return moment.strftime("%d %b %Y") if moment else None
+    """'15 Aug 2026' — see ``display.day``, which ``payment_methods`` prints through too."""
+    return display.day(moment)
 
 
 def _iso(moment) -> str | None:

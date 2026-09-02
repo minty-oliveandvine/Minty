@@ -28,6 +28,7 @@ from blueprints.subscription.constants import (
     TRANSFER_STRANDED_STATUSES,
 )
 from models.db import db
+from blueprints.subscription.models.mixins import CreatedAtMixin
 
 # The status vocabulary lives in ``constants``, which is deliberately dependency-free —
 # importing it from here instead would make every consumer of a status pull the model
@@ -36,7 +37,7 @@ _OPEN = ",".join(f"'{s}'" for s in TRANSFER_OPEN_STATUSES)
 _STRANDED = ",".join(f"'{s}'" for s in TRANSFER_STRANDED_STATUSES)
 
 
-class SubscriptionTransfer(db.Model):
+class SubscriptionTransfer(CreatedAtMixin, db.Model):
     __tablename__ = "subscription_transfer"
     __table_args__ = (
         # ONE open offer per entity. Partial, so declined and expired history accumulates
@@ -78,9 +79,6 @@ class SubscriptionTransfer(db.Model):
 
     status = db.Column(db.String(20), nullable=False, default=TRANSFER_PENDING)
 
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
     # Checked at accept, not only by a sweep. An offer whose day has passed must be
     # refused even if nothing has swept it yet — otherwise "expires in 7 days" means
     # "expires whenever the sweep next runs", which is a different promise.

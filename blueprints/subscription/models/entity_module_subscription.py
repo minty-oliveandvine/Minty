@@ -15,9 +15,10 @@ never total an entity by summing its rows — price the module SET via
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import TimestampMixin
 
 
-class EntityModuleSubscription(db.Model):
+class EntityModuleSubscription(TimestampMixin, db.Model):
     __tablename__ = "entity_module_subscription"
     __table_args__ = (
         db.UniqueConstraint(
@@ -120,15 +121,6 @@ class EntityModuleSubscription(db.Model):
     # No ``synced_at``: it recorded the last reconciliation against live Stripe for a
     # staleness check that was never built. Its only writer, ``store.mark_synced``, had
     # no callers.
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-        nullable=False,
-    )
 
     def __repr__(self):
         return (

@@ -12,9 +12,10 @@ the Stripe columns fall away once billing no longer runs through subscriptions.
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import TimestampMixin
 
 
-class UserStripeCustomer(db.Model):
+class UserStripeCustomer(TimestampMixin, db.Model):
     __tablename__ = "user_stripe_customer"
     __table_args__ = {"schema": "pettycashv2"}
 
@@ -63,16 +64,6 @@ class UserStripeCustomer(db.Model):
     # tail out past the access grace window. NULL = not in dunning.
     dunning_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
     dunning_attempts = db.Column(db.Integer, nullable=False, server_default="0")
-
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-        nullable=False,
-    )
 
     def __repr__(self):
         return (
