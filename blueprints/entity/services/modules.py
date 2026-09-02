@@ -30,7 +30,6 @@ from typing import Mapping
 
 from loguru import logger
 
-from blueprints.entity.models.currency_info import CurrencyInfo
 from models.db import EntityFunction, EntityFunctionMap, db
 
 # Canonical module codes. Keep in sync with the catalog seed in
@@ -93,18 +92,17 @@ MODULE_DISPLAY: dict[str, dict] = {
 }
 
 def _currency_symbol(currency_code: str | None) -> str:
-    """Display symbol for a currency code, from ``currency_info``.
+    """Display symbol for a currency code — delegates to ``subscription.services.money``.
 
-    Falls back to the upper-cased code itself (e.g. "HKD") when no symbol is
-    recorded, and to "" when there's no currency code at all. The symbol is the
-    one shown in the subscription summary — never hardcoded.
+    This was a second copy of the payer portal's lookup and it differed in two ways that
+    both favoured the portal: it did not upper-case the code before querying (so a
+    lowercase code missed the row and rendered the bare code even where a symbol
+    existed), and it let a database error escape into the settings page. Delegating takes
+    both fixes.
     """
-    if not currency_code:
-        return ""
-    currency = CurrencyInfo.query.filter_by(currency_code=currency_code).first()
-    if currency and currency.symbol:
-        return currency.symbol
-    return currency_code.upper()
+    from blueprints.subscription.services import money
+
+    return money.symbol(currency_code)
 
 
 def _normalize_price_amount(amount, currency_code=None) -> Decimal:
@@ -141,18 +139,20 @@ def _fmt_money(symbol: str, amount, places: int = 2) -> str:
     at 2, which rounds a 3-decimal currency wrong and invents a ".00" on a zero-decimal
     one. ``amount`` is already in MAJOR units — callers normalize first.
 
-    A CODE is spaced off the number, a glyph is not: "HKD 400", but "HK$400". The
-    leading token is whatever ``_currency_symbol`` resolved, which falls back to the
-    bare code when ``currency_info`` records no symbol — and in practice it doesn't,
-    so the panel read "HKD400". Same rule the onboarding app's ``money()`` applies.
+    The code-vs-glyph spacing is ``money.join`` -- "HKD 400", but "HK$400". What stays
+    here is the TRAILING-ZERO rule: this surface drops a whole amount to "HK$400" while
+    ``money.format_with_symbol`` (the payer portal) always prints the places. That is a
+    real difference in what the two show, not a duplicate, so only the shared halves
+    moved.
     """
-    space = " " if symbol[-1:].isalpha() else ""
+    from blueprints.subscription.services import money
+
     if places <= 0:
-        return f"{symbol}{space}{int(Decimal(amount).to_integral_value()):,}"
+        return money.join(symbol, f"{int(Decimal(amount).to_integral_value()):,}")
     q = Decimal(amount).quantize(Decimal(1).scaleb(-places))
     if q == q.to_integral_value():
-        return f"{symbol}{space}{int(q):,}"
-    return f"{symbol}{space}{q:,.{places}f}"
+        return money.join(symbol, f"{int(q):,}")
+    return money.join(symbol, f"{q:,.{places}f}")
 
 
 def _entity_customer_id(entity_id) -> str | None:

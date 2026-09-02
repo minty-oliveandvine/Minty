@@ -737,27 +737,12 @@ INVOICE_STATUS_LABELS = {
 def _money(amount_minor, currency_code) -> str:
     """"HK$400.00", or "HKD 400.00" — symbol from ``currency_info``, never hardcoded.
 
-    A CODE is spaced off the number, a GLYPH is not. Same rule and the same one-line test
-    as ``modules._fmt_money`` (and the onboarding app's ``money()``), because it exists for
-    the same reason: ``currency_info`` records no symbol for plenty of currencies, the
-    lookup falls back to the bare code, and the Invoices column then read "HKD57.54" —
-    which scans as one token rather than a currency and an amount.
+    The symbol lookup and the code-vs-glyph spacing both live in ``services.money`` now;
+    this used to hold its own copy of each, as did ``modules._fmt_money``.
     """
-    from blueprints.entity.models.currency_info import CurrencyInfo
     from blueprints.subscription.services import money
 
-    symbol = ""
-    if currency_code:
-        try:
-            row = CurrencyInfo.query.filter_by(
-                currency_code=currency_code.upper()
-            ).first()
-            symbol = (row.symbol if row and row.symbol else currency_code.upper())
-        except Exception:  # noqa: BLE001 - a missing symbol must not cost the amount
-            db.session.rollback()
-            symbol = currency_code.upper()
-    space = " " if symbol[-1:].isalpha() else ""
-    return f"{symbol}{space}{money.format_minor(amount_minor, currency_code)}"
+    return money.format_with_symbol(amount_minor, currency_code)
 
 
 def _reference(invoice) -> str:

@@ -803,12 +803,19 @@ def test_a_currency_code_is_spaced_off_the_amount(app, monkeypatch):
 
 
 def test_a_currency_glyph_is_not_spaced_off_the_amount(app, monkeypatch):
-    """"HK$ 57.54" is not how a symbol is written."""
-    from blueprints.entity.models import currency_info
+    """"HK$ 57.54" is not how a symbol is written.
+
+    Patched on ``models.db`` because that is where the lookup reads it: the symbol
+    resolution moved out of ``portal._money`` into ``money.symbol``, which imports
+    ``CurrencyInfo`` from ``models.db`` like the rest of that module. Same class either
+    way -- ``models.db`` re-exports it -- but patching a module attribute only
+    intercepts the module that reads it.
+    """
+    import models.db as models_db
     from blueprints.subscription.services import portal
 
     monkeypatch.setattr(
-        currency_info,
+        models_db,
         "CurrencyInfo",
         SimpleNamespace(
             query=SimpleNamespace(

@@ -54,6 +54,36 @@ def _unauthorized(reason: str, status: int = 401):
     return _cors(make_response(jsonify({"error": reason}), status))
 
 
+def _preflight():
+    """The CORS answer to a preflight, or None when this request is not one.
+
+    Every route on this blueprint opens with it. In one place so the preflight contract
+    -- 204, and the same ``_cors`` headers a real answer carries -- cannot drift across
+    the thirteen sites that used to spell it out.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+    return None
+
+
+def _guard():
+    """``(early_response, user_id)`` -- the preflight-then-bearer gate.
+
+    Return ``early_response`` when it is not None; otherwise ``user_id`` is the
+    authenticated payer. Two values rather than an exception because a Flask view has to
+    RETURN its refusal, and every refusal on this blueprint must still go back through
+    ``_cors`` -- a bare 401 without the headers reads to the browser as a CORS failure
+    rather than an expired token.
+    """
+    early = _preflight()
+    if early is not None:
+        return early, None
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        return _unauthorized("unauthorized"), None
+    return None, user_id
+
+
 def _user_id_from_bearer() -> str | None:
     """The ``user_id`` claim of a valid billing JWT, or None."""
     header = request.headers.get("Authorization", "")
@@ -96,12 +126,9 @@ def my_subscriptions_api():
     column header, and an unrecognised one means the client is newer than the server,
     which should degrade to a sensible order and not a broken table.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
+    early, user_id = _guard()
+    if early is not None:
+        return early
 
     from models.db import User
 
@@ -153,12 +180,9 @@ def my_subscriber_options_api():
     changes whose card renews it, and the write needs a proration story and an audit
     entry that do not exist yet.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
+    early, user_id = _guard()
+    if early is not None:
+        return early
 
     entity_id = (request.args.get("entity") or "").strip()
     if not entity_id:
@@ -201,12 +225,9 @@ def my_invite_admin_api():
     caller is that entity's payer AND holds ``USER_INVITE`` on it, and answers the same
     message for "not your company" as for "no such company".
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
+    early, user_id = _guard()
+    if early is not None:
+        return early
 
     payload = request.get_json(silent=True) or {}
     entity_id = str(payload.get("entity") or "").strip()
@@ -245,12 +266,9 @@ def _transfer_call(handler, *, description: str):
     read by the person who clicked ("that person needs a saved payment method"), and the
     client only shows the server's words when they look like prose.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
+    early, user_id = _guard()
+    if early is not None:
+        return early
 
     payload = request.get_json(silent=True) or {}
     try:
@@ -356,12 +374,9 @@ def my_transfers_api():
     from the token instead. Still nothing in the request can be swapped for someone
     else's offers, which is the property that matters.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
+    early, user_id = _guard()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import transfers
 
@@ -385,12 +400,9 @@ def my_invoices_api():
     ``payer_user_id`` from the token, so an id the caller does not pay for matches
     nothing rather than reaching anything.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
-
-    user_id = _user_id_from_bearer()
-    if not user_id:
-        return _unauthorized("unauthorized")
+    early, user_id = _guard()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import portal
 
@@ -467,8 +479,9 @@ def my_payment_methods_api():
     which is the ordinary state of an account whose trials never captured a card. The page
     shows "Add payment method" and nothing else there.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 
@@ -491,8 +504,9 @@ def my_payment_method_setup_intent_api():
     leave a customer behind, so the customer is made in ``confirm`` once Stripe says a card
     exists.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 
@@ -512,8 +526,9 @@ def my_payment_method_confirm_api():
 
     Idempotent — a retried request cannot produce a second card or a second customer.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 
@@ -538,8 +553,9 @@ def my_payment_method_default_api():
     ``entity-payment-method`` below — so this changes what is charged for nothing that is
     already running. It decides which card the pickers offer first.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 
@@ -568,8 +584,9 @@ def my_entity_payment_method_api():
     (``_payer_of``) — being an admin of it is not enough, or an admin who pays nothing
     could move someone else's billing onto a card of their choosing.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 
@@ -599,8 +616,9 @@ def my_payment_method_update_api():
     name and address. A card's number, brand and CVC are the card — replacing those is
     "Add payment method", and this endpoint cannot be used to try.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 
@@ -630,8 +648,9 @@ def my_payment_method_remove_api():
     itself: the default cannot go while another method could take its place, and the last
     method cannot go at all while something is still billing forward. Each names its fix.
     """
-    if request.method == "OPTIONS":
-        return _cors(make_response("", 204))
+    early = _preflight()
+    if early is not None:
+        return early
 
     from blueprints.subscription.services import payment_methods
 

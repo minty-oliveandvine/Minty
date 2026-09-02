@@ -304,11 +304,13 @@ def create_app():
     # must be the entity's PAYER (_payer_of), so a forged cross-site POST nominates
     # nothing.
     csrf.exempt(my_entity_payment_method_api)
-    # The handover routes. NO TEST CAN CATCH A MISSING ONE — tests/conftest.py disables
-    # CSRF entirely — so these are verified by hand and any new route here must be added
-    # deliberately. Each still checks the caller: the service refuses unless the token's
-    # user is the entity's payer (initiate/cancel) or the offer's recipient (respond), so
-    # a forged cross-site POST reaches nothing even before this.
+    # The handover routes. These were hand-verified once, because conftest disables CSRF
+    # so no test could EXERCISE it — but tests/test_csrf_exemptions.py now asserts the
+    # registry instead of the behaviour, and covers every write route on the blueprint,
+    # so a new one added without an exemption here fails there by name. Each still checks
+    # the caller: the service refuses unless the token's user is the entity's payer
+    # (initiate/cancel) or the offer's recipient (respond), so a forged cross-site POST
+    # reaches nothing even before this.
     csrf.exempt(my_transfer_initiate_api)
     csrf.exempt(my_transfer_respond_api)
     csrf.exempt(my_transfer_cancel_api)
