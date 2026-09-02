@@ -462,8 +462,6 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
        the retry schedule rather than a silent lapse — and confines it to the companies
        that card actually pays for.
     """
-    from blueprints.subscription.services import billing_gateway
-
     planned: list[dict] = []
     issued: list[dict] = []
     failed: list[dict] = []
@@ -477,141 +475,11 @@ def run_renewals(now: datetime, *, scope, issue: bool = False,
     ]
 
     for account, group, paid_through in candidates[: limit or None]:
-        user_id = account.user_id
-        period = next_period(account.anchor_at, paid_through)
-        invoice = build_renewal(user_id, period, group_id=group.id)
-        entry = {
-            "user_id": user_id,
-            "billing_group_id": group.id,
-            "period_start": period.start,
-            "period_end": period.end,
-            "total": invoice.total if invoice else 0,
-            "lines": [line.description for line in invoice.lines] if invoice else [],
-            # Carried so the receipt / decline email can state the amount in the right
-            # currency without re-deriving the payer's invoice from scratch.
-            "currency": invoice.currency if invoice else None,
-        }
-        if invoice is None:
-            # Two different nothings. "Nothing left on this account" leaves the cycle
-            # alone — advancing it would hand a lapsed payer free periods forever. "This
-            # period was already paid for, just not by a renewal" has to advance it: the
-            # entity that converted or bought on the boundary covered the period in its
-            # own invoice, and leaving ``paid_through`` behind would make the account
-            # permanently due, re-checked every day, and — once past the grace window —
-            # revoked for non-payment it had actually made.
-            #
-            # A transferred entity reaches this the same way: excluded from the invoice
-            # by ``entities_covered_into`` because it was already paid for at accept. The
-            # exclusion MUST be paired with the advance — suppressing the line while
-            # leaving ``paid_through`` behind turns one avoided double-charge into a
-            # guaranteed one, because the account stays due and is re-billed the next day.
-            #
-            # Both questions are asked of THIS CARD's companies only. Another card's
-            # entity covering its own period says nothing about whether this one is
-            # settled, and advancing on it would hand this card's companies a free month.
-            in_group = store.entity_ids_in_group(group.id)
-            if issue and (
-                (entities_billed_in(user_id, period) & in_group)
-                or (entities_covered_past(user_id, period) & in_group)
-            ):
-                store.set_group_paid_through(group.id, period.end)
-                skipped.append({**entry, "reason": "already covered this period"})
-            else:
-                skipped.append({**entry, "reason": "nothing billable"})
-            continue
-        if not issue:
-            planned.append(entry)
-            continue
-
-        key = period_key(user_id, period, group.id)
-        # Captured BEFORE issuing, so the rows closed out afterwards are exactly the ones
-        # whose lines rode this invoice. Re-querying after would also catch anything
-        # cancelled while the charge was in flight and mark it paid for free.
-        #
-        # Matched against the LINES rather than against the payer's whole pending set:
-        # with several cards in play an extension belonging to another card's company is
-        # still pending and must not be closed out by this document.
-        riding = {line.entity_id for line in invoice.lines}
-        extension_ids = [
-            row.id
-            for row in store.pending_extensions_for_payer(user_id)
-            if str(row.entity_id) in riding
-        ]
-        try:
-            status = _already_invoiced(account.stripe_customer_id, key)
-            if status is not None:
-                # Charged on a previous run that failed to record it. Catching up costs
-                # nothing; re-issuing would bill the customer twice for one month.
-                # The extensions rode THAT invoice; leaving them pending would put them on
-                # the next one too. True whether or not it has been PAID yet — an unpaid
-                # one is being chased by dunning with those lines still on it.
-                store.mark_extensions_invoiced(extension_ids)
-                if status == "paid":
-                    store.set_group_paid_through(group.id, period.end)
-                    skipped.append({**entry, "reason": "already invoiced; adopted"})
-                else:
-                    skipped.append({**entry, "reason": "already invoiced; unpaid"})
-                continue
-
-            result = billing_gateway.issue_invoice(
-                account.stripe_customer_id,
-                invoice,
-                # Counted off the invoice itself rather than off the rows, so the memo
-                # describes what is actually being charged. An extension is called out
-                # because it is the one line on a renewal nobody is expecting.
-                memo=renewal_memo(
-                    period,
-                    len(invoice.entity_ids),
-                    sum(1 for line in invoice.lines
-                        if "access after cancellation" in line.product_name),
-                ),
-                # ``billing_group`` travels with the document so dunning can pick this
-                # one out of the payer's other open invoices later — a question that did
-                # not exist while a payer had one invoice per period.
-                metadata={"renewal_key": key, "billing_group": str(group.id)},
-                idempotency_key=key,
-                # Known here, so the gateway doesn't have to look up the payer the
-                # customer id came from in the first place.
-                payer_user_id=user_id,
-                # THE CARD. Set on the invoice rather than by moving the customer default,
-                # which would repoint every other company of this payer mid-run.
-                payment_method=group.stripe_payment_method_id,
-                billing_group_id=group.id,
-            )
-            # Closed out because the invoice CARRYING them was raised — not because it
-            # was paid. An unpaid renewal is not a dropped charge: the invoice exists and
-            # dunning chases that same document, extension lines and all. Marking only on
-            # payment left them pending through the whole episode, so when dunning finally
-            # collected, the next renewal added them a SECOND time and the customer paid
-            # for the same cancellation twice.
-            #
-            # The trade is deliberate. If the account never recovers and dunning gives up,
-            # the extension is closed without being collected — but there is no next
-            # renewal on a closed account to collect it on either, so nothing is actually
-            # lost, and the alternative overcharges every customer who does recover.
-            # Skipped entirely when issuing raised, because then no invoice exists.
-            if result.get("id"):
-                store.mark_extensions_invoiced(extension_ids)
-            if result.get("status") == "paid":
-                store.set_group_paid_through(group.id, period.end)
-                issued.append({**entry, "invoice": result.get("id")})
-            else:
-                # THIS CARD only. The payer's other cards have their own periods and
-                # their own companies, and a decline here says nothing about them.
-                store.begin_group_dunning(group.id, now)
-                failed.append({**entry, "invoice": result.get("id"),
-                               "status": result.get("status")})
-        except Exception:
-            logger.exception(
-                "renewal: failed to bill payer {} on group {}", user_id, group.id
-            )
-            try:
-                store.begin_group_dunning(group.id, now)
-            except Exception:
-                logger.exception(
-                    "renewal: could not start dunning for group {}", group.id
-                )
-            failed.append({**entry, "status": "error"})
+        _out = _renew_one_group(account, group, paid_through, now, issue)
+        planned.extend(_out["planned"])
+        issued.extend(_out["issued"])
+        failed.extend(_out["failed"])
+        skipped.extend(_out["skipped"])
 
     # Emails go out only after the whole batch has been billed and committed. Sending
     # inside the loop would put SMTP latency between two payers' charges, and would tell
@@ -658,3 +526,158 @@ def next_period(anchor: datetime, paid_through: datetime) -> Period:
     which would peg a month-end payer to the 28th permanently.
     """
     return period_containing(anchor, paid_through)
+
+
+def _renew_one_group(account, group, paid_through, now, issue) -> dict[str, list]:
+    """Bill ONE card for the period it is due, or say why it was not billed.
+
+    Returns the four outcome buckets for this card. They are append-only, so the
+    caller simply extends its own -- a card can be ``skipped`` for one reason and
+    never touch the others, and the split cannot reorder or drop an outcome.
+
+    With ``issue=False`` this fills ``planned`` and writes nothing, which is the
+    shadow mode the caller documents: run it against live data and compare with what
+    Stripe actually billed before letting it take money.
+
+    ``continue`` in the loop this came from meant "done with this card", which is a
+    ``return`` now the body is a function.
+    """
+    from blueprints.subscription.services import billing_gateway
+
+    out: dict[str, list] = {"planned": [], "issued": [], "failed": [], "skipped": []}
+    user_id = account.user_id
+    period = next_period(account.anchor_at, paid_through)
+    invoice = build_renewal(user_id, period, group_id=group.id)
+    entry = {
+        "user_id": user_id,
+        "billing_group_id": group.id,
+        "period_start": period.start,
+        "period_end": period.end,
+        "total": invoice.total if invoice else 0,
+        "lines": [line.description for line in invoice.lines] if invoice else [],
+        # Carried so the receipt / decline email can state the amount in the right
+        # currency without re-deriving the payer's invoice from scratch.
+        "currency": invoice.currency if invoice else None,
+    }
+    if invoice is None:
+        # Two different nothings. "Nothing left on this account" leaves the cycle
+        # alone — advancing it would hand a lapsed payer free periods forever. "This
+        # period was already paid for, just not by a renewal" has to advance it: the
+        # entity that converted or bought on the boundary covered the period in its
+        # own invoice, and leaving ``paid_through`` behind would make the account
+        # permanently due, re-checked every day, and — once past the grace window —
+        # revoked for non-payment it had actually made.
+        #
+        # A transferred entity reaches this the same way: excluded from the invoice
+        # by ``entities_covered_into`` because it was already paid for at accept. The
+        # exclusion MUST be paired with the advance — suppressing the line while
+        # leaving ``paid_through`` behind turns one avoided double-charge into a
+        # guaranteed one, because the account stays due and is re-billed the next day.
+        #
+        # Both questions are asked of THIS CARD's companies only. Another card's
+        # entity covering its own period says nothing about whether this one is
+        # settled, and advancing on it would hand this card's companies a free month.
+        in_group = store.entity_ids_in_group(group.id)
+        if issue and (
+            (entities_billed_in(user_id, period) & in_group)
+            or (entities_covered_past(user_id, period) & in_group)
+        ):
+            store.set_group_paid_through(group.id, period.end)
+            out["skipped"].append({**entry, "reason": "already covered this period"})
+        else:
+            out["skipped"].append({**entry, "reason": "nothing billable"})
+        return out
+    if not issue:
+        out["planned"].append(entry)
+        return out
+
+    key = period_key(user_id, period, group.id)
+    # Captured BEFORE issuing, so the rows closed out afterwards are exactly the ones
+    # whose lines rode this invoice. Re-querying after would also catch anything
+    # cancelled while the charge was in flight and mark it paid for free.
+    #
+    # Matched against the LINES rather than against the payer's whole pending set:
+    # with several cards in play an extension belonging to another card's company is
+    # still pending and must not be closed out by this document.
+    riding = {line.entity_id for line in invoice.lines}
+    extension_ids = [
+        row.id
+        for row in store.pending_extensions_for_payer(user_id)
+        if str(row.entity_id) in riding
+    ]
+    try:
+        status = _already_invoiced(account.stripe_customer_id, key)
+        if status is not None:
+            # Charged on a previous run that failed to record it. Catching up costs
+            # nothing; re-issuing would bill the customer twice for one month.
+            # The extensions rode THAT invoice; leaving them pending would put them on
+            # the next one too. True whether or not it has been PAID yet — an unpaid
+            # one is being chased by dunning with those lines still on it.
+            store.mark_extensions_invoiced(extension_ids)
+            if status == "paid":
+                store.set_group_paid_through(group.id, period.end)
+                out["skipped"].append({**entry, "reason": "already invoiced; adopted"})
+            else:
+                out["skipped"].append({**entry, "reason": "already invoiced; unpaid"})
+            return out
+
+        result = billing_gateway.issue_invoice(
+            account.stripe_customer_id,
+            invoice,
+            # Counted off the invoice itself rather than off the rows, so the memo
+            # describes what is actually being charged. An extension is called out
+            # because it is the one line on a renewal nobody is expecting.
+            memo=renewal_memo(
+                period,
+                len(invoice.entity_ids),
+                sum(1 for line in invoice.lines
+                    if "access after cancellation" in line.product_name),
+            ),
+            # ``billing_group`` travels with the document so dunning can pick this
+            # one out of the payer's other open invoices later — a question that did
+            # not exist while a payer had one invoice per period.
+            metadata={"renewal_key": key, "billing_group": str(group.id)},
+            idempotency_key=key,
+            # Known here, so the gateway doesn't have to look up the payer the
+            # customer id came from in the first place.
+            payer_user_id=user_id,
+            # THE CARD. Set on the invoice rather than by moving the customer default,
+            # which would repoint every other company of this payer mid-run.
+            payment_method=group.stripe_payment_method_id,
+            billing_group_id=group.id,
+        )
+        # Closed out because the invoice CARRYING them was raised — not because it
+        # was paid. An unpaid renewal is not a dropped charge: the invoice exists and
+        # dunning chases that same document, extension lines and all. Marking only on
+        # payment left them pending through the whole episode, so when dunning finally
+        # collected, the next renewal added them a SECOND time and the customer paid
+        # for the same cancellation twice.
+        #
+        # The trade is deliberate. If the account never recovers and dunning gives up,
+        # the extension is closed without being collected — but there is no next
+        # renewal on a closed account to collect it on either, so nothing is actually
+        # lost, and the alternative overcharges every customer who does recover.
+        # Skipped entirely when issuing raised, because then no invoice exists.
+        if result.get("id"):
+            store.mark_extensions_invoiced(extension_ids)
+        if result.get("status") == "paid":
+            store.set_group_paid_through(group.id, period.end)
+            out["issued"].append({**entry, "invoice": result.get("id")})
+        else:
+            # THIS CARD only. The payer's other cards have their own periods and
+            # their own companies, and a decline here says nothing about them.
+            store.begin_group_dunning(group.id, now)
+            out["failed"].append({**entry, "invoice": result.get("id"),
+                           "status": result.get("status")})
+    except Exception:
+        logger.exception(
+            "renewal: failed to bill payer {} on group {}", user_id, group.id
+        )
+        try:
+            store.begin_group_dunning(group.id, now)
+        except Exception:
+            logger.exception(
+                "renewal: could not start dunning for group {}", group.id
+            )
+        out["failed"].append({**entry, "status": "error"})
+    return out
