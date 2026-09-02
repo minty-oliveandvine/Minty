@@ -49,6 +49,7 @@ from flask import current_app, render_template
 from flask_mail import Message
 from loguru import logger
 
+from blueprints.subscription.services import display
 from blueprints.subscription.services.money import format_minor
 
 # --- Events -------------------------------------------------------------------
@@ -102,15 +103,14 @@ def money(amount_minor, currency: str | None) -> str:
 def day(value) -> str:
     """A date a human reads without parsing: ``12 Mar 2026``. Empty when unknown.
 
-    Formatted the way ``modules._fmt_day_month_year`` already did it: take the day as an
-    INT and let strftime handle only the parts it agrees about across platforms. This
-    used to probe for glibc's ``%-d`` at every call and fall back to
-    ``"%d %b %Y".lstrip("0")`` on Windows -- two code paths, a try/except and a bare
-    ``datetime`` literal, to reach the string an f-string gives directly.
+    The FORMAT is ``display.day`` -- email is prose, so the day is unpadded. What stays
+    here is the empty-string contract: these values go straight into email templates,
+    where ``None`` would render the word "None" into a sentence, so a missing date has to
+    come back as "" and the isinstance guard has to stay in front of it.
     """
     if not isinstance(value, datetime):
         return ""
-    return f"{value.day} {value:%b %Y}"
+    return display.day(value) or ""
 
 
 def modules_phrase(codes) -> str:

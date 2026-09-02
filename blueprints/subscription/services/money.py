@@ -145,8 +145,31 @@ def format_minor(amount_minor, currency_code: str | None) -> str:
 def format_with_symbol(amount_minor, currency_code: str | None) -> str:
     """Minor units as "HK$400.00" / "HKD 400.00" -- symbol resolved, never hardcoded.
 
-    Always shows the currency's decimal places. For the surface that trims a whole
-    amount to "HK$400" instead, see ``entity.services.modules._fmt_money``: the two
-    share this module's symbol and spacing, and differ only in that trailing-zero rule.
+    Always shows the currency's decimal places. For the surface that trims a whole amount
+    to "HK$400" instead, see :func:`format_trimmed`: the two share the symbol and the
+    spacing, and differ only in that trailing-zero rule.
     """
     return join(symbol(currency_code), format_minor(amount_minor, currency_code))
+
+
+def format_trimmed(currency_symbol: str, amount_major, places: int = FALLBACK_DECIMAL_PLACES) -> str:
+    """MAJOR units as "HK$400" when whole, "HK$400.50" when not.
+
+    The settings page and the module cards print money this way: cents are shown only
+    when they mean something, because a column of "HK$400.00" reads as noise where every
+    price is whole. The payer portal's :func:`format_with_symbol` always prints the
+    places instead -- that is a real difference in what the two SHOW, not a duplicate,
+    which is why both exist here rather than one being folded into the other.
+
+    Takes ``amount_major`` and ``places`` rather than minor units and a currency code:
+    its callers have already scaled through :func:`to_major` and resolved
+    :func:`decimal_places`, often for several amounts at once. ``places`` was once fixed
+    at 2, which rounds a three-decimal currency wrong and invents a ".00" on a
+    zero-decimal one.
+    """
+    if places <= 0:
+        return join(currency_symbol, f"{int(Decimal(amount_major).to_integral_value()):,}")
+    quantized = Decimal(amount_major).quantize(Decimal(1).scaleb(-places))
+    if quantized == quantized.to_integral_value():
+        return join(currency_symbol, f"{int(quantized):,}")
+    return join(currency_symbol, f"{quantized:,.{places}f}")
