@@ -15,7 +15,7 @@ colorama==0.4.6
 cryptography==43.0.1
 dnspython==2.6.1
 docx2pdf==0.1.8
-docxcompose==1.4.0
+docxcompose==1.4.1
 docxtpl==0.20.1
 email_validator==2.2.0
 et-xmlfile==1.1.0
@@ -30,6 +30,7 @@ Flask-OAuthlib==0.9.6
 Flask-Session==0.8.0
 Flask-SQLAlchemy==3.1.1
 Flask-WTF==1.2.1
+google-genai==2.22.0
 greenlet==3.0.3
 gunicorn==23.0.0
 h11==0.16.0

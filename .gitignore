@@ -38,3 +38,6 @@ instance/
 # Flask-Session FileSystemCache scratch dir (created when migrations run with
 # a non-database session backend; see docker/docker-entrypoint.sh).
 flask_session/
+
+# Word/Excel lock files (created when a doc is open)
+~$*
