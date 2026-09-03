@@ -93,19 +93,13 @@ def report_expense_extract():
     result = expense_ai.extract(document, mime, context)
 
     status = "ok" if result.suggestions and not result.reason else "no_suggestion"
-    suggestion_id = expense_ai.record_attempt(
-        entity_id=entity_id,
-        user_id=getattr(current_user, "id", None),
-        report_id=report_id,
-        status=status,
-        error_code=result.reason,
-        audit=result.audit,
-    )
-
-    # Mirrors the audit row into the log, minus the values. Confidence scores,
-    # token counts and timings only — never the amount, supplier or
-    # description read off the receipt. Those live in the table, which is
-    # access-controlled; logs are not the place for a client's figures.
+    # This is the ONLY record of an attempt — there is no audit table, by
+    # decision. Anything not written here is not recoverable later.
+    #
+    # It carries the numbers and NOT the values: confidence scores, token
+    # counts and timings, but never the amount, supplier or description read
+    # off the receipt. Those are a client's financial details and logs are the
+    # wrong place for them.
     confidences = {
         name: field.get("confidence")
         for name, field in (result.suggestions or {}).items()
@@ -126,10 +120,4 @@ def report_expense_extract():
     if not result.suggestions:
         return _no_suggestion(result.reason or expense_ai.REASON_NO_USABLE_FIELD)
 
-    return jsonify(
-        {
-            "suggestions": result.suggestions,
-            "reason": result.reason,
-            "suggestion_id": suggestion_id,
-        }
-    ), 200
+    return jsonify({"suggestions": result.suggestions, "reason": result.reason}), 200

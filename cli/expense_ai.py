@@ -1,16 +1,8 @@
-"""``flask expense-ai`` CLI — retention purge and a spike round-trip check.
+"""``flask expense-ai`` CLI — one command, to prove the route works.
 
-Two jobs, both from the Stage 1 plan:
+    flask expense-ai check
 
-    flask expense-ai purge            the 90-day retention sweep (§8.5)
-    flask expense-ai check            one round trip, to prove the route works
-
-``purge`` is DRY BY DEFAULT. It reports what it would delete and deletes
-nothing until given ``--delete``, because its first production run happens
-before anyone has seen the table fill up and a retention job that deletes on
-its first invocation gives no chance to notice it is wrong (§10.3).
-
-``check`` is Stage 0's "one successful round-trip call from the application's
+This is Stage 0's "one successful round-trip call from the application's
 own network path — not from a laptop". It sends a tiny generated image, not a
 customer receipt, and prints the model, the region, the latency and the token
 usage so the answer to "is this configured correctly" is a fact rather than a
@@ -19,53 +11,14 @@ guess.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 import click
 from flask.cli import AppGroup
 
 from blueprints.report.services import expense_ai
-from models.db import AiExpenseSuggestion, db
 
 expense_ai_cli = AppGroup(
-    "expense-ai", help="Retention purge and connectivity check for expense AI."
+    "expense-ai", help="Connectivity check for AI expense capture."
 )
-
-
-@expense_ai_cli.command("purge", help="Delete audit rows past the retention window.")
-@click.option(
-    "--days",
-    type=int,
-    default=None,
-    help="Override EXPENSE_AI_RETENTION_DAYS for this run.",
-)
-@click.option(
-    "--delete",
-    is_flag=True,
-    default=False,
-    help="Actually delete. Without this the command only reports.",
-)
-def purge_cmd(days: int | None, delete: bool) -> None:
-    retention = days if days is not None else expense_ai._env_int(
-        "EXPENSE_AI_RETENTION_DAYS", 90
-    )
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
-
-    query = AiExpenseSuggestion.query.filter(AiExpenseSuggestion.created_at < cutoff)
-    count = query.count()
-
-    click.echo(f"Retention: {retention} days (cutoff {cutoff.isoformat()})")
-    click.echo(f"Rows older than the cutoff: {count}")
-
-    if not count:
-        return
-    if not delete:
-        click.echo("DRY RUN — nothing deleted. Re-run with --delete to purge.")
-        return
-
-    deleted = query.delete(synchronize_session=False)
-    db.session.commit()
-    click.echo(f"Deleted {deleted} row(s).")
 
 
 @expense_ai_cli.command("check", help="One round-trip call, from where the code runs.")
