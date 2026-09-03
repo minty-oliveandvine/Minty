@@ -29,9 +29,10 @@ bill: a paid subscribe, or the trial converting.
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import TimestampMixin
 
 
-class EntityBillingGroup(db.Model):
+class EntityBillingGroup(TimestampMixin, db.Model):
     __tablename__ = "entity_billing_group"
     __table_args__ = (
         # One nomination per company per payer — see the module docstring.
@@ -66,16 +67,6 @@ class EntityBillingGroup(db.Model):
     # over from the account default when per-entity cards landed). Kept for support, the
     # same way ``entity_billing_consent.source`` is: "why is this company on this card?"
     source = db.Column(db.String(20), nullable=False)
-
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-        nullable=False,
-    )
 
     def __repr__(self):
         return (

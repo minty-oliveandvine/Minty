@@ -20,12 +20,13 @@ what MINTY did, and its uniqueness constraint is load-bearing rather than incide
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import CreatedAtMixin
 
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
 
 
-class SubscriptionEmailLog(db.Model):
+class SubscriptionEmailLog(CreatedAtMixin, db.Model):
     __tablename__ = "subscription_email_log"
     __table_args__ = (
         # The dedupe guarantee itself. Not just an index: two overlapping runs of the
@@ -55,9 +56,6 @@ class SubscriptionEmailLog(db.Model):
     # gate the skip on "has it a sent_at" instead, which is a different question the
     # moment a row is written by anything but ``notify``. ``created_at`` is when the send
     # was claimed, which is within milliseconds of when it went out.
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
 
     def __repr__(self):
         return f"<SubscriptionEmailLog {self.event} {self.dedupe_key} {self.status}>"

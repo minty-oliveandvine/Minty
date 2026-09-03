@@ -4,7 +4,7 @@ The sweep used to be a one-way ratchet. Its candidate set was "modules currently
 switched on" — the only ones it could need to switch off — so a module it revoked left
 that set for good, and nothing in the codebase ever switched one back on. An account
 that went past due had its access revoked on the grace boundary, paid its balance, got
-``paid_through`` advanced and its phases moved back to active by ``end_dunning``, and
+``paid_through`` advanced and its phases moved back to active by ``end_group_dunning``, and
 stayed locked out of every page it was still being charged for.
 
 These pin the restore direction and, just as importantly, its LIMITS: restoring is

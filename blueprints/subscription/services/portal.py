@@ -26,11 +26,12 @@ place money can move from.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from loguru import logger
 
 from blueprints.entity.services.modules import MODULE_CODES
+from blueprints.subscription.services import display
 from blueprints.subscription.constants import (PHASE_ACTIVE, PHASE_PAST_DUE,
                                                PHASE_SCHEDULED_CANCEL,
                                                PHASE_TRIAL)
@@ -96,12 +97,18 @@ MAX_PER_PAGE = 100
 # A date far past anything real, used to park rows with no date at the END of an
 # ascending sort. ``None`` cannot be compared against a datetime, and mapping it to
 # ``datetime.min`` would sort "nothing scheduled" above "due tomorrow".
-_NO_DATE = datetime.max
+# Aware, because every date it is sorted against is: the columns behind ``_next_date``
+# are all ``DateTime(timezone=True)``, so Postgres hands them back with a tzinfo and a
+# naive sentinel raises "can't compare offset-naive and offset-aware datetimes" the
+# moment one row has no date and another does. SQLite returns them naive, which is why
+# the suite never saw it.
+_NO_DATE = datetime.max.replace(tzinfo=timezone.utc)
 
 
 def _fmt(moment) -> str | None:
-    """'15 Aug 2026' — zero-padded day, as the design prints it."""
-    return moment.strftime("%d %b %Y") if moment else None
+    """'15 Aug 2026' — the PADDED form; this grid sets dates in a column. See
+    ``display.day_padded``, which ``payment_methods`` prints through too."""
+    return display.day_padded(moment)
 
 
 def _iso(moment) -> str | None:
@@ -732,27 +739,12 @@ INVOICE_STATUS_LABELS = {
 def _money(amount_minor, currency_code) -> str:
     """"HK$400.00", or "HKD 400.00" — symbol from ``currency_info``, never hardcoded.
 
-    A CODE is spaced off the number, a GLYPH is not. Same rule and the same one-line test
-    as ``modules._fmt_money`` (and the onboarding app's ``money()``), because it exists for
-    the same reason: ``currency_info`` records no symbol for plenty of currencies, the
-    lookup falls back to the bare code, and the Invoices column then read "HKD57.54" —
-    which scans as one token rather than a currency and an amount.
+    The symbol lookup and the code-vs-glyph spacing both live in ``services.money`` now;
+    this used to hold its own copy of each, as did ``modules._fmt_money``.
     """
-    from blueprints.entity.models.currency_info import CurrencyInfo
     from blueprints.subscription.services import money
 
-    symbol = ""
-    if currency_code:
-        try:
-            row = CurrencyInfo.query.filter_by(
-                currency_code=currency_code.upper()
-            ).first()
-            symbol = (row.symbol if row and row.symbol else currency_code.upper())
-        except Exception:
-            db.session.rollback()
-            symbol = currency_code.upper()
-    space = " " if symbol[-1:].isalpha() else ""
-    return f"{symbol}{space}{money.format_minor(amount_minor, currency_code)}"
+    return money.format_with_symbol(amount_minor, currency_code)
 
 
 def _reference(invoice) -> str:
@@ -941,8 +933,7 @@ def build_payer_invoices(
     the request that could reach another payer's history. ``entity_id`` narrows within
     that; an entity the caller does not pay for simply matches nothing.
     """
-    from blueprints.subscription.models.subscription_invoice import (
-        SubscriptionInvoice, SubscriptionInvoiceLine)
+    from blueprints.subscription.models.subscription_invoice import SubscriptionInvoice
 
     invoices = (
         SubscriptionInvoice.query.filter_by(payer_user_id=str(user_id))
