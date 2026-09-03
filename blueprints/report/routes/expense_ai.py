@@ -102,13 +102,25 @@ def report_expense_extract():
         audit=result.audit,
     )
 
+    # Mirrors the audit row into the log, minus the values. Confidence scores,
+    # token counts and timings only — never the amount, supplier or
+    # description read off the receipt. Those live in the table, which is
+    # access-controlled; logs are not the place for a client's figures.
+    confidences = {
+        name: field.get("confidence")
+        for name, field in (result.suggestions or {}).items()
+        if isinstance(field, dict)
+    }
     logger.info(
-        "expense_ai: extract entity={} model={} location={} latency_ms={} "
-        "tokens_in={} tokens_out={} cached={} status={} reason={}",
-        entity_id, result.audit.get("model_id"), result.audit.get("location"),
+        "expense_ai: extract entity={} user={} model={} location={} "
+        "latency_ms={} tokens_in={} tokens_out={} thought={} cached={} "
+        "cost={} status={} reason={} confidence={}",
+        entity_id, getattr(current_user, "id", None),
+        result.audit.get("model_id"), result.audit.get("location"),
         result.audit.get("latency_ms"), result.audit.get("input_tokens"),
-        result.audit.get("output_tokens"), result.audit.get("cached_tokens"),
-        status, result.reason,
+        result.audit.get("output_tokens"), result.audit.get("thought_tokens"),
+        result.audit.get("cached_tokens"), result.audit.get("estimated_cost"),
+        status, result.reason, confidences,
     )
 
     if not result.suggestions:
