@@ -26,7 +26,7 @@ from loguru import logger
 from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
-from models.db import (Entity, EntityFunction, EntityFunctionMap, EntityPettycashSettings, Report, EntitySaleSetting, UserEntity, db)
+from models.db import (Entity, EntityPettycashSettings, Report, EntitySaleSetting, UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
@@ -46,34 +46,24 @@ STEP_ALL_SET = 9
 
 
 def _enabled_modules(entity_id: str) -> list[str]:
-    """Module codes currently enabled for the entity, via entity_function_map.
+    """Module codes currently enabled for the entity, in ``MODULE_CODES`` order.
 
-    Mirrors ``routes.modules._is_module_enabled`` but resolves all canonical
-    modules in one pass so the wizard gets the full selection.
+    Delegates to ``modules._enabled_state`` rather than resolving the map itself. It
+    used to be a third copy of that resolution and it had DRIFTED: where no map row
+    existed it fell back to the catalog's ``is_active`` (which defaults True), and with
+    no catalog row at all it granted Petty Cash outright. Both are the permissive
+    default that ``_is_module_enabled`` deliberately dropped -- "the catalog's
+    ``is_active`` says whether a module is offered at all, never who may use it" -- so
+    the wizard reported modules enabled that the request gate then denied.
+
+    Concretely: a fresh entity with no map rows answered ``[PETTY_CASH, BILL]`` here, so
+    ``_derive_current_step`` skipped STEP_MODULE and landed the user past the very
+    selection they had not made yet. Delegating fixes that and drops an N+1 query.
     """
-    functions = {
-        f.function_code: f
-        for f in EntityFunction.query.filter(
-            EntityFunction.function_code.in_(MODULE_CODES)
-        ).all()
-    }
-    enabled: list[str] = []
-    for code in MODULE_CODES:
-        fn = functions.get(code)
-        if not fn:
-            # No catalog row — default to enabled only for Petty Cash, matching
-            # the create-time default state.
-            if code == MODULE_PETTY_CASH:
-                enabled.append(code)
-            continue
-        mapping = EntityFunctionMap.query.filter(
-            EntityFunctionMap.entity_id == entity_id,
-            EntityFunctionMap.entity_function_id == fn.id,
-        ).first()
-        is_on = mapping.is_enabled if mapping else fn.is_active
-        if is_on:
-            enabled.append(code)
-    return enabled
+    from blueprints.entity.services.modules import _enabled_state
+
+    state = _enabled_state(entity_id)
+    return [code for code in MODULE_CODES if state.get(code)]
 
 
 def _reconcile_xero_disconnect(entity: Entity) -> None:

@@ -338,7 +338,7 @@ def _manual_target(invoices: list[dict], key: str | None) -> dict | None:
 def _restore_access(user_id) -> None:
     """Switch this payer's modules back on now that the balance is settled.
 
-    ``_settle_period`` moves ``paid_through`` and ``end_dunning`` moves the phases, but
+    ``_settle_period`` moves ``paid_through`` and ``end_group_dunning`` moves the phases, but
     neither touches ``entity_function_map`` — and access is a separate write. Without
     this the money is collected, the subscription reads active, and the customer is
     still bounced off every page in it. The daily sweep would eventually notice, so this
@@ -390,9 +390,7 @@ def collect_due(now, limit: int | None = None) -> dict:
     the same attempts — and a job that was down for a week does not fire the whole
     backlog at once, because the missed slots are simply past.
     """
-    from loguru import logger
-
-    from blueprints.subscription.services import billing_gateway, policy, store
+    from blueprints.subscription.services import policy, store
 
     # Resolved ONCE for the cycle, not per account: every payer is on the same policy,
     # and re-reading it mid-run would let an edit land halfway through — some payers
@@ -411,121 +409,11 @@ def collect_due(now, limit: int | None = None) -> dict:
         groups = groups[:limit]
 
     for group in groups:
-        account = _account_for(group)
-        if account is None:
-            logger.warning(
-                "dunning: group {} has no billing account; skipping", group.id
-            )
-            continue
-        user_id = account.user_id
-        started = group.dunning_started_at
-        attempts = int(group.dunning_attempts or 0)
-        entry = {"user_id": user_id, "billing_group_id": group.id,
-                 "attempts": attempts}
-        # The episode this entry belongs to, stamped now because ``end_dunning`` clears
-        # ``dunning_started_at`` before the notification is composed. Without it a payer
-        # who lapses, recovers, and lapses again months later would dedupe against the
-        # first episode's email and hear nothing the second time.
-        entry["_episode"] = (
-            f"{user_id}:{group.id}:{started:%Y%m%dT%H%M%S}"
-            if started else f"{user_id}:{group.id}"
-        )
-        # When THIS CARD's past-due access actually runs out. The SAME expression
-        # ``access.access_end`` uses for a past-due module — ``paid_through`` plus the
-        # window — so collection can never outlive entitlement however late the renewal
-        # that started this ran. See ``give_up_at`` for the drift it closes.
-        #
-        # A card with no paid_through has never collected and cannot be past due on a
-        # renewal; there is nothing to clamp against, so the unclamped deadline stands.
-        access_ends_at = (
-            group.paid_through + timedelta(days=window)
-            if group.paid_through is not None
-            else None
-        )
-        try:
-            if should_give_up(now, started, window, access_ends_at):
-                store.end_group_dunning(group.id, status="closed")
-                given_up.append(entry)
-                continue
-            if not should_attempt_now(
-                now, started, attempts, offsets, window, access_ends_at
-            ):
-                # Either not due yet, or the retries are spent and the account is
-                # riding out the rest of the window — still recoverable if the customer
-                # pays in the portal, so it stays in dunning until the deadline.
-                continue
-
-            invoices = _invoices_for_group(
-                billing_gateway.open_invoices(account.stripe_customer_id),
-                group,
-                store.billing_groups_for_payer(user_id),
-            )
-            if not invoices:
-                # Nothing outstanding on THIS card — it was settled elsewhere (a portal
-                # payment, a manual charge). Collection has no reason to continue, but the
-                # period it paid for still has to be recorded, or the customer has paid
-                # and is locked out until the next renewal run notices.
-                _settle_period(account, group, None)
-                store.end_group_dunning(group.id, status="active")
-                _restore_access(user_id)
-                recovered.append(entry)
-                continue
-
-            # Which invoice would actually recover this card, decided BEFORE the charge:
-            # afterwards the paid one is gone from the processor's open list and the
-            # question cannot be asked again.
-            current = _current_period_invoice(
-                invoices, _current_period_key(account, group)
-            )
-
-            # The attempt is counted BEFORE it runs. If this process dies mid-retry the
-            # slot is spent rather than replayed, which is the safe direction: a
-            # double-charge is far worse than a skipped retry.
-            store.record_group_dunning_attempt(group.id)
-            target = invoices[0]
-            # THE GROUP'S CURRENT CARD, not the one the invoice was raised against.
-            # A payer whose card declined usually recovers by replacing it, and the
-            # document still names the dead one.
-            paid, reason = billing_gateway.retry_invoice(
-                target["id"], group.stripe_payment_method_id
-            )
-            entry["invoice"] = target["id"]
-            entry["reason"] = reason
-            retried.append(entry)
-
-            if paid:
-                # Advance BEFORE clearing dunning: this is what the customer just paid
-                # for. Without it the money is collected and they stay unentitled until
-                # the next monthly run adopts the invoice by its idempotency key — a
-                # month of paying for nothing.
-                _settle_period(account, group, target)
-                # Collecting is not recovering. The oldest open invoice is what policy
-                # charges, but the episode ends and access comes back only when the
-                # CURRENT period is settled — otherwise a returning customer pays a
-                # months-old bill, is told they are up to date, and is locked out again
-                # by the next access sweep.
-                #
-                # ``current is None`` means nothing open belongs to the period they are
-                # behind on: it was settled somewhere this code cannot see, so this IS
-                # recovery. The alternative rule — recover only when NO invoice is open —
-                # would let one uncollectable stale debt lock a paying customer out for
-                # good.
-                if current is None or current["id"] == target["id"]:
-                    store.end_group_dunning(group.id, status="active")
-                    _restore_access(user_id)
-                    recovered.append(entry)
-                else:
-                    entry["_collected"] = True
-                    collected.append(entry)
-                    logger.info(
-                        "dunning: payer {} paid stale invoice {}; current period {} "
-                        "still open, staying in dunning",
-                        user_id, target["id"], current["id"],
-                    )
-        except Exception:
-            logger.exception(
-                "dunning: cycle failed for payer {} on group {}", user_id, group.id
-            )
+        _outcomes = _collect_one_group(group, now, offsets, window)
+        retried.extend(_outcomes["retried"])
+        recovered.extend(_outcomes["recovered"])
+        collected.extend(_outcomes["collected"])
+        given_up.extend(_outcomes["given_up"])
 
     # After the cycle, never during it. A payer whose retry succeeds appears in both
     # ``retried`` and ``recovered``; mailing from inside the loop would send them a
@@ -642,67 +530,19 @@ def retry_now(user_id, entity_id=None) -> dict:
     """
     from loguru import logger
 
-    from blueprints.subscription.services import billing_gateway, clock, policy, store
+    from blueprints.subscription.services import billing_gateway, store
     from blueprints.subscription.services.stripe_client import (
         customer_default_payment_method,
     )
 
-    account = store.customer_mapping_for_user(user_id)
-    if account is None:
-        return {"status": "nothing_owed", "attempts": 0,
-                "invoice": None, "reason": None}
-
-    # WHICH CARD'S DEBT. The button is pressed from one company's settings page, so the
-    # debt to settle is the one on the card THAT company is billed to — not the payer's
-    # oldest, which may belong to companies this person is not even looking at. Without an
-    # entity the caller gets the card that has been in collection longest, which is the
-    # one closest to being given up on.
-    groups = store.billing_groups_for_payer(user_id)
-    group = (
-        store.billing_group_for_entity(entity_id, user_id) if entity_id else None
-    )
-    if group is None:
-        in_dunning = [g for g in groups if g.dunning_started_at is not None]
-        group = (
-            min(in_dunning, key=lambda g: g.dunning_started_at)
-            if in_dunning else (groups[0] if groups else None)
-        )
-    if group is None:
-        # No card nominated for this company, so there is nothing to charge and nothing
-        # to guess at — the customer's next step is to choose one, which is the control
-        # beside this button.
-        return {"status": "no_card", "attempts": 0, "invoice": None, "reason": None}
-
-    now = clock.now()
-    window = policy.current().past_due_window_days
-    started = group.dunning_started_at
-    attempts = int(group.dunning_attempts or 0)
-    access_ends_at = (
-        group.paid_through + timedelta(days=window)
-        if group.paid_through is not None
-        else None
-    )
-
-    # Only meaningful while collection is running: with no stamp there is no schedule to
-    # have outrun, so there is no deadline to be past.
-    if started is not None and should_give_up(now, started, window, access_ends_at):
-        store.end_group_dunning(group.id, status="closed")
-        return {"status": "gave_up", "attempts": attempts,
-                "invoice": None, "reason": None}
-
-    invoices = _invoices_for_group(
-        billing_gateway.open_invoices(account.stripe_customer_id), group, groups
-    )
-    if not invoices:
-        # Nothing owed on this card. If collection was running it was settled somewhere
-        # this code cannot see (a portal payment, a manual charge), so close it out and
-        # record what it paid for — otherwise the customer has paid and stays locked out
-        # until the next renewal run notices.
-        if started is not None:
-            _settle_period(account, group, None)
-            store.end_group_dunning(group.id, status="active")
-        return {"status": "nothing_owed", "attempts": attempts,
-                "invoice": None, "reason": None}
+    _ctx, _refusal = _retry_context(user_id, entity_id)
+    if _refusal is not None:
+        return _refusal
+    account = _ctx["account"]
+    group = _ctx["group"]
+    started = _ctx["started"]
+    attempts = _ctx["attempts"]
+    invoices = _ctx["invoices"]
 
     # THE CURRENT PERIOD, not the oldest debt. This is the one place the manual path
     # deliberately differs from the scheduled one, and the customer's intent is the
@@ -753,7 +593,7 @@ def retry_now(user_id, entity_id=None) -> dict:
         # without ever being dunned has nothing to clear.
         if started is not None:
             store.end_group_dunning(group.id, status="active")
-        # Explicitly, and NOT only via ``end_dunning``. That call flips the module phase
+        # Explicitly, and NOT only via ``end_group_dunning``. That call flips the module phase
         # back from past_due, but it is skipped entirely when there is no stamp — so a
         # payer with a real unpaid invoice and no dunning record (the case this function
         # goes out of its way to serve) paid, and was left switched off until the nightly
@@ -765,3 +605,214 @@ def retry_now(user_id, entity_id=None) -> dict:
 
     return {"status": "failed", "attempts": attempts,
             "invoice": invoice_id, "reason": reason}
+
+
+def _collect_one_group(group, now, offsets, window) -> dict[str, list]:
+    """Run one dunning cycle for ONE card. Returns the outcomes it produced.
+
+    Four buckets rather than one because a single card can land in more than one --
+    a charge that goes through on the wrong period is ``collected`` without being
+    ``recovered``. They are append-only here and the caller extends its own lists
+    with them, so the split cannot reorder or lose an outcome.
+
+    Every ``continue`` in the loop this came from meant "nothing more to do for this
+    card", which is a ``return`` once the body is a function.
+    """
+    from loguru import logger
+
+    from blueprints.subscription.services import billing_gateway, store
+
+    out: dict[str, list] = {"retried": [], "recovered": [],
+                            "collected": [], "given_up": []}
+    account = _account_for(group)
+    if account is None:
+        logger.warning(
+            "dunning: group {} has no billing account; skipping", group.id
+        )
+        return out
+    user_id = account.user_id
+    started = group.dunning_started_at
+    attempts = int(group.dunning_attempts or 0)
+    entry = {"user_id": user_id, "billing_group_id": group.id,
+             "attempts": attempts}
+    # The episode this entry belongs to, stamped now because ``end_group_dunning`` clears
+    # ``dunning_started_at`` before the notification is composed. Without it a payer
+    # who lapses, recovers, and lapses again months later would dedupe against the
+    # first episode's email and hear nothing the second time.
+    entry["_episode"] = (
+        f"{user_id}:{group.id}:{started:%Y%m%dT%H%M%S}"
+        if started else f"{user_id}:{group.id}"
+    )
+    # When THIS CARD's past-due access actually runs out. The SAME expression
+    # ``access.access_end`` uses for a past-due module — ``paid_through`` plus the
+    # window — so collection can never outlive entitlement however late the renewal
+    # that started this ran. See ``give_up_at`` for the drift it closes.
+    #
+    # A card with no paid_through has never collected and cannot be past due on a
+    # renewal; there is nothing to clamp against, so the unclamped deadline stands.
+    access_ends_at = (
+        group.paid_through + timedelta(days=window)
+        if group.paid_through is not None
+        else None
+    )
+    try:
+        if should_give_up(now, started, window, access_ends_at):
+            store.end_group_dunning(group.id, status="closed")
+            out["given_up"].append(entry)
+            return out
+        if not should_attempt_now(
+            now, started, attempts, offsets, window, access_ends_at
+        ):
+            # Either not due yet, or the retries are spent and the account is
+            # riding out the rest of the window — still recoverable if the customer
+            # pays in the portal, so it stays in dunning until the deadline.
+            return out
+
+        invoices = _invoices_for_group(
+            billing_gateway.open_invoices(account.stripe_customer_id),
+            group,
+            store.billing_groups_for_payer(user_id),
+        )
+        if not invoices:
+            # Nothing outstanding on THIS card — it was settled elsewhere (a portal
+            # payment, a manual charge). Collection has no reason to continue, but the
+            # period it paid for still has to be recorded, or the customer has paid
+            # and is locked out until the next renewal run notices.
+            _settle_period(account, group, None)
+            store.end_group_dunning(group.id, status="active")
+            _restore_access(user_id)
+            out["recovered"].append(entry)
+            return out
+
+        # Which invoice would actually recover this card, decided BEFORE the charge:
+        # afterwards the paid one is gone from the processor's open list and the
+        # question cannot be asked again.
+        current = _current_period_invoice(
+            invoices, _current_period_key(account, group)
+        )
+
+        # The attempt is counted BEFORE it runs. If this process dies mid-retry the
+        # slot is spent rather than replayed, which is the safe direction: a
+        # double-charge is far worse than a skipped retry.
+        store.record_group_dunning_attempt(group.id)
+        target = invoices[0]
+        # THE GROUP'S CURRENT CARD, not the one the invoice was raised against.
+        # A payer whose card declined usually recovers by replacing it, and the
+        # document still names the dead one.
+        paid, reason = billing_gateway.retry_invoice(
+            target["id"], group.stripe_payment_method_id
+        )
+        entry["invoice"] = target["id"]
+        entry["reason"] = reason
+        out["retried"].append(entry)
+
+        if paid:
+            # Advance BEFORE clearing dunning: this is what the customer just paid
+            # for. Without it the money is collected and they stay unentitled until
+            # the next monthly run adopts the invoice by its idempotency key — a
+            # month of paying for nothing.
+            _settle_period(account, group, target)
+            # Collecting is not recovering. The oldest open invoice is what policy
+            # charges, but the episode ends and access comes back only when the
+            # CURRENT period is settled — otherwise a returning customer pays a
+            # months-old bill, is told they are up to date, and is locked out again
+            # by the next access sweep.
+            #
+            # ``current is None`` means nothing open belongs to the period they are
+            # behind on: it was settled somewhere this code cannot see, so this IS
+            # recovery. The alternative rule — recover only when NO invoice is open —
+            # would let one uncollectable stale debt lock a paying customer out for
+            # good.
+            if current is None or current["id"] == target["id"]:
+                store.end_group_dunning(group.id, status="active")
+                _restore_access(user_id)
+                out["recovered"].append(entry)
+            else:
+                entry["_collected"] = True
+                out["collected"].append(entry)
+                logger.info(
+                    "dunning: payer {} paid stale invoice {}; current period {} "
+                    "still open, staying in dunning",
+                    user_id, target["id"], current["id"],
+                )
+    except Exception:
+        logger.exception(
+            "dunning: cycle failed for payer {} on group {}", user_id, group.id
+        )
+    return out
+
+
+def _retry_context(user_id, entity_id):
+    """Resolve WHICH card to collect on, or the reason there is nothing to collect.
+
+    Returns ``(context, refusal)`` with exactly one of them set. The four refusals are
+    the answers ``retry_now`` gives without charging anything -- no billing account, no
+    card, the schedule already spent, or nothing owed -- and each is returned verbatim
+    by the caller.
+
+    It WRITES on two of those paths (closing a spent episode, and settling one that was
+    paid somewhere this code cannot see). That is deliberate and stays here: both are
+    part of deciding there is nothing to retry, not part of retrying.
+    """
+    from blueprints.subscription.services import billing_gateway, clock, policy, store
+
+    account = store.customer_mapping_for_user(user_id)
+    if account is None:
+        return None, {"status": "nothing_owed", "attempts": 0,
+                "invoice": None, "reason": None}
+
+    # WHICH CARD'S DEBT. The button is pressed from one company's settings page, so the
+    # debt to settle is the one on the card THAT company is billed to — not the payer's
+    # oldest, which may belong to companies this person is not even looking at. Without an
+    # entity the caller gets the card that has been in collection longest, which is the
+    # one closest to being given up on.
+    groups = store.billing_groups_for_payer(user_id)
+    group = (
+        store.billing_group_for_entity(entity_id, user_id) if entity_id else None
+    )
+    if group is None:
+        in_dunning = [g for g in groups if g.dunning_started_at is not None]
+        group = (
+            min(in_dunning, key=lambda g: g.dunning_started_at)
+            if in_dunning else (groups[0] if groups else None)
+        )
+    if group is None:
+        # No card nominated for this company, so there is nothing to charge and nothing
+        # to guess at — the customer's next step is to choose one, which is the control
+        # beside this button.
+        return None, {"status": "no_card", "attempts": 0, "invoice": None, "reason": None}
+
+    now = clock.now()
+    window = policy.current().past_due_window_days
+    started = group.dunning_started_at
+    attempts = int(group.dunning_attempts or 0)
+    access_ends_at = (
+        group.paid_through + timedelta(days=window)
+        if group.paid_through is not None
+        else None
+    )
+
+    # Only meaningful while collection is running: with no stamp there is no schedule to
+    # have outrun, so there is no deadline to be past.
+    if started is not None and should_give_up(now, started, window, access_ends_at):
+        store.end_group_dunning(group.id, status="closed")
+        return None, {"status": "gave_up", "attempts": attempts,
+                "invoice": None, "reason": None}
+
+    invoices = _invoices_for_group(
+        billing_gateway.open_invoices(account.stripe_customer_id), group, groups
+    )
+    if not invoices:
+        # Nothing owed on this card. If collection was running it was settled somewhere
+        # this code cannot see (a portal payment, a manual charge), so close it out and
+        # record what it paid for — otherwise the customer has paid and stays locked out
+        # until the next renewal run notices.
+        if started is not None:
+            _settle_period(account, group, None)
+            store.end_group_dunning(group.id, status="active")
+        return None, {"status": "nothing_owed", "attempts": attempts,
+                "invoice": None, "reason": None}
+    return {
+        "account": account, "group": group, "started": started,
+        "attempts": attempts, "invoices": invoices,
+    }, None

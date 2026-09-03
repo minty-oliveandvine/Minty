@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from blueprints.subscription.services import clock
+from blueprints.subscription.services import clock, display
 from blueprints.subscription.services import store as sub_store
 from blueprints.subscription.services.stripe_client import (
     attach_payment_method, create_customer_for_user, create_setup_intent,
@@ -101,8 +101,9 @@ def run(handler, user_id) -> tuple[dict, int]:
 
 
 def _fmt(moment) -> str | None:
-    """'15 Aug 2026' — the same zero-padded form the rest of the portal prints."""
-    return moment.strftime("%d %b %Y") if moment else None
+    """'15 Aug 2026' — the same zero-padded form the rest of the portal prints, and now
+    literally the same function: see ``display.day_padded``."""
+    return display.day_padded(moment)
 
 
 def _months_until(exp_year, exp_month, now) -> int | None:
@@ -579,11 +580,13 @@ def _owned(user_id, payment_method_id: str) -> tuple[str, dict]:
 
     try:
         pm = retrieve_payment_method(payment_method_id)
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "payment methods: could not read {} for payer {}", payment_method_id, user_id
         )
-        raise PaymentMethodError("That payment method couldn't be found.", status=404)
+        raise PaymentMethodError(
+            "That payment method couldn't be found.", status=404
+        ) from exc
 
     pm_customer = (pm or {}).get("customer")
     if isinstance(pm_customer, dict):
@@ -685,12 +688,16 @@ def _valid_expiry(exp_month, exp_year) -> tuple[int, int]:
     """
     try:
         month, year = int(exp_month), int(exp_year)
-    except (TypeError, ValueError):
-        raise PaymentMethodError("Enter the expiry as a month and a year.", status=422)
+    except (TypeError, ValueError) as exc:
+        raise PaymentMethodError(
+            "Enter the expiry as a month and a year.", status=422
+        ) from exc
 
-    if not 1 <= month <= 12:
+    # 12 and 100 are calendar facts, not tunables: naming them MONTHS_IN_YEAR /
+    # CENTURY would read worse at the point of use than the numbers do.
+    if not 1 <= month <= 12:  # noqa: PLR2004
         raise PaymentMethodError("That expiry month doesn't exist.", status=422)
-    if year < 100:
+    if year < 100:  # noqa: PLR2004
         # "29" for 2029 — what a customer types into a two-box expiry field.
         year += 2000
     now = clock.now()

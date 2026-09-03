@@ -7,9 +7,10 @@ is deliberately NOT stored on the mirror. Never updated after insert.
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import CreatedAtMixin
 
 
-class SubscriptionAuditLog(db.Model):
+class SubscriptionAuditLog(CreatedAtMixin, db.Model):
     __tablename__ = "subscription_audit_log"
     __table_args__ = (
         db.Index("ix_sub_audit_entity_created", "entity_id", "created_at"),
@@ -62,9 +63,6 @@ class SubscriptionAuditLog(db.Model):
     # written by the customer — keeping them apart is what makes "why do people leave?"
     # a query instead of a string search.
     note = db.Column(db.String(500), nullable=True)
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
 
     def __repr__(self):
         return (

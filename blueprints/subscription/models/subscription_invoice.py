@@ -19,9 +19,10 @@ for the full rationale; the two rules that matter when reading rows here:
 import uuid
 
 from models.db import db
+from blueprints.subscription.models.mixins import CreatedAtMixin, TimestampMixin
 
 
-class SubscriptionInvoice(db.Model):
+class SubscriptionInvoice(TimestampMixin, db.Model):
     __tablename__ = "subscription_invoice"
     __table_args__ = (
         # UNIQUE, not merely indexed: this is what makes charging a period twice
@@ -94,15 +95,6 @@ class SubscriptionInvoice(db.Model):
 
     issued_at = db.Column(db.DateTime(timezone=True), nullable=True)
     paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
-    updated_at = db.Column(
-        db.DateTime(timezone=True),
-        server_default=db.func.now(),
-        onupdate=db.func.now(),
-        nullable=False,
-    )
 
     lines = db.relationship(
         "SubscriptionInvoiceLine",
@@ -118,7 +110,7 @@ class SubscriptionInvoice(db.Model):
         )
 
 
-class SubscriptionInvoiceLine(db.Model):
+class SubscriptionInvoiceLine(CreatedAtMixin, db.Model):
     __tablename__ = "subscription_invoice_line"
     __table_args__ = (
         db.Index("ix_subscription_invoice_line_invoice_id", "invoice_id"),
@@ -146,9 +138,6 @@ class SubscriptionInvoiceLine(db.Model):
     kind = db.Column(db.String(20), nullable=False, server_default="full")
     # The instant a proration was measured from. NULL for a whole-period line.
     at = db.Column(db.DateTime(timezone=True), nullable=True)
-    created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
-    )
 
     invoice = db.relationship("SubscriptionInvoice", back_populates="lines")
 
