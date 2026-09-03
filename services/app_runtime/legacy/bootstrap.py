@@ -402,6 +402,10 @@ def create_app():
     from cli.subscription_plans import plans_cli
     app.cli.add_command(subscriptions_cli)
     app.cli.add_command(plans_cli)
+    # Expense AI: the 90-day audit purge, and the Stage 0 round-trip check that
+    # has to be run from the application's own network path, not a laptop.
+    from cli.expense_ai import expense_ai_cli
+    app.cli.add_command(expense_ai_cli)
 
     # Re-check every published legal document against its recorded fingerprint.
     # A document edited in place silently invalidates every consent row that
