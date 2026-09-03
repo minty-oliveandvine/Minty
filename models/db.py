@@ -21,6 +21,7 @@ from blueprints.entity.models.entity_pettycash_settings import EntityPettycashSe
 from blueprints.entity.models.entity_sale_setting import EntitySaleSetting  # noqa: E402
 from blueprints.entity.models.sale_info import SaleInfo  # noqa: E402
 from blueprints.entity.models.user_entity import UserEntity  # noqa: E402
+from blueprints.report.models.ai_expense_suggestion import AiExpenseSuggestion  # noqa: E402
 from blueprints.report.models.report import Report  # noqa: E402
 from blueprints.report.models.report_cash_count import ReportCashCount  # noqa: E402
 from blueprints.report.models.report_history import ReportHistory  # noqa: E402
@@ -68,6 +69,7 @@ __all__ = [
     "SaleInfo",
     "Report",
     "ShopExpense",
+    "AiExpenseSuggestion",
     "ReportHistory",
     "ReportSaleDetail",
     "ShareLink",

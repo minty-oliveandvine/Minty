@@ -9,6 +9,7 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
+from blueprints.report.services.expense_ai import is_enabled as expense_ai_is_enabled
 from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
@@ -299,6 +300,7 @@ def report_expense(id=None):
             is_edit_mode=is_edit_mode,
             DD_CLIENT_TOKEN=DD_CLIENT_TOKEN,
             header_xero_integrated_yes=header_xero_integrated_yes,
+            expense_ai_enabled=expense_ai_is_enabled(),
         )
     if request.method == "POST":
         # Debug logging
@@ -744,4 +746,5 @@ def report_expense(id=None):
         display_date=display_date,
         is_edit_mode=is_edit_mode,
         DD_CLIENT_TOKEN=DD_CLIENT_TOKEN,
+        expense_ai_enabled=expense_ai_is_enabled(),
     )

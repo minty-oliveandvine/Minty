@@ -13,6 +13,7 @@ _ROUTE_MODULES = (
     "download",
     "ending",
     "expense",
+    "expense_ai",
     "export_screenshot",
     "history",
     "legacy",

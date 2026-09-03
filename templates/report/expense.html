@@ -1628,6 +1628,12 @@
        showUploadSuccess();
        displayImagePreviews(files);
        console.log('Files uploaded:', Array.from(files).map(f => f.name));
+
+       // Read the receipt beside the form. Never inside Add: if this is slow,
+       // rate limited or down the card behaves exactly as it does today.
+       if (window.mintyAi) {
+         try { window.mintyAi.onFilesAttached(currentUploadedFiles); } catch (e) { /* never block entry */ }
+       }
      }
 
      function handleFileUpload(input) {
@@ -1869,6 +1875,12 @@
 
        // Clear stored files
        currentUploadedFiles = null;
+
+       // The receipt is gone, so any extraction of it is abandoned and any
+       // suggestion marking still on the form is cleared.
+       if (window.mintyAi) {
+         try { window.mintyAi.cancel(); } catch (e) { /* never block entry */ }
+       }
 
        // Reset upload area styles
        uploadArea.style.padding = '';
@@ -4518,5 +4530,16 @@
 
   </script>
 <script src="{{ url_for('static', filename='js/report_back_nav.js') }}"></script>
+{% if expense_ai_enabled %}
+<script>
+  window.EXPENSE_AI = {
+    url: '{{ url_for("report.report_expense_extract") }}',
+    entityId: '{{ org.id if org else "" }}',
+    reportId: '{{ current_draft.id if current_draft else "" }}',
+    transactionDate: '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}'
+  };
+</script>
+<script src="{{ url_for('static', filename='js/expense_ai.js') }}"></script>
+{% endif %}
 </body>
 </html>
