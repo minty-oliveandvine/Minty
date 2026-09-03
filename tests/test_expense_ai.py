@@ -420,7 +420,9 @@ def test_client_not_configured_makes_no_call(monkeypatch):
 # Thinking tokens. Invisible in the reply, billed as output, and drawn from
 # max_output_tokens — the combination that truncated a real call.
 # --------------------------------------------------------------------------
-def test_thinking_tokens_are_recorded_separately(monkeypatch):
+def test_thinking_tokens_are_reported_separately(monkeypatch):
+    """Still tracked, now only in the log line: without it a truncation
+    caused by thinking looks like a model that barely answered."""
     extraction, _ = _run(monkeypatch, FakeInteraction(_reply()))
     assert extraction.audit["output_tokens"] == 300
     assert extraction.audit["thought_tokens"] == 400
@@ -523,44 +525,6 @@ def test_location_records_the_direct_route_distinctly(monkeypatch):
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     assert ai.uses_vertex() is False
     assert ai.location().startswith("gemini-api-direct")
-
-
-# --------------------------------------------------------------------------
-# The audit table is measurement, not machinery. A suggestion must survive the
-# audit write failing — including the table not existing at all (§10.4).
-# --------------------------------------------------------------------------
-def test_a_failed_audit_write_does_not_raise(app, monkeypatch):
-    """`record_attempt` swallows anything the database throws — a missing
-    table, a dead connection — and returns None instead of a row id."""
-    from models.db import db
-
-    def explode(_row):
-        raise RuntimeError('relation "ai_expense_suggestion" does not exist')
-
-    with app.app_context():
-        monkeypatch.setattr(db.session, "add", explode)
-        result = ai.record_attempt(
-            entity_id="ent-1", user_id="user-1", report_id=None,
-            status="ok", error_code=None,
-            audit={"model_id": "gemini-3.5-flash", "latency_ms": 900},
-        )
-
-    assert result is None
-
-
-def test_extract_never_touches_the_audit_table(monkeypatch):
-    """The suggestion path does not read or write it, so the feature keeps
-    working with the table dropped. That is what makes rollback cheap."""
-    import models.db as models_db
-
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("extract() must not touch the database session")
-
-    monkeypatch.setattr(models_db.db.session, "add", forbidden)
-    monkeypatch.setattr(models_db.db.session, "commit", forbidden)
-
-    extraction, _ = _run(monkeypatch, FakeInteraction(_reply()))
-    assert extraction.suggestions["amount"]["value"] == "120.00"
 
 
 # --------------------------------------------------------------------------
