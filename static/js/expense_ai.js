@@ -343,6 +343,60 @@
     return !!form && !form.classList.contains('hidden');
   }
 
+  // ------------------------------------------------------- shrink to upload
+  // Resize the photo in the browser before sending it for reading.
+  //
+  // A modern phone photo is 8-12 MB. Uploading that over mobile data is the
+  // slowest part of the whole thing after Google itself, and the server then
+  // spends ~600ms shrinking it anyway. Doing it here removes both.
+  //
+  // THIS COPY IS FOR THE AI ONLY. The file input still holds the untouched
+  // original, and that is what gets uploaded and stored when the user presses
+  // Add. We never degrade the receipt anyone actually keeps.
+  //
+  // 2000px on the long edge is well above what is needed to read a receipt,
+  // and Gemini downscales to 3072px regardless — anything larger is pure
+  // waste. PDFs pass through untouched; they cannot be resized here.
+  var MAX_EDGE = 2000;
+  var JPEG_QUALITY = 0.85;
+
+  function shrinkForUpload(file) {
+    var unchanged = Promise.resolve(file);
+    if (!file || !/^image\/(jpe?g|png)$/i.test(file.type || '')) return unchanged;
+    if (typeof createImageBitmap !== 'function' ||
+        typeof document.createElement('canvas').toBlob !== 'function') {
+      return unchanged;
+    }
+
+    return createImageBitmap(file)
+      .then(function (bitmap) {
+        var scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+        // Already small enough - re-encoding would only lose quality.
+        if (scale === 1) {
+          bitmap.close && bitmap.close();
+          return file;
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(bitmap.height * scale);
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close && bitmap.close();
+
+        return new Promise(function (resolve) {
+          canvas.toBlob(function (blob) {
+            // Only use it if it is actually smaller. A tiny detailed image can
+            // re-encode larger than it started.
+            resolve(blob && blob.size < file.size ? blob : file);
+          }, 'image/jpeg', JPEG_QUALITY);
+        });
+      })
+      .catch(function () {
+        // Any failure - unsupported format, out of memory, a browser quirk -
+        // falls back to the original. The server shrinks it as before.
+        return file;
+      });
+  }
+
   function onFilesAttached(files) {
     // Stage 1 reads the FIRST attached file only; additional files are
     // ignored (§7.1). Anything more is a Stage 2 question.
@@ -355,10 +409,6 @@
 
     var file = files[0];
     var token = requestToken;
-    var formData = new FormData();
-    formData.append('file', file);
-    if (CONFIG.entityId) formData.append('entity_id', CONFIG.entityId);
-    if (CONFIG.reportId) formData.append('report_id', CONFIG.reportId);
 
     var csrf = document.querySelector('input[name="csrf_token"]');
     var headers = csrf ? { 'X-CSRFToken': csrf.value } : {};
@@ -366,26 +416,38 @@
     controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     showReading(true);
 
-    fetch(CONFIG.url, {
-      method: 'POST',
-      body: formData,
-      headers: headers,
-      credentials: 'same-origin',
-      signal: controller ? controller.signal : undefined
+    shrinkForUpload(file).then(function (payload) {
+      // The user may have swapped or removed the receipt while we were
+      // resizing. Do not send a request for a file that is no longer there.
+      if (token !== requestToken || !formIsOpen()) return;
+
+      var formData = new FormData();
+      // Keep the original filename so the server sees a sensible name; the
+      // bytes are the shrunk copy.
+      formData.append('file', payload, file.name || 'receipt.jpg');
+      if (CONFIG.entityId) formData.append('entity_id', CONFIG.entityId);
+      if (CONFIG.reportId) formData.append('report_id', CONFIG.reportId);
+
+      return fetch(CONFIG.url, {
+        method: 'POST',
+        body: formData,
+        headers: headers,
+        credentials: 'same-origin',
+        signal: controller ? controller.signal : undefined
+      })
+        .then(function (response) {
+          return response.ok ? response.json() : null;
+        })
+        .then(function (data) {
+          // Apply only if this is still the current request, the card is
+          // still open, and the file has not been swapped underneath us.
+          if (token !== requestToken || !formIsOpen()) return;
+          var input = document.getElementById('expense_files');
+          var current = input && input.files && input.files[0];
+          if (current && current.name !== file.name) return;
+          applySuggestions(data);
+        });
     })
-      .then(function (response) {
-        return response.ok ? response.json() : null;
-      })
-      .then(function (data) {
-        // Apply only if this is still the current request, the card is still
-        // open, and the file has not been swapped underneath us.
-        if (token !== requestToken || !formIsOpen()) return;
-        var input = document.getElementById('expense_files');
-        var current = input && input.files && input.files[0];
-        if (current && current.name !== file.name) return;
-        showReading(false);
-        applySuggestions(data);
-      })
       .catch(function () {
         // Unavailable means invisible: no toast, no banner, no error state.
         // The card is exactly as it is without the feature.
