@@ -52,14 +52,24 @@
     var uploadArea = document.getElementById('uploadArea');
     if (!uploadArea || !uploadArea.parentNode) return;
 
-    var indicator = document.createElement('p');
+    // QA: the first version of this was 12px grey text and people missed it.
+    // The wait is 8 seconds or more, so it has to be obvious that something
+    // is happening — otherwise the page looks broken.
+    var indicator = document.createElement('div');
     indicator.id = 'aiReadingIndicator';
-    indicator.className = 'hidden mt-2 text-xs text-gray-500 flex items-center gap-2';
+    indicator.className =
+      'hidden mt-3 mb-1 flex items-center gap-3 rounded-xl border ' +
+      'border-[#54D3DA] bg-[#54D3DA]/10 px-4 py-3';
     indicator.innerHTML =
-      '<svg class="animate-spin h-3 w-3 text-gray-400" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+      '<svg class="animate-spin h-5 w-5 text-[#31B6BD] shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
       '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>' +
       '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>' +
-      '</svg><span>Reading the receipt&hellip;</span>';
+      '</svg>' +
+      '<div class="min-w-0">' +
+      '<p class="text-sm font-medium text-[#31B6BD]">Reading the receipt&hellip;</p>' +
+      '<p class="text-xs text-gray-500">This can take a few seconds. ' +
+      'You can start typing now if you prefer.</p>' +
+      '</div>';
     uploadArea.parentNode.insertBefore(indicator, uploadArea.nextSibling);
   }
 
@@ -165,7 +175,64 @@
     unmarkField(inputId);
   }
 
+  // QA request: when the receipt names a supplier we do not have, offer it
+  // rather than silently leaving the field blank. The model read the name;
+  // making the user retype it is a waste.
+  //
+  // This does NOT create a contact. It fills in the New Contact box that
+  // already exists and the user still presses Create. Creating a supplier
+  // stays a deliberate human action.
+  function showDetectedSupplier(name) {
+    removeDetectedSupplier();
+    var input = document.getElementById(TARGETS.supplier);
+    if (!input) return;
+
+    var prompt = document.createElement('div');
+    prompt.id = 'aiDetectedSupplier';
+    prompt.className =
+      'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs';
+
+    var line = document.createElement('p');
+    line.className = 'text-gray-600';
+    // textContent, not innerHTML: this string came off a receipt image and is
+    // untrusted. It is never parsed as markup.
+    line.textContent = 'Receipt says "' + name + '", which is not in your '
+      + 'supplier list.';
+
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className =
+      'mt-1 font-medium text-[#31B6BD] underline hover:no-underline';
+    button.textContent = 'Add "' + name + '" as a new supplier';
+    button.addEventListener('click', function () {
+      if (typeof window.showNewContactSection === 'function') {
+        window.showNewContactSection(name);
+      }
+      removeDetectedSupplier();
+    });
+
+    prompt.appendChild(line);
+    prompt.appendChild(button);
+
+    var anchor =
+      input.parentElement && input.parentElement.classList.contains('relative')
+        ? input.parentElement
+        : input;
+    anchor.insertAdjacentElement('afterend', prompt);
+
+    // Once the user picks a supplier themselves, the offer is stale.
+    input.addEventListener('input', removeDetectedSupplier);
+  }
+
+  function removeDetectedSupplier() {
+    var prompt = document.getElementById('aiDetectedSupplier');
+    if (prompt && prompt.parentNode) prompt.parentNode.removeChild(prompt);
+    var input = document.getElementById(TARGETS.supplier);
+    if (input) input.removeEventListener('input', removeDetectedSupplier);
+  }
+
   function clearAllSuggestions() {
+    removeDetectedSupplier();
     markedFields.slice().forEach(clearSuggestion);
   }
 
@@ -210,6 +277,10 @@
         markField(TARGETS.supplier, bandLabel(supplier.band, 'Supplier'));
         filled.push('supplier');
       }
+    } else if (supplier && supplier.detected_name && isEmpty(supplierInput)) {
+      // Read a name off the receipt, but it matches nothing in the contact
+      // list. Offer it instead of leaving the user to retype it.
+      showDetectedSupplier(supplier.detected_name);
     }
 
     var account = suggestions.account;

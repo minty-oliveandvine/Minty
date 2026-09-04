@@ -969,7 +969,20 @@ def _validate(parsed: ExpenseSuggestion, context: dict) -> dict:
     else:
         if supplier_id:
             logger.info("expense_ai: dropped supplier id not in the sent list")
-        supplier = _field("", 0.0, {"contact_id": ""})
+        # No match in the entity's contacts — but the model still READ a name
+        # off the receipt, and throwing that away makes the user retype
+        # something we already have. Passed through as `detected_name`, which
+        # the page offers as a starting point for the existing New Contact
+        # panel. It is a suggestion for a text box, never a contact: creating
+        # one stays a deliberate click by the user (§6.3).
+        #
+        # Untrusted text from a receipt image, so: stripped, length-capped
+        # well inside contact_name's 150 chars, and rendered with textContent
+        # rather than innerHTML on the page.
+        detected = (parsed.supplier_name or "").strip()[:100]
+        supplier = _field(
+            "", 0.0, {"contact_id": "", "detected_name": detected}
+        )
 
     account_id = (parsed.account_id or "").strip()
     if account_id in accounts:
