@@ -603,3 +603,37 @@ def test_a_tier_mismatch_does_not_disable_the_feature(monkeypatch):
     )
     ai._check_tier_matches_reality(error)
     assert ai.is_enabled() is True
+
+
+# --------------------------------------------------------------------------
+# QA request: when the receipt names a supplier we do not have, hand the name
+# to the page instead of discarding it. Offering is not creating (§6.3).
+# --------------------------------------------------------------------------
+def test_unmatched_supplier_name_is_passed_through(monkeypatch):
+    extraction, _ = _run(
+        monkeypatch,
+        FakeInteraction(
+            _reply(supplier_contact_id="", supplier_name="Caspita Restaurant")
+        ),
+    )
+    supplier = extraction.suggestions["supplier"]
+    # Still not selected — the id was not one we sent.
+    assert supplier["contact_id"] == ""
+    assert supplier["applied"] is False
+    # But the name survives, for the New Contact box.
+    assert supplier["detected_name"] == "Caspita Restaurant"
+
+
+def test_a_matched_supplier_needs_no_detected_name(monkeypatch):
+    extraction, _ = _run(monkeypatch, FakeInteraction(_reply()))
+    assert extraction.suggestions["supplier"]["contact_id"] == "con-sf"
+    assert "detected_name" not in extraction.suggestions["supplier"]
+
+
+def test_detected_supplier_name_is_length_capped(monkeypatch):
+    """Untrusted text off a receipt image, and contact_name is 150 chars."""
+    extraction, _ = _run(
+        monkeypatch,
+        FakeInteraction(_reply(supplier_contact_id="", supplier_name="z" * 400)),
+    )
+    assert len(extraction.suggestions["supplier"]["detected_name"]) == 100
