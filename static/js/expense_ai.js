@@ -85,8 +85,28 @@
   }
 
   // --------------------------------------------------------------- marking
-  // Marking must not rely on colour alone (§7.4): every marked field gets a
-  // visible text label as well as the ring, and the arrival is announced.
+  // A marked field has to be obvious at a glance. The first version was 12px
+  // teal text on white and testers walked straight past it, which defeats the
+  // point: an unnoticed suggestion is an unchecked suggestion.
+  //
+  // Marking never relies on colour alone (§7.4). Every marked field gets an
+  // icon, a worded label and a real button, so it reads correctly in
+  // greyscale and to a screen reader.
+
+  // Where the badge goes, for every field, without depending on how that
+  // particular field happens to be wrapped. Amount, Supplier and Account sit
+  // inside a `.relative` positioning box (it holds the currency symbol or the
+  // dropdown chevron); Description has no wrapper at all. Walking up to the
+  // nearest labelled block treats all four the same.
+  function fieldGroup(input) {
+    var node = input.parentElement;
+    while (node && node !== document.body) {
+      if (node.querySelector && node.querySelector('label')) return node;
+      node = node.parentElement;
+    }
+    return input.parentElement || input;
+  }
+
   function markField(inputId, label) {
     var input = document.getElementById(inputId);
     if (!input) return;
@@ -95,31 +115,28 @@
     input.dataset.aiSuggested = 'true';
     input.classList.add('ring-2', 'ring-[#54D3DA]', 'ring-offset-1');
 
+    // The original inline style, sized up: 14px text and a 16px icon instead
+    // of 12px and 12px. Deliberately light-touch — the ring on the field is
+    // the main signal and this is the label that explains it.
     var badge = document.createElement('div');
     badge.id = 'aiBadge_' + inputId;
     badge.className =
-      'mt-1 flex items-center gap-1 text-xs text-[#31B6BD]';
+      'mt-1.5 flex items-center gap-1.5 text-sm text-[#31B6BD]';
     badge.innerHTML =
-      '<svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<path d="M12 2l2.4 6.2L21 10l-6.6 1.8L12 18l-2.4-6.2L3 10l6.6-1.8L12 2z"/></svg>' +
+      '<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" ' +
+      'aria-hidden="true">' +
+      '<path d="M12 2l2.4 6.2L21 10l-6.6 1.8L12 18l-2.4-6.2L3 10l6.6-1.8L12 2z"/>' +
+      '</svg>' +
       '<span>' + label + '</span>' +
-      '<button type="button" class="underline hover:no-underline" ' +
-      'aria-label="Clear this suggestion">Clear</button>';
+      '<button type="button" class="underline hover:no-underline font-medium" ' +
+      'aria-label="Clear the suggested value for this field">Clear</button>';
 
     badge.querySelector('button').addEventListener('click', function () {
       clearSuggestion(inputId);
       input.focus();
     });
 
-    // Sit the badge directly under the control. Amount, supplier and account
-    // are each wrapped in a `.relative` positioning box (it holds the currency
-    // symbol / dropdown chevron); the badge goes after that box rather than
-    // inside it. Description has no wrapper, so it goes after the input.
-    var anchor =
-      input.parentElement && input.parentElement.classList.contains('relative')
-        ? input.parentElement
-        : input;
-    anchor.insertAdjacentElement('afterend', badge);
+    fieldGroup(input).appendChild(badge);
 
     // Confirmed: the moment the user touches the field it is theirs.
     input.addEventListener('input', onUserEdit);
@@ -135,7 +152,8 @@
     var input = document.getElementById(inputId);
     if (input) {
       delete input.dataset.aiSuggested;
-      input.classList.remove('ring-2', 'ring-[#54D3DA]', 'ring-offset-1');
+      input.classList.remove('ring-2', 'ring-offset-1',
+                             'ring-[#54D3DA]', 'ring-amber-400');
       input.removeEventListener('input', onUserEdit);
       input.removeEventListener('change', onUserEdit);
     }
@@ -187,10 +205,12 @@
     var input = document.getElementById(TARGETS.supplier);
     if (!input) return;
 
+    // The original quiet style, sized up: 14px instead of 12px. Same grey
+    // panel, same underlined link.
     var prompt = document.createElement('div');
     prompt.id = 'aiDetectedSupplier';
     prompt.className =
-      'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs';
+      'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm';
 
     var line = document.createElement('p');
     line.className = 'text-gray-600';
@@ -202,7 +222,7 @@
     var button = document.createElement('button');
     button.type = 'button';
     button.className =
-      'mt-1 font-medium text-[#31B6BD] underline hover:no-underline';
+      'mt-1 font-medium text-[#31B6BD] underline hover:no-underline text-left';
     button.textContent = 'Add "' + name + '" as a new supplier';
     button.addEventListener('click', function () {
       if (typeof window.showNewContactSection === 'function') {
@@ -213,12 +233,10 @@
 
     prompt.appendChild(line);
     prompt.appendChild(button);
+    fieldGroup(input).appendChild(prompt);
 
-    var anchor =
-      input.parentElement && input.parentElement.classList.contains('relative')
-        ? input.parentElement
-        : input;
-    anchor.insertAdjacentElement('afterend', prompt);
+    announce('The receipt names a supplier that is not in your list: ' + name
+             + '. You can add it as a new supplier.');
 
     // Once the user picks a supplier themselves, the offer is stale.
     input.addEventListener('input', removeDetectedSupplier);
@@ -233,12 +251,84 @@
 
   function clearAllSuggestions() {
     removeDetectedSupplier();
+    removeAllMismatches();
     markedFields.slice().forEach(clearSuggestion);
   }
 
   // -------------------------------------------------------------- applying
   function isEmpty(input) {
     return !input || !String(input.value || '').trim();
+  }
+
+  // ------------------------------------------------------- mismatch notices
+  // The never-overwrite rule says we leave a filled field alone. Followed
+  // literally that also means saying nothing when the receipt plainly
+  // disagrees with what is in the box — which loses information the user
+  // would want. A typo of 44.80 for 448.80 is exactly the kind of thing the
+  // receipt could catch and we were staying quiet about.
+  //
+  // So: never change a filled field, but do offer. Nothing moves without a
+  // click, which keeps the rule intact.
+  function showMismatch(inputId, wording, apply) {
+    removeMismatch(inputId);
+    var input = document.getElementById(inputId);
+    if (!input) return;
+
+    var note = document.createElement('div');
+    note.id = 'aiMismatch_' + inputId;
+    note.className =
+      'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm';
+
+    var line = document.createElement('p');
+    line.className = 'text-gray-600';
+    // textContent: this came off a receipt image and is not trusted markup.
+    line.textContent = wording;
+
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className =
+      'mt-1 font-medium text-[#31B6BD] underline hover:no-underline text-left';
+    button.textContent = 'Use the value from the receipt';
+    button.addEventListener('click', function () {
+      apply();
+      removeMismatch(inputId);
+    });
+
+    note.appendChild(line);
+    note.appendChild(button);
+    fieldGroup(input).appendChild(note);
+
+    // Once the user edits the field themselves, the comparison is stale.
+    input.addEventListener('input', function () { removeMismatch(inputId); });
+  }
+
+  // The confidence cut-off decides whether we PUT a value in an empty box.
+  // It should not decide whether we MENTION a disagreement, because a notice
+  // changes nothing and costs the user only a glance. So notices are shown
+  // whenever we read something, and the wording carries how sure we were.
+  function hedge(field) {
+    return field && field.band === 'low' ? 'might read' : 'reads';
+  }
+
+  function removeMismatch(inputId) {
+    var note = document.getElementById('aiMismatch_' + inputId);
+    if (note && note.parentNode) note.parentNode.removeChild(note);
+  }
+
+  function removeAllMismatches() {
+    Object.keys(TARGETS).forEach(function (key) { removeMismatch(TARGETS[key]); });
+  }
+
+  function sameText(a, b) {
+    return String(a || '').trim().toLowerCase() ===
+           String(b || '').trim().toLowerCase();
+  }
+
+  function sameAmount(a, b) {
+    var x = parseFloat(String(a || '').replace(/,/g, ''));
+    var y = parseFloat(String(b || '').replace(/,/g, ''));
+    if (isNaN(x) || isNaN(y)) return false;
+    return Math.abs(x - y) < 0.005;
   }
 
   function applySuggestions(data) {
@@ -256,6 +346,18 @@
       }
       markField(TARGETS.amount, bandLabel(amount.band, 'Amount'));
       filled.push('amount');
+    } else if (amount && amount.value &&
+               !sameAmount(amountInput.value, amount.value)) {
+      showMismatch(TARGETS.amount,
+        'The receipt ' + hedge(amount) + ' ' + amount.value + ', not ' +
+        amountInput.value + '.',
+        function () {
+          amountInput.value = amount.value;
+          if (typeof window.formatWithCommas === 'function') {
+            try { window.formatWithCommas(amountInput); } catch (e) { /* cosmetic */ }
+          }
+          markField(TARGETS.amount, bandLabel(amount.band, 'Amount'));
+        });
     }
 
     var description = suggestions.description;
@@ -281,6 +383,16 @@
       // Read a name off the receipt, but it matches nothing in the contact
       // list. Offer it instead of leaving the user to retype it.
       showDetectedSupplier(supplier.detected_name);
+    } else if (supplier && supplier.contact_id &&
+               !isEmpty(supplierInput) &&
+               !sameText(supplierInput.value, supplier.value)) {
+      showMismatch(TARGETS.supplier,
+        'The receipt ' + hedge(supplier) + ' like "' + supplier.value +
+        '", not "' + supplierInput.value + '".',
+        function () {
+          window.selectContact(supplier.contact_id, supplier.value);
+          markField(TARGETS.supplier, bandLabel(supplier.band, 'Supplier'));
+        });
     }
 
     var account = suggestions.account;
@@ -291,6 +403,26 @@
         markField(TARGETS.account, bandLabel(account.band, 'Account code'));
         filled.push('account');
       }
+    } else if (account && account.account_id &&
+               !isEmpty(accountInput) &&
+               !sameText(accountInput.value, account.name)) {
+      showMismatch(TARGETS.account,
+        'The receipt ' + hedge(account) + ' more like "' + account.name +
+        '" than "' + accountInput.value + '".',
+        function () {
+          window.selectAccount(account.account_id, account.name);
+          markField(TARGETS.account, bandLabel(account.band, 'Account code'));
+        });
+    }
+
+    var mismatches = Object.keys(TARGETS).filter(function (key) {
+      return document.getElementById('aiMismatch_' + TARGETS[key]);
+    });
+    if (mismatches.length) {
+      announce('The receipt disagrees with ' + mismatches.length +
+               ' field' + (mismatches.length === 1 ? '' : 's') +
+               ' you already filled in: ' + mismatches.join(', ') +
+               '. Nothing has been changed.');
     }
 
     if (!filled.length) return;
@@ -306,6 +438,8 @@
 
   function bandLabel(band, fieldName) {
     // Medium confidence is marked more strongly for review than high (§6.2).
+    // The wording carries it as well as the colour, so the distinction
+    // survives greyscale and screen readers.
     return band === 'medium'
       ? fieldName + ' suggested — please check'
       : fieldName + ' suggested';

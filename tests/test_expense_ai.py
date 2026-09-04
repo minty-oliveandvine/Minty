@@ -637,3 +637,31 @@ def test_detected_supplier_name_is_length_capped(monkeypatch):
         FakeInteraction(_reply(supplier_contact_id="", supplier_name="z" * 400)),
     )
     assert len(extraction.suggestions["supplier"]["detected_name"]) == 100
+
+
+def test_supplier_name_survives_when_nothing_matches(monkeypatch):
+    """The prompt used to tell the model to blank every field with no list
+    match, and it blanked supplier_name too — so the page had nothing to
+    offer and the Suppliers field just sat empty. supplier_name is now an
+    explicit exception in the system instruction."""
+    assert "supplier_name IS AN EXCEPTION" in ai._SYSTEM_INSTRUCTION
+
+    extraction, _ = _run(
+        monkeypatch,
+        FakeInteraction(
+            _reply(supplier_contact_id="", supplier_name="Hung's Delicacies")
+        ),
+    )
+    supplier = extraction.suggestions["supplier"]
+    assert supplier["applied"] is False          # not selected
+    assert supplier["detected_name"] == "Hung's Delicacies"   # but offered
+
+
+def test_the_prompt_asks_for_english_in_both_free_text_fields(monkeypatch):
+    """Description and supplier name both end up in an English ledger beside
+    English account names, so both are asked for in English only — the
+    original characters are not carried through."""
+    instruction = ai._SYSTEM_INSTRUCTION
+    assert "ALWAYS write description_value in English" in instruction
+    assert "Write supplier_name in English only" in instruction
+    assert "Do not include the" in instruction
