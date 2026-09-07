@@ -19,6 +19,7 @@ from models.db import (AccountInfo, Report, ReportHistory, User, XeroReportSync,
 from services.auth.token_service import ensure_valid_token, resolve_xero_token
 from services.helpers.xero_bridge import (get_entity_account_settings,
                                           get_entity_contact_settings)
+from blueprints.xero.services import publish_record
 from blueprints.xero.services.publish_errors import (
     PublishFailureReason, translate_xero_error)
 from blueprints.xero.services import publish_errors as _pub_err
@@ -88,8 +89,14 @@ def _normalize_xero_date(value):
     return str(value)
 
 
-def bank_transaction_to_xero(entity, token, payload):
-    # Make a POST request to the banktransactions API
+def bank_transaction_to_xero(entity, token, payload, object_id=None):
+    """POST a bank transaction to Xero.
+
+    With ``object_id`` the request targets ``/BankTransactions/{id}`` and Xero
+    UPDATES that transaction; without it, it posts to the collection and Xero
+    creates a new one. That distinction is the whole republish fix: the same
+    payload either edits the existing entry or duplicates it.
+    """
     headers = {
         "Authorization": f"Bearer {token}",
         "Xero-Tenant-Id": str(entity),
@@ -97,9 +104,12 @@ def bank_transaction_to_xero(entity, token, payload):
         "Content-Type": "application/json",
     }
 
+    base = f"{current_app.config['XERO_API_BASE_URL']}/BankTransactions"
+    url = f"{base}/{object_id}" if object_id else base
+
     # Add timeout to prevent hanging requests (30 seconds for connection, 60 seconds total)
     response = requests.post(
-        url=f"{current_app.config['XERO_API_BASE_URL']}/BankTransactions",
+        url=url,
         data=json.dumps(payload),
         headers=headers,
         timeout=(30, 60),
@@ -134,6 +144,51 @@ def bank_transfer_to_xero(entity, token, payload):
     )
 
     return response
+
+
+def delete_bank_transfer_in_xero(entity, token, transfer_id):
+    """Delete a bank transfer. Returns ``(ok, reason)``.
+
+    ``reason`` is a plain-English explanation on failure and None on success.
+    It matters because the commonest failure here is a transfer the user has
+    already reconciled, and "could not be removed" does not tell them that.
+
+    Xero has no update for bank transfers -- the only way to change one is to
+    delete it and create a replacement. Per the Accounting API spec
+    (operationId ``deleteBankTransfer``) this is a POST to
+    ``/BankTransfers/{BankTransferID}`` with ``{"Status": "DELETED"}`` in the
+    BODY. The generated SDKs name the parameter "ByUrlParam", which is
+    misleading: it is not a query string.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Xero-Tenant-Id": str(entity),
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(
+            url=f"{current_app.config['XERO_API_BASE_URL']}/BankTransfers/{transfer_id}",
+            data=json.dumps({"Status": "DELETED"}),
+            headers=headers,
+            timeout=(30, 60),
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.error(f"Bank transfer delete request failed id={transfer_id}: {exc}")
+        return False, "could not reach Xero, please try again"
+
+    if response.status_code == 200:
+        logger.info(f"Deleted Xero bank transfer {transfer_id}")
+        return True, None
+
+    logger.error(
+        f"Bank transfer delete failed id={transfer_id} "
+        f"status={response.status_code}: {response.text[:300]}"
+    )
+    return False, translate_xero_error(
+        response.status_code, response.text, subject="account"
+    )
 
 
 def create_xero_contact(entity_id, contact_name, access_token, xero_org_id):
@@ -271,6 +326,51 @@ def ensure_contact_exists_in_xero(entity_id, contact_id, contact_name, access_to
         return None
 
 
+def _existing_id(entry, expected_type):
+    """Return a recorded Xero id, but only if it is the type we are about to send.
+
+    A module can change shape between publishes -- a company withdrawal is a
+    bank transfer, a personal one is a bank transaction. Feeding a transfer id
+    to the bank-transaction endpoint would fail confusingly, so a type
+    mismatch is treated as "nothing recorded" and creates fresh instead.
+    """
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("type") and entry.get("type") != expected_type:
+        return None
+    return entry.get("id") or None
+
+
+def _entity_org_id(entity_id):
+    """Return the entity's current Xero org id, or "".
+
+    Stored alongside recorded object ids so a report published under one Xero
+    organisation is not later "updated" with ids that org never issued.
+    """
+    entity = Entity.query.filter(Entity.id == entity_id).first()
+    return str(entity.xero_org_id or "") if entity else ""
+
+
+def _parse_xero_id(response_text, collection, id_field):
+    """Pull an object id out of a Xero success response, or return "".
+
+    Xero wraps created objects in a named array, e.g.
+    ``{"Invoices": [{"InvoiceID": "..."}]}``. Returns "" rather than raising:
+    a publish that Xero accepted must not be reported as failed just because
+    the id could not be read, it only means a later republish cannot update
+    that object and will create a duplicate instead -- today's behaviour.
+    """
+    try:
+        payload = json.loads(response_text or "")
+        return str(payload[collection][0][id_field] or "")
+    except (ValueError, TypeError, KeyError, IndexError):
+        logger.warning(
+            f"Xero response had no {id_field}; this object cannot be updated "
+            "on a later republish"
+        )
+        return ""
+
+
 def create_bank_transaction(
     entity_id,
     date,
@@ -286,6 +386,7 @@ def create_bank_transaction(
     subject=None,  # "contact" / "account" — helps phrase the failure reason
     module_label=None,  # short label for the failing module/line, used in the reason bullet
     error_meta=None,  # resolution metadata: {scope, expense_id, deps}
+    existing_id=None,  # Xero BankTransactionID from a previous publish -> update it
 ):
     try:
         # Get access_token if not provided
@@ -410,19 +511,34 @@ def create_bank_transaction(
         if contact_id:
             bank_transaction_payload["bankTransactions"][0]["contact"] = {"contactID": contact_id}
 
+        if existing_id:
+            # Republish: edit the transaction this report already created
+            # rather than posting a second one.
+            bank_transaction_payload["bankTransactions"][0][
+                "bankTransactionID"
+            ] = existing_id
+            logger.info(f"Updating existing Xero bank transaction {existing_id}")
+
         response = bank_transaction_to_xero(
-            entity.xero_org_id, access_token, bank_transaction_payload
+            entity.xero_org_id, access_token, bank_transaction_payload,
+            object_id=existing_id,
         )
 
         logger.info(f"Bank transaction | {type} | {type_of_transaction} response: {response.text}")
 
         if response.status_code == 200:
+            # Parsed for EVERY bank transaction, not just the expense branch
+            # where this used to live: the id is what lets a republish update
+            # this transaction instead of creating a second one.
+            created_id = _parse_xero_id(
+                response.text, "BankTransactions", "BankTransactionID"
+            )
+
             if type == "SPEND" and type_of_transaction == 'expense':
                 try:
-                    response_data = json.loads(response.text)
-                    bank_transction_id = response_data["BankTransactions"][0][
-                        "BankTransactionID"
-                    ]
+                    bank_transction_id = created_id
+                    if not bank_transction_id:
+                        raise ValueError("no BankTransactionID in Xero response")
 
                     # Get expense details from line_items
                     first_unit_amount = line_items[0].get("unitAmount", 0)
@@ -459,7 +575,7 @@ def create_bank_transaction(
                                 "No report for entity=%s date=%s; skipping "
                                 "expense file upload", entity_id, date
                             )
-                            return True  # Transaction was created, return success
+                            return created_id or True  # Transaction was created
                         report_id = _report_row.id
 
                     _filters = [
@@ -488,22 +604,23 @@ def create_bank_transaction(
                             logger.warning(
                                 f"Bank transaction created but file upload failed for {item}"
                             )
-                        return True
+                        return created_id or True
                     else:
                         logger.warning(
                             f"Expense not found for {item} (report_id={report_id}), but bank transaction was created"
                         )
-                        return True
+                        return created_id or True
                 except Exception as file_error:
                     logger.error(
                         f"Error processing file upload for expense: {str(file_error)}",
                         exc_info=True
                     )
-                    # Transaction was created successfully, so return True even if file upload failed
-                    return True
+                    # Transaction was created successfully, so return truthy even
+                    # if file upload failed
+                    return created_id or True
             else:
                 logger.info("Bank transaction for type RECEIVE successful")
-                return True
+                return created_id or True
         else:
             logger.error(
                 f"Bank transaction failed with status {response.status_code}: {response.text}"
@@ -530,7 +647,10 @@ def create_bank_transaction(
 
 def create_bank_transfer(
     entity_id, date, bank_account, withdrawal_amount, to_bank_account_id, access_token=None, transfer_type="company", reference_override=None,
-    pfr=None, module_label=None, error_meta=None
+    pfr=None, module_label=None, error_meta=None,
+    existing_id=None,  # Xero BankTransferID from a previous publish
+    report_id=None,  # needed to forget the old id before replacing it
+    record_module=None,  # "deposit" / "withdrawal_from"
 ):
     try:
         # Get access_token if not provided
@@ -590,6 +710,29 @@ def create_bank_transfer(
             f"Bank transfer payload: {json.dumps(bank_transfer_payload, indent=2)}"
         )
 
+        if existing_id:
+            # Xero cannot update a bank transfer, so replacing one means
+            # delete-then-create. Forget the old id BEFORE creating: if the
+            # create then fails, no stale id is left pointing at a transfer
+            # that no longer exists, and the retry creates cleanly.
+            deleted, delete_reason = delete_bank_transfer_in_xero(
+                entity.xero_org_id, access_token, existing_id
+            )
+            if report_id and record_module:
+                publish_record.forget_object(report_id, record_module)
+            if not deleted:
+                logger.error(
+                    f"Could not delete bank transfer {existing_id}; not "
+                    "creating a replacement, as that would duplicate it"
+                )
+                _record_module_error(
+                    pfr, module_label,
+                    delete_reason
+                    or "the previous transfer could not be removed from Xero",
+                    error_meta,
+                )
+                return False
+
         response_withdrawal = bank_transfer_to_xero(
             entity.xero_org_id, access_token, bank_transfer_payload
         )
@@ -601,7 +744,9 @@ def create_bank_transfer(
 
         if response_withdrawal.status_code == 200:
             logger.info("Bank transfer for company successful")
-            return True
+            return _parse_xero_id(
+                response_withdrawal.text, "BankTransfers", "BankTransferID"
+            ) or True
         else:
             logger.error(
                 f"Bank transfer for company error: {response_withdrawal.text}"
@@ -636,6 +781,7 @@ def create_invoice(
     pfr=None,
     module_label=None,
     error_meta=None,
+    existing_id=None,  # Xero InvoiceID from a previous publish -> update it
 ):
     try:
         # Get access_token if not provided
@@ -672,11 +818,18 @@ def create_invoice(
             ]
         }
 
+        if existing_id:
+            invoice_payload["Invoices"][0]["InvoiceID"] = existing_id
+            logger.info(f"Updating existing Xero invoice {existing_id}")
+
         response_invoice = invoice_to_xero(
-            entity.xero_org_id, access_token, invoice_payload
+            entity.xero_org_id, access_token, invoice_payload,
+            object_id=existing_id,
         )
         if response_invoice and response_invoice.status_code == 200:
-            return True
+            return _parse_xero_id(
+                response_invoice.text, "Invoices", "InvoiceID"
+            ) or True
         else:
             if response_invoice is None:
                 logger.error(
@@ -699,7 +852,13 @@ def create_invoice(
         return False
 
 
-def invoice_to_xero(entity_id, access_token, invoice_payload):
+def invoice_to_xero(entity_id, access_token, invoice_payload, object_id=None):
+    """Send an invoice to Xero.
+
+    PUT /Invoices creates. POST /Invoices/{id} updates that invoice in place,
+    which is what a republish wants -- PUT would add a second invoice for the
+    same cash sales.
+    """
     try:
 
         headers = {
@@ -708,15 +867,181 @@ def invoice_to_xero(entity_id, access_token, invoice_payload):
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
-        response = requests.put(
-            url=f"{current_app.config['XERO_API_BASE_URL']}/Invoices",
-            data=json.dumps(invoice_payload),
-            headers=headers,
-        )
+        base = f"{current_app.config['XERO_API_BASE_URL']}/Invoices"
+        if object_id:
+            response = requests.post(
+                url=f"{base}/{object_id}",
+                data=json.dumps(invoice_payload),
+                headers=headers,
+            )
+        else:
+            response = requests.put(
+                url=base,
+                data=json.dumps(invoice_payload),
+                headers=headers,
+            )
         return response
     except Exception as e:
         logger.error(f"Error in invoice_to_xero: {str(e)}")
         return None
+
+
+XERO_FILES_API_BASE = "https://api.xero.com/files.xro/1.0"
+
+
+def _xero_files_headers(access_token, xero_org_id, **extra):
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Xero-Tenant-Id": str(xero_org_id),
+        "Accept": "application/json",
+    }
+    headers.update(extra)
+    return headers
+
+
+def _list_xero_associations(access_token, xero_org_id, object_id):
+    """Files currently attached to a Xero object, as association dicts.
+
+    ``GET /Associations/{ObjectId}`` -- NOT ``/Files/Associations/{ObjectId}``,
+    which is a different (and wrong) route: ``/Files/{FileId}/Associations``
+    answers the mirror question, "which objects is this file on". Getting this
+    wrong is silent and expensive: the call just fails, the caller sees
+    "nothing attached", deletes nothing, and every republish stacks another
+    copy of the same receipt onto the transaction.
+
+    Each entry carries FileId, Name and Size, so no follow-up lookup is needed.
+
+    Returns None when the answer is unknown (as distinct from "none attached"),
+    so callers can tell "there is nothing to clean up" from "I could not find
+    out" and avoid deleting on a guess.
+    """
+    url = f"{XERO_FILES_API_BASE}/Associations/{object_id}"
+    try:
+        resp = requests.get(
+            url, headers=_xero_files_headers(access_token, xero_org_id),
+            timeout=(10, 30),
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.warning(f"Could not list Xero files for {object_id}: {exc}")
+        return None  # unknown, as distinct from "none attached"
+
+    if resp.status_code == 404:
+        return []  # nothing has ever been associated with this object
+    if resp.status_code != 200:
+        logger.warning(
+            f"Xero file association list failed for {object_id} "
+            f"status={resp.status_code}: {resp.text[:200]}"
+        )
+        return None
+
+    try:
+        associations = resp.json() or []
+    except ValueError:
+        return None
+
+    return [a for a in associations if (a or {}).get("FileId")]
+
+
+def _receipt_already_attached(associations, file_name, file_bytes):
+    """True when Xero already holds exactly this receipt on this transaction.
+
+    Republishing re-runs every module, so without this an unchanged receipt
+    would be replaced on every publish -- churning the FileId and re-sending
+    the bytes for nothing. Name and size are enough: the name is derived from
+    the expense, and the size moves whenever the file does.
+    """
+    if not associations or len(associations) != 1:
+        return False
+    entry = associations[0]
+    if (entry.get("Name") or "") != file_name:
+        return False
+    try:
+        return int(entry.get("Size") or -1) == len(file_bytes)
+    except (TypeError, ValueError):
+        return False
+
+
+def _delete_xero_files(access_token, xero_org_id, file_ids):
+    """Remove files from the org's file library.
+
+    Only ever called AFTER a replacement is attached, so a failure here leaves
+    a duplicate rather than a transaction with no receipt at all.
+    """
+    for file_id in file_ids or []:
+        try:
+            resp = requests.delete(
+                f"{XERO_FILES_API_BASE}/Files/{file_id}",
+                headers=_xero_files_headers(access_token, xero_org_id),
+                timeout=(10, 30),
+            )
+            if resp.status_code not in (200, 204):
+                logger.warning(
+                    f"Could not delete superseded Xero file {file_id} "
+                    f"status={resp.status_code}"
+                )
+        except requests.exceptions.RequestException as exc:
+            logger.warning(f"Xero file delete failed {file_id}: {exc}")
+
+
+def _upload_file_to_xero_files(
+    access_token, xero_org_id, file_name, file_bytes, content_type
+):
+    """POST a file to the Files API. Returns its FileId, or None."""
+    try:
+        resp = requests.post(
+            f"{XERO_FILES_API_BASE}/Files",
+            headers=_xero_files_headers(access_token, xero_org_id),
+            # The multipart part name must match the filename, extension and
+            # all, or Xero rejects the upload.
+            files={file_name: (file_name, file_bytes, content_type)},
+            timeout=(10, 60),
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.error(f"Xero file upload failed for {file_name}: {exc}")
+        return None
+
+    if resp.status_code not in (200, 201):
+        logger.error(
+            f"Xero file upload failed for {file_name} "
+            f"status={resp.status_code}: {resp.text[:300]}"
+        )
+        return None
+
+    try:
+        body = resp.json()
+    except ValueError:
+        logger.error(f"Xero file upload returned no JSON for {file_name}")
+        return None
+
+    file_id = body.get("FileId") or body.get("Id")
+    if not file_id:
+        logger.error(f"Xero file upload returned no FileId for {file_name}")
+        return None
+    return file_id
+
+
+def _associate_xero_file(access_token, xero_org_id, file_id, object_id):
+    """Link an uploaded file to a bank transaction. Returns True on success."""
+    try:
+        resp = requests.post(
+            f"{XERO_FILES_API_BASE}/Files/{file_id}/Associations",
+            headers=_xero_files_headers(
+                access_token, xero_org_id, **{"Content-Type": "application/json"}
+            ),
+            json={"ObjectId": str(object_id), "ObjectGroup": "BankTransaction"},
+            timeout=(10, 30),
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.error(f"Xero file association failed {file_id}->{object_id}: {exc}")
+        return False
+
+    if resp.status_code in (200, 201):
+        return True
+    logger.error(
+        f"Xero file association failed {file_id}->{object_id} "
+        f"status={resp.status_code}: {resp.text[:300]}"
+    )
+    return False
 
 
 def upload_each_file(expense, entity, bank_transction_id, access_token=None):
@@ -756,29 +1081,56 @@ def upload_each_file(expense, entity, bank_transction_id, access_token=None):
             content_type = (
                 mimetypes.guess_type(file_name)[0] or "application/octet-stream"
             )
-            upload_url = f"https://api.xero.com/api.xro/2.0/BankTransactions/{bank_transction_id}/Attachments/{file_name}"
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "Xero-Tenant-Id": str(entity.xero_org_id),
-                "Content-Type": content_type,
-                # Do not set Content-Type; requests will set the multipart boundary
-            }
-            # Xero expects PUT for attachments to /BankTransactions/{id}/Attachments/{filename}
-            # Add timeout: 10s connection, 60s total
-            attach_resp = requests.put(
-                upload_url, headers=headers, data=file_bytes, timeout=(10, 60)
+            # Receipts go through the Files API, which -- unlike the
+            # Accounting attachments endpoint this used to call -- can delete.
+            # That matters because the filename is derived from editable data
+            # (remarks/item), so editing an expense used to strand the old
+            # receipt under its old name for ever.
+            #
+            # Republish re-runs every module, so the order here is: leave it
+            # alone if it is already right, otherwise ADD the new file and only
+            # then remove the old one. Deleting first would mean a failed
+            # upload leaves the transaction with no receipt at all.
+            existing = _list_xero_associations(
+                access_token, entity.xero_org_id, bank_transction_id
             )
-            # Removed session["xero_response_text"] as session is not available in background threads
-            if attach_resp.status_code in (200, 201, 204):
+            existing_file_ids = (
+                [a["FileId"] for a in existing] if existing is not None else None
+            )
+
+            if existing is not None and _receipt_already_attached(
+                existing, file_name, file_bytes
+            ):
                 logger.info(
-                    f"Attachment uploaded successfully to Xero for bank transaction {bank_transction_id}"
+                    f"Receipt for bank transaction {bank_transction_id} is "
+                    "unchanged; leaving the existing attachment alone"
                 )
                 return True
-            else:
-                logger.error(
-                    f"Failed to upload attachment to Xero. Status: {attach_resp.status_code}, Response: {attach_resp.text}"
-                )
+
+            file_id = _upload_file_to_xero_files(
+                access_token, entity.xero_org_id, file_name, file_bytes,
+                content_type,
+            )
+            if not file_id:
                 return False
+
+            if not _associate_xero_file(
+                access_token, entity.xero_org_id, file_id, bank_transction_id
+            ):
+                return False
+
+            # Safe now: the replacement is attached, so removing the previous
+            # ones cannot leave the transaction empty.
+            _delete_xero_files(
+                access_token, entity.xero_org_id,
+                [fid for fid in (existing_file_ids or []) if fid != file_id],
+            )
+
+            logger.info(
+                f"Attachment uploaded and associated to bank transaction "
+                f"{bank_transction_id} (file {file_id})"
+            )
+            return True
         except requests.exceptions.Timeout as ex:
             logger.error(f"Timeout error uploading attachment to Xero: {ex}")
             return False
@@ -794,7 +1146,7 @@ def upload_each_file(expense, entity, bank_transction_id, access_token=None):
         return False
 
 
-def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=None):
+def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=None, existing=None):
     """Publish the cash withdrawal/addition.  Returns (succeeded, failed) counts."""
     try:
         # Get access_token if not provided
@@ -882,7 +1234,13 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
                     subject="contact",
                     module_label="Withdrawal",
                     error_meta={"scope": "entity", "deps": DEPS_WITHDRAWAL_PERSONAL, "module": "withdrawal_from"},
+                    existing_id=_existing_id(existing, "BANK_TRANSACTION"),
                 )
+                if ok:
+                    publish_record.record_object(
+                        report_draft.id, _entity_org_id(entity_id),
+                        "withdrawal_from", ok, object_type="BANK_TRANSACTION",
+                    )
                 return (1, 0) if ok else (0, 1)
             elif withdrawal_type == "company":
                 deposit_bank_settings = (
@@ -909,7 +1267,16 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
                     pfr=pfr,
                     module_label="Withdrawal",
                     error_meta={"scope": "entity", "deps": DEPS_WITHDRAWAL_COMPANY, "module": "withdrawal_from"},
+                    existing_id=_existing_id(existing, "BANK_TRANSFER"),
+                    report_id=report_draft.id,
+                    record_module="withdrawal_from",
                 )
+                if ok:
+                    publish_record.record_object(
+                        report_draft.id, _entity_org_id(entity_id),
+                        "withdrawal_from", ok, object_type="BANK_TRANSFER",
+                        amount=cash_addition,
+                    )
                 return (1, 0) if ok else (0, 1)
         # No draft / unrecognised withdrawal type — nothing to post.
         _record_module_error(pfr, "Withdrawal", "withdrawal type is not set")
@@ -919,7 +1286,7 @@ def xero_withdrawal_from(report_draft, entity_id, date, access_token=None, pfr=N
         _record_module_error(pfr, "Withdrawal", "Xero rejected this entry")
         return (0, 1)
 
-def xero_invoices(entity_id, posted_report, date, amount, access_token=None, pfr=None):
+def xero_invoices(entity_id, posted_report, date, amount, access_token=None, pfr=None, existing=None):
     """Publish cash sales as an invoice.  Returns (succeeded, failed) counts."""
     try:
         # Get access_token if not provided
@@ -976,7 +1343,13 @@ def xero_invoices(entity_id, posted_report, date, amount, access_token=None, pfr
             pfr=pfr,
             module_label="Cash sales",
             error_meta={"scope": "entity", "deps": DEPS_CASH_SALES, "module": "invoices"},
+            existing_id=_existing_id(existing, "INVOICE"),
         )
+        if invoice_success:
+            publish_record.record_object(
+                posted_report.id, _entity_org_id(entity_id),
+                "invoices", invoice_success, object_type="INVOICE",
+            )
         return (1, 0) if invoice_success else (0, 1)
     except Exception as e:
         logger.error(f"Error in xero_invoices: {str(e)}")
@@ -986,7 +1359,7 @@ def xero_invoices(entity_id, posted_report, date, amount, access_token=None, pfr
 
 
 
-def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, retry_expense_ids=None):
+def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, retry_expense_ids=None, existing=None):
     """Publish each shop expense.  Returns (succeeded, failed) line counts.
 
     ``retry_expense_ids`` (selective re-publish) restricts processing to the
@@ -1079,8 +1452,14 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
                                     "failed_contact_id": expense.contact_id,
                                     "module": "expenses",
                                 },
+                                existing_id=(existing or {}).get(str(expense.id)),
                             )
                             if result:
+                                publish_record.record_object(
+                                    posted_report.id, _entity_org_id(entity_id),
+                                    "expenses", result, source_id=expense.id,
+                                    object_type="BANK_TRANSACTION",
+                                )
                                 expenses_submitted.append(True)
                                 logger.info(
                                     f"Expense {index}/{total_count} submitted successfully: {expense.item}"
@@ -1149,7 +1528,7 @@ def xero_expenses(entity_id, posted_report, date, access_token=None, pfr=None, r
         return (0, 1)
 
 
-def xero_deposit(entity_id, posted_report, date, access_token=None, pfr=None):
+def xero_deposit(entity_id, posted_report, date, access_token=None, pfr=None, existing=None):
     """Publish the bank deposit transfer.  Returns (succeeded, failed) counts."""
     try:
         # Get access_token if not provided
@@ -1184,7 +1563,15 @@ def xero_deposit(entity_id, posted_report, date, access_token=None, pfr=None):
             pfr=pfr,
             module_label="Deposit",
             error_meta={"scope": "entity", "deps": DEPS_DEPOSIT, "module": "deposit"},
+            existing_id=_existing_id(existing, "BANK_TRANSFER"),
+            report_id=posted_report.id,
+            record_module="deposit",
         )
+        if ok:
+            publish_record.record_object(
+                posted_report.id, _entity_org_id(entity_id),
+                "deposit", ok, object_type="BANK_TRANSFER", amount=deposit,
+            )
         return (1, 0) if ok else (0, 1)
     except Exception as e:
         logger.error(f"Error in xero_deposit: {str(e)}")
@@ -1193,7 +1580,7 @@ def xero_deposit(entity_id, posted_report, date, access_token=None, pfr=None):
         return (0, 1)
 
 
-def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None):
+def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None, existing=None):
     """Publish the cash discrepancy.  Returns (succeeded, failed) counts."""
     try:
         # Get access_token if not provided
@@ -1283,7 +1670,13 @@ def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None):
             ],
             type_of_transaction="discrepancy",
             access_token=access_token,
+            existing_id=_existing_id(existing, "BANK_TRANSACTION"),
         )
+        if ok:
+            publish_record.record_object(
+                report.id, _entity_org_id(entity_id),
+                "discrepancy", ok, object_type="BANK_TRANSACTION",
+            )
         return (1, 0) if ok else (0, 1)
 
     except Exception as error:
@@ -1383,6 +1776,120 @@ def _aggregate_error_result(reason):
     }
 
 
+def _sweep_removed_objects(entity_id, posted_report, org_id, access_token, pfr):
+    """Delete Xero objects this report created whose source is now gone.
+
+    Only ever removes things this report itself recorded, so it cannot touch
+    anything a person created in Xero by hand.
+
+    Skipped during a selective re-publish: that path deliberately looks at
+    only part of the report, so "absent" there does not mean "removed".
+    """
+    try:
+        entity = Entity.query.filter(Entity.id == entity_id).first()
+        if not entity:
+            return
+        record = publish_record.load_record(posted_report.id, org_id)
+        objects = record.get("objects") or {}
+        if not objects:
+            return
+
+        # Expenses: any recorded expense whose ShopExpense row is gone.
+        live_expense_ids = {
+            str(row.id)
+            for row in ShopExpense.query.filter(
+                ShopExpense.report_id == posted_report.id
+            ).all()
+        }
+        for expense_id, xero_id in publish_record.recorded_expense_ids(record).items():
+            if expense_id in live_expense_ids:
+                continue
+            logger.info(
+                f"Expense {expense_id} was deleted after publishing; removing "
+                f"its Xero bank transaction {xero_id}"
+            )
+            if _delete_bank_transaction(entity, access_token, xero_id):
+                publish_record.forget_object(
+                    posted_report.id, "expenses", source_id=expense_id
+                )
+
+        # Entity-level modules whose amount has since gone to zero.
+        zeroed = []
+        if not (posted_report.discrepancy_amount and posted_report.discrepancy_type
+                in ("surplus", "shortage")):
+            zeroed.append(("discrepancy", "BANK_TRANSACTION"))
+        if not (posted_report.cash_sales and posted_report.cash_sales > 0):
+            zeroed.append(("invoices", "INVOICE"))
+        if not (posted_report.bank_deposit and posted_report.bank_deposit > 0):
+            zeroed.append(("deposit", "BANK_TRANSFER"))
+
+        for module, object_type in zeroed:
+            entry = publish_record.recorded_entry(record, module)
+            if not entry:
+                continue
+            xero_id = entry.get("id")
+            logger.info(
+                f"Module {module} no longer applies to report "
+                f"{posted_report.id}; removing Xero object {xero_id}"
+            )
+            removed = False
+            if object_type == "BANK_TRANSACTION":
+                removed = _delete_bank_transaction(entity, access_token, xero_id)
+            elif object_type == "BANK_TRANSFER":
+                removed, _reason = delete_bank_transfer_in_xero(
+                    entity.xero_org_id, access_token, xero_id
+                )
+            elif object_type == "INVOICE":
+                removed = _void_invoice(entity, access_token, xero_id)
+            if removed:
+                publish_record.forget_object(posted_report.id, module)
+    except Exception as exc:
+        # A failed cleanup must not fail a publish that otherwise worked; the
+        # stale entry is the status quo, not a regression.
+        logger.error(f"Error sweeping removed Xero objects: {exc}", exc_info=True)
+
+
+def _delete_bank_transaction(entity, access_token, xero_id):
+    """Set a bank transaction to DELETED in Xero. Returns True on success."""
+    if not xero_id:
+        return False
+    payload = {"bankTransactions": [{"bankTransactionID": xero_id, "status": "DELETED"}]}
+    try:
+        response = bank_transaction_to_xero(
+            entity.xero_org_id, access_token, payload, object_id=xero_id
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.error(f"Bank transaction delete failed id={xero_id}: {exc}")
+        return False
+    if response.status_code == 200:
+        return True
+    logger.error(
+        f"Bank transaction delete failed id={xero_id} "
+        f"status={response.status_code}: {response.text[:300]}"
+    )
+    return False
+
+
+def _void_invoice(entity, access_token, xero_id):
+    """Void an invoice in Xero. Returns True on success.
+
+    Xero refuses to void an invoice that has payments against it; that failure
+    is logged and the recorded id kept, so the next run tries again rather
+    than silently forgetting an invoice that is still live.
+    """
+    if not xero_id:
+        return False
+    payload = {"Invoices": [{"InvoiceID": xero_id, "Status": "VOIDED"}]}
+    response = invoice_to_xero(
+        entity.xero_org_id, access_token, payload, object_id=xero_id
+    )
+    if response is not None and response.status_code == 200:
+        return True
+    detail = response.text[:300] if response is not None else "no response"
+    logger.error(f"Invoice void failed id={xero_id}: {detail}")
+    return False
+
+
 def xero_integrated_module(entity_id, date, posted_report, access_token=None, retry_filter=None):
     """Publish every transaction type for a report.
 
@@ -1424,6 +1931,14 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
         modules = {}
         total_succeeded = 0
         total_failed = 0
+
+        # What this report already put in Xero. Empty on a first publish, and
+        # empty when the entity has since moved to a different Xero org (ids
+        # from the old org would not resolve there), in which case every
+        # module creates fresh -- the pre-existing behaviour.
+        org_id = _entity_org_id(entity_id)
+        record = publish_record.load_record(posted_report.id, org_id)
+        existing_expenses = publish_record.recorded_expense_ids(record)
 
         retry_modules = retry_filter.get("modules") if retry_filter else None
         retry_expense_ids = retry_filter.get("expense_ids") if retry_filter else None
@@ -1467,7 +1982,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
         if report_draft and report_draft.cash_addition and report_draft.cash_addition > 0:
             if _should_run("withdrawal_from"):
                 _record("withdrawal_from", xero_withdrawal_from(
-                    report_draft, entity_id, date, access_token=access_token, pfr=pfr))
+                    report_draft, entity_id, date, access_token=access_token, pfr=pfr,
+                    existing=publish_record.recorded_entry(record, "withdrawal_from")))
         else:
             modules["withdrawal_from"] = {"status": "success"}
         if _auth_expired():
@@ -1478,7 +1994,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             if _should_run("invoices"):
                 _record("invoices", xero_invoices(
                     entity_id, posted_report, date, posted_report.cash_sales,
-                    access_token=access_token, pfr=pfr))
+                    access_token=access_token, pfr=pfr,
+                    existing=publish_record.recorded_entry(record, "invoices")))
         else:
             modules["invoices"] = {"status": "success"}
         if _auth_expired():
@@ -1489,7 +2006,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             if _should_run("expenses"):
                 _record("expenses", xero_expenses(
                     entity_id, posted_report, date, access_token=access_token, pfr=pfr,
-                    retry_expense_ids=retry_expense_ids))
+                    retry_expense_ids=retry_expense_ids,
+                    existing=existing_expenses))
         else:
             modules["expenses"] = {"status": "success"}
         if _auth_expired():
@@ -1499,7 +2017,8 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
         if posted_report.bank_deposit and posted_report.bank_deposit > 0:
             if _should_run("deposit"):
                 _record("deposit", xero_deposit(
-                    entity_id, posted_report, date, access_token=access_token, pfr=pfr))
+                    entity_id, posted_report, date, access_token=access_token, pfr=pfr,
+                    existing=publish_record.recorded_entry(record, "deposit")))
         else:
             modules["deposit"] = {"status": "success"}
         if _auth_expired():
@@ -1511,11 +2030,23 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
             posted_report.discrepancy_type in ["surplus", "shortage"]):
             if _should_run("discrepancy"):
                 _record("discrepancy", xero_discrepancy(
-                    entity_id, posted_report, date, access_token=access_token, pfr=pfr))
+                    entity_id, posted_report, date, access_token=access_token, pfr=pfr,
+                    existing=publish_record.recorded_entry(record, "discrepancy")))
         else:
             modules["discrepancy"] = {"status": "success"}
         if _auth_expired():
             return _aggregate_error_result(_pub_err.XERO_AUTH_EXPIRED)
+
+        # Anything recorded whose source no longer applies has to come OUT of
+        # Xero: an expense deleted after publishing, a discrepancy edited to
+        # zero, a deposit that became 0. This runs after the modules and
+        # outside their `if amount > 0` guards, which short-circuit to
+        # "success" without ever calling Xero -- without this, "update in
+        # place" would quietly leave the stale entry behind.
+        if retry_filter is None:
+            _sweep_removed_objects(
+                entity_id, posted_report, org_id, access_token, pfr,
+            )
 
         return {
             "modules": modules,
@@ -1707,13 +2238,16 @@ def update_xero_deposit_after_change(
     previous_amount,
     new_amount,
     access_token=None,
+    report_id=None,
 ):
     """Reconcile a published report's deposit in Xero after the user changed
     or removed the deposit amount.
 
-    Xero's BankTransfers API is write-only — transfers cannot be updated or
-    deleted via the API. The supported way to "undo" one is to post an
-    offsetting BankTransfer in the reverse direction. So this helper:
+    Xero's BankTransfers API cannot UPDATE a transfer. It can delete one
+    (see ``delete_bank_transfer_in_xero``), but this path deliberately posts
+    an offsetting BankTransfer instead: a reversal leaves a visible trail of
+    the correction in the ledger, where a delete would silently erase the
+    original. So this helper:
 
       1. Verifies the original deposit transfer still exists in Xero (safety
          check against the local "published" flag drifting from Xero state).
@@ -1782,6 +2316,12 @@ def update_xero_deposit_after_change(
             "deposit is still in Xero — check server logs for details."
         )
 
+    # The original transfer has been neutralised by the reversal, so the
+    # publish record must stop pointing at it. Leaving it would let a later
+    # republish delete the original and strand the reversal against nothing.
+    if report_id:
+        publish_record.forget_object(report_id, "deposit")
+
     if not new_amount or new_amount <= 0:
         return True, None
 
@@ -1798,6 +2338,14 @@ def update_xero_deposit_after_change(
         return False, (
             "Reversal was posted in Xero, but the replacement deposit "
             "BankTransfer could not be created. Check server logs for details."
+        )
+
+    # Record the replacement so a later republish edits THIS transfer rather
+    # than creating a third one for the same deposit.
+    if report_id:
+        publish_record.record_object(
+            report_id, _entity_org_id(entity_id), "deposit", replacement_ok,
+            object_type="BANK_TRANSFER", amount=new_amount,
         )
     return True, None
 

@@ -30,6 +30,19 @@ logger = logging.getLogger(__name__)
 # and the report-history toast both key off it.
 XERO_AUTH_EXPIRED = "Xero connection has expired"
 
+# Republishing a report now UPDATES the entries it created rather than posting
+# duplicates, which means Xero can refuse where it previously just accepted a
+# second copy. These two are the refusals a user can actually act on, so they
+# get named wording instead of Xero's raw validation text.
+XERO_RECONCILED = (
+    "this entry is already reconciled in Xero, so it cannot be changed there. "
+    "Unreconcile it in Xero, then publish again"
+)
+XERO_HAS_PAYMENT = (
+    "this entry already has a payment or credit note against it in Xero, so it "
+    "cannot be changed. Remove that in Xero, then publish again"
+)
+
 
 def _latest_publish_failed_row(histories):
     """Return the most recent publish-failed ReportHistory-like row, or None."""
@@ -192,6 +205,15 @@ def translate_xero_error(
     lowered = message.lower()
 
     # ── Keyword mapping → plain English ──────────────────────────────────────
+    # Reconciliation is checked first: it is the most common reason a petty
+    # cash republish is refused (entries get reconciled quickly), and it is the
+    # one the user can resolve themselves.
+    if "reconcil" in lowered:
+        return XERO_RECONCILED
+    if ("payment" in lowered or "credit note" in lowered) and (
+        "cannot" in lowered or "allocated" in lowered or "not be" in lowered
+    ):
+        return XERO_HAS_PAYMENT
     if "archived" in lowered:
         if who == "account" or "account" in lowered:
             return "account is archived in Xero"
