@@ -47,7 +47,6 @@ EXPECTED_SCOPES = frozenset(
         "accounting.contacts",
         "accounting.invoices",
         "accounting.banktransactions",
-        "accounting.attachments",
         "files",
     }
 )
@@ -283,6 +282,13 @@ class FakeXero:
 
     @staticmethod
     def _payload_for(url):
+        if "files.xro/1.0/Files/Associations/" in url:
+            # Nothing previously attached; the republish sweep finds none.
+            return []
+        if "files.xro/1.0/Files/" in url and "/Associations" in url:
+            return {"Id": "assoc-1"}
+        if "files.xro/1.0/Files" in url:
+            return {"FileId": "file-1"}
         if "/Attachments/" in url:
             return {"Attachments": [{"AttachmentID": "att-1"}]}
         if "/Organisation" in url:
@@ -407,7 +413,9 @@ def test_every_xero_call_succeeds_with_granted_scopes(app, client, db_session, m
             "PUT /Invoices failed — accounting.invoices missing?"
         )
 
-        # accounting.attachments: receipt upload onto a bank transaction.
+        # files: receipts go through the Files API, not the Accounting
+        # attachments endpoint. That endpoint has no DELETE, so a republish
+        # could never remove a receipt it had replaced.
         expense = SimpleNamespace(
             files="https://cdn.example.test/receipt.png",
             remarks="fuel receipt",
@@ -416,7 +424,7 @@ def test_every_xero_call_succeeds_with_granted_scopes(app, client, db_session, m
         entity = SimpleNamespace(id="e-1", xero_org_id=org_id)
         uploaded = publish.upload_each_file(expense, entity, "bt-1", access_token=token)
         assert uploaded is True, (
-            "PUT /BankTransactions/{id}/Attachments failed — accounting.attachments missing?"
+            "Files API upload/association failed — files scope missing?"
         )
 
     assert not fake.unknown_urls, (

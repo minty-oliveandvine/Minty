@@ -245,7 +245,7 @@ def xero_connect_entity():
     scope = (
         "openid profile email offline_access accounting.settings "
         "accounting.contacts accounting.invoices accounting.banktransactions "
-        "accounting.attachments files"
+        "files"
     )
     # When launched from the onboarding app, tag the OAuth state so the
     # callback returns to onboarding (step 3) instead of the entity list.
@@ -303,7 +303,7 @@ def xero_reconnect():
     scope = (
         "openid profile email offline_access accounting.settings "
         "accounting.contacts accounting.invoices accounting.banktransactions "
-        "accounting.attachments files"
+        "files"
     )
     # state shape: "entity_reconnect" | "entity_reconnect:<initiator_user_id>".
     # The trailing id is the user who clicked Reconnect; the callback enforces the

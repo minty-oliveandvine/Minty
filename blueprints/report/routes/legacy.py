@@ -281,6 +281,7 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
                     date,
                     previous_deposit,
                     amount,
+                    report_id=updated_report.id,
                 )
                 xero_status = "success" if xero_ok else "failed"
                 if not xero_ok:
