@@ -16,8 +16,8 @@ from flask_login import current_user, login_required, login_user
 from loguru import logger
 from sqlalchemy import desc
 
-from blueprints.entity.services.settings import \
-    sync_all_accounts_and_contacts_background
+from blueprints.entity.services.settings import (
+    invalidate_entity_xero_cache, sync_all_accounts_and_contacts_background)
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.xero import xero_bp
 from blueprints.xero.services.integration import (
@@ -976,6 +976,19 @@ def xero_callback():
                                 # onboarding redirect-back current_user is
                                 # anonymous — current_user.username would be None
                                 # and clobber ``user`` with the wrong / no row.
+                                # Connecting to a DIFFERENT org than last
+                                # time invalidates every cached Xero id for
+                                # this entity. Runs before the overwrite (we
+                                # need the outgoing org) and before the sync
+                                # thread below, which would otherwise stack
+                                # new-org rows on top of the old ones.
+                                invalidate_entity_xero_cache(
+                                    entity.id,
+                                    entity.xero_org_id
+                                    if entity.xero_org_id
+                                    and str(entity.xero_org_id) != str(tenant_id)
+                                    else None,
+                                )
                                 entity.xero_org_id = tenant_id
                                 entity.xero_tenant_name = curr_conn[0].get(
                                     "tenantName"
@@ -1245,6 +1258,13 @@ def xero_callback():
                                     ) != str(tenant_id):
                                         logger.info(
                                             f"Entity {entity_id} xero_org_id update: {entity.xero_org_id} -> {tenant_id}"
+                                        )
+                                        # Only a genuine switch invalidates:
+                                        # a first connect has nothing cached,
+                                        # and the helper no-ops on a falsy
+                                        # old org either way.
+                                        invalidate_entity_xero_cache(
+                                            entity.id, entity.xero_org_id
                                         )
                                     entity.xero_org_id = tenant_id
                                     entity.xero_tenant_name = curr_conn[0].get(
@@ -1715,6 +1735,10 @@ def disconnect_from_xero():
                     f"Cleared Xero tokens for user {connector.username}"
                 )
 
+        # Disconnecting has always left the cached Xero data in place. Clear
+        # it here too: whatever reconnects next is not guaranteed to be the
+        # same organisation, and a stale id is worse than an absent one.
+        invalidate_entity_xero_cache(org.id, org.xero_org_id)
         org.status = "disconnected"
         org.xero_org_id = None
         org.connected_by_user_id = None
