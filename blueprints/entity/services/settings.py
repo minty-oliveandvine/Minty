@@ -10,8 +10,108 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
-from models.db import (AccountInfo, Entity, EntityAccountXero, XeroContactSync,
-                       db)
+from models.db import (AccountInfo, Entity, EntityAccountXero,
+                       EntityPettycashSettings, XeroContactSync, db)
+
+# Columns on entity_pettycash_settings naming a row in account_info or
+# xero_contact_sync. Both parents are FK'd ON DELETE SET NULL, so the deletes
+# in invalidate_entity_xero_cache would null these anyway; clearing them
+# explicitly keeps the consequence visible rather than leaving it to a
+# constraint the reader has to go and look up.
+_ORG_SCOPED_SETTINGS_COLUMNS = (
+    "pettycash_account_id",
+    "bank_account_id",
+    "cash_sale_account_id",
+    "discrepancy_bank_account_id",
+    "discrepancy_account_id",
+    "director_account_id",
+    "cash_sale_contact_id",
+    "director_contact_id",
+    "discrepancy_contact_id",
+)
+
+
+def invalidate_entity_xero_cache(entity_id, old_org_id):
+    """Drop every cached Xero object belonging to ``old_org_id``.
+
+    Called when an entity moves to a DIFFERENT Xero organisation. Contact ids,
+    account ids and account codes are all tenant-scoped: an id issued by the
+    old org means nothing in the new one, so leaving these rows behind makes
+    publishing target contacts and accounts that do not exist there.
+
+    Must run BEFORE ``entity.xero_org_id`` is overwritten and before
+    ``sync_all_accounts_and_contacts_background`` starts, or the sync thread
+    layers new-org rows on top of the old ones with no way to tell them apart.
+
+    Does not commit -- the caller does, so the invalidation and the org write
+    land in one transaction.
+
+    This is the ONLY path that deletes contact rows. Do not call it from a
+    sync: ``sync_contacts_if_changed`` deliberately never deletes, because a
+    contact merely missing from a Xero fetch is not a contact that is gone
+    (see tests/test_xero_contact_sync_no_mass_delete.py). An org change is a
+    different thing entirely, and is the one case where deleting is correct.
+    """
+    if not entity_id or not old_org_id:
+        return  # first connect, or nothing cached to invalidate
+
+    logger.info(
+        f"Entity {entity_id} is leaving Xero org {old_org_id}: clearing "
+        "cached contacts, accounts and account mappings"
+    )
+
+    # 1. Account and contact mappings, explicitly (see the note above).
+    settings_row = EntityPettycashSettings.query.filter_by(
+        entity_id=entity_id
+    ).first()
+    if settings_row is not None:
+        for column in _ORG_SCOPED_SETTINGS_COLUMNS:
+            setattr(settings_row, column, None)
+
+    # 2. Contacts for the org being left. Scoped to old_org_id so any row
+    #    already written for the incoming org survives.
+    contacts_removed = XeroContactSync.query.filter_by(
+        entity_id=entity_id, xero_org_id=str(old_org_id)
+    ).delete(synchronize_session=False)
+
+    # 3. Accounts. account_info carries no org column, so it can only be
+    #    cleared wholesale; the post-connect sync repopulates it from the new
+    #    org. entity_account_xero FKs account_info.id ON DELETE CASCADE and
+    #    goes with it.
+    accounts_removed = AccountInfo.query.filter_by(entity_id=entity_id).delete(
+        synchronize_session=False
+    )
+
+    # 4. entity_bill_account_xero is NOT entity_account_xero, despite the
+    #    name. It holds no FK to account_info, so step 3's cascade does not
+    #    reach it. It is backfilled FROM account_info, so deleting it lets
+    #    that backfill rebuild it against the new org. Raw SQL because Minty
+    #    has no model for this table (billing-backend owns it).
+    #    Guarded: billing-backend owns this table's DDL, so Minty must not
+    #    assume it exists. A missing table here must not take down the OAuth
+    #    callback that called us.
+    try:
+        bill_accounts_removed = db.session.execute(
+            text(
+                "DELETE FROM pettycashv2.entity_bill_account_xero "
+                "WHERE entity_id = :entity_id"
+            ),
+            {"entity_id": str(entity_id)},
+        ).rowcount
+    except Exception as exc:  # pragma: no cover - depends on deployment state
+        bill_accounts_removed = 0
+        logger.warning(
+            f"Could not clear entity_bill_account_xero for entity "
+            f"{entity_id}: {exc}. Bill account codes from the old org may "
+            "still be offered until the next sync rebuilds them."
+        )
+
+    logger.info(
+        f"Entity {entity_id} Xero cache cleared: {contacts_removed} contacts, "
+        f"{accounts_removed} accounts, {bill_accounts_removed} bill accounts. "
+        "Account and contact mappings are now unset and must be re-selected."
+    )
+
 
 # Columns refreshed when an account_info row already exists for an
 # (entity_id, xero_account_id) pair. id / entity_id / xero_account_id are the
