@@ -1,4 +1,9 @@
 {% set is_report_edit_mode = request.args.get('report_edit') == 'true' and current_draft and current_draft.status != 'draft' %}
+{# A discrepancy reason only means something when the saved count is actually out.
+   Rendering the box locked here keeps the initial paint consistent with the state
+   applyDiscrepancyEditability() settles on once the JS totals have run. #}
+{% set has_saved_discrepancy = current_draft and current_draft.discrepancy_amount and (current_draft.discrepancy_amount | abs) > 0.01 %}
+{% set discrepancy_reason_locked = (current_draft and current_draft.status != 'draft' and not is_report_edit_mode) or not has_saved_discrepancy %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -308,13 +313,14 @@ document.addEventListener('submit', function(e){
 
           <!-- Description Input -->
           <div>
-            <textarea id="discrepancyDescription"  name="discrepancy_reason" class="w-full px-3 py-3 border border-gray-300 rounded-2xl {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent resize-none" rows="1" placeholder="Description" {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}readonly{% endif %}>{{ current_draft.discrepancy_reason if current_draft else '' }}</textarea>
+            <textarea id="discrepancyDescription"  name="discrepancy_reason" class="w-full px-3 py-3 border border-gray-300 rounded-2xl {% if discrepancy_reason_locked %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent resize-none" rows="1" placeholder="{% if has_saved_discrepancy %}Description{% else %}No discrepancy &mdash; description not required{% endif %}" {% if discrepancy_reason_locked %}readonly{% endif %}>{{ (current_draft.discrepancy_reason or '') if current_draft else '' }}</textarea>
           </div>
           {% if is_report_edit_mode %}
           <!-- Submitted report in edit mode: save the discrepancy reason -->
           <div class="flex justify-end mt-3">
-            <button type="button" onclick="saveDiscrepancyReason()"
-              class="bg-[#54D3DA] hover:bg-[#54D3DA]/80 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+            <button type="button" id="saveDiscrepancyReasonBtn" onclick="saveDiscrepancyReason()"
+              {% if discrepancy_reason_locked %}disabled{% endif %}
+              class="text-sm font-medium px-4 py-2 rounded-lg transition-colors {% if discrepancy_reason_locked %}bg-gray-100 text-gray-300 cursor-not-allowed{% else %}bg-[#54D3DA] hover:bg-[#54D3DA]/80 text-white{% endif %}">
               Save changes
             </button>
           </div>
@@ -451,6 +457,16 @@ document.addEventListener('submit', function(e){
     // The discrepancy reason is editable on drafts, or on submitted reports
     // opened in edit mode.
     const canEditDiscrepancy = !isSubmitted || isReportEditMode;
+
+    // The reason box is only usable while the count is actually out. These two
+    // track that: lastHadDiscrepancy spots the moment a discrepancy is resolved
+    // (so a now-meaningless reason can be dropped), and discrepancyStateReady
+    // keeps that clearing from firing during page load -- see
+    // applyDiscrepancyEditability().
+    let lastHadDiscrepancy = null;
+    let discrepancyStateReady = false;
+    const DISCREPANCY_PLACEHOLDER = 'Description';
+    const NO_DISCREPANCY_PLACEHOLDER = 'No discrepancy \u2014 description not required';
 
     function validatePreDepositBalance() {
       return EXPECTED_CASH_COUNT_BALANCE >= 0;
@@ -806,7 +822,7 @@ document.addEventListener('submit', function(e){
         
         // Enable description textarea when there is a discrepancy
         const descriptionTextarea = document.getElementById('discrepancyDescription');
-        applyDiscrepancyEditability(descriptionTextarea);
+        applyDiscrepancyEditability(descriptionTextarea, true);
 
         // Show required asterisk
         const requiredAsterisk = document.getElementById('descriptionRequired');
@@ -816,9 +832,9 @@ document.addEventListener('submit', function(e){
       } else {
         document.getElementById('discrepancyAlert').style.display = 'none';
 
-        // Keep description textarea editable (when allowed) even with no discrepancy
+        // Nothing to explain: lock the description textarea
         const descriptionTextarea = document.getElementById('discrepancyDescription');
-        applyDiscrepancyEditability(descriptionTextarea);
+        applyDiscrepancyEditability(descriptionTextarea, false);
 
         // Clear error highlighting when there's no discrepancy
         clearFieldError('discrepancyDescription');
@@ -890,19 +906,55 @@ document.addEventListener('submit', function(e){
       }
     }
 
-    // Apply editable vs. locked styling to the discrepancy reason textarea
-    // based on whether the report can be edited (draft, or submitted-in-edit-mode).
-    function applyDiscrepancyEditability(textarea) {
+    // Apply editable vs. locked styling to the discrepancy reason textarea.
+    // It is usable only when BOTH are true: the report can be edited (draft, or
+    // submitted-in-edit-mode) and there is an actual shortage or surplus to explain.
+    //
+    // Locking uses readOnly, never disabled: a disabled field is dropped from the
+    // POST body, and the server reads discrepancy_reason unconditionally on every
+    // save, so disabling it would silently blank an already-saved reason.
+    function applyDiscrepancyEditability(textarea, hasDiscrepancy) {
       if (!textarea) return;
-      if (canEditDiscrepancy) {
-        textarea.disabled = false;
+      const unlocked = canEditDiscrepancy && hasDiscrepancy;
+
+      // Drop a reason the user typed for a discrepancy they then resolved, so a
+      // balanced report never carries a stale explanation into the PDF or Xero.
+      // Gated on discrepancyStateReady because calculateTotals() and
+      // getDiscrepancyAmount() read different inputs (the hidden totals vs. the
+      // actual_cash[...] fields) and can briefly disagree while the page loads --
+      // without the gate that flicker would wipe a legitimately saved reason.
+      if (discrepancyStateReady && lastHadDiscrepancy === true && !hasDiscrepancy && canEditDiscrepancy) {
+        textarea.value = '';
+        clearFieldError('discrepancyDescription');
+      }
+      lastHadDiscrepancy = hasDiscrepancy;
+
+      textarea.disabled = false;
+      if (unlocked) {
         textarea.readOnly = false;
+        textarea.placeholder = DISCREPANCY_PLACEHOLDER;
         textarea.classList.remove('bg-gray-200', 'text-gray-400', 'text-gray-500', 'cursor-not-allowed');
         textarea.classList.add('bg-white', 'text-gray-700', 'cursor-pointer');
       } else {
         textarea.readOnly = true;
+        // Only say "no discrepancy" when that is the actual reason for the lock;
+        // on a submitted report that is out, the box is locked but the count isn't.
+        textarea.placeholder = hasDiscrepancy ? DISCREPANCY_PLACEHOLDER : NO_DISCREPANCY_PLACEHOLDER;
         textarea.classList.remove('bg-white', 'text-gray-700', 'text-black', 'cursor-pointer');
         textarea.classList.add('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
+      }
+
+      // The submitted-report "Save changes" button is pointless while the box is locked.
+      const saveReasonBtn = document.getElementById('saveDiscrepancyReasonBtn');
+      if (saveReasonBtn) {
+        saveReasonBtn.disabled = !unlocked;
+        if (unlocked) {
+          saveReasonBtn.classList.remove('bg-gray-100', 'text-gray-300', 'cursor-not-allowed');
+          saveReasonBtn.classList.add('bg-[#54D3DA]', 'hover:bg-[#54D3DA]/80', 'text-white');
+        } else {
+          saveReasonBtn.classList.remove('bg-[#54D3DA]', 'hover:bg-[#54D3DA]/80', 'text-white');
+          saveReasonBtn.classList.add('bg-gray-100', 'text-gray-300', 'cursor-not-allowed');
+        }
       }
     }
 
@@ -915,15 +967,15 @@ document.addEventListener('submit', function(e){
       
       if (Math.abs(discrepancy) > 0.01) {
         // There is a discrepancy, enable the textarea (when editing is allowed)
-        applyDiscrepancyEditability(descriptionTextarea);
+        applyDiscrepancyEditability(descriptionTextarea, true);
 
         // Show required asterisk
         if (requiredAsterisk) {
           requiredAsterisk.classList.remove('hidden');
         }
       } else {
-        // No discrepancy, but keep the textarea editable (when editing is allowed)
-        applyDiscrepancyEditability(descriptionTextarea);
+        // No discrepancy, so the textarea has nothing to hold: lock it
+        applyDiscrepancyEditability(descriptionTextarea, false);
 
         // Hide required asterisk
         if (requiredAsterisk) {
@@ -973,6 +1025,10 @@ document.addEventListener('submit', function(e){
       
       // Initialize description textarea state after calculations
       initializeDescriptionState();
+
+      // Load is done and the discrepancy state is now trustworthy, so from here
+      // on a fall to zero is a real user edit and may clear the stale reason.
+      discrepancyStateReady = true;
     }
 
     // Call this function after DOM is loaded
