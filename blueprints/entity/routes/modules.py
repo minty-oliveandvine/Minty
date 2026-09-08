@@ -5,8 +5,10 @@ Flow when a user clicks an entity in the entity list:
   2. If billing isn't enabled for the entity, redirect to the petty cash
      dashboard (existing behaviour).
   3. If billing IS enabled, issue a short-lived HS256 JWT signed with
-     Flask ``SECRET_KEY`` and redirect to the Module 2 Next.js frontend's
-     ``/module-selection`` page with the JWT in the query string.
+     Flask ``SECRET_KEY`` and hand off to the Module 2 Next.js frontend with
+     the JWT in the query string — to its ``/module-selection`` page when petty
+     cash is enabled too, and straight into the app itself when it isn't. The
+     picker only appears when there is actually something to pick.
 
 Module 2 (the payment-request app) consumes the JWT, stores it in a cookie,
 and uses ``Authorization: Bearer <jwt>`` + ``X-Entity-Id`` for all calls to
@@ -146,6 +148,15 @@ def module_selector(entity_id):
             f"Only petty cash enabled - redirecting directly to dashboard for entity {entity_id}"
         )
         return redirect(url_for("entity.report_dashboard", id=entity_id))
+
+    if not petty_cash_enabled:
+        # Mirror image of the branch above: with only one module switched on there
+        # is nothing to choose between, so the picker is a dead click. Send the
+        # user straight into Module 2's app instead of its /module-selection page.
+        current_app.logger.info(
+            f"Only billing enabled - redirecting directly to Module 2 for entity {entity_id}"
+        )
+        return redirect(billing_app_home_url(entity_id, org, current_user.id))
 
     # Both modules enabled — hand off to Module 2's /module-selection page.
     frontend_app_url = os.environ.get("FRONTEND_APP_URL", "http://localhost:3000").rstrip("/")
