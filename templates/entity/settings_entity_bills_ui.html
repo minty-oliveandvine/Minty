@@ -372,12 +372,14 @@
         <input type="hidden" id="ci_country_code_hidden" name="country_code" value="{{ selected_country.country_code if selected_country else '' }}" />
         <input type="hidden" id="ci_currency_id_hidden" name="currency_id" value="{{ selected_currency.currency_id if selected_currency else '' }}" />
 
+        {% with view_only = is_view_only | default(false) %}{% include 'entity/partials/view_only_notice.html' %}{% endwith %}
+
         <!-- Header Section (matches settings_entity.html) -->
         <div class="mb-6 flex items-center justify-between">
           <h2 class="text-lg font-semibold text-gray-800">Sales Settlement Method</h2>
         </div>
 
-        {% set can_map = can_edit_xero_settings | default(false) %}
+        {% set can_map = can_edit_coa_mappings | default(false) %}
         <div class="mb-6 {% if not can_map %}settings-readonly{% endif %}">
           {% include 'entity/partials/xero_account_mapping_cards_classic.html' %}
         </div>

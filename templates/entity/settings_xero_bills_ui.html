@@ -182,6 +182,8 @@
 
       <!-- ─────────────────── CONTENT ─────────────────── -->
 
+      {% with view_only = not (can_edit_xero_settings | default(false)) %}{% include 'entity/partials/view_only_notice.html' %}{% endwith %}
+
       <form method="POST"
             action="{{ url_for('entity_settings', entity_id=org.id) }}"
             id="xeroSettingsForm"

@@ -1172,7 +1172,7 @@ def entity_settings_entity(org_id):
                 org_id,
                 tok_err,
             )
-        can_edit_xero_settings = has_permission(
+        can_edit_coa_mappings = has_permission(
             current_user, Permission.COA_UPDATE, org_id
         )
         from blueprints.entity.services.xero_mapping_form_context import \
@@ -1186,6 +1186,12 @@ def entity_settings_entity(org_id):
             else "entity/settings_entity.html"
         )
         _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
+        # The Electronic/Delivery cards are the only controls on this page whose
+        # APIs enforce SALES_METHOD_* rather than COA_*. Same minimum role today,
+        # but gate the UI on the permission its own endpoints check.
+        _can_edit_sales_methods = has_permission(
+            current_user, Permission.SALES_METHOD_UPDATE, org_id
+        )
         # Live check (hits Xero /connections): warn if the entity was connected
         # to Xero but is no longer live, so the user knows to reconnect.
         _flash_if_xero_disconnected(org)
@@ -1202,7 +1208,8 @@ def entity_settings_entity(org_id):
             expense_account_code=expense_account_code,
             entity_acronym=entity_acronym,
             is_view_only=not _can_edit_coa,
-            can_edit_xero_settings=can_edit_xero_settings,
+            can_edit_coa_mappings=can_edit_coa_mappings,
+            can_edit_sales_methods=_can_edit_sales_methods,
             **_mapping,
         )
     except Exception as e:

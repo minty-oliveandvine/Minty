@@ -335,18 +335,20 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
           <input type="hidden" id="ci_country_code_hidden" name="country_code" value="{{ selected_country.country_code if selected_country else '' }}"/>
           <input type="hidden" id="ci_currency_id_hidden" name="currency_id" value="{{ selected_currency.currency_id if selected_currency else '' }}"/>
+        {% with view_only = is_view_only | default(false) %}{% include 'entity/partials/view_only_notice.html' %}{% endwith %}
         <!-- Header Section -->
         <div class="flex items-center justify-between mb-6">
           <h2 class="text-lg font-semibold text-gray-800">Sales Settlement Method</h2>
         </div>
 
-        {% set can_map = can_edit_xero_settings | default(false) %}
+        {% set can_map = can_edit_coa_mappings | default(false) %}
         <div class="mb-6 {% if not can_map %}settings-readonly{% endif %}">
           {% include 'entity/partials/xero_account_mapping_cards_classic.html' %}
         </div>
 
+        {% set sales_view_only = not (can_edit_sales_methods | default(false)) %}
         <!-- Electronic Payment Methods Card -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
+        <div class="mb-6 rounded-lg border border-gray-200 {% if sales_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-gray-800">Electronic</h3>
             <div class="flex items-center gap-3">
@@ -357,14 +359,14 @@
           </div>
           
           <!-- Electronic Content (Collapsible) -->
-          <div id="electronicContent" {% if is_view_only %}class="settings-readonly"{% endif %}>
+          <div id="electronicContent" {% if sales_view_only %}class="settings-readonly"{% endif %}>
             <!-- Payment Methods List -->
             <div id="paymentMethodsList" class="mb-4 mt-4">
               <!-- Dynamic payment methods will be loaded here -->
             </div>
 
             <!-- Add New Method Button -->
-            <button type="button" id="addMethodBtn" {% if is_view_only %}disabled{% endif %} class="w-full border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors hover-scale-parent {% if is_view_only %}opacity-50 cursor-not-allowed{% endif %}">
+            <button type="button" id="addMethodBtn" {% if sales_view_only %}disabled{% endif %} class="w-full border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors hover-scale-parent {% if sales_view_only %}opacity-50 cursor-not-allowed{% endif %}">
               <svg width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg" class="hover-scale">
                 <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="currentColor"/>
               </svg>
@@ -418,7 +420,7 @@
         </div>
 
         <!-- Delivery Sales Card -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
+        <div class="mb-6 rounded-lg border border-gray-200 {% if sales_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-gray-800">Delivery</h3>
             <div class="flex items-center gap-3">
@@ -429,14 +431,14 @@
           </div>
           
           <!-- Delivery Content (Collapsible) -->
-          <div id="deliveryContent" {% if is_view_only %}class="settings-readonly"{% endif %}>
+          <div id="deliveryContent" {% if sales_view_only %}class="settings-readonly"{% endif %}>
             <!-- Delivery Methods List -->
             <div id="deliveryMethodsList" class="mb-4 mt-4">
               <!-- Dynamic delivery methods will be loaded here -->
             </div>
 
             <!-- Add New Method Button -->
-            <button type="button" id="addDeliveryMethodBtn" {% if is_view_only %}disabled{% endif %} class="w-full border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors hover-scale-parent {% if is_view_only %}opacity-50 cursor-not-allowed{% endif %}">
+            <button type="button" id="addDeliveryMethodBtn" {% if sales_view_only %}disabled{% endif %} class="w-full border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors hover-scale-parent {% if sales_view_only %}opacity-50 cursor-not-allowed{% endif %}">
               <svg width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg" class="hover-scale">
                 <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="currentColor"/>
               </svg>
