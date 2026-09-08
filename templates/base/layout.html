@@ -100,6 +100,12 @@
            });
          </script>
       {% endblock %}
+
+      {# The AI Hub bubble is NOT included here. Only 7 of this app's 85
+         templates extend this layout — most pages are standalone <!DOCTYPE html>
+         documents — so an include would reach almost none of them. It is spliced
+         into every HTML response instead; see
+         blueprints/capture/services/context.py. #}
     </div>
   </body>
 </html>

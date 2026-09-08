@@ -49,6 +49,9 @@ from blueprints.subscription.models.subscription_audit_log import SubscriptionAu
 from blueprints.subscription.models.subscription_invoice import SubscriptionInvoice, SubscriptionInvoiceLine  # noqa: E402
 from blueprints.subscription.models.subscription_email_log import SubscriptionEmailLog  # noqa: E402
 from blueprints.subscription.models.subscription_transfer import SubscriptionTransfer  # noqa: E402
+from blueprints.capture.models.capture_upload import CaptureUpload  # noqa: E402
+from blueprints.capture.models.capture_draft import CaptureDraft  # noqa: E402
+from blueprints.capture.models.capture_ai_audit import CaptureAiAudit  # noqa: E402
 
 __all__ = [
     "db",
@@ -95,5 +98,8 @@ __all__ = [
     "SubscriptionEmailLog",
     "SubscriptionTransfer",
     "TermsConsent",
+    "CaptureUpload",
+    "CaptureDraft",
+    "CaptureAiAudit",
 ]
 

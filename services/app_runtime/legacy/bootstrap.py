@@ -432,6 +432,20 @@ def create_app():
     except Exception:
         logger.exception("scheduler: could not start the daily subscription pass")
 
+    # The AI Capture Hub's housekeeping: recovering uploads whose worker thread
+    # died with its process, retrying sends to Module 2, and the retention
+    # purge. Its own flag (CAPTURE_SCHEDULER_ENABLED) rather than the billing
+    # one, so whether this host does housekeeping and whether it bills people
+    # stay two separate decisions — and a failure here cannot stop billing.
+    # Wrapped for the same reason as above: a web service that serves nobody is
+    # worse than one that skips a sweep.
+    try:
+        from blueprints.capture.services.sweeper import start_capture_scheduler
+
+        start_capture_scheduler(app)
+    except Exception:
+        logger.exception("capture sweeper: could not start the housekeeping jobs")
+
     return (
         app,
         db,

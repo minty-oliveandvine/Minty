@@ -23,6 +23,11 @@ _EXPECTED_BLUEPRINTS = frozenset(
         # routes. Left out of this set, an import failure in routes/portal.py would
         # drop every one of them at DEBUG and nothing would say so.
         "blueprints.subscription",
+        # The AI Capture Hub. Expected rather than optional: its bubble renders
+        # through an app-wide context processor registered by the blueprint, so a
+        # silent registration failure would take the bubble off every page in the
+        # app with nothing in the log above DEBUG to say why.
+        "blueprints.capture",
     }
 )
 
@@ -91,6 +96,7 @@ def register_blueprints(app):
         ("blueprints.file", "file_bp"),
         ("blueprints.api", "api_bp"),
         ("blueprints.subscription", "subscription_bp"),
+        ("blueprints.capture", "capture_bp"),
     ):
         _register_if_available(app, module_path, attr)
 

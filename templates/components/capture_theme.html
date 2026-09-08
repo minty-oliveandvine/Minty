@@ -1,0 +1,74 @@
+{#
+  The AI Hub palette — one source of truth.
+
+  Included by BOTH the bubble partial and the queue page, so the two cannot
+  drift apart. Duplicate :root blocks are harmless in CSS, which is what lets a
+  page that renders the queue AND receives the injected bubble include it twice
+  without consequence.
+
+  WHY THESE COLOURS ARE NOT THE APP'S `primary`
+
+  The app's Tailwind `primary` is #294882, a navy. The AI Hub is aqua. That is a
+  deliberate difference, not an oversight: the bubble floats over every page in
+  the application, and a floating control that shares the page's own accent
+  colour reads as part of whatever is underneath it rather than as one
+  consistent thing that follows you around.
+
+  WHY THE TEXT ON THE AQUA IS DARK, NOT WHITE
+
+  #54D3DA is a light colour. White text on it measures 1.79:1, where the
+  standard asks 4.5:1 for ordinary text and 3:1 for large or bold — so white
+  fails by a wide margin and reads as a smudge on anything smaller than a
+  heading. Rather than darken the brand colour to make white work, the colour is
+  kept exactly as specified and the text on it is `--cap-on-mint`, which
+  measures 5.56:1.
+
+  The one place white survives is the bubble's sparkle icon. An icon is a large
+  solid shape rather than text, and white-on-aqua is the look the design asks
+  for. That is a considered exception, not an oversight.
+
+  Keep every AI Hub colour here. A hex code written inline in a component is how
+  two screens start disagreeing three months from now.
+#}
+<style>
+  :root {
+    /* The aqua, exactly as specified. */
+    --cap-mint: #54D3DA;
+    /* The same colour as raw channels, for glows and shadows. Having this means
+       changing the brand colour is TWO lines here rather than a hunt through
+       every rgba() in two files — which is how the last change went wrong. */
+    --cap-mint-rgb: 84, 211, 218;
+
+    --cap-mint-300: #7FDFE4;   /* the light end of the button gradient */
+    --cap-mint-600: #2CC3CC;   /* hover: the same colour, a step deeper */
+    --cap-mint-700: #1F8A90;   /* icons and accents on white */
+    --cap-mint-800: #196E72;   /* headings and body text on white (5.97:1) */
+    --cap-mint-200: #9EE6EA;   /* borders on tinted surfaces */
+    --cap-mint-050: #E9F9FA;   /* tinted backgrounds */
+
+    /* Text and icons sitting ON the aqua. 5.56:1 — see the note above. */
+    --cap-on-mint: #0B4A4E;
+
+    /* The halo. Built from the brand hue at low alpha so it reads as light
+       coming off the button rather than as a second ring drawn around it. */
+    --cap-glow-near: rgba(var(--cap-mint-rgb), 0.34);
+    --cap-glow-far: rgba(var(--cap-mint-rgb), 0.20);
+    --cap-glow-edge: rgba(var(--cap-mint-rgb), 0.12);
+
+    /* Neutrals, shared with the rest of the app's slate scale. */
+    --cap-ink: #0F172A;
+    --cap-muted: #64748B;
+    --cap-faint: #94A3B8;
+    --cap-line: #E2E8F0;
+    --cap-surface: #F8FAFC;
+
+    /* States. Red stays red — an alert badge that matched the brand would stop
+       being an alert. */
+    --cap-alert: #DC2626;
+    --cap-danger-bg: #FEF2F2;
+    --cap-danger-line: #FECACA;
+    --cap-danger-ink: #991B1B;
+    --cap-warn-bg: #FFFBEB;
+    --cap-warn-ink: #92400E;
+  }
+</style>

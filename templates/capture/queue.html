@@ -1,0 +1,187 @@
+{% extends 'base/layout.html' %}
+
+{# The Draft Queue.
+
+   The bubble is a launcher — a drop zone, a badge, and the last three uploads.
+   This is where the work happens, because a queue with editable amount,
+   supplier, account code and date fields is painful in a 340px panel in the
+   corner of the screen.
+
+   The cards are rendered by static/js/capture_queue.js from /capture/drafts
+   rather than server-side, so confirming one card does not reload the page and
+   lose the user's place in a list of twenty. #}
+
+{% block title %}— AI Hub{% endblock %}
+
+{% block styles %}
+{% include 'components/capture_theme.html' %}
+<style>
+  .cap-page { max-width: 1120px; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
+
+  .cap-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .cap-head h1 {
+    font-size: 1.5rem; font-weight: 600; color: var(--cap-mint-800);
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .cap-head h1 i { color: var(--cap-mint-700); }
+  .cap-head p { font-size: .85rem; color: var(--cap-muted); margin-top: .15rem; }
+  .cap-head .cap-lede { max-width: 46rem; margin-top: .35rem; }
+
+  .cap-filters { display: flex; gap: .4rem; flex-wrap: wrap; margin: 1.25rem 0; }
+  .cap-filter {
+    border: 1px solid var(--cap-line); background: #fff; color: #475569;
+    border-radius: 999px; padding: .3rem .8rem; font-size: .8rem; cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .cap-filter:hover { border-color: var(--cap-mint-200); background: var(--cap-mint-050); }
+  .cap-filter.is-on {
+    background: var(--cap-mint); border-color: var(--cap-mint);
+    color: var(--cap-on-mint); font-weight: 600;
+  }
+
+  .cap-card {
+    display: flex; gap: 1.1rem; background: #fff; border: 1px solid var(--cap-line);
+    border-radius: 14px; padding: 1rem; margin-bottom: .9rem;
+    transition: box-shadow .15s ease;
+  }
+  .cap-card:hover { box-shadow: 0 4px 16px rgba(15, 23, 42, .06); }
+  .cap-card.is-busy { opacity: .55; pointer-events: none; }
+
+  .cap-thumb { flex: 0 0 190px; }
+  .cap-thumb .cap-frame {
+    width: 190px; height: 220px; border: 1px solid var(--cap-line);
+    border-radius: 10px; background: var(--cap-surface); overflow: hidden; display: block;
+  }
+  .cap-thumb iframe, .cap-thumb img { width: 100%; height: 100%; border: 0; object-fit: contain; }
+  .cap-thumb .cap-origin {
+    font-size: .7rem; color: var(--cap-faint); margin-top: .4rem; word-break: break-all;
+  }
+
+  .cap-fields { flex: 1; min-width: 0; }
+  .cap-tags { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; margin-bottom: .7rem; }
+  .cap-tag {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
+    border-radius: 5px; padding: .13rem .45rem; font-weight: 600;
+    background: var(--cap-surface); color: var(--cap-muted);
+  }
+  .cap-tag.receipt { background: var(--cap-mint-050); color: var(--cap-mint-800); }
+  .cap-tag.invoice { background: #F5F3FF; color: #6D28D9; }
+  .cap-tag.ready { background: #F0FDF4; color: #166534; }
+  .cap-tag.needs_clarification { background: var(--cap-warn-bg); color: var(--cap-warn-ink); }
+  .cap-tag.hold { background: #F1F5F9; color: #475569; }
+  .cap-tag.send_failed { background: var(--cap-danger-bg); color: var(--cap-danger-ink); }
+
+  .cap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .6rem; }
+  .cap-field label { display: block; font-size: .7rem; color: var(--cap-muted); margin-bottom: .15rem; }
+  .cap-field input, .cap-field select {
+    width: 100%; border: 1px solid #CBD5E1; border-radius: 7px;
+    padding: .38rem .5rem; font-size: .85rem; background: #fff;
+  }
+  .cap-field input:focus, .cap-field select:focus {
+    outline: none; border-color: var(--cap-mint);
+    box-shadow: 0 0 0 3px rgba(var(--cap-mint-rgb), .25);
+  }
+  /* An AI suggestion, until the user touches it. Mint rather than the blue the
+     expense form uses, because on this page every filled field came from the
+     model and the marking is the page's own language. */
+  .cap-field input.is-suggested {
+    background: var(--cap-mint-050); border-color: var(--cap-mint-200);
+  }
+  .cap-field .cap-why { font-size: .68rem; color: var(--cap-mint-800); margin-top: .12rem; }
+
+  .cap-note { margin-top: .7rem; font-size: .8rem; border-radius: 9px; padding: .55rem .7rem; }
+  .cap-note.hold {
+    background: var(--cap-surface); color: #475569; border: 1px solid var(--cap-line);
+  }
+  .cap-note.err {
+    background: var(--cap-danger-bg); color: var(--cap-danger-ink);
+    border: 1px solid var(--cap-danger-line);
+  }
+
+  .cap-actions { display: flex; gap: .5rem; align-items: center; margin-top: .85rem; flex-wrap: wrap; }
+  .cap-btn {
+    border: none; border-radius: 9px; padding: .45rem .95rem;
+    font-size: .83rem; font-weight: 600; cursor: pointer;
+    transition: background .15s ease;
+  }
+  .cap-btn.primary {
+    background: var(--cap-mint); color: var(--cap-on-mint);
+    box-shadow: 0 2px 8px rgba(var(--cap-mint-rgb), .36);
+  }
+  .cap-btn.primary:hover { background: var(--cap-mint-600); }
+  .cap-btn.primary:disabled {
+    background: #CBD5E1; cursor: not-allowed; box-shadow: none;
+  }
+  .cap-btn.ghost {
+    background: #fff; color: var(--cap-muted); border: 1px solid var(--cap-line);
+  }
+  .cap-btn.ghost:hover { background: var(--cap-surface); }
+
+  .cap-empty {
+    border: 1px dashed var(--cap-mint-200); border-radius: 12px;
+    background: var(--cap-mint-050);
+    padding: 3rem 1.5rem; text-align: center; color: #35595C;
+  }
+  .cap-empty i {
+    font-size: 2.4rem; color: var(--cap-mint-700); display: block; margin-bottom: .6rem;
+  }
+
+  @media (max-width: 720px) {
+    .cap-card { flex-direction: column; }
+    .cap-thumb, .cap-thumb .cap-frame { width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cap-page">
+  <div class="cap-head">
+    <div>
+      <h1><i class="ri-sparkling-2-fill" aria-hidden="true"></i>AI Hub</h1>
+      <p>{% if entity %}{{ entity.name }}{% endif %}</p>
+      <p class="cap-lede">
+        Everything the AI has read, waiting for you to check it. Nothing here is
+        a real record until you press Confirm.
+      </p>
+    </div>
+    <div id="capCount" class="text-sm text-slate-500"></div>
+  </div>
+
+  <div class="cap-filters" id="capFilters">
+    <button type="button" class="cap-filter is-on" data-status="">Waiting</button>
+    <button type="button" class="cap-filter" data-status="ready">Ready</button>
+    <button type="button" class="cap-filter" data-status="needs_clarification">Needs a look</button>
+    <button type="button" class="cap-filter" data-status="hold">On hold</button>
+    <button type="button" class="cap-filter" data-status="send_failed">Didn't send</button>
+    <button type="button" class="cap-filter" data-status="posted">Added</button>
+    <button type="button" class="cap-filter" data-status="archived">Archived</button>
+  </div>
+
+  <div id="capList"></div>
+
+  <div class="cap-empty" id="capEmpty" hidden>
+    <i class="ri-inbox-line" aria-hidden="true"></i>
+    <p class="font-medium">Nothing waiting for review.</p>
+    <p class="text-sm mt-1">
+      Drop a receipt or invoice on the bubble in the bottom-right corner and it
+      will show up here.
+    </p>
+  </div>
+</div>
+
+{# Same CSRF convention as the rest of the app — a hidden input the JS reads
+   and re-sends as X-CSRFToken. Confirm, Archive and Retry are all session
+   -authenticated writes and are protected like any other. #}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+<div id="capQueueLive" class="sr-only" role="status" aria-live="polite"></div>
+
+<script>
+  window.CAPTURE_QUEUE = {
+    entityId: {{ entity_id | tojson }},
+    draftsUrl: {{ url_for('capture.capture_drafts') | tojson }},
+    reportsUrl: {{ url_for('capture.capture_reports') | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/capture_queue.js') }}"></script>
+{% endblock %}
