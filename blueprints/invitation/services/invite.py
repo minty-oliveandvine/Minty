@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 from datetime import datetime, timedelta
@@ -234,8 +235,8 @@ def send_invitation_email(
         base_url = public_url or url_for("static", filename="", _external=True).rstrip(
             "/"
         )
-        logo_url = f"{base_url}/static/img/minty_newlogo_word.png"
-        mascot_url = f"{base_url}/static/img/new_logo.png"
+        logo_url = _asset_url(base_url, "img/minty_newlogo_word.png")
+        mascot_url = _asset_url(base_url, "img/new_logo.png")
 
         msg = Message(
             subject=f"You've been invited to {entity_name} on Minty",
@@ -497,6 +498,37 @@ def _is_user_in_xero_org(user: User, entity: Entity) -> bool:
         logger.warning(f"Xero connection check failed for user {user.id}: {exc}")
 
     return False
+
+
+# Content fingerprints for static assets embedded in outbound email, keyed by
+# path relative to the static folder. Mail clients (Gmail in particular) proxy
+# and cache remote images by URL and hold them indefinitely, so replacing an
+# image in place is invisible to anyone who was sent the old one. Appending a
+# content hash gives each revision its own URL, forcing a refetch.
+_ASSET_FINGERPRINTS: dict[str, str] = {}
+
+
+def _asset_url(base_url: str, rel_path: str) -> str:
+    """Return the absolute URL for a static asset, fingerprinted by content.
+
+    Falls back to the plain URL if the file cannot be read, so a missing or
+    unreadable asset degrades to the previous behaviour rather than failing
+    the send.
+    """
+    digest = _ASSET_FINGERPRINTS.get(rel_path)
+    if digest is None:
+        try:
+            static_folder = current_app.static_folder or "static"
+            full_path = os.path.join(static_folder, *rel_path.split("/"))
+            with open(full_path, "rb") as handle:
+                digest = hashlib.md5(handle.read()).hexdigest()[:10]
+        except OSError as exc:
+            logger.warning(f"Could not fingerprint static asset {rel_path}: {exc}")
+            digest = ""
+        _ASSET_FINGERPRINTS[rel_path] = digest
+
+    url = f"{base_url}/static/{rel_path}"
+    return f"{url}?v={digest}" if digest else url
 
 
 def _build_invitation_html(
