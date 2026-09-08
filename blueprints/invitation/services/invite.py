@@ -234,7 +234,8 @@ def send_invitation_email(
         base_url = public_url or url_for("static", filename="", _external=True).rstrip(
             "/"
         )
-        logo_url = f"{base_url}/static/img/new_logo.png"
+        logo_url = f"{base_url}/static/img/minty_newlogo_word.png"
+        mascot_url = f"{base_url}/static/img/new_logo.png"
 
         msg = Message(
             subject=f"You've been invited to {entity_name} on Minty",
@@ -246,6 +247,7 @@ def send_invitation_email(
                 inviter_name=inviter_name,
                 accept_url=accept_url,
                 logo_url=logo_url,
+                mascot_url=mascot_url,
             ),
         )
         mail.send(msg)
@@ -503,39 +505,87 @@ def _build_invitation_html(
     inviter_name: str,
     accept_url: str,
     logo_url: str = "",
+    mascot_url: str = "",
 ) -> str:
     role_display = role.replace("_", " ").title()
     return f"""\
 <!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<title>You&#39;ve been invited to Minty</title>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<![endif]-->
+<style>
+  body,table,td,a {{ -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }}
+  table,td {{ mso-table-lspace:0pt; mso-table-rspace:0pt; }}
+  img {{ -ms-interpolation-mode:bicubic; border:0; line-height:100%; outline:none; text-decoration:none; }}
+  body {{ width:100% !important; min-width:100%; }}
+  @media only screen and (max-width:600px) {{
+    .m-wrap   {{ padding:20px 12px !important; }}
+    .m-card   {{ width:100% !important; max-width:100% !important; border-radius:12px !important; }}
+    .m-header {{ padding:20px 16px !important; }}
+    .m-pad    {{ padding-left:24px !important; padding-right:24px !important; }}
+    .m-body   {{ padding-top:28px !important; }}
+    .m-cta    {{ padding:24px !important; }}
+    .m-h1     {{ font-size:20px !important; }}
+    .m-btn    {{ display:block !important;
+                padding-left:16px !important; padding-right:16px !important; }}
+  }}
+</style>
+</head>
 <body style="margin:0;padding:0;font-family:'Inter',Arial,Helvetica,sans-serif;background:#f0f4f8;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
-    <tr><td align="center">
-      <table width="520" cellpadding="0" cellspacing="0"
-             style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+  <div style="display:none;font-size:1px;color:#f0f4f8;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+    {inviter_name} invited you to join {entity_name} on Minty.
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background:#f0f4f8;">
+    <tr><td align="center" class="m-wrap" style="padding:40px 12px;">
 
-        <!-- Header logo -->
-        <tr><td style="background:linear-gradient(135deg,#54D3DA 0%,#3BB8BF 100%);
+      <!--[if mso]>
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0"><tr><td>
+      <![endif]-->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="m-card"
+             style="width:100%;max-width:520px;background:#ffffff;border-radius:16px;
+                    overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        <!-- Header with logo and mascot side by side -->
+        <tr><td class="m-header"
+                style="background:linear-gradient(135deg,#54D3DA 0%,#3BB8BF 100%);
                        padding:24px 40px;text-align:center;">
-          <img src="{logo_url}" alt="Minty" width="180"
-               style="display:inline-block;border:0;" />
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+            <tr>
+              <td style="vertical-align:middle;padding-right:12px;">
+                <img src="{logo_url}" alt="Minty" width="130"
+                     style="display:block;border:0;width:130px;max-width:130px;height:auto;" />
+              </td>
+              <td style="vertical-align:middle;">
+                <img src="{mascot_url}" alt="Minty Cat" width="60"
+                     style="display:block;border:0;width:60px;max-width:60px;height:auto;" />
+              </td>
+            </tr>
+          </table>
         </td></tr>
 
         <!-- Body -->
-        <tr><td style="padding:36px 40px 0 40px;">
-          <h1 style="color:#2d3748;font-size:22px;margin:0 0 8px 0;text-align:center;">
-            You've Been Invited!
+        <tr><td class="m-pad m-body" style="padding:36px 40px 0 40px;">
+          <h1 class="m-h1" style="color:#2d3748;font-size:22px;margin:0 0 8px 0;text-align:center;">
+            You&#39;ve Been Invited!
           </h1>
           <p style="color:#718096;font-size:14px;text-align:center;margin:0 0 28px 0;">
             Join your team on Minty and start collaborating.
           </p>
         </td></tr>
 
-        <tr><td style="padding:0 40px;">
-          <table width="100%" cellpadding="0" cellspacing="0"
-                 style="background:#f7fafc;border-radius:10px;padding:20px 24px;">
-            <tr><td style="color:#4a5568;font-size:14px;line-height:1.7;">
+        <tr><td class="m-pad" style="padding:0 40px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                 style="background:#f7fafc;border-radius:10px;">
+            <tr><td style="padding:20px 24px;color:#4a5568;font-size:14px;line-height:1.7;
+                           word-break:break-word;">
               <p style="margin:0 0 6px 0;">
                 <strong>{inviter_name}</strong> has invited you to join
               </p>
@@ -550,17 +600,19 @@ def _build_invitation_html(
         </td></tr>
 
         <!-- CTA Button -->
-        <tr><td style="text-align:center;padding:32px 40px;">
-          <a href="{accept_url}"
+        <tr><td class="m-cta" style="text-align:center;padding:32px 40px;">
+          <a href="{accept_url}" class="m-btn"
              style="display:inline-block;background:#54D3DA;color:#ffffff;text-decoration:none;
-                    padding:14px 48px;border-radius:8px;font-weight:600;font-size:15px;
+                    padding:14px 48px;border-radius:8px;font-weight:600;font-size:16px;
+                    line-height:1.2;text-align:center;
                     box-shadow:0 2px 8px rgba(84,211,218,0.35);">
             Accept Invitation
           </a>
         </td></tr>
 
         <!-- Footer -->
-        <tr><td style="padding:16px 40px 24px 40px;text-align:center;border-top:1px solid #e2e8f0;">
+        <tr><td class="m-pad"
+                style="padding:16px 40px 24px 40px;text-align:center;border-top:1px solid #e2e8f0;">
           <p style="color:#a0aec0;font-size:12px;line-height:1.5;margin:0;">
             If you did not expect this invitation you can safely ignore this email.<br />
             &copy; {_current_year()} Minty &mdash; Petty Cash Management
@@ -568,6 +620,10 @@ def _build_invitation_html(
         </td></tr>
 
       </table>
+      <!--[if mso]>
+      </td></tr></table>
+      <![endif]-->
+
     </td></tr>
   </table>
 </body>
