@@ -234,8 +234,7 @@ def send_invitation_email(
         base_url = public_url or url_for("static", filename="", _external=True).rstrip(
             "/"
         )
-        logo_url = f"{base_url}/static/img/logo_v2.png"
-        mascot_url = f"{base_url}/static/img/minty_cat.png"
+        logo_url = f"{base_url}/static/img/new_logo.png"
 
         msg = Message(
             subject=f"You've been invited to {entity_name} on Minty",
@@ -247,7 +246,6 @@ def send_invitation_email(
                 inviter_name=inviter_name,
                 accept_url=accept_url,
                 logo_url=logo_url,
-                mascot_url=mascot_url,
             ),
         )
         mail.send(msg)
@@ -505,7 +503,6 @@ def _build_invitation_html(
     inviter_name: str,
     accept_url: str,
     logo_url: str = "",
-    mascot_url: str = "",
 ) -> str:
     role_display = role.replace("_", " ").title()
     return f"""\
@@ -518,21 +515,11 @@ def _build_invitation_html(
       <table width="520" cellpadding="0" cellspacing="0"
              style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
-        <!-- Header with logo and mascot side by side -->
+        <!-- Header logo -->
         <tr><td style="background:linear-gradient(135deg,#54D3DA 0%,#3BB8BF 100%);
                        padding:24px 40px;text-align:center;">
-          <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
-            <tr>
-              <td style="vertical-align:middle;padding-right:12px;">
-                <img src="{logo_url}" alt="Minty" width="130"
-                     style="display:block;" />
-              </td>
-              <td style="vertical-align:middle;">
-                <img src="{mascot_url}" alt="Minty Cat" width="60"
-                     style="display:block;" />
-              </td>
-            </tr>
-          </table>
+          <img src="{logo_url}" alt="Minty" width="180"
+               style="display:inline-block;border:0;" />
         </td></tr>
 
         <!-- Body -->
