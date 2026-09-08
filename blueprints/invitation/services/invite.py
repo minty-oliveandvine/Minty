@@ -587,15 +587,18 @@ def _build_invitation_html(
 
         <!-- Header with logo and mascot side by side -->
         <tr><td class="m-header"
-                style="background:linear-gradient(135deg,#54D3DA 0%,#3BB8BF 100%);
+                style="background:#ffffff;
                        padding:24px 40px;text-align:center;">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
             <tr>
-              <td style="vertical-align:middle;padding-right:12px;">
+              <td style="vertical-align:middle;padding-right:0;">
                 <img src="{logo_url}" alt="Minty" width="130"
                      style="display:block;border:0;width:130px;max-width:130px;height:auto;" />
               </td>
-              <td style="vertical-align:middle;">
+              <!-- The wordmark's leaf sits above the letterforms, pulling the logo's
+                   centre 6.3px above the word itself. A middle-aligned cell shifts by
+                   half its padding, so 13px drops the cat onto the letterform centre. -->
+              <td style="vertical-align:middle;padding-top:13px;">
                 <img src="{mascot_url}" alt="Minty Cat" width="60"
                      style="display:block;border:0;width:60px;max-width:60px;height:auto;" />
               </td>
