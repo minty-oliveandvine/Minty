@@ -386,7 +386,8 @@
 
   function notifyError(msg) {
     if (typeof showErrorToast === 'function') showErrorToast(msg);
-    else alert(msg);
+    else if (window.showFlashMessages) window.showFlashMessages(msg, 'error');
+    else console.error(msg);   // never swallow it silently
   }
 
   // Full-screen blocking loader shown while a (slow) Stripe request is in flight,
@@ -413,6 +414,8 @@
     const data = await res.json().catch(function () { return {}; });
     if (!res.ok || data.error) {
       const err = new Error(data.error || 'Request failed');
+      // Only text the server actually authored is fit to show the user.
+      err.fromServer = Boolean(data.error);
       // Callers key on the status — notably 402, which means "no card on file"
       // and routes the user into the add-payment-method flow.
       err.status = res.status;
@@ -1010,7 +1013,7 @@
       window.location.reload();
     } catch (err) {
       hideBlockingLoader();
-      notifyError(err.message || 'Could not start checkout.');
+      notifyError(window.mintyApiError(err, "I couldn't start checkout. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   }
@@ -1040,7 +1043,7 @@
       window.location.reload();
     } catch (err) {
       hideBlockingLoader();
-      notifyError(err.message || 'Could not confirm billing.');
+      notifyError(window.mintyApiError(err, "I couldn't confirm your billing details. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   };
@@ -1525,7 +1528,7 @@
           );
         }));
       } catch (err) {
-        notifyError(err.message || 'Could not check what cancelling would do.');
+        notifyError(window.mintyApiError(err, "I couldn't work out what cancelling would do. Mind trying again?"));
         return restore();
       }
       const names = paidRemovals.map(function (i) { return i.name; });
@@ -1557,7 +1560,7 @@
           { code: item.code, reason: item.state === 'paid' ? cancelReason : '' }
         );
       } catch (err) {
-        notifyError(err.message || 'Could not cancel ' + item.name + '.');
+        notifyError(window.mintyApiError(err, "I couldn't cancel " + item.name + ". Mind trying again?"));
         return restore();
       }
     }
@@ -1573,7 +1576,7 @@
         try {
           await postJson("{{ url_for('entity.entity_settings_module_renew', org_id=org.id) }}", { code: item.code });
         } catch (err) {
-          notifyError(err.message || 'Could not resume ' + item.name + '.');
+          notifyError(window.mintyApiError(err, "I couldn't resume " + item.name + ". Mind trying again?"));
           return restore();
         }
       }
@@ -1587,7 +1590,7 @@
       try {
         outcome = await resolveTrialGap(keptTrials, plan, subModal.dataset.trialEnd || '');
       } catch (err) {
-        notifyError(err.message || 'Could not confirm billing.');
+        notifyError(window.mintyApiError(err, "I couldn't confirm your billing details. Mind trying again?"));
         return restore();
       }
       if (outcome === 'redirected') return;      // Stripe owns the page now
@@ -1608,7 +1611,7 @@
           { codes: startTrials.map(function (i) { return i.code; }) }
         );
       } catch (err) {
-        notifyError(err.message || 'Could not start free trial.');
+        notifyError(window.mintyApiError(err, "I couldn't start your free trial. Mind trying again?"));
         return restore();
       }
     }
@@ -1812,7 +1815,7 @@
     } catch (err) {
       // postJson throws on a body-level `error` too, so a module that isn't
       // cancellable surfaces the server's own wording rather than this fallback.
-      notifyError(err.message || 'Could not check what cancelling would do.');
+      notifyError(window.mintyApiError(err, "I couldn't work out what cancelling would do. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
       return;
     }
@@ -1835,7 +1838,7 @@
       window.location.reload();
     } catch (err) {
       hideBlockingLoader();
-      notifyError(err.message || 'Could not start cancellation.');
+      notifyError(window.mintyApiError(err, "I couldn't start that cancellation. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   };
@@ -1865,7 +1868,7 @@
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     } catch (err) {
       hideBlockingLoader();
-      notifyError(err.message || 'Could not take payment.');
+      notifyError(window.mintyApiError(err, "I couldn't take that payment. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   };
@@ -1881,7 +1884,7 @@
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     } catch (err) {
       hideBlockingLoader();
-      notifyError(err.message || 'Could not open the payment method form.');
+      notifyError(window.mintyApiError(err, "I couldn't open the card form. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   };
@@ -1899,7 +1902,7 @@
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     } catch (err) {
       hideBlockingLoader();
-      notifyError(err.message || 'Could not open billing portal.');
+      notifyError(window.mintyApiError(err, "I couldn't open the billing portal. Mind trying again?"));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
   };

@@ -1,6 +1,6 @@
 """Report history routes."""
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from blueprints.entity.services.shared import check_user_has_entities
@@ -49,8 +49,15 @@ def entity_report_history(entity_id):
             per_page=per_page,
             uploaded_by=None if can_view_entity_history else current_user.username,
         )
-    except ValueError as exc:
-        return {"status": "error", "message": str(exc)}, 400
+    except ValueError:
+        # The detail belongs in the log, not in the body the client renders.
+        current_app.logger.exception(
+            "Report history query failed for entity %s", entity_id
+        )
+        return {
+            "status": "error",
+            "message": "I couldn't load your report history. Mind trying again?",
+        }, 400
 
     return render_template(
         "report_history/report_history.html",

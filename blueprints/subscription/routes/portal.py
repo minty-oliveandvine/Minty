@@ -256,6 +256,10 @@ def _transfer_call(handler, *, description: str):
     try:
         result = handler(user_id, payload)
     except _MissingField as exc:
+        # App-authored text from _required(), not exception detail: it names the
+        # field on purpose so the client can say which one is missing, and
+        # test_payer_portal_api asserts that. Not a leak.
+        current_app.logger.warning("%s missing field: %s", description, exc)
         return _cors(make_response(jsonify({"error": str(exc)}), 400))
     except Exception:
         current_app.logger.exception("%s failed for user %s", description, user_id)

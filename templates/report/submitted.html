@@ -291,20 +291,6 @@
 
 
   <script>
-    // Function to handle Save as Image action
-    function saveAsImage() {
-      alert('Save as Image functionality would be implemented here');
-      // In a real implementation, you would use a library like html2canvas
-      // to capture the screen and save it as an image
-    }
-
-    // Function to handle PDF generation
-    function generatePDF() {
-      alert('Generate PDF functionality would be implemented here');
-      // In a real implementation, you would use a library like jsPDF
-      // to generate a PDF document
-    }
-
     // Initialize page transition
     PageTransition.init('.main-content', 'fadeIn', 10);
 
@@ -468,7 +454,9 @@
         }
         if (!response.ok && response.status !== 202) {
           return response.json().then(data => {
-            throw new Error(data.message || data.error || 'Publishing failed');
+            const err = new Error(data.message || data.error || 'Publishing failed');
+            err.fromServer = Boolean(data.message || data.error);
+            throw err;
           });
         }
         return response.json();
@@ -497,7 +485,7 @@
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('error', 'Publish error', { reportId, entityId, message: error && error.message });
         }
-        publishingFailed(error.message || 'Error publishing to Xero. Please try again.');
+        publishingFailed(window.mintyApiError(error, "I couldn't publish that report to Xero. Mind trying again?"));
       });
     }
 

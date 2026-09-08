@@ -8,6 +8,7 @@ from flask import (flash, has_request_context, jsonify, redirect,
 from flask_login import current_user, user_logged_in, user_logged_out
 from flask_wtf.csrf import CSRFError
 from loguru import logger
+from werkzeug.exceptions import HTTPException
 
 from models.db import Entity
 from services.auth.token_service import (auto_refresh_token,
@@ -20,6 +21,29 @@ from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
 # a tab left open overnight would otherwise refresh its owner's presence all night
 # and keep them listed forever — defeating the whole point of last_seen_at.
 PRESENCE_INERT_ENDPOINTS = frozenset({"entity.entity_settings_users_presence"})
+
+
+def _wants_json():
+    """True when the caller is a fetch()/XHR that will try to parse JSON.
+
+    Match "/api/" anywhere in the path, not just as a prefix. Blueprints register
+    with no url_prefix, so routes mount at their literal path — and while most sit
+    at /api/..., the user_management and invitation ones are declared as
+    /minty/api/... A startswith("/api") check missed exactly those, handing
+    fetch() an HTML error page that then died in response.json().
+
+    Every route containing "/api/" returns JSON today, so the wider match cannot
+    catch an HTML page; if that ever stops being true, key off request.blueprint
+    or the Accept/X-Requested-With clauses rather than the path.
+    """
+    if not has_request_context():
+        return False
+    return (
+        "/api/" in request.path
+        or request.is_json
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or "application/json" in (request.headers.get("Accept") or "").lower()
+    )
 
 
 def init_app(app, db):
@@ -58,24 +82,39 @@ def init_app(app, db):
             "Something interrupted that action. We've logged it on our end — "
             "please try again, and let us know if it keeps happening."
         )
-        # Match "/api/" anywhere in the path, not just as a prefix. Blueprints
-        # register with no url_prefix, so routes mount at their literal path —
-        # and while most sit at /api/..., the user_management and invitation
-        # ones are declared as /minty/api/... A startswith("/api") check missed
-        # exactly those, handing fetch() an HTML error page that then died in
-        # response.json() as "Unexpected token '<'". Every route containing
-        # "/api/" returns JSON today, so the wider match cannot catch an HTML
-        # page; if that ever stops being true, key off request.blueprint or the
-        # Accept/X-Requested-With clauses below rather than the path.
-        wants_json = bool(request) and (
-            "/api/" in request.path
-            or request.is_json
-            or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-            or "application/json" in (request.headers.get("Accept") or "").lower()
-        )
-        if wants_json:
+        if _wants_json():
             return jsonify({"status": "error", "message": friendly_message}), 500
         return render_template("errors.html", error=friendly_message), 500
+
+    # Only the 500 and CSRF handlers existed. Nothing handled 400/401/403/404/405,
+    # so abort() and every @login_required rejection returned Werkzeug's HTML error
+    # page — which a fetch() then died on inside response.json() as
+    # "Unexpected token '<'". That string is the single most common unreadable
+    # toast in the app, and it is produced here, not in the browser.
+    HTTP_ERROR_COPY = {
+        400: "That request didn't look right. Mind trying again?",
+        401: "Your session has expired. Sign in again to keep going.",
+        403: "You don't have access to that.",
+        404: "I couldn't find that.",
+        405: "That action isn't available here.",
+        409: "Someone else changed that first. Reload and try again.",
+        413: "That file is too large to upload.",
+        429: "That's a lot of requests at once. Give it a moment and try again.",
+    }
+
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(exc):
+        # 500 and CSRF keep their own, more specific handlers; Flask prefers those.
+        code = exc.code or 500
+        # Redirects are HTTPExceptions too (Werkzeug's trailing-slash
+        # RequestRedirect is a 308). Turning one into a JSON body would break
+        # the redirect, so only error statuses are rewritten.
+        if code < 400 or not _wants_json():
+            return exc
+        message = HTTP_ERROR_COPY.get(
+            code, "Something interrupted that action. Mind trying again?"
+        )
+        return jsonify({"status": "error", "message": message}), code
 
     @app.route("/health")
     def health_check():

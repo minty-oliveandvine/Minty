@@ -324,6 +324,9 @@
     }
 
     function showErrorToast(message) {
+      // Guard raw API/exception text: this toast drives its own DOM and
+      // never reaches showFlashMessages(). See components/flash_messages.html.
+      if (window.mintyErrorCopy) message = window.mintyErrorCopy(message);
       if (showBillsInlineBanner('Error', message)) return;
 
       const toast = document.getElementById('errorToast');

@@ -228,9 +228,31 @@ def translate_xero_error(
         return XERO_AUTH_EXPIRED
 
     # ── Fallbacks ────────────────────────────────────────────────────────────
-    if message and len(message) <= 120:
+    # A short Xero validation sentence is genuinely useful to the person
+    # fixing their mapping, so it is passed through -- but only when it reads
+    # as prose. Serialised bodies, markup and stack text are not.
+    if message and len(message) <= 120 and _reads_as_prose(message):
         return message.strip()
     return "Xero rejected this entry"
+
+
+# Shapes that mean the "message" pulled out of Xero is machinery, not a
+# sentence: a serialised body, markup, or exception text. Any of these reaching
+# the toast reads as a leak, however short the string is.
+_NON_PROSE_MARKERS = (
+    "{", "}", "[", "<", ">", "Traceback", "Exception", "at Xero.", "System.",
+    "null,", "\n", "\\n",
+)
+
+
+def _reads_as_prose(message: str) -> bool:
+    text = message.strip()
+    if not text:
+        return False
+    if any(marker in text for marker in _NON_PROSE_MARKERS):
+        return False
+    # A bare identifier or GUID is not a sentence.
+    return " " in text
 
 
 # Stable, user-facing labels for each Xero-mapping piece the publish flow

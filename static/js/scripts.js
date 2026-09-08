@@ -456,7 +456,7 @@ document.addEventListener('DOMContentLoaded', function () {
             event.preventDefault(); // Prevent default form submission behavior
 
             if (!validateExpenseFiles()) {
-                alert('Each shop expense must have at least one file attached.');
+                showFlashMessages('Each shop expense needs at least one file attached.', 'error');
                 return;
             }
     
@@ -499,11 +499,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     const errorText = await response.text();
                     console.error('Error downloading statements:', errorText);
-                    alert('Failed to download statements. Please check your filters or try again later.');
+                    showFlashMessages("I couldn't download those statements. Mind checking your filters and trying again?", 'error');
                 }
             } catch (error) {
                 console.error('Unexpected error during download:', error);
-                alert('An unexpected error occurred. Please try again.');
+                showFlashMessages("Something went wrong on my end. Mind trying again?", 'error');
             }
         }
 
@@ -538,7 +538,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     
         if (submittedDate !== expectedDate) {
-            alert(`Transaction Date must be ${expectedDate}.`);
+            showFlashMessages(`Transaction date needs to be ${expectedDate}.`, 'error');
             return false;
         }
         return true;
@@ -637,7 +637,7 @@ document.addEventListener('DOMContentLoaded', function () {
         saveFormData(); // Log current form data before validation and submission
 
         if (!validateForm()) {
-            alert("Validation failed. Please fix the errors before submitting.");
+            showFlashMessages("Some fields need a second look before I can save.", 'error');
             return; // Stop submission
         }
 
@@ -767,7 +767,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (response.ok) {
                 const data = await response.json();
                 if (data.status === 'success') {
-                    alert(data.message || 'Report submitted successfully!');
+                    showFlashMessages(data.message || 'Report submitted.', 'success');
                     if (data.redirect_url) {
                         window.location.href = data.redirect_url;
                     }
@@ -782,7 +782,7 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (error) {
             console.log(error)
             console.error("Unexpected error during form submission:", error);
-            alert("An unexpected error occurred. Please try again.");
+            showFlashMessages("Something went wrong on my end. Mind trying again?", 'error');
         } finally {
             submitReportButton.disabled = false; // Re-enable button after submission attempt
         }

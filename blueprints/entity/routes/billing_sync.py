@@ -62,8 +62,12 @@ def billing_sync_chart_accounts(entity_id):
             "billing_sync_chart_accounts failed entity=%s: %s", entity_id, exc
         )
         # Detail stays in the log; the response carries only a stable reason
-        # code for Module 2 to branch on.
-        return jsonify({"skipped": True, "reason": "exception"}), 200
+        # code for Module 2 to branch on. A caught exception is a failure, not
+        # a skip: returning 200 had the caller log it at WARNING next to benign
+        # reasons like no_xero_org_id. 500 puts it in the caller's error branch
+        # (bills/services/flask_billing_sync.py), which logs the body and still
+        # returns True, so nothing downstream changes shape.
+        return jsonify({"status": "failed", "reason": "exception"}), 500
 
 
 @entity_bp.route(
@@ -103,8 +107,12 @@ def billing_sync_chart_if_changed(entity_id):
             "billing_sync_chart_if_changed failed entity=%s: %s", entity_id, exc
         )
         # Detail stays in the log; the response carries only a stable reason
-        # code for Module 2 to branch on.
-        return jsonify({"skipped": True, "reason": "exception"}), 200
+        # code for Module 2 to branch on. A caught exception is a failure, not
+        # a skip: returning 200 had the caller log it at WARNING next to benign
+        # reasons like no_xero_org_id. 500 puts it in the caller's error branch
+        # (bills/services/flask_billing_sync.py), which logs the body and still
+        # returns True, so nothing downstream changes shape.
+        return jsonify({"status": "failed", "reason": "exception"}), 500
 
 
 @entity_bp.route(
@@ -149,5 +157,9 @@ def billing_sync_contacts_if_changed(entity_id):
             "billing_sync_contacts_if_changed failed entity=%s: %s", entity_id, exc
         )
         # Detail stays in the log; the response carries only a stable reason
-        # code for Module 2 to branch on.
-        return jsonify({"skipped": True, "reason": "exception"}), 200
+        # code for Module 2 to branch on. A caught exception is a failure, not
+        # a skip: returning 200 had the caller log it at WARNING next to benign
+        # reasons like no_xero_org_id. 500 puts it in the caller's error branch
+        # (bills/services/flask_billing_sync.py), which logs the body and still
+        # returns True, so nothing downstream changes shape.
+        return jsonify({"status": "failed", "reason": "exception"}), 500

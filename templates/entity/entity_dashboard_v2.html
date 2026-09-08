@@ -1254,7 +1254,10 @@
 
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data.status === 'error') {
-          throw new Error((data && data.message) || `HTTP ${response.status}`);
+          const err = new Error((data && data.message) || `HTTP ${response.status}`);
+          // Only a server-authored message is fit to show; a bare status is not.
+          err.fromServer = Boolean(data && data.message);
+          throw err;
         }
 
         if (data.status === 'warning' && data.message) {
@@ -1271,7 +1274,7 @@
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('error', 'Deposit correction failed', { message: error && error.message });
         }
-        showFlashErrorToast(error.message || 'An error occurred while processing your request. Please try again.');
+        showFlashErrorToast(window.mintyApiError(error, "I couldn't save that deposit correction. Mind trying again?"));
         restoreButton();
       }
     }
