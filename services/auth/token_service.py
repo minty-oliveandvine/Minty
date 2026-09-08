@@ -124,7 +124,9 @@ def token_expired(current_user, application=None, tz=None):
         return False
     except Exception as exc:
         _log(app, "error", f"Error checking token expiration: {str(exc)}")
-        return {"Token Expired": str(exc)}, 500
+        # Callers key on the tuple shape (see hooks.py / refresh flow), so keep
+        # it — but the exception text is already logged just above.
+        return {"Token Expired": "Could not check token expiry"}, 500
 
 
 def auto_refresh_token(current_user, application=None):

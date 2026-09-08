@@ -136,4 +136,12 @@ def client_logs():
         return jsonify({"status": "success"}), 200
     except Exception as e:
         logger.error("Failed to process client log: %s", str(e))
-        return jsonify({"status": "error"}), 500
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "I couldn't record that log entry.",
+                }
+            ),
+            500,
+        )

@@ -1611,13 +1611,15 @@
         if (response.status === 409) {
           return response.json().then(data => {
             hidePublishingOverlay();
-            showNotification(data.message || 'This report is already being published. Please wait...', 'error');
+            showNotification(window.mintyErrorCopy(data.message, 'That report is already being published. Give it a moment.'), 'error');
             return { handled: true };
           });
         }
         if (!response.ok && response.status !== 202) {
           return response.json().then(data => {
-            throw new Error(data.message || data.error || 'Publishing failed');
+            const err = new Error(data.message || data.error || 'Publishing failed');
+            err.fromServer = Boolean(data.message || data.error);
+            throw err;
           });
         }
         return response.json();
@@ -1643,7 +1645,7 @@
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('error', 'Publish/Republish error', { reportId, entityId, message: error && error.message });
         }
-        publishingFailed(error.message || 'Error publishing to Xero. Please try again.');
+        publishingFailed(window.mintyApiError(error, "I couldn't publish that report to Xero. Mind trying again?"));
       });
     }
 

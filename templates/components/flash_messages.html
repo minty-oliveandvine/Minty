@@ -79,6 +79,53 @@
       if (wrap) wrap.style.transform = 'translateX(calc(100% + 1.5rem))';
     }
 
+    // ---- Raw-error scrubber -------------------------------------------------
+    // There is no shared API client in this app: every call site does a bare
+    // fetch() with its own .catch(). That makes this the only chokepoint where a
+    // failure can be stopped from reaching the user as developer text. Anything
+    // matching a fingerprint below is swapped for the caller's fallback.
+    // See ERROR_MESSAGE_LEAKS.md for the copy standard.
+    var RAW_ERROR_PATTERNS = [
+      /failed to fetch/i, /networkerror/i, /load failed/i,
+      /unexpected token/i, /unexpected end of/i, /json\.parse/i,
+      /is not a function/i, /is not defined/i, /cannot read/i,
+      /^[\w\s]*error\s*[:!(]/i, /\bhttp\b\s*\d{3}/i, /status:?\s*\d{3}/i,
+      /\[object /i, /instead of json/i,
+      /network response was not ok/i, /request failed/i,
+      /non-json/i, /<html/i, /traceback/i, /sqlalchemy|psycopg/i
+    ];
+    var HOUSE_FALLBACK = "Something went wrong on my end. Mind trying again?";
+
+    function mintyErrorCopy(message, fallback) {
+      var safe = fallback || HOUSE_FALLBACK;
+      if (message == null) return safe;
+      // Validation payloads sometimes arrive as a list of strings.
+      if (Array.isArray(message)) {
+        message = message
+          .filter(function (x) { return typeof x === 'string' && x.trim(); })
+          .join('; ');
+      }
+      // Anything still not a string would render as "[object Object]".
+      if (typeof message !== 'string') return safe;
+      var text = message.trim();
+      // A very long string is a dumped body or stack, not written copy.
+      if (!text || text.length > 200) return safe;
+      for (var i = 0; i < RAW_ERROR_PATTERNS.length; i++) {
+        if (RAW_ERROR_PATTERNS[i].test(text)) return safe;
+      }
+      return text;
+    }
+
+    // The `fromServer` convention from templates/report/expense.html: only a
+    // message the server actually authored is fit to show. Anything reaching a
+    // .catch() without the flag is a JS/network/parse failure — never surface it.
+    function mintyApiError(error, fallback) {
+      if (error && error.fromServer && error.message) {
+        return mintyErrorCopy(error.message, fallback);
+      }
+      return fallback || HOUSE_FALLBACK;
+    }
+
     // durationMs: how long the toast stays before auto-hiding (default 4000).
     // Pass a larger value (or 0 to disable auto-hide) for messages the user must
     // not miss — e.g. the "disconnected from Xero" warning, which can otherwise
@@ -98,7 +145,11 @@
       title.style.color = tone.title;
       title.textContent = tone.label;
       msg.style.color = tone.sub;
-      msg.textContent = message;
+      // Error/warning copy is scrubbed; success/info is app-authored and
+      // passes through untouched.
+      msg.textContent = (type === 'error' || type === 'danger' || type === 'warning')
+        ? mintyErrorCopy(message)
+        : message;
       icon.src = tone.icon;
 
       positionToast();
@@ -123,6 +174,8 @@
     }
 
     // Canonical names.
+    window.mintyErrorCopy = window.mintyErrorCopy || mintyErrorCopy;
+    window.mintyApiError = window.mintyApiError || mintyApiError;
     window.showFlashMessages = window.showFlashMessages || showFlashMessages;
     window.hideFlashMessages = window.hideFlashMessages || hideFlashMessages;
 

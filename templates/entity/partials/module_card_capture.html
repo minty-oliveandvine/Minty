@@ -255,7 +255,8 @@
         redirect: 'if_required'
       }).then(function (result) {
         if (result.error) {
-          fail(result.error.message || 'That card could not be saved.');
+          fail(window.mintyErrorCopy(result.error && result.error.message,
+             "I couldn't save that card. Mind checking the details and trying again?"));
           saveBtn.disabled = false;
           return;
         }

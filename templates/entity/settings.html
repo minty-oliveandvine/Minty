@@ -687,7 +687,10 @@
     }
     
      // Function to show error toast
-     function showErrorToast(message = 'Please connect to Xero and set up Entity Settings') {
+     function showErrorToast(message = 'Something went wrong on my end. Mind trying again?') {
+       // Guard raw API/exception text: this toast drives its own DOM and
+       // never reaches showFlashMessages(). See components/flash_messages.html.
+       if (window.mintyErrorCopy) message = window.mintyErrorCopy(message);
        const notification = document.getElementById('settingsNotification');
        const errorToast = document.getElementById('errorToast');
        const successToast = document.getElementById('successToast');

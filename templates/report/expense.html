@@ -1408,8 +1408,9 @@
                   window.sendLogToDataDog('error', 'Submit all expenses - server returned HTML error page', { context: 'submit_all', total_files: total_files });
                 }
               } else {
-                // It's plain text, use it if it's not too long
-                errorMessage = errorText.length > 200 ? errorMessage : errorText;
+                // Plain text from the server, but only if it reads as written
+                // copy rather than a dumped body or stack.
+                errorMessage = window.mintyErrorCopy(errorText, errorMessage);
               }
             }
           } catch (parseError) {
@@ -1449,9 +1450,12 @@
         }
         
         // Show user-friendly error message
-        const userMessage = error.message && !error.message.includes('<html>') 
-          ? error.message 
-          : 'An error occurred while submitting expenses. Please try again.';
+        // A substring test for '<html>' misses 'Failed to fetch' and
+        // "Unexpected token '<'"; the shared scrubber catches both.
+        const userMessage = window.mintyErrorCopy(
+          error && error.message,
+          "I couldn't submit those expenses. Mind trying again?"
+        );
         showAddExpenseNotification(userMessage, 'error');
         throw error; // Re-throw to be caught by logFormSubmission
       }

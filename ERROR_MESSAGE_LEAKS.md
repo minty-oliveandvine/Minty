@@ -1,303 +1,221 @@
 # Error & warning message audit
 
-Audit of user-facing error/warning messaging across the app. Covers three
-classes of defect:
+How user-facing error copy works in this app, what was fixed, and what is left.
 
-1. **Raw exception text leaking to users** — `error.message` / `str(e)` shown verbatim
-2. **Misleading or inaccurate copy** — messages that state the wrong outcome or cause
-3. **Inconsistent tone & delivery** — blocking `alert()` vs toast, `'Error: '` prefixes
-
-Status: **audit only — nothing fixed yet.** Counts below supersede the earlier
-version of this document, which undercounted and contained a false claim (see
-"Corrections" at the bottom).
+**Status: the leak classes below are closed.** This document previously tracked
+an open backlog; that backlog has been worked. Keep it updated — an earlier
+version of this file sat stale for months and sent the next reader chasing
+issues that had already been fixed.
 
 ---
 
-## The fix pattern
+## The mechanism: one scrubber, because there is no API client
 
-`templates/report/expense.html` already establishes the right shape for the
-frontend — tag errors the server actually authored:
+There is **no shared API client** in this app. Every call site does a bare
+`fetch()` with its own hand-rolled `.then/.catch`, so there is no natural place
+to turn a failure into human copy.
 
-```js
-const serverError = new Error(errorData.message || 'Network response was not ok');
-serverError.fromServer = Boolean(errorData.message);
-throw serverError;
-```
-
-…and only show `error.message` when that flag is set:
+`templates/components/flash_messages.html` is therefore the chokepoint. It is
+included by 39 templates and installs two globals:
 
 ```js
-showFlashMessages(
-  error && error.fromServer && error.message
-    ? error.message
-    : "I couldn't add that contact. Mind trying again?",
-  'error'
-);
+window.mintyErrorCopy(message, fallback)   // scrub a string
+window.mintyApiError(error, fallback)      // scrub a caught Error
 ```
 
-Anything reaching `.catch()` **without** `fromServer` is a JS/parser failure and
-must not be surfaced verbatim.
+`mintyErrorCopy` replaces anything matching `RAW_ERROR_PATTERNS` (`Failed to
+fetch`, `Unexpected token '<'`, `HTTP 500`, `Server error (502): …`,
+`Traceback`, `[object Object]`, anything over 200 chars, non-strings) with the
+caller's fallback. It also joins string arrays and drops non-string members, so
+a validation payload can be passed straight in.
+
+`showFlashMessages` runs error and warning copy through it automatically.
+Success and info pass through untouched.
+
+### The `fromServer` convention
+
+`mintyApiError` only shows `error.message` when the error is tagged
+`fromServer` — i.e. the server actually authored the text:
+
+```js
+const err = new Error(data.error || 'Request failed');
+err.fromServer = Boolean(data.error);   // 'Request failed' is OURS, not the server's
+throw err;
+```
+
+Anything reaching a `.catch()` without that flag is a JS/network/parse failure
+and must never be surfaced. **When you add a `fetch()`, tag its throw.**
+
+### Four legacy toasts bypass all of this
+
+`showErrorToast` is redefined per-page in four files, each driving its own DOM
+(`#settingsNotification` / `#errorToast`) and never reaching
+`showFlashMessages`. A top-level `function showErrorToast` overwrites
+`window.showErrorToast` regardless of include order, so the page-local version
+always wins:
+
+- `templates/entity/settings.html`
+- `templates/entity/settings_entity.html`
+- `templates/entity/partials/electronic_delivery_scripts.html`
+- `templates/entity/settings_users_scripts.html`
+
+Each now calls `window.mintyErrorCopy(message)` on entry. **If you add a fifth,
+it must do the same.** Consolidating them onto `showFlashMessages` means
+removing the legacy DOM from those pages — deliberately not attempted.
 
 ---
+
+## The other repos
+
+This standard is shared across the product. Each repo has its own `ERROR_COPY.md`
+describing its mechanism; this file is the canonical statement of the standard
+itself.
+
+| Repo | Mechanism | Talks to |
+|---|---|---|
+| Minty (here) | `mintyErrorCopy` / `mintyApiError` in `templates/components/flash_messages.html` | itself |
+| billing-frontend | `normalizeApiErrorDetail` + `readsAsProse` in `lib/api.ts`; `lib/payerPortal.ts` | Django billing backend, and Minty |
+| onboarding | `friendlyError` / `errorCopy` in `lib/errorCopy.js` | Minty only |
+| billing-backend | `core/exceptions.py` handlers | serves billing-frontend |
+
+The cross-repo bug worth remembering: django-ninja answers a schema failure with
+`detail: [{type, loc, msg}, ...]`, and billing-frontend used to `JSON.stringify`
+that into a toast. Neither side was unreasonable alone. Both ends are guarded now.
 
 ## The copy standard
 
-Every replacement string in this document follows these rules. They are derived
-from the only three strings in the repo already written in the intended voice:
-
-```
-"I couldn't add that contact. Mind trying again?"      templates/report/expense.html:2684
-"I couldn't send that invitation. Mind trying again?"  templates/entity/settings_users_scripts.html:443
-"Who should I put down as the contact?"                showFlashMessages call site
-```
-
-**Rules**
-
-1. **Under two sentences.** One clause naming what failed, one short offer to
-   retry. Never a third.
-2. **First person, Minty speaking.** *"I couldn't …"* — not *"Error:"*, not
-   *"The system encountered"*, not *"Failed to"*.
-3. **Name the specific thing.** *"that invitation"*, *"that expense"* — never
-   *"the operation"* or *"your request"*.
-4. **Warm close, no blame.** *"Mind trying again?"* is the house default. Drop it
-   when retrying won't help (a validation error, a hard limit) and say what to do
-   instead.
-5. **No error codes, stack text, or jargon** in the visible string. That detail
-   goes to DataDog/logs, never the toast.
-6. **Sentence case, no `Error:` prefix, no exclamation marks** on failures.
-
-**Shape**
-
 > `I couldn't <do the specific thing>. <Short next step>?`
 
-Validation and limit messages skip the apology — they aren't Minty's fault and
-retrying unchanged won't fix them. State the requirement instead:
+1. Under two sentences. One clause naming what failed, one short offer to retry.
+2. First person, Minty speaking — not `Error:`, not `Failed to`.
+3. Name the specific thing — *"that invitation"*, not *"the operation"*.
+4. Warm close, no blame. Drop the apology when retrying won't help (validation,
+   a hard limit) and state the requirement instead: `Files need to be under 10MB.`
+5. No error codes or stack text in the visible string. That goes to the log.
+6. Sentence case, no `Error:` prefix, no exclamation marks on failures.
 
-> `Files need to be under 10MB.`
-> `Pick a start and end date first.`
+House fallback for unknown causes: `Something went wrong on my end. Mind trying again?`
+Defaults must be **cause-neutral** — `settings.html` used to default to
+"Please connect to Xero and set up Entity Settings", which lied for every caller
+that passed nothing.
 
 ---
 
-# Class 1 — Raw exception text leaking to users
+## Backend
 
-## 1a. Frontend — 22 sites
+### Content negotiation — `pettycash/core/hooks.py`
 
-### `templates/entity/settings_users_scripts.html` — 4 sites
-Highest priority: user-management screen, all four bare `'Error: ' + err.message`.
+Handlers exist for **500**, **CSRF**, and **`HTTPException`** (the last added in
+this pass). Before that, nothing handled 400/401/403/404/405, so `abort(404)`
+and every `@login_required` rejection returned Werkzeug's **HTML** page — which
+a `fetch()` then died on inside `response.json()` as `Unexpected token '<'`.
+That string was the app's most common unreadable toast, and it was produced
+here, not in the browser.
 
-| Line | Context | Suggested copy |
+`_wants_json()` is the shared negotiation helper. Two things to preserve:
+
+- The handler **must not** rewrite anything under 400. Werkzeug's trailing-slash
+  `RequestRedirect` is an `HTTPException` with code 308; returning JSON for it
+  breaks the redirect.
+- `handle_500_error` still special-cases the literal path
+  `/report/expense/submit_all`. Don't expand that pattern.
+
+### Response envelopes are inconsistent — still true
+
+Two competing shapes, split by blueprint, not by route:
+
+| Shape | Count | Where |
 |---|---|---|
-| 776 | update user | `I couldn't update that user. Mind trying again?` |
-| 822 | remove user | `I couldn't remove that user. Mind trying again?` |
-| 984 | cancel invitation | `I couldn't cancel that invitation. Mind trying again?` |
-| 1020 | resend invitation | `I couldn't resend that invitation. Mind trying again?` |
+| `{"status": "error", "message": …}` | ~235 | `report/`, `auth/`, `xero/`, `legal/`, the global handlers |
+| `{"error": …}` | ~131 | `entity/routes/create.py` (71), `entity/routes/settings.py` (33), `subscription/routes/portal.py` (13) |
 
-Lines 984 and 1020 log to DataDog on the line above — keep that, replace only the toast.
+`entity/routes/settings.py` uses **both** — `{"error": …}` for billing routes,
+`{"status": "error", "message": …}` for the Xero-contact routes below them. The
+frontend reads `data.message` at ~51 sites and `data.error` at ~17. Unifying
+these is worthwhile but was out of scope here.
 
-Line **437** in this file is also worth fixing while you're here:
-`showErrorToast(data.message || 'Unknown error.')` — the fallback `Unknown error.`
-is the opposite of the house voice. Use `I couldn't send that invitation. Mind trying again?`,
-matching line 443 four lines below it.
+There is **no machine-readable error code**. Four string codes exist
+(`session_expired`, `csrf_expired`, `terms_acceptance_required`,
+`version_changed`) and **no template or JS reads `.code`** — they are dead
+weight on the wire. Any future friendly-message mapping layer has nothing to map
+against; copy is authored at each raise site.
 
-### `templates/entity/settings.html` — 3 sites
-Lines **2757**, **3595**, **4724** — all `showErrorToast('Error creating contact: ' + error.message);`
+### Not leaks, despite appearances
 
-### `templates/entity/partials/xero_mapping_classic_script_fragment.html` — 3 sites
-Lines **1925**, **2763**, **3892** — identical to the above.
-
-All six: `I couldn't add that contact. Mind trying again?` — the exact string
-already live at `templates/report/expense.html:2684`.
-
-> These six create-contact handlers are the same duplicated block. Worth
-> collapsing into one shared function rather than fixing six times.
-
-### `templates/report/expense.html` — 6 sites
-| Line | Current | Suggested copy |
-|---|---|---|
-| 1571 | `'...unable to save your expense information: ' + error.message` | `I couldn't save that expense. Mind trying again?` |
-| 3302 | `alert('Error updating expense: ' + (data.message \|\| 'Unknown error'))` | `I couldn't update that expense. Mind trying again?` |
-| 3309 | `alert('Error updating expense. Please try again.')` | `I couldn't update that expense. Mind trying again?` |
-| 4000 | `alert('Error deleting expense: ' + (data.message \|\| 'Unknown error'))` | `I couldn't delete that expense. Mind trying again?` |
-| 4015 | `alert('Error deleting expense: ' + error.message)` | `I couldn't delete that expense. Mind trying again?` |
-| 4270 | `'...unable to save your expense information: ' + error.message` | `I couldn't save that expense. Mind trying again?` |
-
-All six also need `alert()` → toast (Class 3). This file already has the
-`fromServer` guard elsewhere — these were missed.
-
-The two CSRF alerts in the same file (**3265**, **3958**,
-`'Error: CSRF token not found. Please refresh the page.'`) are a different case:
-retrying won't help, so skip the apology and give the action —
-`Your session expired. Refresh the page to keep going.`
-
-### `templates/download_statements.html` — 1 site
-Line **157**: ``alert(`Error: ${error.message}`)``. Logs to DataDog above — keep that.
-Suggested: `I couldn't download those statements. Mind trying again?`
-
-Line **104** in the same file is a validation message, not a failure —
-`'Please select a start date and end date.'` → `Pick a start and end date first.`
-
-### `static/js/` — 3 sites
-`opening.js:179`, `expense.js:398`, `scripts.js:775` — all
-``alert(`Error: ${data.message || 'An unknown error occurred.'}`)``.
-Server-authored `data.message`, so lower risk, but blocking `alert()` and
-`'Error: '` prefix both need normalizing. Fallback copy, per file:
-`I couldn't save that opening entry. Mind trying again?` /
-`I couldn't add that expense. Mind trying again?` /
-`I couldn't save that. Mind trying again?`
-
-## 1b. Backend — 13 user-facing sites
-
-`str(e)` / `str(exc)` placed directly into a response body:
-
-| File | Line(s) |
-|---|---|
-| `blueprints/auth/routes/tokens.py` | 20, 35 |
-| `blueprints/entity/routes/billing_sync.py` | 66, 105, 149 |
-| `blueprints/entity/services/settings.py` | 1580 |
-| `blueprints/xero/routes/settings.py` | 72, 126 |
-| `blueprints/report/routes/submitted.py` | 369 |
-| `blueprints/report/routes/download.py` | 39 |
-| `blueprints/report/routes/history.py` | 53 |
-| `blueprints/report/routes/export_screenshot.py` | 443 |
-| `blueprints/report/services/report_detail.py` | 34 |
-| `blueprints/report/services/ending.py` | 165 |
-| `services/helpers/xero_bridge.py` | 194 |
-
-Fix: log the exception server-side, return a generic message in the body.
-
-Backend strings follow the same standard — these are rendered directly by
-clients that surface `message` to the user:
-
-| Context | Suggested copy |
-|---|---|
-| token refresh/exchange (`tokens.py`) | `I couldn't refresh your Xero connection. Mind reconnecting?` |
-| billing sync (`billing_sync.py`) | `I couldn't sync with Xero. Mind trying again?` |
-| entity settings save (`settings.py:1580`) | `I couldn't save those settings. Mind trying again?` |
-| Xero settings (`xero/routes/settings.py`) | `I couldn't save those Xero settings. Mind trying again?` |
-| report download/detail/export | `I couldn't open that report. Mind trying again?` |
-| report history (`history.py:53`) | `I couldn't load your report history. Mind trying again?` |
-| ending balance (`ending.py:165`) | `I couldn't save that closing balance. Mind trying again?` |
-| Xero API bridge (`xero_bridge.py:194`) | `I couldn't reach Xero just now. Mind trying again?` |
-
-**Not** in scope — these are logger calls, correctly keeping detail server-side:
-`services/auth/token_service.py` lines 84, 118, 134, 182, 226, 262.
+- `services/auth/token_service.py` — `token_expired()` returns a **tuple** on
+  failure as a sentinel. Both callers (`hooks.py`, the refresh flow) branch on
+  `isinstance(..., tuple)`. It never reaches a response body. Keep the shape.
+- `blueprints/subscription/routes/portal.py` — `_MissingField` text is authored
+  by `_required()` and names the field **on purpose**;
+  `test_payer_portal_api.py::test_initiating_a_handover_needs_an_entity`
+  asserts it. Do not genericise it.
+- `blueprints/xero/services/publish_errors.py` — the `<= 120` char passthrough
+  is deliberate: a real Xero validation sentence ("Account code 'X' is not a
+  valid code for this document") is exactly what the user needs to fix their
+  mapping. It is now gated on `_reads_as_prose()`, which rejects serialised
+  bodies, markup, stack text and bare GUIDs.
+- The six duplicated create-contact blocks in `settings.html` and
+  `xero_mapping_classic_script_fragment.html` throw jargon
+  (`'Network response was not ok'`, `'Server returned non-JSON response.'`) but
+  every one of their `.catch()` blocks shows fixed copy and never reads
+  `error.message`. The jargon feeds `sendLogToDataDog` — it is diagnostic value.
+  Leave it.
 
 ---
 
-# Class 2 — Misleading / inaccurate copy
+## Dead code found while doing this
 
-### Failures reported as successes — `blueprints/entity/routes/billing_sync.py`
-Lines **66**, **105**, **149** return **HTTP 200** with `{"skipped": true,
-"reason": "exception"}` after catching a real exception. A caught exception is a
-failure, not a skip — any client treating 200 as success will silently believe
-the sync worked.
+`static/js/expense.js`, `opening.js` and `login.js` had **zero** references
+anywhere and held 12 blocking `alert()` calls. Deleted.
 
-Two separate bugs on one line: wrong status semantics *and* a leaked `str(exc)`.
-Decide whether these should be 5xx, or a 200 with an explicit `"status":
-"failed"` the client actually checks.
+**`static/js/scripts.js` has never parsed.** Line 28 is a truncated string
+literal (`document.getElementById('noE`) and has been that way since the file
+was first committed in `42f73fa`. The whole file is a SyntaxError, so none of it
+runs — including `submitForm`, `handleDownloadStatements` and every
+`calculateTotal*`.
 
-### Wrong severity — `blueprints/report/routes/download.py:39`, `report_detail.py:34`, `export_screenshot.py:443`
-All return **404** from a generic `except Exception`. A crash is not "not
-found" — this misreports server faults as missing resources and will mislead
-anyone reading logs or metrics.
+It is loaded by `templates/index.html` and `templates/edit_report.html`, and
+**neither template is rendered by any route** — no `render_template("index.html")`
+or `("edit_report.html")` exists. That is why a permanently broken file never
+caused a visible problem: all three are orphaned legacy files.
 
-### Placeholder copy shipped to users — 14 sites
-`'This feature is currently in progress, Stay Tuned!'` (11 sites) and
-`'... would be implemented here'` (`templates/report/submitted.html:296`, `303`).
-Not errors, but user-facing dead ends. Confirm whether these should be hidden,
-disabled, or given real copy.
+**Do not "fix" line 28 in isolation.** Repairing it would activate ~800 lines of
+code that has never once run. Either delete all three files, or revive them
+deliberately with testing. The `alert()` calls inside `scripts.js` were
+converted to toasts for consistency, but nothing in that file executes today.
 
-### Misleading default toast — `templates/entity/settings.html:688`
-`function showErrorToast(message = 'Please connect to Xero and set up Entity Settings')`
-— any caller invoking `showErrorToast()` with no argument tells the user to
-connect Xero regardless of the real cause.
-
-Defaults must be cause-neutral, since they fire for unknown reasons. Use
-`Something went wrong on my end. Mind trying again?` for all four duplicate
-implementations' defaults (see Class 3), and let callers pass the specific string.
-Same applies to `settings_entity.html:2291` and
-`electronic_delivery_scripts.html:1544`, both defaulting to
-`'Error updating entity settings'`.
+Three unreachable stubs whose only body was a blocking `alert()` were removed:
+`saveAsImage()` / `generatePDF()` in `templates/report/submitted.html` (their
+buttons are commented out with `{# #}`) and `saveAndNext()` in
+`templates/report/cash_count.html` (no callers).
 
 ---
 
-# Class 3 — Inconsistent tone & delivery
+## Still open
 
-### Blocking `alert()` — ~45 sites
-The app has a toast system (`templates/components/flash_messages.html`,
-`showFlashMessages`), but ~45 call sites still use blocking `alert()`, including
-every error path in `templates/report/` (`deposit`, `cash_count`, `sales`,
-`opening`, `ending`, `expense`) and all of `static/js/`.
-
-Worst offender — `templates/report/cash_count.html:1218`:
-`alert('Saving data and proceeding to next step...')` — a blocking modal for a
-*progress* message. This shouldn't be a message at all; use the existing saving
-indicator.
-
-Recurring strings and their replacements:
-
-| Current (repeated across report/) | Suggested copy |
-|---|---|
-| `An error occurred while saving. Please try again.` (8 sites) | `I couldn't save that. Mind trying again?` |
-| `Please complete the current report before navigating away.` (4 sites) | `Finish this report first, then you can move on.` |
-| `File size must be less than 10MB` | `Files need to be under 10MB.` |
-| `Please upload PDF, JPEG, or PNG files only` | `I can take PDF, JPEG, or PNG files.` |
-| `Please fix the validation errors before submitting.` | `Some fields need a second look before I can save.` |
-| `Please fill in all required fields and ensure valid values.` | `A few required fields still need filling in.` |
-| `Could not find expense details` / `Could not find expense to edit.` | `I couldn't find that expense.` |
-| `Could not save modules. Please try again.` | `I couldn't save those modules. Mind trying again?` |
-| `At least one module should be active.` | `Keep at least one module active.` |
-| `You can only delete the latest submitted report. A newer report exists.` | `Only the newest report can be deleted.` |
-| `An error occurred while processing the connection. Please try again.` | `I couldn't finish connecting. Mind trying again?` |
-| `Form elements not found. Please refresh the page.` | `Something got out of sync. Refresh the page to keep going.` |
-
-Note the validation rows drop *"Please"* and the apology — they state the rule
-directly, per rule 4 of the copy standard.
-
-### Five duplicate toast implementations
-`showErrorToast` / `showSuccessToast` are redefined independently in:
-- `templates/entity/settings_users_scripts.html:304, 326`
-- `templates/entity/settings_entity.html:2291, 2320`
-- `templates/entity/settings.html:688, 718`
-- `templates/entity/partials/electronic_delivery_scripts.html:1544, 1579`
-
-…each with different default messages, alongside the shared
-`showFlashMessages` in `templates/components/flash_messages.html:86`.
-Consolidating these is a prerequisite for consistent tone — otherwise every copy
-fix has to be made four times.
-
-### `'Error: '` prefix
-~10 sites prefix user copy with `Error: `. The repo's established voice (per the
-`fromServer` examples) is conversational — *"I couldn't … Mind trying again?"*.
-
----
-
-# Corrections to the previous version of this doc
-
-- **The claim "Python/backend leaks are fixed (commit `ad9a952c`)" is false.**
-  That SHA does not exist in this repository (`git cat-file -t ad9a952c` →
-  *Not a valid object name*), and no commit in the log matches an
-  error-message/leak fix. **13 backend leaks are live.** Treat the old
-  "backend is done" status as unverified.
-- Frontend count was **12**, actually **22**.
-- Line numbers for `templates/entity/settings.html` had drifted:
-  2667/3505/4634 → now **2757/3595/4724**.
-- `blueprints/xero/routes/settings.py:72` was listed as a footnote; it is one of
-  13 equivalent backend sites, and line **126** in the same file was missed.
-
----
-
-## Suggested fix order
-
-1. Consolidate the five duplicate toast implementations (prerequisite — otherwise
-   every copy fix must be made four times)
-2. Backend `str(e)` leaks (security-adjacent)
-3. Frontend `error.message` leaks
-4. Misleading status codes (`billing_sync` 200s, the three 404s)
-5. Tone pass — `alert()` → toast, drop `'Error: '` prefixes
+- **`{"skipped": true}` semantics.** `blueprints/entity/routes/billing_sync.py`
+  now returns **500** when it catches an exception, instead of 200. The consumer
+  (`billing-backend/bills/services/flask_billing_sync.py`) logs any `>= 400` at
+  ERROR and still returns `True`, so nothing downstream changed shape — but the
+  other `{"skipped": true, "reason": …}` 200s in that file are genuine skips and
+  were left alone.
+- **Envelope unification** (`error` vs `status`/`message`) — see above.
+- **Placeholder copy.** `'This feature is currently in progress, Stay Tuned!'`
+  still ships at several sites. Not errors, but user-facing dead ends; decide
+  whether to hide, disable, or write real copy.
 
 ## How to verify a fix
 
-Force a non-JSON error response (make the endpoint 500, or point it at a URL
-returning HTML) and confirm the toast shows the friendly copy rather than
-`Unexpected token '<'`.
+1. `window.mintyErrorCopy('Failed to fetch')` in the console should return the
+   house fallback; a real sentence should pass through unchanged.
+2. Force a non-JSON error (point an endpoint at a URL returning HTML) and
+   confirm the toast reads friendly copy rather than `Unexpected token '<'`.
+3. `fetch()` a route behind `@login_required` while logged out with
+   `Accept: application/json` — assert a JSON body, not Werkzeug HTML.
+4. Sweep: this should return nothing.
+   ```
+   grep -rnE '(notifyError|showErrorToast|showFlashErrorToast|showNotification|publishingFailed|showToast)\((err|error)\.message' templates/
+   ```
+5. The suite is **not green at HEAD** (~90 non-passing). Diff a full run against
+   a full run and grep `ERROR` as well as `FAILED`; a single-file run tells you
+   nothing.
