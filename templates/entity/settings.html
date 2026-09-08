@@ -194,6 +194,8 @@
       <!-- Main Content Area -->
       <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1 overflow-hidden">
 
+        {% with view_only = not (can_edit_xero_settings | default(false)) %}{% include 'entity/partials/view_only_notice.html' %}{% endwith %}
+
         <!-- Xero integration card and form (read-only for Cashier / Shop Manager) -->
         <div id="xeroSettingsFormWrapper" class="{% if not can_edit_xero_settings %}settings-readonly{% endif %}" data-can-edit="{{ can_edit_xero_settings|lower }}">
         <form method="POST" action="{{ url_for('entity_settings', entity_id=org.id) }}" id="settingsForm" onsubmit="return handleFormSubmission(event)" {% if not can_edit_xero_settings %}data-readonly="true"{% endif %}>

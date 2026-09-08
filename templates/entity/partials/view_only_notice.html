@@ -1,0 +1,18 @@
+{# View-only banner for settings pages. Same design as the billing app's
+   (billing-frontend components/settings/AccountCodeSettings.tsx): grey strip,
+   Material Symbols "visibility" icon, one line of text.
+
+   The Module & Subscription section does this same job in prose
+   (module_subscription_section.html), but there the answer is one named person -
+   the payer - so it names them. Here the answer is a role, because any Accountant
+   or Admin on the entity can save these pages.
+
+   Expects ``view_only`` in context; include it inside {% with %} so each page can
+   name the permission that actually governs its Save button. #}
+{% if view_only %}
+<div role="status" aria-live="polite"
+     class="mb-6 flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-600">
+  <span class="material-symbols-outlined shrink-0 text-[18px] leading-none text-gray-400" aria-hidden="true">visibility</span>
+  <span>You have view-only access to these settings. Ask an Accountant or Admin to make changes.</span>
+</div>
+{% endif %}
