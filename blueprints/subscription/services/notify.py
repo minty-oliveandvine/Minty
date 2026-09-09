@@ -25,7 +25,7 @@ THREE RULES, all of them load-bearing:
    customer about a charge that then rolls back, and puts network latency inside a
    billing transaction.
 
-The copy for all nine events lives in ``_COPY`` below rather than in nine templates, so
+The copy for all eleven events lives in ``_COPY`` below rather than in eleven templates, so
 the entire customer-facing vocabulary of the billing system is reviewable on one screen —
 which matters more here than template purity, because these are the only words Minty ever
 says to a customer about their money.
@@ -43,48 +43,64 @@ point of keeping this vocabulary on one screen is that no such message escapes r
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import current_app, render_template
 from flask_mail import Message
 from loguru import logger
 
-from blueprints.subscription.services import display
+from blueprints.subscription.services import clock, display
 from blueprints.subscription.services.money import format_minor
 
 # --- Events -------------------------------------------------------------------
 # Stable strings: they are persisted as dedupe rows, so renaming one silently
 # re-sends every email of that kind to every customer who already had it.
 TRIAL_ENDING = "trial_ending"
-TRIAL_CONVERTED = "trial_converted"
 TRIAL_EXPIRED = "trial_expired"
 RENEWAL_PAID = "renewal_paid"
 RENEWAL_FAILED = "renewal_failed"
 DUNNING_RETRY_FAILED = "dunning_retry_failed"
 PAYMENT_RECOVERED = "payment_recovered"
-ACCOUNT_CLOSED = "account_closed"
-ACCESS_REVOKED = "access_revoked"
 # The handover family. ``requested`` is the one email in this module sent to a non-payer.
 SUBSCRIBER_TRANSFER_REQUESTED = "subscriber_transfer_requested"
 SUBSCRIBER_TRANSFER_ACCEPTED = "subscriber_transfer_accepted"
-SUBSCRIBER_TRANSFER_FAILED = "subscriber_transfer_failed"
+SUBSCRIBER_TRANSFER_DECLINED = "subscriber_transfer_declined"
+SUBSCRIBER_TRANSFER_EXPIRED = "subscriber_transfer_expired"
+
+# Retired 2026-09. The strings stay documented because historical ``subscription_email_log``
+# rows still carry them, and anyone reading a row for "trial_converted" needs to find out
+# here that it was deliberately stopped rather than assume the send is broken:
+#
+#   trial_converted            a converting trial is now silent; the first charge is
+#                              receipted by ``renewal_paid`` in the same daily pass
+#   account_closed             superseded, then access_revoked went too
+#   subscriber_transfer_failed the accepting user sees the decline in the browser
+#   access_revoked             nothing now announces a revocation at all -- see the
+#                              closing comment in access_sweep.sweep_expired_module_access
+#
+# Do NOT reuse these strings for a different meaning — a dedupe row written years ago
+# would suppress the new email for anyone who received the old one.
 
 EVENTS = (
     TRIAL_ENDING,
-    TRIAL_CONVERTED,
     TRIAL_EXPIRED,
     RENEWAL_PAID,
     RENEWAL_FAILED,
     DUNNING_RETRY_FAILED,
     PAYMENT_RECOVERED,
-    ACCOUNT_CLOSED,
-    ACCESS_REVOKED,
     SUBSCRIBER_TRANSFER_REQUESTED,
     SUBSCRIBER_TRANSFER_ACCEPTED,
-    SUBSCRIBER_TRANSFER_FAILED,
+    SUBSCRIBER_TRANSFER_DECLINED,
+    SUBSCRIBER_TRANSFER_EXPIRED,
 )
 
-TEMPLATE = "email/subscription_notice.html"
+# One template for everything except the receipt. ``renewal_paid`` is a document rather
+# than a notice — it has to itemise what was charged — and the redesigned notice template
+# is prose-only with nowhere to put a line-item table. Temporary: once the invoice-styled
+# mockup exists, that design absorbs the receipt and this mapping collapses back to one.
+NOTICE_TEMPLATE = "email/subscription_notice.html"
+RECEIPT_TEMPLATE = "email/subscription_receipt.html"
+TEMPLATES = {RENEWAL_PAID: RECEIPT_TEMPLATE}
 
 
 # --- Formatting helpers -------------------------------------------------------
@@ -180,6 +196,22 @@ def _warn_once_if_unreachable(value: str) -> None:
         )
 
 
+def billing_sender() -> str | None:
+    """The From address for billing mail.
+
+    Its own address rather than the account-wide ``BREVO_EMAIL``: an invitation comes from
+    a colleague, a dunning notice comes from the company about to switch your access off.
+    Recipients filter and search on the sender, so those should not share one.
+
+    Falls back to ``BREVO_EMAIL`` when unset. An environment that has not yet verified the
+    dedicated sender with the relay keeps sending rather than silently failing — an
+    unverified From is rejected or spam-filed, and ``notify`` swallows SMTP errors by
+    design, so the failure would be invisible.
+    """
+    return (current_app.config.get("SUBSCRIPTION_EMAIL")
+            or current_app.config.get("BREVO_EMAIL"))
+
+
 def settings_url(entity_id) -> str:
     """The Module & Subscription page for an entity — where every action actually is."""
     root = base_url()
@@ -188,7 +220,7 @@ def settings_url(entity_id) -> str:
     return f"{root}/entity/settings/module/{entity_id}"
 
 
-# --- Logo ---------------------------------------------------------------------
+# --- Inline images ------------------------------------------------------------
 # Embedded in the message rather than linked. A remote <img> in an email fails in two
 # ordinary situations, and both produce a broken-image box, which reads worse than no
 # logo at all:
@@ -205,40 +237,62 @@ def settings_url(entity_id) -> str:
 # a masthead that is broken by default.
 
 LOGO_CID = "minty-logo"
-LOGO_PATH = ("img", "logo_v2.png")
+#: Built by ``scripts/build_email_assets.py`` from ``static/img/new_logo.png``, not that
+#: file itself: the source is a padded 571x379 canvas weighing 98KB, and this one is
+#: attached to EVERY message the billing system sends. Trimmed and downsized it is ~19KB.
+LOGO_PATH = ("img", "email", "logo.png")
 
-_logo_cache: tuple[bytes | None] | None = None
+#: The hero illustration, one per event, resolved by event key. An event whose art has
+#: not been drawn yet simply resolves to nothing and the template omits the row — which
+#: is why a new event can ship before its illustration exists.
+ILLUSTRATION_CID = "minty-art"
 
 
-def logo_bytes() -> bytes | None:
-    """The logo file, read once per process. None if it cannot be read.
+def illustration_path(event: str) -> tuple[str, ...]:
+    """Where ``event``'s illustration lives under ``static/``.
+
+    Built by ``scripts/build_email_assets.py``, which trims and downsizes the source art;
+    the files here are ~10-40KB, not the ~1MB originals in ``static/img``.
+    """
+    return ("img", "email", f"{event}.png")
+
+
+_image_cache: dict[tuple[str, ...], bytes | None] = {}
+
+
+def image_bytes(*parts: str) -> bytes | None:
+    """An inline image file, read once per process. None if it cannot be read.
 
     Resolved from ``static_folder``, NOT ``root_path``. This app is constructed inside
     ``services/app_runtime/legacy``, so ``root_path`` is that package directory while the
-    static assets live at the repository root — joining onto ``root_path`` looks right
-    and silently finds nothing.
+    static assets live at the repository root — joining onto ``root_path`` looks right and
+    silently finds nothing.
 
     Cached either way — including the failure — so a missing asset costs one warning
     rather than a disk hit on every message of every nightly run.
     """
-    global _logo_cache
-    if _logo_cache is not None:
-        return _logo_cache[0]
+    if parts in _image_cache:
+        return _image_cache[parts]
 
     import os
 
-    path = os.path.join(current_app.static_folder or "", *LOGO_PATH)
+    path = os.path.join(current_app.static_folder or "", *parts)
     try:
         with open(path, "rb") as handle:
             data = handle.read()
     except Exception as exc:
         # Not an error: the email is entirely readable without it, and every word of it
         # still renders. Worth saying once so a lost asset does not go unnoticed forever.
-        logger.warning("notify: could not read email logo at {}: {}", path, exc)
+        logger.warning("notify: could not read email image at {}: {}", path, exc)
         data = None
 
-    _logo_cache = (data,)
+    _image_cache[parts] = data
     return data
+
+
+def logo_bytes() -> bytes | None:
+    """The masthead logo. Kept as its own name because every message attaches it."""
+    return image_bytes(*LOGO_PATH)
 
 
 # --- Copy ---------------------------------------------------------------------
@@ -248,95 +302,85 @@ def logo_bytes() -> bytes | None:
 # on file, and that difference is the entire value of the email.
 
 
+def _days_until(value) -> int | None:
+    """Whole days from today to ``value``, or None if it isn't a date.
+
+    Calendar days, not elapsed hours: a trial ending tomorrow afternoon is "1 day", not
+    "0 days" because it is 20 hours away. The heading is the first thing the customer
+    reads and it has to agree with how they would count it themselves.
+    """
+    if not isinstance(value, (datetime, date)):
+        return None
+    ends = value.date() if isinstance(value, datetime) else value
+    # ``clock.now``, not ``date.today``. Everything else in the billing engine dates
+    # itself from this clock, and the replay harness moves it — reading the process clock
+    # here would make a scenario run months in the past render "Trial Ending today" on a
+    # trial with three weeks left, and the email would disagree with the state that
+    # produced it.
+    return (ends - clock.now().date()).days
+
+
+def _in_days(count: int | None) -> str:
+    """``7`` -> ``'in 7 days'``. Degrades to a phrase that is true whatever the number is.
+
+    Never renders "in 0 days" or a negative: the warning job can run late, and a heading
+    reading "Trial Ending in -1 days" is the kind of thing customers screenshot.
+    """
+    if count is None:
+        return "soon"
+    if count <= 0:
+        return "today"
+    if count == 1:
+        return "in 1 day"
+    return f"in {count} days"
+
+
 def _trial_ending(ctx: dict) -> dict:
+    """The trial is about to lapse AND the customer has to do something about it.
+
+    Sent only when a card or billing consent is missing - a trial that will convert
+    cleanly is not mailed at all, because there is nothing to act on. That filter lives in
+    ``checkout.notify_trials_ending``; by the time it reaches here, action IS needed.
+
+    The two blocked states used to read differently. They no longer do:
+
+      no card:  "The free trial for {mods} on {entity} ends on {ends}. There's no payment
+                 method saved for this company yet, so access will stop on that date
+                 rather than continuing."
+                "Adding a card before then keeps everything running with no interruption
+                 - you won't be charged until the trial actually ends."
+      consent:  "The free trial for {mods} on {entity} ends on {ends}. Your saved card is
+                 shared with your other companies, so it won't be charged for this one
+                 until you confirm - and access will stop on that date instead."
+                "Confirming takes a moment and charges nothing today - the first payment
+                 is taken when the trial actually ends."
+      convert:  "The free trial for {mods} on {entity} ends on {ends}. Your saved card
+                 will be charged then and access continues without interruption - there's
+                 nothing you need to do."
+                "If you'd rather not continue, you can cancel any time before that date."
+
+    Kept because the consent wording named the one thing this email no longer explains:
+    WHY a card the customer can see on their own billing page will not be charged. That
+    explanation now lives only in the in-app banner (``notices.py``), which distinguishes
+    "add a payment method" from "confirm billing for this company". If a payer ever asks
+    why they were told to add a card they already have, this is the paragraph they needed.
+    """
     entity = ctx.get("entity_name") or "your company"
-    mods = modules_phrase(ctx.get("codes") or [])
     ends = day(ctx.get("trial_end"))
-    amount = ctx.get("amount")
-    currency = ctx.get("currency")
-    if ctx.get("needs_card"):
-        return {
-            "tone": "warn",
-            "subject": f"Action needed: {entity}'s free trial ends {ends}",
-            "heading": "Your free trial is ending",
-            "lede": (
-                f"The free trial for {mods} on {entity} ends on {ends}. There's no "
-                f"payment method saved for this company yet, so access will stop on "
-                f"that date rather than continuing."
-            ),
-            "facts": _trial_facts(entity, mods, ends, amount, currency),
-            "body": [
-                "Adding a card before then keeps everything running with no "
-                "interruption — you won't be charged until the trial actually ends."
-            ],
-            "cta_label": "Add a payment method",
-            "cta_url": settings_url(ctx.get("entity_id")),
-        }
-    if ctx.get("needs_consent"):
-        # A CARD IS SAVED and this trial will still lapse. Until this branch existed
-        # these payers got the no-card copy above — told to add a payment method they
-        # could see on their own billing page, while the actual reason went unnamed.
-        # The cause is not obvious and has to be spelled out: one card serves every
-        # company on the account, so each company is authorised separately.
-        return {
-            "tone": "warn",
-            "subject": f"Action needed: confirm billing for {entity} by {ends}",
-            "heading": "Confirm billing to keep your subscription",
-            "lede": (
-                f"The free trial for {mods} on {entity} ends on {ends}. Your saved card "
-                f"is shared with your other companies, so it won't be charged for this "
-                f"one until you confirm — and access will stop on that date instead."
-            ),
-            "facts": _trial_facts(entity, mods, ends, amount, currency),
-            "body": [
-                "Confirming takes a moment and charges nothing today — the first "
-                "payment is taken when the trial actually ends."
-            ],
-            "cta_label": "Confirm billing",
-            "cta_url": settings_url(ctx.get("entity_id")),
-        }
+    left = _days_until(ctx.get("trial_end"))
     return {
-        "tone": "neutral",
-        "subject": f"{entity}'s free trial ends {ends}",
-        "heading": "Your free trial ends soon",
-        "lede": (
-            f"The free trial for {mods} on {entity} ends on {ends}. Your saved card "
-            f"will be charged then and access continues without interruption — "
-            f"there's nothing you need to do."
-        ),
-        "facts": _trial_facts(entity, mods, ends, amount, currency),
-        "body": ["If you'd rather not continue, you can cancel any time before that date."],
-        "cta_label": "Review subscription",
-        "cta_url": settings_url(ctx.get("entity_id")),
-    }
-
-
-def _trial_facts(entity, mods, ends, amount, currency) -> list[tuple[str, str]]:
-    facts = [("Company", entity), ("Modules", mods), ("Trial ends", ends)]
-    if amount:
-        # The entity's monthly price after conversion — NOT "first charge". When a trial
-        # converts alongside a module the entity already pays for, the immediate charge
-        # is the marginal step up to the bundle, not the full line. Labelling the line
-        # price as the first charge would state a number the customer never sees on
-        # their card. The recurring figure is true in both cases.
-        facts.append(("Monthly after trial", money(amount, currency)))
-    return facts
-
-
-def _trial_converted(ctx: dict) -> dict:
-    entity = ctx.get("entity_name") or "your company"
-    mods = modules_phrase(ctx.get("codes") or [])
-    return {
-        "tone": "neutral",
-        "subject": f"{entity} is now on a paid Minty subscription",
-        "heading": "Your free trial has converted",
-        "lede": (
-            f"The free trial for {mods} on {entity} has ended and the subscription is "
-            f"now active. Your saved card has been charged."
-        ),
-        "facts": [("Company", entity), ("Modules", mods)],
-        "body": ["Nothing has changed about your access — this is just to confirm the switch."],
-        "cta_label": "View subscription",
+        # The subject echoes the heading. A payer with several companies loses the
+        # company name from their inbox list, which the amber line inside the email
+        # carries instead.
+        "subject": f"Your Minty trial ends {_in_days(left)}",
+        "heading": f"Trial Ending {_in_days(left)}",
+        "entity_name": entity,
+        "body": [
+            f"Your Minty trial will end {_in_days(left)}.",
+            f"To continue using your current modules after the trial ends, please "
+            f"choose a subscription plan before {ends}.",
+        ],
+        "cta_label": "Go to Manage Subscription",
         "cta_url": settings_url(ctx.get("entity_id")),
     }
 
@@ -345,25 +389,27 @@ def _trial_expired(ctx: dict) -> dict:
     entity = ctx.get("entity_name") or "your company"
     mods = modules_phrase(ctx.get("codes") or [])
     return {
-        "tone": "alert",
-        "subject": f"{entity}'s free trial has ended",
-        "heading": "Your free trial has ended",
-        "lede": (
-            f"The free trial for {mods} on {entity} has ended, and access has been "
-            f"switched off. This happens when there's no payment method saved for the "
-            f"company, or billing for it was never confirmed."
-        ),
-        "facts": [("Company", entity), ("Modules", mods)],
+        "subject": "Your trial has ended",
+        "heading": "Your trial has ended",
+        "entity_name": entity,
         "body": [
-            "Your data is untouched and waiting — subscribing restores access to "
-            "everything exactly as you left it."
+            f"The free trial for {mods} has ended, and access has been switched off.",
+            "Your data is safe and unchanged. Subscribing restores access to everything "
+            "exactly as you left it.",
         ],
-        "cta_label": "Subscribe",
+        "cta_label": "Go to Manage Subscription",
         "cta_url": settings_url(ctx.get("entity_id")),
     }
 
 
 def _renewal_paid(ctx: dict) -> dict:
+    """The receipt. The ONE email still rendering the pre-redesign template.
+
+    It is a document rather than a notice: the line items and the period are the point of
+    it, and the redesigned notice template is prose-only with nowhere to itemise. Keeps
+    ``tone``, ``facts`` and ``lines``, which every other builder has dropped - see
+    ``TEMPLATES``.
+    """
     total = money(ctx.get("total"), ctx.get("currency"))
     start, end = day(ctx.get("period_start")), day(ctx.get("period_end"))
     return {
@@ -379,134 +425,98 @@ def _renewal_paid(ctx: dict) -> dict:
     }
 
 
+def _payment_failed_body(deadline: str) -> list[str]:
+    """Shared body for the two payment-failure emails, which share a design and art.
+
+    Only the first line differs between them, so it is passed in rather than duplicated:
+    a first decline and a fourth are the same message with a different count in front.
+    """
+    body = [
+        "If you have resolved the issue with your payment method, you can retry the "
+        "payment at any time.",
+    ]
+    if deadline:
+        body.append(
+            f"Access to the affected entities will be suspended if the payment is not "
+            f"received by {deadline}."
+        )
+    else:
+        # No deadline in context. Still say suspension is coming - the sentence exists to
+        # convey that retries are finite, and dropping it entirely would leave the email
+        # reading as though nothing happens if it is ignored.
+        body.append(
+            "Access to the affected entities will be suspended if the payment is not "
+            "received."
+        )
+    return body
+
+
 def _renewal_failed(ctx: dict) -> dict:
-    total = money(ctx.get("total"), ctx.get("currency"))
     return {
-        "tone": "alert",
-        "subject": f"We couldn't take payment for Minty ({total})",
-        "heading": "Your payment didn't go through",
-        "lede": (
-            f"We tried to charge {total} for your Minty subscription and the payment "
-            f"was declined."
-        ),
-        "facts": [("Amount due", total)],
-        "body": [
-            "We'll try again automatically over the next few days. Updating your card "
-            "now — or paying immediately from your billing page — settles it straight "
-            "away and avoids any interruption to your access.",
-        ],
-        "cta_label": "Update payment method",
+        "subject": "We couldn't process your payment",
+        "heading": "We couldn't process your payment",
+        # No entity line: a card belongs to the payer and may cover several companies, so
+        # naming one of them would be arbitrary rather than merely redundant.
+        "body": ["We could not process your latest subscription payment."]
+        + _payment_failed_body(day(ctx.get("deadline"))),
+        "cta_label": "Go to Manage Subscription",
         "cta_url": base_url(),
     }
 
 
 def _dunning_retry_failed(ctx: dict) -> dict:
-    attempts = int(ctx.get("attempts") or 0) + 1
-    reason = (ctx.get("reason") or "").strip()
     return {
-        "tone": "alert",
-        "subject": "Your Minty payment failed again",
-        "heading": "We still can't take payment",
-        "lede": (
-            f"That's attempt {attempts} on the outstanding balance for your Minty "
-            f"subscription, and the card was declined again."
-        ),
-        "facts": [("Attempts", str(attempts))] + ([("Reason", reason)] if reason else []),
-        "body": [
-            "Retries don't continue indefinitely. If the balance isn't settled before "
-            "the deadline, access to your modules will be switched off.",
-        ],
-        "cta_label": "Update payment method",
+        "subject": "We couldn't process your payment",
+        "heading": "We couldn't process your payment",
+        "body": ["We still could not process your subscription payment."]
+        + _payment_failed_body(day(ctx.get("deadline"))),
+        "cta_label": "Go to Manage Subscription",
         "cta_url": base_url(),
     }
 
 
 def _payment_recovered(ctx: dict) -> dict:
     return {
-        "tone": "neutral",
-        "subject": "Payment received — your Minty subscription is active",
-        "heading": "You're all settled",
-        "lede": (
-            "Your outstanding balance has been paid and your Minty subscription is "
-            "active again. Full access has been restored."
-        ),
-        "facts": [],
-        "body": ["Thanks for sorting it out — no further action needed."],
-        "cta_label": "View subscription",
-        "cta_url": base_url(),
-    }
-
-
-def _account_closed(ctx: dict) -> dict:
-    return {
-        "tone": "alert",
-        "subject": "Your Minty subscription has been closed",
-        "heading": "Your subscription has been closed",
-        "lede": (
-            "We weren't able to collect payment for your Minty subscription after "
-            "several attempts, so it has now been closed and module access has stopped."
-        ),
-        "facts": [("Attempts made", str(ctx.get("attempts") or 0))],
+        "subject": "Thank you for your payment",
+        "heading": "Payment issue resolved",
         "body": [
-            "None of your data has been deleted. Subscribing again with a working "
-            "payment method restores access to everything.",
+            "Payment issue has been resolved.",
+            "We have successfully received your payment.",
         ],
-        "cta_label": "Reactivate",
+        "cta_label": "Go to Minty",
         "cta_url": base_url(),
-    }
-
-
-def _access_revoked(ctx: dict) -> dict:
-    entity = ctx.get("entity_name") or "your company"
-    mods = modules_phrase(ctx.get("codes") or [])
-    return {
-        "tone": "alert",
-        "subject": f"{mods} access for {entity} has been switched off",
-        "heading": "Module access has stopped",
-        "lede": (
-            f"Access to {mods} for {entity} has been switched off because the "
-            f"subscription is no longer active."
-        ),
-        "facts": [("Company", entity), ("Modules", mods)],
-        "body": [
-            "Your data is safe and unchanged. Restarting the subscription switches "
-            "everything back on immediately.",
-        ],
-        "cta_label": "Restart subscription",
-        "cta_url": settings_url(ctx.get("entity_id")),
     }
 
 
 def _subscriber_transfer_requested(ctx: dict) -> dict:
-    """Sent to the person being ASKED to take the bill on — not to the payer.
+    """Sent to the person being ASKED to take the bill on - not to the payer.
 
-    It names the amount and the date because accepting is a purchase, and a request to
-    take on a recurring cost with the figure withheld is not a request anyone can answer.
+    States NO amount. The figure used to be in the facts table this email had before the
+    redesign, and briefly survived as a sentence:
+
+        "Accepting charges {amount} today, covering the period already paid for up to
+         {billed_through}."
+
+    Removed by decision. Worth knowing what that costs, because the original reason was
+    not decorative: accepting is a purchase, so this asks someone to take on a recurring
+    charge without showing them the figure. The amount IS on the review screen the button
+    leads to — ``portal_url`` — which is now the only place it appears before they commit.
     """
     entity = ctx.get("entity_name") or "a company"
     who = ctx.get("from_name") or "The current subscriber"
-    amount = money(ctx.get("amount"), ctx.get("currency"))
+    body = [
+        f"{who} would like to transfer the subscription ownership of the above entity "
+        f"to you.",
+        "To complete the transfer, please review and accept the request in Minty.",
+        "If accepted, you will become responsible for managing the subscription and "
+        "future billing of this entity.",
+    ]
     return {
-        "tone": "info",
-        "subject": f"{who} would like you to take over billing for {entity}",
-        "heading": f"Take over the subscription for {entity}?",
-        "lede": (
-            f"{who} has asked you to become the subscriber for {entity}. If you accept, "
-            "its subscription moves to your billing account and future invoices come to you."
-        ),
-        "facts": [
-            ("Company", entity),
-            ("Requested by", who),
-            ("Charged when you accept", amount),
-            ("Covers from", day(ctx.get("billed_through"))),
-            ("Request expires", day(ctx.get("expires_at"))),
-        ],
-        "body": [
-            "The amount above covers the period the current subscriber has already paid "
-            "for up to — you are not charged for days they have covered.",
-            "Nothing changes until you accept.",
-        ],
-        "cta_label": "Review the request",
+        "subject": "Subscription transfer request received",
+        "heading": "Subscription transfer request received",
+        "entity_name": entity,
+        "body": body,
+        "cta_label": "Review Transfer Request",
         "cta_url": ctx.get("portal_url") or base_url(),
     }
 
@@ -514,66 +524,79 @@ def _subscriber_transfer_requested(ctx: dict) -> dict:
 def _subscriber_transfer_accepted(ctx: dict) -> dict:
     """Sent to the OUTGOING payer: their bill just got smaller and they should know why."""
     entity = ctx.get("entity_name") or "a company"
-    who = ctx.get("to_name") or "another admin"
+    who = ctx.get("to_name") or "Another admin"
     return {
-        "tone": "info",
-        "subject": f"{who} is now the subscriber for {entity}",
-        "heading": "The subscription has been handed over",
-        "lede": (
-            f"{who} has taken over the subscription for {entity}. You will not be billed "
-            "for it again."
-        ),
-        "facts": [("Company", entity), ("New subscriber", who)],
+        "subject": "Subscription transfer completed",
+        "heading": "Subscription transfer completed",
+        "entity_name": entity,
         "body": [
-            "Invoices you were already sent stay on your account — they are the record "
-            "of what you paid, so they do not move.",
+            f"{who} has accepted the subscription transfer request for the above entity.",
+            "The subscription has now been transferred successfully.",
+            "You will no longer be able to manage the subscription or billing "
+            "information for this entity.",
+            "Your final invoice will include subscription charges up to the transfer "
+            "date.",
         ],
-        "cta_label": "View your subscriptions",
+        "cta_label": "Go to Minty",
         "cta_url": ctx.get("portal_url") or base_url(),
     }
 
 
-def _subscriber_transfer_failed(ctx: dict) -> dict:
-    """Sent to the person who tried to accept, when the card did not go through.
+def _subscriber_transfer_declined(ctx: dict) -> dict:
+    """Sent to the outgoing payer when the recipient says no.
 
-    Says plainly that nothing moved. A failed handover that reads as ambiguous leaves two
-    people each assuming the other is being billed.
+    Until this existed, declining was silent: the status flipped and an audit row was
+    written, but the person who asked was never told, so a request that had actually been
+    answered looked identical to one nobody had opened yet.
     """
     entity = ctx.get("entity_name") or "a company"
+    who = ctx.get("to_name") or "The recipient"
     return {
-        "tone": "alert",
-        "subject": f"We couldn't complete the handover for {entity}",
-        "heading": "That payment didn't go through",
-        "lede": (
-            f"The payment to take over {entity} was declined, so the handover has not "
-            "happened and the current subscriber is still being billed."
-        ),
-        "facts": [
-            ("Company", entity),
-            ("Amount", money(ctx.get("amount"), ctx.get("currency"))),
-        ],
+        "subject": "Transfer request declined",
+        "heading": "Transfer request declined",
+        "entity_name": entity,
         "body": [
-            "Nothing has changed. Update your payment method and accept the request "
-            "again — it is still open.",
+            f"{who} declined the transfer request.",
+            "Your subscription remains unchanged.",
         ],
-        "cta_label": "Update payment method",
+        "cta_label": "Go to Manage Subscription",
+        "cta_url": ctx.get("portal_url") or base_url(),
+    }
+
+
+def _subscriber_transfer_expired(ctx: dict) -> dict:
+    """Sent to the payer who asked, when nobody ever answered.
+
+    Distinct from ``declined``: no one said no, the request simply ran out. The
+    distinction matters because the follow-up differs - a decline is an answer, an expiry
+    usually means the email was missed and re-sending is reasonable.
+    """
+    entity = ctx.get("entity_name") or "a company"
+    who = ctx.get("to_name") or "the recipient"
+    return {
+        "subject": "Transfer request expired",
+        "heading": "Transfer request expired",
+        "entity_name": entity,
+        "body": [
+            f"The transfer request expired before {who} responded.",
+            "No changes have been made to your subscription.",
+        ],
+        "cta_label": "Go to Manage Subscription",
         "cta_url": ctx.get("portal_url") or base_url(),
     }
 
 
 _COPY = {
     TRIAL_ENDING: _trial_ending,
-    TRIAL_CONVERTED: _trial_converted,
     TRIAL_EXPIRED: _trial_expired,
     RENEWAL_PAID: _renewal_paid,
     RENEWAL_FAILED: _renewal_failed,
     DUNNING_RETRY_FAILED: _dunning_retry_failed,
     PAYMENT_RECOVERED: _payment_recovered,
-    ACCOUNT_CLOSED: _account_closed,
-    ACCESS_REVOKED: _access_revoked,
     SUBSCRIBER_TRANSFER_REQUESTED: _subscriber_transfer_requested,
     SUBSCRIBER_TRANSFER_ACCEPTED: _subscriber_transfer_accepted,
-    SUBSCRIBER_TRANSFER_FAILED: _subscriber_transfer_failed,
+    SUBSCRIBER_TRANSFER_DECLINED: _subscriber_transfer_declined,
+    SUBSCRIBER_TRANSFER_EXPIRED: _subscriber_transfer_expired,
 }
 
 
@@ -704,18 +727,22 @@ def notify(user_id, event: str, *, dedupe_key: str, context: dict | None = None)
 
         content = builder(context or {})
         logo = logo_bytes()
+        # Resolved from the EVENT, not from anything the builder returns, so copy and art
+        # cannot drift apart and no builder has to know a filename.
+        art = image_bytes(*illustration_path(event))
         html = render_template(
-            TEMPLATE,
+            TEMPLATES.get(event, NOTICE_TEMPLATE),
             first_name=first_name,
             base_url=base_url(),
             # Only offered to the template when the bytes are actually going to be
             # attached, so the markup can never reference a part that isn't there.
             logo_src=f"cid:{LOGO_CID}" if logo else None,
+            illustration_src=f"cid:{ILLUSTRATION_CID}" if art else None,
             **content,
         )
         message = InlineImageMessage(
             subject=content["subject"],
-            sender=current_app.config.get("BREVO_EMAIL"),
+            sender=billing_sender(),
             recipients=[address],
             html=html,
         )
@@ -730,6 +757,15 @@ def notify(user_id, event: str, *, dedupe_key: str, context: dict | None = None)
                 # wrong is the usual reason an inline image silently fails to resolve.
                 headers={"Content-ID": f"<{LOGO_CID}>",
                          "X-Attachment-Id": LOGO_CID},
+            )
+        if art:
+            message.attach(
+                "illustration.png",
+                "image/png",
+                art,
+                "inline",
+                headers={"Content-ID": f"<{ILLUSTRATION_CID}>",
+                         "X-Attachment-Id": ILLUSTRATION_CID},
             )
         row.recipient = address
         try:

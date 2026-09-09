@@ -473,25 +473,14 @@ def set_entity_module(
 # The daily access reconciler moved to ``subscription.services.access_sweep`` -- it is
 # subscription work and every one of its callers lives there. Re-exported rather than
 # repointed: importers and the suite's monkeypatches both name THIS module, and the moved
-# code reads these two back off it at call time, so the patches still bite.
+# code reads it back off here at call time, so the patches still bite.
+#
+# ``_notify_access_revoked`` was exported alongside it until 2026-09. The revocation email
+# was retired, so both it and ``_entity_names_for_sweep`` -- which existed only to put a
+# company name in that email -- are gone rather than left as dead names for the next
+# reader to trace.
 from blueprints.subscription.services.access_sweep import (  # noqa: E402, F401
-    _notify_access_revoked, sweep_expired_module_access)
-
-
-def _entity_names_for_sweep(entity_ids) -> dict[str, str]:
-    """{entity_id: name} in one query. Empty on failure — a missing name costs the email
-    a company name; a raised exception would cost the sweep its run.
-    """
-    if not entity_ids:
-        return {}
-    try:
-        from models.db import Entity
-
-        rows = Entity.query.filter(Entity.id.in_([str(i) for i in entity_ids])).all()
-        return {str(e.id): (e.name or "").strip() for e in rows if (e.name or "").strip()}
-    except Exception:
-        logger.exception("modules: could not resolve entity names for notification")
-        return {}
+    sweep_expired_module_access)
 
 
 def _write_pairs(

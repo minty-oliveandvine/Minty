@@ -6,10 +6,10 @@ subscription work: it reads ``paid_through``, ``app_access_until`` and the phase
 is driven by ``daily.run_daily``, ``dunning`` and the transfer accept -- all of which live
 here.
 
-WHAT STAYED BEHIND, AND WHY IT MATTERS: ``entity.services.modules`` still exports both
-names, so every importer and every ``monkeypatch.setattr`` that names that module keeps
-working. The three entity-side dependencies -- ``_enabled_state``, ``set_entity_module``
-and ``_notify_access_revoked`` -- are reached through the MODULE OBJECT and read at call
+WHAT STAYED BEHIND, AND WHY IT MATTERS: ``entity.services.modules`` still exports
+``sweep_expired_module_access``, so every importer and every ``monkeypatch.setattr`` that
+names that module keeps working. The two entity-side dependencies -- ``_enabled_state``
+and ``set_entity_module`` -- are reached through the MODULE OBJECT and read at call
 time, not bound at import. That is deliberate and load-bearing: the suite patches those
 names on ``entity.services.modules``, and a ``from ... import`` here would capture the
 real ones at import and silently ignore the patch (see CODE_CLEANSE_NOTES.md, "dependency
@@ -20,7 +20,6 @@ this module importable from ``modules`` without a cycle.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -151,7 +150,7 @@ def sweep_expired_module_access(payer_user_id=None) -> dict:
                         entity_id, code, False, actor="subscription"
                     )
                     disabled.append(
-                        {"entity_id": entity_id, "code": code, "payer_user_id": payer_id}
+                        {"entity_id": entity_id, "code": code}
                     )
                     continue
                 if access.grants_access(
@@ -176,73 +175,27 @@ def sweep_expired_module_access(payer_user_id=None) -> dict:
                 # that transition (see checkout.terminate_lapsed_module).
                 checkout.terminate_lapsed_module(row)
                 disabled.append(
-                    {"entity_id": entity_id, "code": code, "payer_user_id": payer_id}
+                    {"entity_id": entity_id, "code": code}
                 )
         except Exception:
             logger.exception("modules: access sweep failed for entity {}", entity_id)
             continue
 
-    # After the whole sweep. A revocation the customer is not told about is how someone
-    # discovers their subscription lapsed by being bounced to an Access Denied page.
-    entity_modules._notify_access_revoked(disabled)
-    # ``payer_user_id`` is scaffolding for addressing the email, not part of what this
-    # reports. Dropped so the documented return shape is unchanged by notification
-    # having been bolted on.
-    for item in disabled:
-        item.pop("payer_user_id", None)
-    # Restorations are deliberately NOT mailed. The customer is told by the thing that
-    # caused them — the dunning "you're all settled" notice, the receipt for the payment
-    # that cleared the balance — and a second "your access is back" for the same event
-    # reads as a system talking to itself. A revocation has no such owner, which is why
-    # that one does send.
+    # THIS SWEEP MAILS NOTHING, in either direction.
+    #
+    # Restorations never did: the customer is told by the thing that caused them — the
+    # dunning "you're all settled" notice, the receipt for the payment that cleared the
+    # balance — and a second "your access is back" for the same event reads as a system
+    # talking to itself.
+    #
+    # Revocations used to, and no longer do (2026-09, by decision). Worth knowing what
+    # that means, because nothing else covers it: when this switches a module off, the
+    # customer is not told. The dunning notices warn that suspension is coming, so they
+    # are not unwarned — but nothing confirms it happened, and a lapse from plain
+    # cancellation is not announced at all. If "the customer discovered it by hitting an
+    # Access Denied page" ever comes back as a complaint, this is the line that explains
+    # why.
     return {"disabled": disabled, "restored": restored}
-
-
-def _notify_access_revoked(disabled: list[dict]) -> None:
-    """Tell each payer which modules were switched off. Never raises — see ``notify``.
-
-    One email per entity, listing every module it lost, rather than one per module: the
-    customer lost access to a company, not to two rows.
-
-    A trial that ended has ALREADY been mailed by ``convert_or_expire_due_trials``, which
-    revokes access itself — so by the time this sweep runs those modules are no longer
-    enabled and never reach this list. That ordering is what keeps the two jobs from
-    double-notifying, and is why ``close-trials`` is documented to run first.
-    """
-    if not disabled:
-        return
-    from blueprints.entity.services import modules as entity_modules
-    from blueprints.subscription.services import notify
-
-    now = datetime.now(timezone.utc)
-    by_entity: dict[str, dict] = {}
-    for item in disabled:
-        payer = item.get("payer_user_id")
-        if not payer:
-            # Nothing was ever subscribed for this entity, so there is no payer to tell.
-            continue
-        bucket = by_entity.setdefault(
-            str(item["entity_id"]), {"payer": payer, "codes": []}
-        )
-        bucket["codes"].append(item["code"])
-
-    names = entity_modules._entity_names_for_sweep(set(by_entity))
-    events = [
-        (
-            bucket["payer"],
-            notify.ACCESS_REVOKED,
-            # Date-stamped so an entity that resubscribes and lapses again months later
-            # is notified again rather than deduping against the first lapse.
-            f"{entity_id}:{','.join(sorted(bucket['codes']))}:{now:%Y-%m-%d}",
-            {
-                "entity_id": entity_id,
-                "entity_name": names.get(entity_id),
-                "codes": sorted(bucket["codes"]),
-            },
-        )
-        for entity_id, bucket in by_entity.items()
-    ]
-    notify.notify_many(events)
 
 
 def _sweep_scope(payer_user_id, sub_store):

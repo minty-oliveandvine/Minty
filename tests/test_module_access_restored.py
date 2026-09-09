@@ -103,7 +103,6 @@ def _sweep(app, monkeypatch, row, *, paid_through):
     monkeypatch.setattr("models.db.Entity", _FakeEntity)
     monkeypatch.setattr(modules_mod, "MODULE_CODES", ("PETTY_CASH",))
     monkeypatch.setattr(modules_mod, "_enabled_state", lambda eid: {"PETTY_CASH": False})
-    monkeypatch.setattr(modules_mod, "_notify_access_revoked", lambda disabled: None)
     monkeypatch.setattr(
         modules_mod,
         "set_entity_module",
@@ -200,7 +199,6 @@ def test_access_is_never_invented_without_a_subscription(app, monkeypatch):
     monkeypatch.setattr("models.db.Entity", _FakeEntity)
     monkeypatch.setattr(modules_mod, "MODULE_CODES", ("PETTY_CASH",))
     monkeypatch.setattr(modules_mod, "_enabled_state", lambda eid: {"PETTY_CASH": False})
-    monkeypatch.setattr(modules_mod, "_notify_access_revoked", lambda disabled: None)
     monkeypatch.setattr(
         modules_mod,
         "set_entity_module",
