@@ -396,9 +396,57 @@ def test_the_repair_step_does_nothing_when_nothing_is_stranded(db_session, monke
     _offer(db_session, transfers, status="pending")
 
     assert transfers.repair_stranded(NOW) == {
-        "completed": [], "released": [], "waiting": []
+        "completed": [], "released": [], "waiting": [], "expired": []
     }
     assert calls["flips"] == []
+
+
+def test_a_lapsed_request_is_retired_and_the_payer_who_asked_is_told(db_session,
+                                                                     monkeypatch):
+    """Expiry used to be LAZY: ``respond_to_transfer`` flipped a stale offer only when
+    somebody happened to touch it, so a request nobody ever opened sat ``pending`` for
+    ever and the person who sent it was never told it had run out.
+
+    The sweep is what gives that moment somewhere to happen.
+    """
+    transfers, _ = _wire(monkeypatch, db_session)
+    _offer(db_session, transfers, status="pending", expires=NOW - timedelta(days=1))
+    sent = []
+    monkeypatch.setattr(transfers, "_notify",
+                        lambda offer, kind: sent.append((offer.id, kind)))
+
+    from models.db import SubscriptionTransfer
+
+    assert transfers.repair_stranded(NOW)["expired"] == ["t1"]
+    assert sent == [("t1", "expired")]
+    assert db_session.session.get(SubscriptionTransfer, "t1").status == "expired"
+
+
+def test_a_request_still_inside_its_window_is_left_alone(db_session, monkeypatch):
+    """The sweep must not shorten the deadline it is enforcing."""
+    transfers, _ = _wire(monkeypatch, db_session)
+    _offer(db_session, transfers, status="pending")
+    sent = []
+    monkeypatch.setattr(transfers, "_notify", lambda offer, kind: sent.append(kind))
+
+    assert transfers.repair_stranded(NOW)["expired"] == []
+    assert sent == []
+
+
+def test_declining_tells_the_payer_who_asked(db_session, monkeypatch):
+    """Until this send existed, declining was silent to the sender: the status flipped and
+    an audit row was written, so a request that had actually been answered looked exactly
+    like one nobody had opened yet."""
+    transfers, _ = _wire(monkeypatch, db_session)
+    _offer(db_session, transfers, status="pending")
+    sent = []
+    monkeypatch.setattr(transfers, "_notify",
+                        lambda offer, kind: sent.append((offer.id, kind)))
+
+    ok, _message, _ = transfers.respond_to_transfer(NEW, "t1", accept=False)
+
+    assert ok
+    assert sent == [("t1", "declined")]
 
 
 def test_a_charging_row_the_processor_never_saw_is_released(db_session, monkeypatch):

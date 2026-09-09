@@ -463,10 +463,15 @@ def _notify_dunning(retried: list[dict], recovered: list[dict],
         events.append(
             (entry["user_id"], notify.PAYMENT_RECOVERED, entry["_episode"], entry)
         )
-    for entry in given_up:
-        events.append(
-            (entry["user_id"], notify.ACCOUNT_CLOSED, entry["_episode"], entry)
-        )
+    # ``given_up`` sends nothing, and NOTHING ELSE PICKS IT UP EITHER.
+    #
+    # The account-closed notice was retired first, on the grounds that the access sweep
+    # running immediately after this in the same pass (``daily.JOB_ORDER``) would mail
+    # ``access_revoked`` per entity and say it better. That one was then retired too, so
+    # the end of a dunning episode is now entirely silent: the customer's last word from
+    # us is the retry-failed notice warning that suspension is coming, and no email
+    # confirms it arrived. Deliberate — see the closing comment in
+    # ``access_sweep.sweep_expired_module_access``.
     notify.notify_many(events)
 
     # ``_episode`` is scaffolding for the dedupe key, not part of what ``collect_due``

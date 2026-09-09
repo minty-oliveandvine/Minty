@@ -20,6 +20,20 @@ SQLALCHEMY_RDS_DATABASE_URI = os.environ.get('RDS_DATABASE_URI')
 
 BREVO_EMAIL = os.environ.get('BREVO_EMAIL')
 
+# The From address for BILLING email only — trial warnings, receipts, dunning, handovers.
+# Everything else (OTP, password reset, invitations) keeps BREVO_EMAIL.
+#
+# Split because the two are different conversations: an invitation comes from a colleague
+# and a dunning notice comes from the company that is about to switch your access off.
+# Recipients filter and search on the sender, and a customer looking for "that email about
+# my payment" should not have to know it arrived from an address with `invite` in it.
+#
+# MUST be a verified sender in Brevo. An unverified From is either rejected outright by
+# the relay or delivered straight to spam, and the failure is silent from here — the send
+# is logged and swallowed like any other SMTP error. Falls back to BREVO_EMAIL when unset,
+# so an environment that has not added the sender yet keeps working.
+SUBSCRIPTION_EMAIL = os.environ.get('SUBSCRIPTION_EMAIL')
+
 # Public origin used to build links in outbound email — the same variable the
 # invitation email already reads (blueprints/invitation/services/invite.py), surfaced
 # through app.config so it can be overridden in tests.

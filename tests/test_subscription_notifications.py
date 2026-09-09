@@ -160,7 +160,7 @@ def test_a_send_that_failed_is_retried_on_the_next_run(app, db_session, mail):
 
         mail.fail = True
         assert notify.notify(
-            payer, notify.ACCOUNT_CLOSED, dedupe_key="ep-1", context={}
+            payer, notify.PAYMENT_RECOVERED, dedupe_key="ep-1", context={}
         ) is False
         row = SubscriptionEmailLog.query.filter_by(dedupe_key="ep-1").one()
         assert row.status == STATUS_FAILED
@@ -168,7 +168,7 @@ def test_a_send_that_failed_is_retried_on_the_next_run(app, db_session, mail):
 
         mail.fail = False
         assert notify.notify(
-            payer, notify.ACCOUNT_CLOSED, dedupe_key="ep-1", context={}
+            payer, notify.PAYMENT_RECOVERED, dedupe_key="ep-1", context={}
         ) is True
         assert len(mail.sent) == 1
         db_session.session.expire_all()
@@ -187,7 +187,7 @@ def test_one_claim_row_per_notification_not_one_per_attempt(app, db_session, mai
         payer = _make_payer(db_session)
         mail.fail = True
         for _ in range(3):
-            notify.notify(payer, notify.ACCOUNT_CLOSED, dedupe_key="ep-1", context={})
+            notify.notify(payer, notify.PAYMENT_RECOVERED, dedupe_key="ep-1", context={})
 
         assert SubscriptionEmailLog.query.filter_by(dedupe_key="ep-1").count() == 1
 
@@ -216,7 +216,7 @@ def test_no_mail_extension_configured_does_not_raise(app, db_session):
         original = app.extensions.pop("mail", None)
         try:
             assert notify.notify(
-                payer, notify.ACCOUNT_CLOSED, dedupe_key="k", context={}
+                payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={}
             ) is False
         finally:
             if original is not None:
@@ -236,7 +236,7 @@ def test_a_payer_with_no_email_address_is_skipped_without_claiming(app, db_sessi
         db_session.session.commit()
 
         assert notify.notify(
-            payer, notify.ACCOUNT_CLOSED, dedupe_key="k", context={}
+            payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={}
         ) is False
         assert SubscriptionEmailLog.query.filter_by(dedupe_key="k").count() == 0
 
@@ -292,10 +292,20 @@ def test_a_batch_drains_even_when_one_entry_is_broken(app, db_session, mail):
 # ---------------------------------------------------------------------------
 
 
-def test_a_trial_with_no_card_is_told_access_will_stop(app, db_session, mail):
+def test_a_trial_that_needs_action_says_what_to_do_and_by_when(app, db_session, mail,
+                                                              monkeypatch):
     """The single most valuable email in the system: it arrives while the customer can
-    still prevent the lapse."""
+    still prevent the lapse.
+
+    The clock is frozen rather than left to run. The heading and subject are a COUNTDOWN
+    now, so a fixed ``trial_end`` would quietly start rendering "ends today" the moment
+    the date passed, and the test would fail for a reason that has nothing to do with the
+    behaviour it is guarding.
+    """
     from blueprints.subscription.services import notify
+
+    frozen = datetime(2026, 9, 1, tzinfo=UTC)
+    monkeypatch.setattr(notify.clock, "now", lambda: frozen)
 
     with app.app_context():
         payer = _make_payer(db_session)
@@ -303,47 +313,86 @@ def test_a_trial_with_no_card_is_told_access_will_stop(app, db_session, mail):
             "entity_id": "e1",
             "entity_name": "Olive Ltd",
             "codes": ["PETTY_CASH"],
-            "trial_end": datetime(2026, 9, 1, tzinfo=UTC),
+            "trial_end": frozen + timedelta(days=7),
             "amount": 28000,
             "currency": "HKD",
             "needs_card": True,
         })
 
         message = mail.sent[0]
-        assert "Action needed" in message.subject
-        assert "Olive Ltd" in message.subject
-        assert "no payment method saved" in message.html
-        assert "Add a payment method" in message.html
-        assert "HKD 280.00" in message.html
+        # The subject echoes the heading rather than naming the company. That makes the
+        # company name in the BODY load-bearing, not decorative: a payer with several
+        # companies cannot act on "your trial" without it.
+        assert message.subject == "Your Minty trial ends in 7 days"
+        assert "Trial Ending in 7 days" in message.html
+        assert "Olive Ltd" in message.html
+        assert "choose a subscription plan" in message.html
+        assert "8 Sep 2026" in message.html
+        assert "Go to Manage Subscription" in message.html
         assert "https://app.minty.test/entity/settings/module/e1" in message.html
 
 
-def test_a_trial_that_will_convert_is_reassuring_not_alarming(app, db_session, mail):
-    """Same event, opposite message. Warning a customer whose card is saved and whose
-    billing is confirmed would train them to ignore the one that matters."""
+def test_the_trial_countdown_never_reads_as_a_negative(app, db_session, mail,
+                                                       monkeypatch):
+    """The warning job can run late. "Trial Ending in -1 days" is the kind of thing
+    customers screenshot, so the countdown degrades to a phrase that stays true."""
     from blueprints.subscription.services import notify
+
+    frozen = datetime(2026, 9, 1, tzinfo=UTC)
+    monkeypatch.setattr(notify.clock, "now", lambda: frozen)
 
     with app.app_context():
         payer = _make_payer(db_session)
-        notify.notify(payer, notify.TRIAL_ENDING, dedupe_key="k", context={
-            "entity_id": "e1",
-            "entity_name": "Olive Ltd",
-            "codes": ["PETTY_CASH", "BILL"],
-            "trial_end": datetime(2026, 9, 1, tzinfo=UTC),
-            "needs_card": False,
-        })
-
-        message = mail.sent[0]
-        assert "Action needed" not in message.subject
-        assert "nothing you need to do" in message.html
-        # Both modules named, and named the way the UI names them.
-        assert "Petty Cash and Payment Request" in message.html
+        for key, offset, expected in (("past", -3, "today"),
+                                      ("same", 0, "today"),
+                                      ("one", 1, "in 1 day")):
+            notify.notify(payer, notify.TRIAL_ENDING, dedupe_key=key, context={
+                "entity_id": "e1", "entity_name": "Olive Ltd", "codes": ["BILL"],
+                "trial_end": frozen + timedelta(days=offset), "needs_card": True,
+            })
+            assert mail.sent[-1].subject == f"Your Minty trial ends {expected}"
 
 
-def test_the_trial_price_is_labelled_monthly_not_first_charge(app, db_session, mail):
-    """A converting trial on an entity that already pays for a sibling module is charged
-    the marginal step up to the bundle, not the full line. The recurring figure is the
-    one that is true either way."""
+def test_the_two_blocked_trial_states_now_read_identically(app, db_session, mail):
+    """``needs_card`` and ``needs_consent`` used to produce different wording. They no
+    longer do — one "action needed" body covers both, and the in-app banner is what still
+    distinguishes "add a payment method" from "confirm billing for this company".
+
+    Asserted rather than assumed, because the merge is easy to half-undo: re-adding a
+    branch here would resurrect the bug where a consent-blocked payer was told to add a
+    card they could already see on their own billing page.
+    """
+    from blueprints.subscription.services import notify
+
+    base = {
+        "entity_id": "e1",
+        "entity_name": "Olive Ltd",
+        "codes": ["PETTY_CASH"],
+        "trial_end": datetime(2026, 9, 1, tzinfo=UTC),
+    }
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        notify.notify(payer, notify.TRIAL_ENDING, dedupe_key="no-card",
+                      context={**base, "needs_card": True, "needs_consent": False})
+        notify.notify(payer, notify.TRIAL_ENDING, dedupe_key="consent",
+                      context={**base, "needs_card": False, "needs_consent": True})
+
+        no_card, consent = mail.sent[0], mail.sent[1]
+        assert no_card.subject == consent.subject
+        assert no_card.html == consent.html
+
+
+def test_the_trial_email_states_no_price(app, db_session, mail):
+    """Deliberate, and worth pinning so nobody helpfully adds one back.
+
+    A converting trial on an entity that already pays for a sibling module is charged the
+    marginal step up to the bundle, NOT the full line price. The old email printed the
+    line price under "Monthly after trial" precisely because labelling it "First charge"
+    would have stated a number the customer never sees on their card. The redesign drops
+    the figure entirely, which is safe — but re-adding it without that context is how it
+    comes back labelled wrongly.
+    """
     from blueprints.subscription.services import notify
 
     with app.app_context():
@@ -351,12 +400,13 @@ def test_the_trial_price_is_labelled_monthly_not_first_charge(app, db_session, m
         notify.notify(payer, notify.TRIAL_ENDING, dedupe_key="k", context={
             "entity_id": "e1", "entity_name": "Olive Ltd", "codes": ["BILL"],
             "trial_end": datetime(2026, 9, 1, tzinfo=UTC),
-            "amount": 40000, "currency": "HKD", "needs_card": False,
+            "amount": 40000, "currency": "HKD", "needs_card": True,
         })
 
         html = mail.sent[0].html
-        assert "Monthly after trial" in html
+        assert "400.00" not in html
         assert "First charge" not in html
+        assert "Monthly after trial" not in html
 
 
 def test_a_receipt_states_the_amount_and_the_period(app, db_session, mail):
@@ -387,55 +437,61 @@ def test_links_are_dropped_rather_than_pointed_at_localhost(app, db_session, mai
     with app.app_context():
         payer = _make_payer(db_session)
         app.config["PUBLIC_URL"] = None
-        notify.notify(payer, notify.ACCESS_REVOKED, dedupe_key="k", context={
+        notify.notify(payer, notify.TRIAL_EXPIRED, dedupe_key="k", context={
             "entity_id": "e1", "entity_name": "Olive Ltd", "codes": ["BILL"],
         })
 
         html = mail.sent[0].html
         assert "localhost" not in html
-        assert "Restart subscription" not in html
+        assert "Go to Manage Subscription" not in html
         # The words still carry the message without the button.
         assert "switched off" in html
 
 
-def test_the_logo_travels_with_the_message_not_over_http(app, db_session, mail):
+def test_the_images_travel_with_the_message_not_over_http(app, db_session, mail):
     """A remote <img> is a broken grey box whenever the client blocks images — which
     Gmail and Outlook both do by default — or whenever PUBLIC_URL isn't publicly
     reachable. The first live send went out with a logo pointing at localhost:5001.
 
-    Attached, it renders offline, behind image blocking, and whatever PUBLIC_URL says.
+    Attached, they render offline, behind image blocking, and whatever PUBLIC_URL says.
+    Both parts get the same treatment: the masthead logo and the event's illustration.
     """
     from blueprints.subscription.services import notify
 
     with app.app_context():
         payer = _make_payer(db_session)
-        notify._logo_cache = None
+        notify._image_cache.clear()
         notify.notify(payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={})
 
         message = mail.sent[0]
         assert f'src="cid:{notify.LOGO_CID}"' in message.html
-        # Nothing is fetched over the wire to render the masthead.
-        assert "/static/img/logo_v2.png" not in message.html
+        assert f'src="cid:{notify.ILLUSTRATION_CID}"' in message.html
+        # Nothing is fetched over the wire to render either image.
+        assert "/static/img/" not in message.html
 
-        assert len(message.attachments) == 1
-        logo = message.attachments[0]
-        assert logo.content_type == "image/png"
-        assert logo.disposition == "inline"
-        assert logo.data[:8] == b"\x89PNG\r\n\x1a\n"
-        # Angle brackets in the header, none in the src — mismatching the pair is the
-        # usual reason an inline image silently fails to resolve.
-        assert logo.headers["Content-ID"] == f"<{notify.LOGO_CID}>"
+        assert len(message.attachments) == 2
+        for part, cid in zip(message.attachments,
+                             (notify.LOGO_CID, notify.ILLUSTRATION_CID)):
+            assert part.content_type == "image/png"
+            assert part.disposition == "inline"
+            assert part.data[:8] == b"\x89PNG\r\n\x1a\n"
+            # Angle brackets in the header, none in the src — mismatching the pair is the
+            # usual reason an inline image silently fails to resolve.
+            assert part.headers["Content-ID"] == f"<{cid}>"
 
 
-def test_a_missing_logo_drops_the_image_rather_than_dangling(app, db_session, mail,
-                                                             monkeypatch):
+def test_a_missing_image_drops_it_rather_than_dangling(app, db_session, mail,
+                                                       monkeypatch):
     """No bytes means no <img> — never a reference to a part that isn't attached, which
-    renders as the same broken box the attachment exists to avoid."""
+    renders as the same broken box the attachment exists to avoid.
+
+    This is also what lets an event ship before its illustration has been drawn.
+    """
     from blueprints.subscription.services import notify
 
     with app.app_context():
         payer = _make_payer(db_session)
-        monkeypatch.setattr(notify, "_logo_cache", (None,))
+        monkeypatch.setattr(notify, "image_bytes", lambda *parts: None)
         notify.notify(payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={})
 
         message = mail.sent[0]
@@ -443,7 +499,62 @@ def test_a_missing_logo_drops_the_image_rather_than_dangling(app, db_session, ma
         assert "<img" not in message.html
         assert message.attachments == []
         # The email still says everything it needs to.
-        assert "active again" in message.html
+        assert "successfully received your payment" in message.html
+
+
+def test_an_event_with_no_illustration_still_sends(app, db_session, mail, monkeypatch):
+    """The logo is present, the event's art is not. Half-dressed has to work, because
+    three events are shipping ahead of their illustrations."""
+    from blueprints.subscription.services import notify
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        real = notify.image_bytes
+        # Matched on the exact path, not on a substring: the logo now lives under
+        # ``img/email/`` too, so anything looser suppresses both and tests nothing.
+        art_path = notify.illustration_path(notify.PAYMENT_RECOVERED)
+        monkeypatch.setattr(
+            notify, "image_bytes",
+            lambda *parts: None if parts == art_path else real(*parts),
+        )
+        notify.notify(payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={})
+
+        message = mail.sent[0]
+        assert f"cid:{notify.LOGO_CID}" in message.html
+        assert notify.ILLUSTRATION_CID not in message.html
+        assert len(message.attachments) == 1
+
+
+def test_billing_mail_comes_from_its_own_address(app, db_session, mail):
+    """Billing does not share a From with invitations and sign-in codes.
+
+    An invitation comes from a colleague; a dunning notice comes from the company about to
+    switch your access off. Recipients filter and search on the sender, so a customer
+    hunting for "that email about my payment" should not have to know it arrived from an
+    address with `invite` in it.
+    """
+    from blueprints.subscription.services import notify
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        app.config["SUBSCRIPTION_EMAIL"] = "subscription@minty.test"
+        notify.notify(payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={})
+
+        assert mail.sent[0].sender == "subscription@minty.test"
+
+
+def test_billing_mail_falls_back_to_the_shared_address(app, db_session, mail):
+    """An environment that has not yet verified the dedicated sender with the relay keeps
+    sending. An unverified From is rejected or spam-filed and ``notify`` swallows SMTP
+    errors by design, so failing over to the working address beats failing invisibly."""
+    from blueprints.subscription.services import notify
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        app.config["SUBSCRIPTION_EMAIL"] = None
+        notify.notify(payer, notify.PAYMENT_RECOVERED, dedupe_key="k", context={})
+
+        assert mail.sent[0].sender == app.config["BREVO_EMAIL"]
 
 
 def test_an_inline_logo_makes_the_message_related_not_mixed(app):
@@ -576,32 +687,29 @@ def test_dunning_scaffolding_does_not_leak_into_the_reported_result():
     assert entries[0] == {"user_id": "u1", "attempts": 0}
 
 
-def test_a_lapsed_entity_gets_one_email_for_all_its_modules(app, db_session, mail):
-    """The customer lost access to a company, not to two rows."""
-    from blueprints.entity.services import modules
+def test_the_retired_events_stay_retired(app):
+    """Five emails were deliberately switched off. Each removal has a consequence that is
+    invisible from the call site, so re-adding one should be a decision, not a reflex:
 
-    with app.app_context():
-        payer = _make_payer(db_session)
-        modules._notify_access_revoked([
-            {"entity_id": "e1", "code": "PETTY_CASH", "payer_user_id": payer},
-            {"entity_id": "e1", "code": "BILL", "payer_user_id": payer},
-        ])
+      trial_converted            a converting trial is silent; the first charge is
+                                 receipted by ``renewal_paid`` in the same daily pass
+      trial_ending/will-convert  a cleanly converting trial gets no advance warning at all
+      account_closed             superseded, then the thing meant to supersede it went too
+      subscriber_transfer_failed the accepting user sees the decline in the browser
+      access_revoked             NOTHING now announces a revocation -- a dunning give-up
+                                 ends in silence, and a cancellation is never confirmed
 
-        assert len(mail.sent) == 1
-        # Codes are sorted for a stable dedupe key, so the prose follows that order.
-        assert "Payment Request and Petty Cash" in mail.sent[0].html
+    The strings themselves must never be reused for a different meaning either: a dedupe
+    row written years ago would suppress the new email for anyone who received the old.
+    """
+    from blueprints.subscription.services import notify
 
-
-def test_a_revoked_module_with_no_payer_notifies_nobody(app, db_session, mail):
-    """Switched on with nothing behind it — nobody ever subscribed, so there is no payer
-    to tell. The sweep still revokes it."""
-    from blueprints.entity.services import modules
-
-    with app.app_context():
-        modules._notify_access_revoked(
-            [{"entity_id": "e1", "code": "BILL", "payer_user_id": None}]
-        )
-        assert mail.sent == []
+    retired = ("trial_converted", "account_closed", "subscriber_transfer_failed",
+               "access_revoked")
+    assert [e for e in retired if e in notify._COPY] == []
+    assert [e for e in retired if e in notify.EVENTS] == []
+    # The live set, stated once so a silent addition shows up here.
+    assert len(notify._COPY) == 10
 
 
 def test_renewal_receipts_are_deduped_on_the_billing_period(app, db_session, mail):
@@ -688,6 +796,75 @@ def test_the_warning_window_is_day_aligned_not_run_time_aligned(
             checkout.clock, "now", lambda: datetime(2026, 8, 17, 8, 10, tzinfo=UTC)
         )
         result = checkout.notify_trials_ending(days_before=3)
+
+        assert [w["entity_id"] for w in result["warned"]] == ["e1"]
+
+
+def test_a_trial_that_will_convert_cleanly_is_not_warned_at_all(app, db_session,
+                                                                monkeypatch):
+    """The filter moved from the COPY to the SEND.
+
+    This email used to go to every trial in the window and pick one of three wordings,
+    one of which amounted to "your trial ends soon, do nothing". That trains people to
+    skim past the one trial email that does need acting on, so a trial with a card saved
+    and this company authorised is now not mailed at all — its first word about the
+    charge is the receipt.
+    """
+    from blueprints.subscription.services import checkout
+    from models.db import EntityModuleSubscription
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        db_session.session.add(EntityModuleSubscription(
+            id=str(uuid.uuid4()),
+            entity_id="e1",
+            function_code="BILL",
+            payer_user_id=payer,
+            phase="trial",
+            trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
+        ))
+        db_session.session.commit()
+
+        monkeypatch.setattr(checkout, "_trial_has_card", lambda uid: True)
+        monkeypatch.setattr(checkout.store, "has_billing_consent",
+                            lambda eid, uid: True)
+        monkeypatch.setattr(
+            checkout.clock, "now", lambda: datetime(2026, 8, 17, 8, 10, tzinfo=UTC)
+        )
+
+        result = checkout.notify_trials_ending(days_before=7)
+
+        assert result["warned"] == []
+        assert [s["reason"] for s in result["skipped"]] == ["will_convert"]
+
+
+def test_a_trial_blocked_only_on_consent_is_still_warned(app, db_session, monkeypatch):
+    """A card IS saved; this company just was not authorised for it. That trial lapses
+    exactly as hard as one with no card at all, so it must still be warned — the send
+    gates on ``needs_card OR needs_consent``, not on the card alone."""
+    from blueprints.subscription.services import checkout
+    from models.db import EntityModuleSubscription
+
+    with app.app_context():
+        payer = _make_payer(db_session)
+        db_session.session.add(EntityModuleSubscription(
+            id=str(uuid.uuid4()),
+            entity_id="e1",
+            function_code="BILL",
+            payer_user_id=payer,
+            phase="trial",
+            trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
+        ))
+        db_session.session.commit()
+
+        monkeypatch.setattr(checkout, "_trial_has_card", lambda uid: True)
+        monkeypatch.setattr(checkout.store, "has_billing_consent",
+                            lambda eid, uid: False)
+        monkeypatch.setattr(
+            checkout.clock, "now", lambda: datetime(2026, 8, 17, 8, 10, tzinfo=UTC)
+        )
+
+        result = checkout.notify_trials_ending(days_before=7)
 
         assert [w["entity_id"] for w in result["warned"]] == ["e1"]
 

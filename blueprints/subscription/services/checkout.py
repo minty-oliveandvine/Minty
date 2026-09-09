@@ -1015,8 +1015,12 @@ def _notify_trial_outcomes(converted: list[dict], expired: list[dict],
     names = _entity_names_for_notice(set(payers))
 
     events = []
-    for event, outcome in ((notify.TRIAL_CONVERTED, converted),
-                           (notify.TRIAL_EXPIRED, expired)):
+    # Only the expired half is mailed. A trial that CONVERTED is announced by the receipt
+    # ``run_renewals`` sends for the first charge later in this same daily pass — see
+    # ``daily.JOB_ORDER``, where close-trials deliberately runs before run-renewals — so a
+    # separate "your trial converted" note arrived minutes before the receipt for the very
+    # same event and said less.
+    for event, outcome in ((notify.TRIAL_EXPIRED, expired),):
         by_id: dict[str, list[str]] = {}
         for item in outcome:
             by_id.setdefault(item["entity_id"], []).append(item["code"])
@@ -1058,7 +1062,7 @@ def _entity_names_for_notice(entity_ids) -> dict[str, str]:
         return {}
 
 
-def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict:
+def notify_trials_ending(days_before: int = 7, limit: int | None = None) -> dict:
     """Warn payers about trials that end in ``days_before`` days.
 
     THE ONLY NOTIFICATION IN THE SYSTEM THAT CAN PREVENT A LAPSE. Everything else in this
@@ -1144,14 +1148,22 @@ def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict
                 "trial_end": min(row.trial_end for row in rows),
                 "amount": amount,
                 "currency": currency,
-                # TWO reasons a trial will not convert, and the email has to be able
-                # to tell them apart. ``_trial_will_convert`` collapses them into one
-                # boolean, which made the no-card copy fire at payers who HAVE a card
-                # and were only missing this company's consent — telling them to add a
-                # card they already had, while the real fix went unnamed.
+                # TWO reasons a trial will not convert. The email no longer words
+                # them differently — one "action needed" body covers both, and the
+                # in-app banner (``notices.py``) is what still distinguishes "add a
+                # payment method" from "confirm billing for this company". Both flags
+                # stay because the SEND now gates on them: either one means the trial
+                # lapses, and neither means there is nothing to say.
                 "needs_card": not _trial_has_card(payer),
                 "needs_consent": not store.has_billing_consent(entity_id, payer),
             }
+            if not (context["needs_card"] or context["needs_consent"]):
+                # Card saved and this company authorised, so the trial converts on its
+                # own. Mailing "your trial ends soon, do nothing" trains people to skim
+                # past the one trial email that does need acting on, so it is not sent
+                # at all. The customer's first word about the charge is the receipt.
+                skipped.append({"entity_id": entity_id, "reason": "will_convert"})
+                continue
             events.append((
                 payer,
                 _notify_module().TRIAL_ENDING,
@@ -1164,8 +1176,8 @@ def notify_trials_ending(days_before: int = 3, limit: int | None = None) -> dict
                 # codes and ``trial_end`` are all unchanged by a handover, so the key
                 # regenerates identically, ``notify._claim`` finds the row already sent to
                 # the OUTGOING payer, and the incoming one hears nothing until the money
-                # leaves. This warning is not a reminder — it branches on ``needs_card``
-                # into "action needed" versus "nothing to do".
+                # leaves. This warning is the only notice that can PREVENT the lapse,
+                # so losing it to a stale key costs the customer the module.
                 f"{payer}:{entity_id}:{','.join(codes)}:{context['trial_end']:%Y-%m-%d}",
                 context,
             ))

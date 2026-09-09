@@ -476,6 +476,10 @@ def _decline(offer, user_id) -> tuple[bool, str, dict | None]:
     offer.responded_at = clock.now()
     db.session.commit()
     _record(offer, AUDIT_TRANSFER_DECLINED, actor=user_id, outcome=OUTCOME_ABORTED)
+    # After the commit, like every other send here. Until this existed a decline was
+    # silent to the payer who asked: the status flipped and the audit row was written, so
+    # a request that had actually been answered looked exactly like one nobody had opened.
+    _notify(offer, "declined")
     return True, "You've declined the handover.", None
 
 
@@ -601,7 +605,10 @@ def _accept(offer, user_id, now) -> tuple[bool, str, dict | None]:
             # counter stays incremented and the voided one stays claimed.
             offer.status = STATUS_PENDING
             db.session.commit()
-            _notify(offer, "failed")
+            # No email. This path is reached from the accept request itself, so the person
+            # whose card was declined is looking at ``result["reason"]`` in the browser as
+            # it happens; a second telling by email minutes later added nothing. The offer
+            # stays ``pending``, so they can fix the card and accept again.
             return False, result["reason"], None
 
         offer.status = STATUS_CHARGED
@@ -702,6 +709,11 @@ def repair_stranded(now=None, *, limit=None) -> dict:
     ``charging`` row is resolved by ASKING the processor through the same adopt path the
     accept uses, and released back to ``pending`` only when the processor confirms it
     never saw the invoice.
+
+    ALSO retires lapsed offers, which is not a repair but has to live on a schedule for
+    the same reason: ``respond_to_transfer`` expires an offer only when somebody touches
+    it, so without a sweep a request nobody ever opened stays ``pending`` for ever and the
+    payer who sent it is never told it ran out.
     """
     from blueprints.subscription.services import renewals
 
@@ -714,7 +726,8 @@ def repair_stranded(now=None, *, limit=None) -> dict:
         .limit(limit or None)
         .all()
     )
-    result = {"completed": [], "released": [], "waiting": []}
+    result = {"completed": [], "released": [], "waiting": [],
+              "expired": _expire_lapsed(now, limit=limit)}
 
     for offer in rows:
         try:
@@ -753,6 +766,45 @@ def repair_stranded(now=None, *, limit=None) -> dict:
     return result
 
 
+def _expire_lapsed(now, *, limit=None) -> list:
+    """Retire pending offers past their deadline and tell the payer who sent them.
+
+    The time comparison is done in PYTHON, not in the query. ``expires_at`` is compared
+    against ``clock.now()`` everywhere else in this module through ``_aware``, and pushing
+    an aware datetime into a filter against a column that may be naive is how an offer
+    silently expires an hour early or late. The candidate set is every open request in the
+    system, which is bounded by the TTL and small.
+
+    Never raises per offer: one bad row must not stop the rest of the sweep, and this runs
+    inside the same daily pass that moves money.
+    """
+    rows = (
+        SubscriptionTransfer.query.filter(
+            SubscriptionTransfer.status == STATUS_PENDING,
+            SubscriptionTransfer.expires_at.isnot(None),
+        )
+        .order_by(SubscriptionTransfer.created_at)
+        .limit(limit or None)
+        .all()
+    )
+
+    expired = []
+    for offer in rows:
+        deadline = _aware(offer.expires_at)
+        if deadline is None or deadline > now:
+            continue
+        try:
+            offer.status = STATUS_EXPIRED
+            db.session.commit()
+            # After the commit, so a send can never describe an expiry that rolled back.
+            _notify(offer, "expired")
+            expired.append(offer.id)
+        except Exception:
+            db.session.rollback()
+            logger.exception("transfer: could not expire lapsed handover {}", offer.id)
+    return expired
+
+
 # --- helpers ---------------------------------------------------------------------------
 
 
@@ -775,8 +827,14 @@ def _notify(offer, kind: str) -> None:
         "accepted": (
             notifier.SUBSCRIBER_TRANSFER_ACCEPTED, offer.from_user_id, "/profile/subscriptions"
         ),
-        "failed": (
-            notifier.SUBSCRIBER_TRANSFER_FAILED, offer.to_user_id, "/profile/billing"
+        # Both of these go to the payer who ASKED. The recipient already knows what they
+        # did — declining is their own click, and an expiry is a request they chose not
+        # to answer. The person left waiting is the one who learns nothing otherwise.
+        "declined": (
+            notifier.SUBSCRIBER_TRANSFER_DECLINED, offer.from_user_id, "/profile/subscriptions"
+        ),
+        "expired": (
+            notifier.SUBSCRIBER_TRANSFER_EXPIRED, offer.from_user_id, "/profile/subscriptions"
         ),
     }
     event, recipient, path = events[kind]
