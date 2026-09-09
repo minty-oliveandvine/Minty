@@ -643,3 +643,374 @@ def test_the_resolver_prefers_the_url_over_the_users_current_company(app, captur
     capture_env.setattr(context, "current_user", FakeUser())
     with app.test_request_context("/some/page?entity_id=ent-LOOKING-AT"):
         assert context._current_entity_id() == "ent-LOOKING-AT"
+
+
+def test_no_bubble_on_the_company_chooser(app, capture_env):
+    """The entity list is where you PICK a company, so nothing is picked yet.
+
+    Without this the ``current_entity_id`` fallback would put a bubble on the
+    chooser pointed at whatever company the user last opened, and a file
+    dropped there would land somewhere they had not chosen — which is the exact
+    mistake the fallback is otherwise careful to avoid.
+    """
+    from blueprints.capture.services import context
+
+    class FakeUser:
+        is_authenticated = True
+        current_entity_id = "ent-LAST-OPENED"
+
+    capture_env.setattr(context, "current_user", FakeUser())
+    with app.test_request_context("/entity"):
+        from flask import request
+
+        assert request.endpoint == "entity.entity_list"
+        assert context._bubble() is None
+
+
+def test_the_bubble_still_shows_on_a_company_dashboard(app, capture_env):
+    """The guard above is by endpoint, not by path — "/entity" is the chooser
+    but "/entity/<id>" is a company, and that one keeps its bubble."""
+    from blueprints.capture.services import context
+
+    class FakeUser:
+        is_authenticated = True
+        current_entity_id = "ent-1"
+
+    capture_env.setattr(context, "current_user", FakeUser())
+    set_modules(capture_env)
+    allow_permission(capture_env)
+    with app.test_request_context("/entity/ent-1"):
+        assert context._bubble() is not None
+
+
+# --------------------------------------------------------------------------
+# The second door: Module 2's widget, on another origin, with a bearer token
+# and no session cookie.
+# --------------------------------------------------------------------------
+ORIGIN = "http://localhost:3000"
+
+
+def bearer_for(app, user_id, entity_id="ent-1"):
+    """A token of exactly the shape Minty already mints for the module handoff."""
+    import datetime as dt
+
+    import jwt
+
+    return jwt.encode(
+        {
+            "user_id": str(user_id),
+            "entity_id": entity_id,
+            "module": "billing",
+            "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30),
+            "iat": dt.datetime.now(dt.timezone.utc),
+        },
+        app.config["SECRET_KEY"],
+        algorithm="HS256",
+    )
+
+
+def test_a_preflight_is_answered_without_any_auth(client):
+    """A browser sends OPTIONS with no cookie and no Authorization header, by
+    design. Running it through the kill switch and the module gate would refuse
+    every cross-origin call before the real request was ever made."""
+    response = client.options(
+        "/capture/status?entity_id=ent-1", headers={"Origin": ORIGIN}
+    )
+    assert response.status_code == 204
+    assert response.headers["Access-Control-Allow-Origin"] == ORIGIN
+    assert "POST" in response.headers["Access-Control-Allow-Methods"]
+    # So a response cached for one origin is never replayed to another. The app
+    # appends its own values to Vary elsewhere, hence "in" rather than "==".
+    assert "Origin" in response.headers["Vary"]
+
+
+def test_module_2_can_read_status_with_a_bearer_token(app, client, capture_env):
+    """The whole point: no session cookie, and it still works."""
+    set_modules(capture_env)
+    allow_permission(capture_env)
+
+    with app.app_context():
+        user_id = make_user()
+
+    response = client.get(
+        "/capture/status?entity_id=ent-1",
+        headers={
+            "Origin": ORIGIN,
+            "Authorization": "Bearer " + bearer_for(app, user_id),
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == ORIGIN
+    assert "attention" in response.get_json()
+
+
+def test_an_expired_token_says_so_in_plain_words(app, client, capture_env):
+    """The token lasts 30 minutes. When it runs out the widget shows this
+    sentence verbatim — silently doing nothing on a page that had a working
+    button is worse than telling the user what to do about it."""
+    import datetime as dt
+
+    import jwt
+
+    set_modules(capture_env)
+    allow_permission(capture_env)
+
+    stale = jwt.encode(
+        {
+            "user_id": "someone",
+            "exp": dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1),
+        },
+        app.config["SECRET_KEY"],
+        algorithm="HS256",
+    )
+    response = client.get(
+        "/capture/status?entity_id=ent-1",
+        headers={"Origin": ORIGIN, "Authorization": "Bearer " + stale},
+    )
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["reason"] == "session_expired"
+    assert body["message"] == "Your session's expired, refresh the page."
+
+
+def test_a_forged_token_is_refused(app, client, capture_env):
+    """Signed with the wrong secret. Every failure is the same 401 — saying
+    which part of a forged token to fix would be a favour to an attacker."""
+    import jwt
+
+    set_modules(capture_env)
+    allow_permission(capture_env)
+
+    forged = jwt.encode({"user_id": "someone"}, "not-the-secret", algorithm="HS256")
+    response = client.get(
+        "/capture/status?entity_id=ent-1",
+        headers={"Origin": ORIGIN, "Authorization": "Bearer " + forged},
+    )
+    assert response.status_code == 401
+
+
+def test_a_valid_token_still_cannot_reach_another_company(app, client, capture_env):
+    """The token identifies a person. It grants nothing: the permission check
+    still requires an approved membership on that exact company."""
+    set_modules(capture_env)
+    allow_permission(capture_env, allowed=False)
+
+    with app.app_context():
+        user_id = make_user()
+
+    response = client.get(
+        "/capture/status?entity_id=ent-SOMEBODY-ELSE",
+        headers={
+            "Origin": ORIGIN,
+            "Authorization": "Bearer " + bearer_for(app, user_id),
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_only_module_2s_origin_is_recognised_as_the_widget(app):
+    """The capture blueprint's own CORS hook fires for ONE origin.
+
+    NOTE ON THE APP-WIDE POLICY: ``bootstrap.py`` installs ``CORS(app)`` with no
+    arguments, which reflects any Origin on every route in the application. That
+    is pre-existing and outside this feature — and it is why
+    ``blueprints/shared/bearer_api.py`` says every surface "names its origin
+    explicitly rather than leaning on the global flask-cors install".
+
+    What keeps it from mattering is that the global install sets no
+    ``Access-Control-Allow-Credentials``, so a browser will not send cookies
+    cross-origin — asserted below, because if that ever changes, every
+    authenticated GET in the app becomes readable by any site.
+    """
+    from blueprints.capture.services import actor
+
+    with app.test_request_context("/capture/status", headers={"Origin": ORIGIN}):
+        assert actor.is_cross_origin() is True
+    with app.test_request_context(
+        "/capture/status", headers={"Origin": "https://evil.example"}
+    ):
+        assert actor.is_cross_origin() is False
+    with app.test_request_context("/capture/status"):
+        assert actor.is_cross_origin() is False
+
+
+def test_no_response_ever_allows_cross_origin_credentials(app, client, capture_env):
+    """The tripwire for the note above. Without this header a browser sends no
+    cookies cross-origin, which is what makes the app-wide reflection harmless.
+    If it ever appears, this feature's data is readable by any site the user
+    happens to visit while signed in."""
+    set_modules(capture_env)
+    allow_permission(capture_env)
+
+    with app.app_context():
+        user_id = make_user()
+
+    for origin in (ORIGIN, "https://evil.example"):
+        response = client.get(
+            "/capture/status?entity_id=ent-1",
+            headers={
+                "Origin": origin,
+                "Authorization": "Bearer " + bearer_for(app, user_id),
+            },
+        )
+        assert "Access-Control-Allow-Credentials" not in response.headers, origin
+
+
+def test_the_widget_and_the_bubble_share_one_stylesheet():
+    """Two copies of the look is two things to keep in step. The widget runs on
+    a React page with no Jinja, so a stylesheet is the only form both can use."""
+    from pathlib import Path
+
+    css = Path("static/css/capture_hub.css")
+    assert css.exists()
+    widget = Path("static/js/capture_widget.js").read_text(encoding="utf-8")
+    bubble = Path("templates/components/ai_capture_bubble.html").read_text(encoding="utf-8")
+    queue = Path("templates/capture/queue.html").read_text(encoding="utf-8")
+    assert "capture_hub.css" in widget
+    assert "capture_hub.css" in bubble
+    assert "capture_hub.css" in queue
+    # And the colour is defined once, in that file.
+    assert "--cap-mint:" in css.read_text(encoding="utf-8")
+    assert "--cap-mint:" not in bubble
+
+
+# --------------------------------------------------------------------------
+# CSRF, per door.
+#
+# The blueprint is exempt from the app-wide CSRFProtect so Module 2's widget
+# can POST at all, and the protection comes back in the gate for the requests
+# that actually need it. This is what the first cross-origin upload hit:
+# OPTIONS 204, then "CSRF token is missing", then POST 302 — and the widget,
+# following the redirect, reported "We could not reach Minty".
+# --------------------------------------------------------------------------
+def test_the_capture_blueprint_is_exempt_from_the_global_csrf(app):
+    """Exempt at the app level. Not because these writes are unprotected, but
+    because the check has to tell the two doors apart and the global one
+    cannot."""
+    from blueprints.capture import capture_bp
+
+    assert capture_bp in app.extensions["csrf"]._exempt_blueprints
+
+
+def test_a_bearer_upload_is_not_refused_for_a_missing_csrf_token(
+    app, client, capture_env
+):
+    """The bug this fixes. A bearer POST carries no cookie, so there is no
+    ambient credential to forge and no token to demand — and demanding one
+    would ask the widget to read a cookie from another origin."""
+    set_modules(capture_env)
+    allow_permission(capture_env)
+    capture_env.setitem(app.config, "WTF_CSRF_ENABLED", True)
+
+    with app.app_context():
+        user_id = make_user()
+
+    response = client.post(
+        "/capture/upload",
+        data={"entity_id": "ent-1"},          # no file: we are testing the gate
+        headers={
+            "Origin": ORIGIN,
+            "Authorization": "Bearer " + bearer_for(app, user_id),
+        },
+    )
+    # Past CSRF and into the route, which then complains about the missing file.
+    assert response.status_code != 302
+    body = response.get_json()
+    assert body.get("reason") != "csrf"
+    assert body.get("reason") == "unsupported_file"
+
+
+def test_a_cookie_upload_without_a_token_is_still_refused(app, client, capture_env):
+    """The other half. A form on any site could make a signed-in user's browser
+    POST here with their session attached; only a token they cannot read stops
+    it. Exempting the blueprint must not have cost this."""
+    set_modules(capture_env)
+    allow_permission(capture_env)
+    capture_env.setitem(app.config, "WTF_CSRF_ENABLED", True)
+
+    with app.app_context():
+        user_id = make_user()
+    login(client, user_id)
+
+    response = client.post("/capture/upload", data={"entity_id": "ent-1"})
+    assert response.status_code == 400
+    assert response.get_json()["reason"] == "csrf"
+
+
+def test_a_csrf_refusal_is_a_400_not_a_redirect(app, client, capture_env):
+    """A redirect is what made the original failure unreadable: the client
+    follows it, parses an HTML login page as JSON, and reports something
+    unrelated. A 400 with a reason code says what happened."""
+    set_modules(capture_env)
+    allow_permission(capture_env)
+    capture_env.setitem(app.config, "WTF_CSRF_ENABLED", True)
+
+    with app.app_context():
+        user_id = make_user()
+    login(client, user_id)
+
+    response = client.post("/capture/draft/whatever/confirm", json={"amount": "1"})
+    assert response.status_code == 400
+    assert response.headers["Content-Type"].startswith("application/json")
+
+
+def test_reads_never_need_a_token(app, client, capture_env):
+    """GET is never protected. Asking a read for a token would be noise."""
+    set_modules(capture_env)
+    allow_permission(capture_env)
+    capture_env.setitem(app.config, "WTF_CSRF_ENABLED", True)
+
+    with app.app_context():
+        user_id = make_user()
+    login(client, user_id)
+
+    assert client.get("/capture/status?entity_id=ent-1").status_code == 200
+
+
+def test_the_bubble_carries_its_own_icons(client, signed_in):
+    """Inline SVG, never an icon font.
+
+    The bubble is spliced into EVERY page, and most of this app's pages are
+    standalone documents that never extend base/layout.html — so most never
+    load Remix Icon. The <i class="ri-..."> version rendered as three blank
+    spaces: no star on the button, no × to close, no upload arrow. It looked
+    like a styling bug and was a missing dependency.
+    """
+    html = client.get("/capture?entity_id=ent-1").get_data(as_text=True)
+    bubble = html[html.index('id="capBubbleBtn"'):]
+    assert "<svg" in bubble
+    assert 'class="ri-' not in bubble
+
+
+def test_the_two_bubbles_draw_the_same_mark():
+    """Minty's bubble and Module 2's widget must not diverge into two logos."""
+    from pathlib import Path
+
+    partial = Path("templates/components/ai_capture_bubble.html").read_text(encoding="utf-8")
+    widget = Path("static/js/capture_widget.js").read_text(encoding="utf-8")
+    # The first path of the sparkle — enough to prove they are the same drawing.
+    star = 'M9.5 2.5 11 7l4.5 1.5L11 10l-1.5 4.5L8 10l-4.5-1.5L8 7z'
+    assert star in partial
+    assert star in widget
+
+
+def test_hidden_actually_hides_the_panel():
+    """`hidden` is how the panel is opened and dismissed, and the browser's own
+    `[hidden] { display: none }` does not enforce it here.
+
+    An author rule beats a user-agent rule whatever the specificity, so the
+    `display: flex` on .cap-panel silently won: pressing × ran the handler, set
+    the attribute, and changed nothing on screen. The panel could not be closed.
+
+    Asserted on the stylesheet because the collision is a cascade fact, not a
+    behaviour any Python test can exercise.
+    """
+    from pathlib import Path
+
+    css = Path("static/css/capture_hub.css").read_text(encoding="utf-8")
+
+    # If something sets display on the panel, the [hidden] override must exist.
+    assert "display: flex" in css, "test is guarding a rule that no longer exists"
+    assert ".cap-panel[hidden]" in css
+    override = css[css.index(".cap-panel[hidden]"):]
+    assert "display: none !important" in override[:200]

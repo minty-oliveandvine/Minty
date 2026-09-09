@@ -29,7 +29,6 @@ rather than a failure.
 from __future__ import annotations
 
 from flask import jsonify, request
-from flask_login import current_user, login_required
 from loguru import logger
 from werkzeug.utils import secure_filename
 
@@ -37,8 +36,9 @@ from blueprints.capture import capture_bp
 from blueprints.capture.models.capture_upload import (STATUS_QUEUED,
                                                       UPLOAD_ACTIVE_STATUSES,
                                                       CaptureUpload)
-from blueprints.capture.routes.module_guard import resolve_entity_id
-from blueprints.capture.services import capture_ai, pdf_tools, storage
+from blueprints.capture.routes.module_guard import current_entity_id
+from blueprints.capture.services import actor, capture_ai, pdf_tools, storage
+from blueprints.capture.services.actor import actor_id
 from models.db import db
 from services.permission_policy import Permission, has_permission
 
@@ -51,25 +51,24 @@ def _error(message, status=400, code=None):
 
 
 @capture_bp.route("/capture/upload", methods=["POST"])
-@login_required
 def capture_upload():
     # The module gate and the kill switch already ran in the blueprint's
     # before_request, so by this point the feature is on and the company has a
     # module that can receive a draft.
-    entity_id = resolve_entity_id()
+    entity_id = current_entity_id()
 
     # The gate answers "does this company have the feature". This answers "is
     # this person allowed to use it".
-    if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
+    if not has_permission(actor.acting_user(), Permission.REPORT_EDIT_OWN, entity_id):
         logger.warning(
             "capture: upload denied user={} entity={}",
-            getattr(current_user, "id", None), entity_id,
+            actor_id(), entity_id,
         )
         return _error("You don't have permission to add expenses here.", 403)
 
     # Before the file is even read. A user who is over their limit should not
     # be able to make us hold 10 MB in memory to be told no.
-    if not capture_ai.check_rate_limit(getattr(current_user, "id", ""), entity_id):
+    if not capture_ai.check_rate_limit(actor_id() or "", entity_id):
         logger.info("capture: rate limited entity={}", entity_id)
         return _error(
             "That's a lot of uploads at once. Give it a minute and try again.",
@@ -158,7 +157,7 @@ def capture_upload():
 
     upload = CaptureUpload(
         entity_id=entity_id,
-        uploaded_by=str(getattr(current_user, "id", "")),
+        uploaded_by=str(actor_id() or ""),
         original_filename=secure_filename(uploaded.filename or "")[:255] or None,
         mime_type=mime,
         byte_size=len(data),
@@ -192,7 +191,7 @@ def capture_upload():
 
     logger.info(
         "capture: upload accepted id={} entity={} user={} mime={} bytes={} pages={}",
-        upload.id, entity_id, getattr(current_user, "id", None),
+        upload.id, entity_id, actor_id(),
         mime, len(data), page_count,
     )
 

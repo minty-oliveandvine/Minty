@@ -172,13 +172,17 @@ def process(upload_id: str) -> None:
 
     # ---------------------------------------------------------------- pass 2
     petty_cash_on, bill_on = routing.entity_modules(upload.entity_id)
-    single = len(real) == 1
+    # How many documents Pass 1 found IN THE FILE — not how many survived the
+    # 'other' filter. The difference matters: a file holding a covering page and
+    # one receipt has one real document, but the receipt still occupies only
+    # part of the file and the covering page must not be sent with it.
+    found = len(documents)
 
     created = 0
     for index, document in enumerate(real, start=1):
         try:
             created += _build_draft(
-                upload, document, index, data, single, petty_cash_on, bill_on
+                upload, document, index, data, found, petty_cash_on, bill_on
             )
         except Exception as exc:
             # One bad document does not lose the other four. The user keeps
@@ -198,7 +202,7 @@ def process(upload_id: str) -> None:
 
 
 def _build_draft(
-    upload, document, sequence, original_bytes, single, petty_cash_on, bill_on
+    upload, document, sequence, original_bytes, found, petty_cash_on, bill_on
 ) -> int:
     """Cut out one document, read it, and commit ONE draft. Returns 0 or 1.
 
@@ -210,9 +214,22 @@ def _build_draft(
     page_mime = upload.mime_type
     page_key = None
 
+    # Cut whenever this document does NOT span the whole file.
+    #
+    # The test that used to be here was "is this the only surviving document",
+    # which is not the same question and gets a common case wrong: a file whose
+    # first page is a covering note and whose second page is the receipt has
+    # exactly one surviving document, so nothing was cut and the covering note
+    # was sent to the model alongside the receipt. A page full of unrelated
+    # figures next to a receipt is an invitation to read the wrong total.
+    #
     # Only PDFs can be cut. Several documents on one image page are told apart
     # by the locator instead, which is exactly what it is for.
-    if upload.mime_type == capture_ai.MIME_PDF and not single:
+    total_pages = upload.page_count or 1
+    spans_whole_file = (
+        document["page_start"] == 1 and document["page_end"] == total_pages
+    )
+    if upload.mime_type == capture_ai.MIME_PDF and not spans_whole_file:
         try:
             page_bytes = pdf_tools.extract_pages(
                 original_bytes, document["page_start"], document["page_end"]
@@ -244,7 +261,10 @@ def _build_draft(
             prepared_mime,
             context,
             document["doc_type"],
-            document.get("locator", "") if not single else "",
+            # The locator names one document among several sharing a page. Sent
+            # whenever the file held more than one document at all: cutting to a
+            # page range does not separate two receipts printed side by side.
+            document.get("locator", "") if found > 1 else "",
         )
         suggestions, reason, audit = result.suggestions, result.reason, result.audit
     else:

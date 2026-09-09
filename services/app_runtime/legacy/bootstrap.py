@@ -314,6 +314,20 @@ def create_app():
     csrf.exempt(my_transfer_initiate_api)
     csrf.exempt(my_transfer_respond_api)
     csrf.exempt(my_transfer_cancel_api)
+    # The AI Hub. Its write routes serve TWO doors: Minty's own pages, with a
+    # session cookie, and Module 2's widget, with a Bearer JWT and no cookie at
+    # all. Neither a blanket exemption nor no exemption is right — one drops CSRF
+    # from cookie writes that create real accounting records, the other redirects
+    # the widget's POST to the login page (which is exactly how it first failed:
+    # OPTIONS 204, then "CSRF token is missing", then POST 302).
+    #
+    # So the blueprint is exempted HERE and re-checked in its own gate, where the
+    # two doors can be told apart: see
+    # ``blueprints/capture/routes/module_guard.py::_csrf_ok``. A cookie write
+    # without a token is still refused there.
+    from blueprints.capture import capture_bp
+    csrf.exempt(capture_bp)
+
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,

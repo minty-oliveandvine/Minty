@@ -260,3 +260,77 @@ def test_a_two_page_invoice_stays_one_document():
     )
     assert len(documents) == 1
     assert (documents[0]["page_start"], documents[0]["page_end"]) == (1, 2)
+
+
+# --------------------------------------------------------------------------
+# Pass 1 must account for every page.
+#
+# Found in testing: a three-page upload — two receipts and an HK Electric bill
+# — came back with TWO documents. Page 3 was simply absent from the reply, so
+# no draft was made for it and nothing was logged. The user saw two drafts from
+# a three-page file with nothing to explain the third.
+# --------------------------------------------------------------------------
+def test_the_prompt_demands_every_page_be_accounted_for():
+    """A prompt is the only place this can be asked for, so assert it is."""
+    assert "ACCOUNT FOR EVERY PAGE" in ai._PASS1_SYSTEM
+    assert "Never leave a page out" in ai._PASS1_SYSTEM
+    # And that an unidentifiable page is still to be returned, not omitted.
+    assert "STILL a document" in ai._PASS1_SYSTEM
+
+
+def test_a_shortfall_in_coverage_is_detected(monkeypatch, caplog):
+    """A prompt is a request, not a guarantee. This is the check that makes a
+    shortfall visible instead of silently losing a page."""
+    import json
+
+    class FakeInteraction:
+        id = "i1"
+        status = "completed"
+        errors: list = []
+        usage = None
+        # Three pages in, two documents out — exactly the observed failure.
+        output_text = json.dumps({
+            "documents": [
+                {"page_start": 1, "page_end": 1, "locator": "receipt",
+                 "doc_type": "receipt", "doc_type_confidence": 1.0,
+                 "other_reason": ""},
+                {"page_start": 2, "page_end": 2, "locator": "receipt",
+                 "doc_type": "receipt", "doc_type_confidence": 1.0,
+                 "other_reason": ""},
+            ]
+        })
+
+    monkeypatch.setattr(ai, "_get_client", lambda: object())
+    monkeypatch.setattr(ai, "_call_model", lambda *a, **k: (FakeInteraction(), None))
+
+    result = ai.split_and_classify(b"%PDF-1.7 pretend", "application/pdf", 3)
+
+    assert len(result.documents) == 2
+    # The missing page is recorded rather than passed over.
+    assert result.audit["missing_pages"] == [3]
+
+
+def test_full_coverage_records_nothing_missing(monkeypatch):
+    import json
+
+    class FakeInteraction:
+        id = "i1"
+        status = "completed"
+        errors: list = []
+        usage = None
+        output_text = json.dumps({
+            "documents": [
+                {"page_start": 1, "page_end": 2, "locator": "invoice",
+                 "doc_type": "invoice", "doc_type_confidence": 0.9,
+                 "other_reason": ""},
+                {"page_start": 3, "page_end": 3, "locator": "receipt",
+                 "doc_type": "receipt", "doc_type_confidence": 0.9,
+                 "other_reason": ""},
+            ]
+        })
+
+    monkeypatch.setattr(ai, "_get_client", lambda: object())
+    monkeypatch.setattr(ai, "_call_model", lambda *a, **k: (FakeInteraction(), None))
+
+    result = ai.split_and_classify(b"%PDF-1.7 pretend", "application/pdf", 3)
+    assert result.audit["missing_pages"] == []

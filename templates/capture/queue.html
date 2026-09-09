@@ -14,7 +14,7 @@
 {% block title %}— AI Hub{% endblock %}
 
 {% block styles %}
-{% include 'components/capture_theme.html' %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/capture_hub.css') }}">
 <style>
   .cap-page { max-width: 1120px; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
 
@@ -23,7 +23,7 @@
     font-size: 1.5rem; font-weight: 600; color: var(--cap-mint-800);
     display: flex; align-items: center; gap: .5rem;
   }
-  .cap-head h1 i { color: var(--cap-mint-700); }
+  .cap-head h1 svg { width: 1.35rem; height: 1.35rem; fill: var(--cap-mint-700); }
   .cap-head p { font-size: .85rem; color: var(--cap-muted); margin-top: .15rem; }
   .cap-head .cap-lede { max-width: 46rem; margin-top: .35rem; }
 
@@ -137,7 +137,7 @@
 <div class="cap-page">
   <div class="cap-head">
     <div>
-      <h1><i class="ri-sparkling-2-fill" aria-hidden="true"></i>AI Hub</h1>
+      <h1><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 2.5 11 7l4.5 1.5L11 10l-1.5 4.5L8 10l-4.5-1.5L8 7z"/><path d="M17.5 12.5 18.4 15l2.6.9-2.6.9-.9 2.6-.9-2.6L14 15l2.6-.9z"/><path d="M16 3l.6 1.7 1.7.6-1.7.6L16 7.6l-.6-1.7-1.7-.6 1.7-.6z"/></svg>AI Hub</h1>
       <p>{% if entity %}{{ entity.name }}{% endif %}</p>
       <p class="cap-lede">
         Everything the AI has read, waiting for you to check it. Nothing here is

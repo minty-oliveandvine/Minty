@@ -13,22 +13,20 @@ here. The unguessable S3 key is a second line of defence, never the first.
 from __future__ import annotations
 
 from flask import Response, abort
-from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.capture import capture_bp
 from blueprints.capture.models.capture_draft import CaptureDraft
 from blueprints.capture.models.capture_upload import CaptureUpload
-from blueprints.capture.routes.module_guard import resolve_entity_id
-from blueprints.capture.services import storage
+from blueprints.capture.routes.module_guard import current_entity_id
+from blueprints.capture.services import actor, storage
 from services.permission_policy import Permission, has_permission
 
 
 @capture_bp.route("/capture/draft/<string:draft_id>/file", methods=["GET"])
-@login_required
 def capture_draft_file(draft_id):
-    entity_id = resolve_entity_id()
-    if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
+    entity_id = current_entity_id()
+    if not has_permission(actor.acting_user(), Permission.REPORT_EDIT_OWN, entity_id):
         abort(403)
 
     draft = CaptureDraft.query.filter(

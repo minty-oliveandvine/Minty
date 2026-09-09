@@ -774,6 +774,13 @@ _PASS1_SYSTEM = (
     "actually appears to be, and ONLY when doc_type is 'other'. Otherwise "
     "return an empty string.\n"
     "- doc_type_confidence is 0.0 to 1.0, per document, and honest.\n"
+    "- ACCOUNT FOR EVERY PAGE. You are told how many pages the file has. "
+    "Every page number from 1 to that count must fall inside the page range "
+    "of one of the documents you return. A page you cannot identify is "
+    "STILL a document: return it with doc_type 'other' and say what it "
+    "looks like in other_reason. Never leave a page out of your answer.\n"
+    "- Do not stop after the first document or two. Work through the file "
+    "to its last page.\n"
     "- If the file contains nothing you can identify at all, return an empty "
     "documents list.\n"
     "- Answer only with the JSON object described by the response schema."
@@ -816,8 +823,10 @@ def split_and_classify(document: bytes, mime: str, page_count: int) -> SplitResu
         {
             "type": "text",
             "text": (
-                f"This file has {page_count} page(s). List the separate "
-                "documents inside it."
+                f"This file has {page_count} page(s), numbered 1 to "
+                f"{page_count}. List EVERY separate document inside it. "
+                f"All {page_count} page(s) must appear in the page range of "
+                "one of the documents you return."
             ),
         },
         {
@@ -851,6 +860,29 @@ def split_and_classify(document: bytes, mime: str, page_count: int) -> SplitResu
     documents = _validate_split(entries, page_count)
     if not documents:
         return SplitResult(reason=REASON_NO_DOCUMENT_FOUND, audit=audit)
+
+    # Did the reply cover the whole file?
+    #
+    # This exists because it did not, and nothing noticed. A three-page
+    # upload — two receipts and a utility bill — came back with two
+    # documents; page 3 was simply absent from the answer, so no draft was
+    # made for it and no error was raised. The user saw two drafts from a
+    # three-page file and had nothing to go on.
+    #
+    # The prompt now demands full coverage, but a prompt is a request and
+    # not a guarantee. This is the check that makes a shortfall visible.
+    covered = set()
+    for document in documents:
+        covered.update(range(document["page_start"], document["page_end"] + 1))
+    missing = sorted(set(range(1, page_count + 1)) - covered)
+    if missing:
+        logger.warning(
+            "capture_ai: pass 1 left page(s) {} of {} unaccounted for — "
+            "{} document(s) returned. Anything on those pages produced no "
+            "draft.",
+            missing, page_count, len(documents),
+        )
+    audit["missing_pages"] = missing
 
     audit["confidence_by_field"] = {
         f"document_{index + 1}": doc["doc_type_confidence"]

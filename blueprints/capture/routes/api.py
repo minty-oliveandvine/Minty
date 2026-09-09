@@ -22,7 +22,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from flask import jsonify, request
-from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.capture import capture_bp
@@ -38,8 +37,9 @@ from blueprints.capture.models.capture_draft import (DEST_PETTY_CASH,
 from blueprints.capture.models.capture_upload import (
     STATUS_PROCESSING, STATUS_QUEUED, STATUS_REJECTED_NOT_SUPPORTED,
     CaptureUpload)
-from blueprints.capture.routes.module_guard import resolve_entity_id
-from blueprints.capture.services import capture_ai, routing
+from blueprints.capture.routes.module_guard import current_entity_id
+from blueprints.capture.services import actor, capture_ai, routing
+from blueprints.capture.services.actor import actor_id
 from models.db import db
 from services.permission_policy import Permission, has_permission
 
@@ -51,12 +51,20 @@ def _error(message, status=400, code=None):
     return jsonify(payload), status
 
 
-def _authorised_entity():
-    """(entity_id, error_response). Exactly one is set."""
-    entity_id = resolve_entity_id()
-    if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
-        return None, _error("You don't have permission to do that here.", 403)
-    return entity_id, None
+def _denied():
+    """An error response when this person may not use the hub here, else None.
+
+    Deliberately NOT "(entity_id, error)". That shape made the entity optional
+    in the type system — it has to be None in the error branch — so every route
+    then handled a case the gate had already ruled out, and a type checker
+    flagged each one. The company is available from ``current_entity_id()``,
+    which the gate guarantees; this answers only the question it is asked.
+    """
+    if not has_permission(
+        actor.acting_user(), Permission.REPORT_EDIT_OWN, current_entity_id()
+    ):
+        return _error("You don't have permission to do that here.", 403)
+    return None
 
 
 def _own_draft(draft_id, entity_id):
@@ -79,11 +87,11 @@ def _own_draft(draft_id, entity_id):
 # about to add work here, add it to /capture/drafts instead.
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/status", methods=["GET"])
-@login_required
 def capture_status():
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     upload_counts = dict(
         db.session.query(CaptureUpload.status, db.func.count(CaptureUpload.id))
@@ -146,11 +154,11 @@ def _recent_uploads(entity_id, limit=3):
 # GET /capture/drafts — the queue's list.
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/drafts", methods=["GET"])
-@login_required
 def capture_drafts():
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     query = CaptureDraft.query.filter(CaptureDraft.entity_id == entity_id)
 
@@ -216,11 +224,11 @@ def _draft_json(draft, upload):
 # Confirm can do anything.
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/reports", methods=["GET"])
-@login_required
 def capture_reports():
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     from blueprints.report.models.report import Report
 
@@ -257,11 +265,11 @@ def capture_reports():
 # POST /capture/draft/<id>/confirm
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/draft/<string:draft_id>/confirm", methods=["POST"])
-@login_required
 def capture_confirm(draft_id):
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     draft = _own_draft(draft_id, entity_id)
     if draft is None:
@@ -291,7 +299,7 @@ def capture_confirm(draft_id):
 
     draft.confirmed = values
     draft.confirmed_at = datetime.now(timezone.utc)
-    draft.confirmed_by = str(getattr(current_user, "id", "") or "")
+    draft.confirmed_by = str(actor_id() or "" or "")
     draft.status = STATUS_CONFIRMING
     draft.updated_at = datetime.now(timezone.utc)
     db.session.commit()
@@ -399,11 +407,11 @@ def _validated_values(body, draft, entity_id):
 # POST /capture/draft/<id>/reject — archive.
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/draft/<string:draft_id>/reject", methods=["POST"])
-@login_required
 def capture_reject(draft_id):
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     draft = _own_draft(draft_id, entity_id)
     if draft is None:
@@ -423,11 +431,11 @@ def capture_reject(draft_id):
 # POST /capture/draft/<id>/retry — re-send one that failed to send.
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/draft/<string:draft_id>/retry", methods=["POST"])
-@login_required
 def capture_retry_send(draft_id):
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     draft = _own_draft(draft_id, entity_id)
     if draft is None:
@@ -457,11 +465,11 @@ def capture_retry_send(draft_id):
 # duplicate check.
 # --------------------------------------------------------------------------
 @capture_bp.route("/capture/upload/<string:upload_id>/retry", methods=["POST"])
-@login_required
 def capture_retry_upload(upload_id):
-    entity_id, error = _authorised_entity()
-    if error:
-        return error
+    denied = _denied()
+    if denied:
+        return denied
+    entity_id = current_entity_id()
 
     upload = CaptureUpload.query.filter(
         CaptureUpload.id == upload_id,
@@ -479,7 +487,7 @@ def capture_retry_upload(upload_id):
         return _error("We already tried reading this one twice.", 400)
 
     # A real model call, so it counts against the limit like any other upload.
-    if not capture_ai.check_rate_limit(getattr(current_user, "id", ""), entity_id):
+    if not capture_ai.check_rate_limit(actor_id() or "", entity_id):
         return _error(
             "That's a lot of uploads at once. Give it a minute and try again.",
             429,

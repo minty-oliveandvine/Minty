@@ -33,11 +33,63 @@ have the feature"; each route answers "is this person allowed to use it", with
 
 from __future__ import annotations
 
-from flask import abort, request
+from flask import abort, current_app, g, jsonify, make_response, request
 from loguru import logger
 
 from blueprints.capture import capture_bp
-from blueprints.capture.services import capture_ai
+from blueprints.capture.services import actor, capture_ai
+from blueprints.shared import bearer_api
+
+# What the cross-origin surface advertises. Narrow on purpose: a preflight for a
+# method not named here is refused by the browser before the route is reached,
+# so listing only what the widget actually uses is a real constraint rather than
+# documentation.
+_CORS_METHODS = "GET, POST, OPTIONS"
+
+# What CSRF actually guards. GET/HEAD/OPTIONS are never protected, so a read
+# needs no token and must not be asked for one.
+_CSRF_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _csrf_ok() -> bool:
+    """CSRF, checked per DOOR rather than per route.
+
+    The blueprint is exempt from the app-wide CSRFProtect (see bootstrap.py) so
+    that Module 2's widget can POST at all. This is where the protection comes
+    back for the requests that need it.
+
+    A COOKIE write still needs a token. It is the ambient-credential case CSRF
+    exists for: a form on any site could make the user's browser POST here with
+    their session attached, and only a token they cannot read stops it.
+
+    A BEARER write does not, and cannot use one. There is no ambient credential
+    to abuse — the browser attaches nothing on its own, and an attacker's page
+    has no way to obtain the JWT. Demanding a CSRF token as well would ask the
+    widget to read a cookie from another origin, which is the thing browsers
+    exist to prevent.
+    """
+    if request.method not in _CSRF_METHODS:
+        return True
+    if actor.has_bearer():
+        return True
+    # Tests and local tooling turn CSRF off wholesale; honour that here too
+    # rather than becoming the one surface that ignores the switch.
+    if not current_app.config.get("WTF_CSRF_ENABLED", True):
+        return True
+
+    from flask_wtf.csrf import validate_csrf
+
+    token = (
+        request.headers.get("X-CSRFToken")
+        or request.form.get("csrf_token")
+        or ""
+    )
+    try:
+        validate_csrf(token)
+        return True
+    except Exception as exc:
+        logger.warning("capture: CSRF rejected for {}: {}", request.path, exc)
+        return False
 
 
 def _from_request(keys):
@@ -94,6 +146,19 @@ def resolve_entity_id():
     return None
 
 
+def current_entity_id() -> str:
+    """The entity the gate already resolved for THIS request.
+
+    Routes call this instead of ``resolve_entity_id`` for two reasons. It is one
+    lookup per request rather than two — resolving through a draft or upload id
+    costs a query, and every write route was paying for it a second time. And it
+    is a ``str``, not ``str | None``: the gate refuses the request when nothing
+    resolves, so by the time a route runs the answer exists, and the routes no
+    longer have to pretend otherwise.
+    """
+    return getattr(g, "capture_entity_id", "") or ""
+
+
 def entity_has_capture(entity_id: str) -> bool:
     """True when either module that can receive a draft is switched on."""
     from blueprints.entity.routes.modules import _is_module_enabled
@@ -104,15 +169,54 @@ def entity_has_capture(entity_id: str) -> bool:
     )
 
 
+@capture_bp.after_request
+def _stamp_cors(response):
+    """CORS headers for Module 2's widget, and nobody else.
+
+    Stamped only when the request actually came from the configured Module 2
+    origin — ``Vary: Origin`` goes on with it, so a response cached for one
+    origin is never replayed to another.
+    """
+    if actor.is_cross_origin():
+        bearer_api.cors(response, bearer_api.frontend_origin(), methods=_CORS_METHODS)
+    return response
+
+
 @capture_bp.before_request
 def _enforce_capture_gate():
+    # The preflight, before ANY other check. A browser sends OPTIONS with no
+    # cookie and no Authorization header by design, so running it through the
+    # kill switch and the module gate would refuse every cross-origin call
+    # before the real request was ever made.
     if request.method == "OPTIONS":
-        return None
+        return make_response("", 204)
 
     # 1. The kill switch, before anything else — no database work, no context
     #    assembly, no cost, on a feature nobody has turned on.
     if not capture_ai.is_enabled():
         abort(404)
+
+    if not _csrf_ok():
+        # 400, not a redirect. A redirect is what the widget hit first, and a
+        # client that follows it parses an HTML login page as JSON and reports
+        # something unrelated ("We could not reach Minty").
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "reason": "csrf",
+                    "message": "That request was missing its security token. "
+                               "Refresh the page and try again.",
+                }
+            ),
+            400,
+        )
+
+    # Who is asking — a Minty session, or Module 2's bearer token. Neither
+    # means the token has expired, which is the common case and is worth saying
+    # rather than redirecting a widget to a login page it cannot render.
+    if actor.acting_user() is None:
+        return actor.expired_or_unauthenticated()
 
     entity_id = resolve_entity_id()
     if not entity_id:
@@ -134,6 +238,8 @@ def _enforce_capture_gate():
         allowed = False
 
     if allowed:
+        # Hand it to the routes so they do not resolve it a second time.
+        g.capture_entity_id = entity_id
         return None
 
     from services.authz import DENIAL_MODULE_INACTIVE, permission_denied

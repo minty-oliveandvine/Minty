@@ -588,3 +588,83 @@ def test_the_audit_never_records_a_value_off_the_document(rig):
         assert "SF Express" not in blob
         assert "120.00" not in blob
         assert "Courier delivery" not in blob
+
+
+# --------------------------------------------------------------------------
+# The shape of a real uploaded file: something that is not a receipt on one
+# page, and the receipt on another. Found by examining an actual test PDF —
+# a petty cash worksheet on page 1, a photographed till receipt on page 2.
+# --------------------------------------------------------------------------
+def test_a_covering_page_is_not_sent_to_the_model_with_the_receipt(rig):
+    """One real document in a two-page file must still be CUT to its own page.
+
+    The rule used to be "is this the only surviving document", which is a
+    different question: a file whose page 1 is a worksheet full of unrelated
+    figures and whose page 2 is the receipt had exactly one survivor, so
+    nothing was cut and the worksheet went to the model beside the receipt.
+    A page of unrelated totals next to a receipt is an invitation to read the
+    wrong one.
+    """
+    rig.modules()
+    rig.stub_model([doc(1, 1, doc_type="other"), doc(2, 2, doc_type="receipt")])
+
+    sent = []
+    stubbed = rig.ai.extract
+
+    def spy(document, mime, context, doc_type, locator=""):
+        sent.append(document)
+        return stubbed(document, mime, context, doc_type, locator)
+
+    rig.monkeypatch.setattr(rig.ai, "extract", spy)
+
+    upload = rig.seed_upload(page_count=2)
+    rig.run(upload)
+
+    assert len(sent) == 1
+    # One page reached the model, not two.
+    import io as _io
+
+    import pikepdf
+
+    with pikepdf.open(_io.BytesIO(sent[0])) as cut:
+        assert len(cut.pages) == 1
+
+    draft = rig.drafts_for(upload)[0]
+    assert draft.page_start == 2 and draft.page_end == 2
+    # And the cut page was stored, so the review card shows the receipt alone.
+    assert draft.page_s3_key is not None
+
+
+def test_a_single_document_spanning_the_file_is_not_cut(rig):
+    """A one-receipt upload is sent whole. Re-saving a PDF to get an identical
+    PDF is work for nothing."""
+    rig.modules()
+    rig.stub_model([doc(1, 2, doc_type="invoice")])
+
+    upload = rig.seed_upload(page_count=2)
+    rig.run(upload)
+
+    draft = rig.drafts_for(upload)[0]
+    assert draft.page_s3_key is None
+
+
+def test_the_locator_is_sent_whenever_the_file_held_more_than_one_document(rig):
+    """Cutting to a page range does not separate two receipts printed side by
+    side, so the locator is still the only thing telling them apart."""
+    rig.modules()
+    rig.stub_model([doc(1, 1, doc_type="other"),
+                    doc(2, 2, doc_type="receipt", locator="till receipt, $24.20")])
+
+    seen = []
+    stubbed = rig.ai.extract
+
+    def spy(document, mime, context, doc_type, locator=""):
+        seen.append(locator)
+        return stubbed(document, mime, context, doc_type, locator)
+
+    rig.monkeypatch.setattr(rig.ai, "extract", spy)
+
+    upload = rig.seed_upload(page_count=2)
+    rig.run(upload)
+
+    assert seen == ["till receipt, $24.20"]

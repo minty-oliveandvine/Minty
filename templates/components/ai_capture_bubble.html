@@ -10,150 +10,26 @@
   Cash or Payment, and the user has permission on it.
 #}
 {% if capture_bubble %}
-{% include 'components/capture_theme.html' %}
-<style>
-  /* ---------------------------------------------------------------- button
-     A mint disc with a soft halo. The halo is layered box-shadows rather than
-     a blurred pseudo-element: the button is position:fixed, and a child sent
-     behind it with z-index:-1 disappears under the page on some stacking
-     contexts. Four shadows — a tight ring, a near glow, a far glow, and one
-     ordinary drop shadow for the sense that it sits above the page. */
-  .cap-bubble-btn {
-    position: fixed; right: 24px; bottom: 24px; z-index: 900;
-    width: 58px; height: 58px; border-radius: 50%;
-    background: linear-gradient(160deg, var(--cap-mint-300) 0%, var(--cap-mint) 55%, var(--cap-mint-600) 100%);
-    /* White on aqua measures 1.79:1 — far too low for text, but this is a
-       large solid glyph rather than a word, and it is the look the design
-       asks for. The considered exception; see capture_theme.html. */
-    color: #fff; border: none; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 26px; line-height: 1;
-    box-shadow:
-      0 0 0 8px var(--cap-glow-edge),
-      0 0 18px 6px var(--cap-glow-near),
-      0 0 40px 16px var(--cap-glow-far),
-      0 6px 18px rgba(15, 23, 42, .16);
-    transition: transform .18s ease, box-shadow .18s ease;
-  }
-  .cap-bubble-btn:hover {
-    transform: translateY(-2px);
-    box-shadow:
-      0 0 0 10px var(--cap-glow-edge),
-      0 0 22px 8px var(--cap-glow-near),
-      0 0 52px 20px var(--cap-glow-far),
-      0 10px 24px rgba(15, 23, 42, .2);
-  }
-  .cap-bubble-btn:active { transform: translateY(0); }
-  .cap-bubble-btn:focus-visible {
-    outline: 3px solid var(--cap-mint-800);
-    outline-offset: 3px;
-  }
+{# ICONS ARE INLINE SVG, NOT AN ICON FONT.
 
-  .cap-badge {
-    position: absolute; top: -2px; right: -2px; min-width: 20px; height: 20px;
-    padding: 0 5px; border-radius: 10px;
-    background: var(--cap-alert); color: #fff;
-    font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
-    border: 2px solid #fff;
-  }
+   This partial is spliced into EVERY page in the application, and most of them
+   are standalone documents that do not extend base/layout.html — so most of
+   them never load Remix Icon. The <i class="ri-..."> version rendered as three
+   blank spaces: no star on the button, no × to close the panel, no upload
+   arrow. It looked like a styling bug and was a missing dependency.
 
-  /* ----------------------------------------------------------------- panel */
-  .cap-panel {
-    position: fixed; right: 24px; bottom: 96px; z-index: 900;
-    width: 340px; max-height: min(460px, calc(100vh - 148px));
-    background: #fff; border: 1px solid var(--cap-line); border-radius: 14px;
-    box-shadow: 0 18px 44px rgba(15, 23, 42, .16);
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  .cap-panel-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 14px;
-    background: linear-gradient(135deg, var(--cap-mint-050) 0%, #fff 100%);
-    border-bottom: 1px solid var(--cap-line);
-    font-weight: 600; color: var(--cap-mint-800);
-  }
-  .cap-panel-head i { color: var(--cap-mint-700); }
-  .cap-panel-body { padding: 14px; overflow-y: auto; }
-  .cap-intro {
-    font-size: 12px; line-height: 1.5; color: var(--cap-muted);
-    margin-bottom: 12px;
-  }
-  .cap-close {
-    background: none; border: none; font-size: 18px;
-    color: var(--cap-muted); cursor: pointer; line-height: 1;
-  }
-
-  /* -------------------------------------------------------------- drop zone */
-  .cap-drop {
-    border: 2px dashed var(--cap-mint-200); border-radius: 12px;
-    background: var(--cap-mint-050);
-    padding: 22px 14px; text-align: center; color: #35595C; cursor: pointer;
-    transition: border-color .15s ease, background .15s ease;
-  }
-  .cap-drop:hover, .cap-drop.is-over {
-    border-color: var(--cap-mint); background: #D8F4F6;
-  }
-  .cap-drop.is-busy { opacity: .55; cursor: progress; }
-  .cap-drop i {
-    font-size: 26px; color: var(--cap-mint-700); display: block; margin-bottom: 6px;
-  }
-  .cap-drop .cap-hint { font-size: 11px; color: var(--cap-faint); margin-top: 6px; }
-
-  /* ---------------------------------------------------------------- notices */
-  .cap-msg { margin-top: 10px; font-size: 12px; border-radius: 8px; padding: 8px 10px; }
-  .cap-msg.err {
-    background: var(--cap-danger-bg); color: var(--cap-danger-ink);
-    border: 1px solid var(--cap-danger-line);
-  }
-  .cap-msg.ok {
-    background: var(--cap-mint-050); color: var(--cap-mint-800);
-    border: 1px solid var(--cap-mint-200);
-  }
-
-  /* ----------------------------------------------------------- recent list */
-  .cap-recent { margin-top: 14px; }
-  .cap-recent h4 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--cap-faint); margin-bottom: 6px;
-  }
-  .cap-row {
-    display: flex; align-items: baseline; gap: 8px; padding: 5px 0;
-    font-size: 12px; color: #334155; border-top: 1px solid #F1F5F9;
-  }
-  .cap-row .cap-name {
-    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .cap-row .cap-state { color: var(--cap-muted); font-size: 11px; white-space: nowrap; }
-  .cap-row .cap-state.bad { color: #B91C1C; }
-
-  /* -------------------------------------------------------------------- cta */
-  .cap-go {
-    display: block; width: 100%; margin-top: 14px; padding: 10px;
-    background: var(--cap-mint); color: var(--cap-on-mint); border: none;
-    border-radius: 9px;
-    font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
-    text-decoration: none;
-    box-shadow: 0 2px 8px rgba(var(--cap-mint-rgb), .40);
-  }
-  .cap-go:hover { background: var(--cap-mint-600); color: var(--cap-on-mint); }
-
-  @media (max-width: 480px) {
-    .cap-panel { right: 12px; left: 12px; width: auto; bottom: 88px; }
-    .cap-bubble-btn { right: 16px; bottom: 16px; }
-  }
-
-  /* A halo is decoration; a transition on a fixed element is motion. Somebody
-     who has asked for less of it gets the colour and none of the movement. */
-  @media (prefers-reduced-motion: reduce) {
-    .cap-bubble-btn { transition: none; }
-    .cap-bubble-btn:hover { transform: none; }
-  }
-</style>
+   The same SVGs are in static/js/capture_widget.js, which is why the bubble on
+   Module 2 looked right while Minty's did not. #}
+{# One stylesheet, shared with the queue page AND with the widget Module 2
+   loads (static/js/capture_widget.js). The CSS cannot live in this partial any
+   more: a React page on another origin has no Jinja, and two copies of the
+   look is two things to keep in step. #}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/capture_hub.css') }}">
 
 <button type="button" class="cap-bubble-btn" id="capBubbleBtn"
         aria-label="AI Hub — upload a receipt or invoice"
         aria-expanded="false" aria-controls="capBubblePanel">
-  <i class="ri-sparkling-2-fill" aria-hidden="true"></i>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 2.5 11 7l4.5 1.5L11 10l-1.5 4.5L8 10l-4.5-1.5L8 7z"/><path d="M17.5 12.5 18.4 15l2.6.9-2.6.9-.9 2.6-.9-2.6L14 15l2.6-.9z"/><path d="M16 3l.6 1.7 1.7.6-1.7.6L16 7.6l-.6-1.7-1.7-.6 1.7-.6z"/></svg>
   <span class="cap-badge" id="capBadge" hidden>0</span>
 </button>
 
@@ -162,7 +38,7 @@
   <div class="cap-panel-head">
     <span>AI Hub</span>
     <button type="button" class="cap-close" id="capCloseBtn" aria-label="Close">
-      <i class="ri-close-line" aria-hidden="true"></i>
+      &times;
     </button>
   </div>
   <div class="cap-panel-body">
@@ -184,7 +60,7 @@
 
     <div class="cap-drop" id="capDrop" tabindex="0" role="button"
          aria-label="Drop a file here, or click to choose one">
-      <i class="ri-upload-cloud-2-line" aria-hidden="true"></i>
+      <span class="cap-drop-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 7 8h3v6h4V8h3zM5 17h14v3H5z"/></svg></span>
       <div><strong>Drop a file here</strong></div>
       <div>or click to choose one</div>
       <div class="cap-hint">

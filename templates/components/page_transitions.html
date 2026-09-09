@@ -111,6 +111,40 @@
           PageTransition.init(selector, effect, 0);
         }, 10);
       }
+    },
+
+    // Undo a fade-out that never got thrown away.
+    //
+    // navigateWithFade() fades .main-content to opacity 0 and THEN leaves the
+    // page. When the browser comes back to it with the Back button it usually
+    // restores the page from its back/forward cache: the DOM returns exactly as
+    // it was left - still carrying `page-fade-out` - and the scripts on the page
+    // do NOT run a second time, so nothing ever fades it back in. The result is
+    // a page with its header and buttons but a completely empty body, which is
+    // what Back out of the Bills module gave on the Select Company list.
+    //
+    // `pageshow` is the one event that fires on a cached restore as well as a
+    // normal load, so this is the place to clear it.
+    restore: function(element) {
+      const el = element || document.querySelector('.main-content');
+      if (!el) return;
+      el.classList.remove('page-fade-out');
+      // .main-content is opacity:0 until an animation puts it back, so make sure
+      // one is still on the element after the fade-out class comes off.
+      if (!el.classList.contains('page-fade-in') &&
+          !el.classList.contains('page-fade-slide')) {
+        el.classList.add('page-fade-in');
+      }
     }
   };
+
+  // Every page that fades also needs un-fading on a Back-button restore, so this
+  // is wired here once rather than left to each template to remember.
+  window.addEventListener('pageshow', function (event) {
+    if (!event.persisted) return;   // a normal load re-runs init() on its own
+    document.querySelectorAll('.page-fade-out').forEach(function (el) {
+      PageTransition.restore(el);
+    });
+    PageTransition.restore();
+  });
 </script>

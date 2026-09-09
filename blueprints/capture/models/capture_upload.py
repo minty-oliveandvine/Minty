@@ -58,8 +58,18 @@ class CaptureUpload(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
 
-    # Resolved server-side on every request. A client-supplied entity_id is
-    # never trusted — cross-entity leakage is a security defect, not a bug.
+    # Which company this upload belongs to.
+    #
+    # The value ARRIVES from the browser — the bubble carries the entity of the
+    # page it was rendered on. What makes that safe is not that we ignore it but
+    # that it is AUTHORISED on every request: the blueprint gate checks the
+    # company holds a module, and each route calls ``has_permission``, which for
+    # an entity-scoped permission requires an approved membership on that exact
+    # entity. Naming somebody else's company gets a 403, not their data.
+    #
+    # Everything downstream compares against THIS stored value rather than
+    # against whatever a later request supplies, so a draft can only ever be
+    # read or confirmed by someone with access to the company that owns it.
     entity_id = db.Column(
         db.String(36), db.ForeignKey(f"{SCHEMA}.entities.id"), nullable=False
     )

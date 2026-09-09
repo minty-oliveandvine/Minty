@@ -1,0 +1,221 @@
+/*
+ * AI Hub — the whole look, in one file.
+ *
+ * Loaded by THREE things that must never drift apart:
+ *
+ *   templates/components/ai_capture_bubble.html   the bubble on Minty's pages
+ *   templates/capture/queue.html                  the review queue
+ *   static/js/capture_widget.js                   the bubble on Module 2
+ *
+ * That last one is why this is a stylesheet rather than a Jinja partial: the
+ * widget runs on a different application, on a different origin, with no
+ * template engine. A <link> it can fetch is the only form all three can share.
+ *
+ * WHY THESE COLOURS ARE NOT THE APP'S `primary`
+ *
+ * The app's Tailwind `primary` is #294882, a navy. The AI Hub is aqua. That is
+ * deliberate: the bubble floats over every page in the application, and a
+ * floating control that shares the page's own accent colour reads as part of
+ * whatever is underneath it rather than as one consistent thing that follows
+ * you around.
+ *
+ * WHY THE TEXT ON THE AQUA IS DARK, NOT WHITE
+ *
+ * #54D3DA is a light colour. White text on it measures 1.79:1, where the
+ * standard asks 4.5:1 for ordinary text and 3:1 for large or bold — so white
+ * fails by a wide margin. Rather than darken the brand colour to make white
+ * work, the colour is kept exactly as specified and the text on it is
+ * --cap-on-mint, which measures 5.56:1.
+ *
+ * The one place white survives is the bubble's sparkle icon. An icon is a large
+ * solid shape rather than text, and white-on-aqua is the look the design asks
+ * for. A considered exception, not an oversight.
+ */
+
+:root {
+  /* The aqua, exactly as specified. */
+  --cap-mint: #54D3DA;
+  /* The same colour as raw channels, for glows and shadows. Having this means
+     changing the brand colour is TWO lines here rather than a hunt through
+     every rgba() in three files. */
+  --cap-mint-rgb: 84, 211, 218;
+
+  --cap-mint-300: #7FDFE4;   /* the light end of the button gradient */
+  --cap-mint-600: #2CC3CC;   /* hover: the same colour, a step deeper */
+  --cap-mint-700: #1F8A90;   /* icons and accents on white */
+  --cap-mint-800: #196E72;   /* headings and body text on white (5.97:1) */
+  --cap-mint-200: #9EE6EA;   /* borders on tinted surfaces */
+  --cap-mint-050: #E9F9FA;   /* tinted backgrounds */
+
+  /* Text and icons sitting ON the aqua. 5.56:1 — see the note above. */
+  --cap-on-mint: #0B4A4E;
+
+  /* The halo. Built from the brand hue at low alpha so it reads as light coming
+     off the button rather than as a second ring drawn around it. */
+  --cap-glow-near: rgba(var(--cap-mint-rgb), 0.34);
+  --cap-glow-far: rgba(var(--cap-mint-rgb), 0.20);
+  --cap-glow-edge: rgba(var(--cap-mint-rgb), 0.12);
+
+  /* Neutrals, shared with the rest of the app's slate scale. */
+  --cap-ink: #0F172A;
+  --cap-muted: #64748B;
+  --cap-faint: #94A3B8;
+  --cap-line: #E2E8F0;
+  --cap-surface: #F8FAFC;
+
+  /* States. Red stays red — an alert badge that matched the brand would stop
+     being an alert. */
+  --cap-alert: #DC2626;
+  --cap-danger-bg: #FEF2F2;
+  --cap-danger-line: #FECACA;
+  --cap-danger-ink: #991B1B;
+  --cap-warn-bg: #FFFBEB;
+  --cap-warn-ink: #92400E;
+}
+
+/* ------------------------------------------------------------------ button
+   An aqua disc with a soft halo. The halo is layered box-shadows rather than a
+   blurred pseudo-element: the button is position:fixed, and a child sent behind
+   it with z-index:-1 disappears under the page in some stacking contexts. Four
+   shadows — a tight ring, a near glow, a far glow, and one ordinary drop shadow
+   for the sense that it sits above the page. */
+.cap-bubble-btn {
+  position: fixed; right: 24px; bottom: 24px; z-index: 2147483000;
+  width: 58px; height: 58px; border-radius: 50%;
+  background: linear-gradient(160deg, var(--cap-mint-300) 0%, var(--cap-mint) 55%, var(--cap-mint-600) 100%);
+  /* White on aqua measures 1.79:1 — far too low for text, but this is a large
+     solid glyph rather than a word, and it is the look the design asks for. */
+  color: #fff; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; line-height: 1;
+  box-shadow:
+    0 0 0 8px var(--cap-glow-edge),
+    0 0 18px 6px var(--cap-glow-near),
+    0 0 40px 16px var(--cap-glow-far),
+    0 6px 18px rgba(15, 23, 42, .16);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.cap-bubble-btn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 10px var(--cap-glow-edge),
+    0 0 22px 8px var(--cap-glow-near),
+    0 0 52px 20px var(--cap-glow-far),
+    0 10px 24px rgba(15, 23, 42, .2);
+}
+.cap-bubble-btn:active { transform: translateY(0); }
+.cap-bubble-btn:focus-visible { outline: 3px solid var(--cap-mint-800); outline-offset: 3px; }
+
+/* The sparkle, drawn rather than iconfont-loaded.
+   NEITHER host can be relied on for an icon font. Module 2 is a React app that
+   loads none, and most of Minty's own pages are standalone documents that never
+   extend base/layout.html and so never load Remix Icon either — which is
+   exactly how the button shipped with no star and no × on them. An SVG in the
+   markup is the one form that works everywhere. */
+.cap-bubble-btn svg { width: 26px; height: 26px; fill: currentColor; }
+
+.cap-badge {
+  position: absolute; top: -2px; right: -2px; min-width: 20px; height: 20px;
+  padding: 0 5px; border-radius: 10px;
+  background: var(--cap-alert); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
+  border: 2px solid #fff;
+}
+
+/* ------------------------------------------------------- hiding must work
+   `hidden` is how every part of this widget is shown and dismissed, and the
+   browser's own `[hidden] { display: none }` is NOT enough to enforce it: an
+   author rule beats a user-agent rule whatever the specificity, so the
+   `display: flex` on .cap-panel below silently won and the panel could never be
+   closed. Pressing × ran, set the attribute, and changed nothing on screen.
+
+   Stated explicitly, and with !important, because this stylesheet is loaded
+   into host pages whose own CSS we do not control — Module 2's React app among
+   them. A widget that cannot be dismissed on somebody else's page is worse than
+   one that never opened. */
+.cap-panel[hidden],
+.cap-badge[hidden],
+.cap-recent[hidden] { display: none !important; }
+
+/* ------------------------------------------------------------------- panel */
+.cap-panel {
+  position: fixed; right: 24px; bottom: 96px; z-index: 2147483000;
+  width: 340px; max-height: min(480px, calc(100vh - 148px));
+  background: #fff; border: 1px solid var(--cap-line); border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .16);
+  display: flex; flex-direction: column; overflow: hidden;
+  /* The widget runs inside another application's stylesheet. Naming the font
+     here stops it inheriting whatever that page happens to use. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--cap-ink);
+  text-align: left;
+}
+.cap-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, var(--cap-mint-050) 0%, #fff 100%);
+  border-bottom: 1px solid var(--cap-line);
+  font-weight: 600; font-size: 14px; color: var(--cap-mint-800);
+}
+.cap-panel-body { padding: 14px; overflow-y: auto; }
+.cap-intro { font-size: 12px; line-height: 1.5; color: var(--cap-muted); margin: 0 0 12px; }
+.cap-close {
+  background: none; border: none; font-size: 20px; line-height: 1;
+  color: var(--cap-muted); cursor: pointer; padding: 0 2px;
+}
+
+/* --------------------------------------------------------------- drop zone */
+.cap-drop {
+  border: 2px dashed var(--cap-mint-200); border-radius: 12px;
+  background: var(--cap-mint-050);
+  padding: 22px 14px; text-align: center; color: #35595C; cursor: pointer;
+  font-size: 13px;
+  transition: border-color .15s ease, background .15s ease;
+}
+.cap-drop:hover, .cap-drop.is-over { border-color: var(--cap-mint); background: #D8F4F6; }
+.cap-drop.is-busy { opacity: .55; cursor: progress; }
+.cap-drop .cap-drop-icon { font-size: 26px; color: var(--cap-mint-700); display: block; margin-bottom: 6px; }
+.cap-drop .cap-drop-icon svg { width: 26px; height: 26px; fill: currentColor; }
+.cap-drop .cap-hint { font-size: 11px; color: var(--cap-faint); margin-top: 6px; }
+
+/* ----------------------------------------------------------------- notices */
+.cap-msg { margin-top: 10px; font-size: 12px; border-radius: 8px; padding: 8px 10px; }
+.cap-msg.err { background: var(--cap-danger-bg); color: var(--cap-danger-ink); border: 1px solid var(--cap-danger-line); }
+.cap-msg.ok  { background: var(--cap-mint-050); color: var(--cap-mint-800); border: 1px solid var(--cap-mint-200); }
+
+/* ------------------------------------------------------------- recent list */
+.cap-recent { margin-top: 14px; }
+.cap-recent h4 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--cap-faint); margin: 0 0 6px; font-weight: 600;
+}
+.cap-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 0;
+  font-size: 12px; color: #334155; border-top: 1px solid #F1F5F9;
+}
+.cap-row .cap-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-row .cap-state { color: var(--cap-muted); font-size: 11px; white-space: nowrap; }
+.cap-row .cap-state.bad { color: #B91C1C; }
+
+/* ---------------------------------------------------------------------- cta */
+.cap-go {
+  display: block; width: 100%; margin-top: 14px; padding: 10px;
+  background: var(--cap-mint); color: var(--cap-on-mint); border: none;
+  border-radius: 9px; box-sizing: border-box;
+  font-size: 13px; font-weight: 700; text-align: center; cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(var(--cap-mint-rgb), .40);
+}
+.cap-go:hover { background: var(--cap-mint-600); color: var(--cap-on-mint); }
+
+@media (max-width: 480px) {
+  .cap-panel { right: 12px; left: 12px; width: auto; bottom: 88px; }
+  .cap-bubble-btn { right: 16px; bottom: 16px; }
+}
+
+/* A halo is decoration; a transition on a fixed element is motion. Somebody who
+   has asked for less of it gets the colour and none of the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .cap-bubble-btn { transition: none; }
+  .cap-bubble-btn:hover { transform: none; }
+}

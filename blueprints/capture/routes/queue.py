@@ -18,7 +18,7 @@ from flask import render_template
 from flask_login import current_user, login_required
 
 from blueprints.capture import capture_bp
-from blueprints.capture.routes.module_guard import resolve_entity_id
+from blueprints.capture.routes.module_guard import current_entity_id
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -26,7 +26,7 @@ from services.permission_policy import Permission, has_permission
 @capture_bp.route("/capture", methods=["GET"])
 @login_required
 def capture_queue():
-    entity_id = resolve_entity_id()
+    entity_id = current_entity_id()
 
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return permission_denied(

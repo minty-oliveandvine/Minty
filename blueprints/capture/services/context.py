@@ -35,9 +35,45 @@ from loguru import logger
 
 from blueprints.capture import capture_bp
 
+# Failure signatures already reported at WARNING in this process.
+#
+# Both handlers below run on EVERY request, so a warning per request would
+# drown the log and get muted, which is how the useful signal gets lost. But
+# DEBUG is worse: the bubble simply not appearing is the single most likely way
+# this feature breaks, and at the default level nobody would ever learn why.
+#
+# So: the FIRST occurrence of each distinct failure is a warning, and repeats
+# drop to debug. One line in the log when something breaks, and no flood.
+_reported: set[str] = set()
+
+
+def _report(where: str, exc: Exception) -> None:
+    signature = f"{where}:{type(exc).__name__}:{exc}"
+    if signature in _reported:
+        logger.debug("capture bubble: {} ({})", where, exc)
+        return
+    _reported.add(signature)
+    logger.warning(
+        "capture bubble: {} — {}: {}. The bubble will not appear until this is "
+        "fixed. Further occurrences of this one are logged at debug.",
+        where, type(exc).__name__, exc,
+    )
+
 # Paths where the bubble has no business appearing even if everything else
 # lines up: signing in, agreeing to terms, and the onboarding wizard, which is
 # a linear flow that a floating panel would interrupt.
+# Pages where a company has NOT been chosen yet, named by endpoint rather than
+# path because "/entity" is the chooser and "/entity/<id>" is a company's own
+# dashboard.
+#
+# This matters because of the ``current_entity_id`` fallback: without it the
+# chooser would show a bubble pointed at whatever company the user last opened,
+# and a file dropped there would land somewhere they had not picked. The whole
+# point of the chooser is that nothing is chosen yet.
+_SUPPRESSED_ENDPOINTS = frozenset({
+    "entity.entity_list",
+})
+
 _SUPPRESSED_PREFIXES = (
     "/login",
     "/logout",
@@ -55,8 +91,9 @@ def inject_capture_bubble():
         return {"capture_bubble": _bubble()}
     except Exception as exc:
         # Never let this take a page down. A missing bubble is a small loss; a
-        # 500 on every route is not.
-        logger.debug("capture bubble: suppressed ({})", exc)
+        # 500 on every route is not — this runs for every template render in
+        # the app, including the error page.
+        _report("could not decide whether to render", exc)
         return {"capture_bubble": None}
 
 
@@ -67,6 +104,9 @@ def _bubble():
         return None
 
     if not getattr(current_user, "is_authenticated", False):
+        return None
+
+    if (request.endpoint or "") in _SUPPRESSED_ENDPOINTS:
         return None
 
     path = (request.path or "").lower()
@@ -221,5 +261,5 @@ def inject_capture_bubble_html(response):
     except Exception as exc:
         # Never break a page over the bubble. Same rule as the context
         # processor: a missing bubble is a small loss, a broken response is not.
-        logger.debug("capture bubble: not injected ({})", exc)
+        _report("could not be injected into the page", exc)
     return response
