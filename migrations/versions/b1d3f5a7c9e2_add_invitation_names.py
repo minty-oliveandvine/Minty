@@ -23,17 +23,43 @@ depends_on = None
 SCHEMA = "pettycashv2"
 
 
+
+
+def _has_column(table: str, column: str) -> bool:
+    """True if the column already exists.
+
+    production-backup - and therefore production - carries these columns already,
+    while its alembic_version still points at the revision BEFORE this one: the
+    DDL was applied without stamping. A plain add_column then fails with
+    DuplicateColumn and the whole upgrade stops.
+
+    The column definitions were compared against what this revision declares and
+    match exactly, so skipping the add when it is already there is safe and makes
+    the revision idempotent.
+    """
+    bind = op.get_bind()
+    return bind.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = :s AND table_name = :t AND column_name = :c"
+        ),
+        {"s": SCHEMA, "t": table, "c": column},
+    ).scalar() is not None
+
+
 def upgrade():
-    op.add_column(
-        "invitations",
-        sa.Column("first_name", sa.String(length=100), nullable=True),
-        schema=SCHEMA,
-    )
-    op.add_column(
-        "invitations",
-        sa.Column("last_name", sa.String(length=100), nullable=True),
-        schema=SCHEMA,
-    )
+    if not _has_column("invitations", "first_name"):
+        op.add_column(
+            "invitations",
+            sa.Column("first_name", sa.String(length=100), nullable=True),
+            schema=SCHEMA,
+        )
+    if not _has_column("invitations", "last_name"):
+        op.add_column(
+            "invitations",
+            sa.Column("last_name", sa.String(length=100), nullable=True),
+            schema=SCHEMA,
+        )
 
 
 def downgrade():

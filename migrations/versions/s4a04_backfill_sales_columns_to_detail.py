@@ -141,6 +141,23 @@ def upgrade():
                           SELECT 1 FROM {SCHEMA}.report_sale_detail d
                           WHERE d.report_id = r.id
                       )
+                      -- At THIS point in the chain report_sale_detail.report_id
+                      -- references report_v2(report_id) - not report(id), which is
+                      -- where r10a10 repoints it much later. SOURCE_TABLES reads
+                      -- report and report_draft, and neither id is guaranteed to
+                      -- exist in report_v2, so the insert can violate the key:
+                      --
+                      --   ForeignKeyViolation: Key (report_id)=(...) is not
+                      --   present in table "report_v2"
+                      --
+                      -- Guarding against report_v2 rather than report is the whole
+                      -- point: the constraint that will actually be checked is the
+                      -- one that exists now, not the one that exists at head.
+                      -- Rows with no report_v2 parent are unreachable anyway.
+                      AND EXISTS (
+                          SELECT 1 FROM {SCHEMA}.report_v2 rr
+                          WHERE rr.report_id = r.id
+                      )
                     """
                 ),
                 {"method_id": method_id},

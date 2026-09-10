@@ -20,6 +20,7 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin, TimestampMixin
+from blueprints.subscription.models.column_types import uuid_column
 
 
 class SubscriptionInvoice(TimestampMixin, db.Model):
@@ -38,7 +39,7 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # WHO owes it. No FK: an invoice is history and must survive the payer row.
     payer_user_id = db.Column(db.String(36), nullable=False)
     # Denormalised from user_stripe_customer rather than joined, because that mapping can
@@ -87,7 +88,9 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
     # No FK, like every other reference on this table: an invoice is history and must
     # survive the group being closed. NULL on rows raised before per-entity cards, which
     # is what those rows honestly mean — one card paid for everything.
-    billing_group_id = db.Column(db.String(36), nullable=True)
+    # uuid: payer_billing_group.id is inside the subscription tables and converted
+    # with them. payer_user_id above stays String(36) because ``user`` has not.
+    billing_group_id = db.Column(uuid_column(), nullable=True)
 
     # The double-billing guard. Nullable: a mid-period purchase has no natural key and
     # is guarded by the user waiting for the response instead.
@@ -118,9 +121,9 @@ class SubscriptionInvoiceLine(CreatedAtMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     invoice_id = db.Column(
-        db.String(36),
+        uuid_column(),
         db.ForeignKey("pettycashv2.subscription_invoice.id", ondelete="CASCADE"),
         nullable=False,
     )

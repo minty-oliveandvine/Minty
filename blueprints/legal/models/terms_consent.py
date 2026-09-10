@@ -21,6 +21,8 @@ agreed to precisely what, and when" — which is the whole question. `source`,
 
 import uuid
 
+from sqlalchemy.dialects.postgresql import UUID
+
 from models.db import db
 
 # How the agreement was given. Kept as a plain string column rather than a DB
@@ -52,7 +54,9 @@ class TermsConsent(db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     user_id = db.Column(
         db.String(36),
         # Section 13 of the Terms allows permanent deletion of a user. Keeping

@@ -29,6 +29,10 @@ from blueprints.subscription.constants import (
 )
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin
+from blueprints.subscription.models.column_types import (
+    TRANSFER_STATUS,
+    uuid_column,
+)
 
 # The status vocabulary lives in ``constants``, which is deliberately dependency-free —
 # importing it from here instead would make every consumer of a status pull the model
@@ -64,7 +68,7 @@ class SubscriptionTransfer(CreatedAtMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
@@ -77,7 +81,7 @@ class SubscriptionTransfer(CreatedAtMixin, db.Model):
     from_user_id = db.Column(db.String(36), nullable=False)
     to_user_id = db.Column(db.String(36), nullable=False)
 
-    status = db.Column(db.String(20), nullable=False, default=TRANSFER_PENDING)
+    status = db.Column(TRANSFER_STATUS, nullable=False, default=TRANSFER_PENDING)
 
     # Checked at accept, not only by a sweep. An offer whose day has passed must be
     # refused even if nothing has swept it yet — otherwise "expires in 7 days" means
@@ -93,7 +97,7 @@ class SubscriptionTransfer(CreatedAtMixin, db.Model):
     accepted_billed_through = db.Column(db.DateTime(timezone=True), nullable=True)
     accepted_anchor_at = db.Column(db.DateTime(timezone=True), nullable=True)
     quoted_amount = db.Column(db.Integer, nullable=True)  # minor units, like every amount
-    quoted_currency = db.Column(db.String(3), nullable=True)
+    quoted_currency = db.Column(db.CHAR(3), nullable=True)
 
     # --- the charge ---------------------------------------------------------------
     # How many times a charge has been STARTED for this offer. Incremented and committed

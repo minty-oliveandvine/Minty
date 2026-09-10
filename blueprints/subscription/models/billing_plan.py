@@ -27,6 +27,7 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
+from blueprints.subscription.models.column_types import uuid_column
 
 # ``plan_code`` — which builds the canonical ``code`` value below — lives in
 # ``services.billing`` rather than here. It is pure string canonicalisation with no
@@ -39,7 +40,7 @@ class BillingPlan(TimestampMixin, db.Model):
     __tablename__ = "billing_plan"
     __table_args__ = {"schema": "pettycashv2"}
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # The module SET this plan bills — see ``plan_code``.
     code = db.Column(db.String(200), nullable=False, unique=True, index=True)
     display_name = db.Column(db.String(200), nullable=False)

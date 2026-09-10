@@ -30,6 +30,7 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
+from blueprints.subscription.models.column_types import uuid_column
 
 
 class EntityBillingGroup(TimestampMixin, db.Model):
@@ -45,7 +46,7 @@ class EntityBillingGroup(TimestampMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
@@ -57,8 +58,12 @@ class EntityBillingGroup(TimestampMixin, db.Model):
         db.ForeignKey("pettycashv2.user.id"),
         nullable=False,
     )
+    # uuid, unlike entity_id and payer_user_id above. This one points INSIDE the
+    # subscription tables, so it converted with them; those two point at
+    # ``entities`` / ``user``, which are still String(36) - and Postgres cannot key
+    # a uuid column to a varchar one. See column_types for the whole boundary.
     billing_group_id = db.Column(
-        db.String(36),
+        uuid_column(),
         db.ForeignKey("pettycashv2.payer_billing_group.id"),
         nullable=False,
     )

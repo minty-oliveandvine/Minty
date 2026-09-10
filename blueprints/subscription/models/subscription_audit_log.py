@@ -8,6 +8,12 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin
+from blueprints.subscription.models.column_types import (
+    AUDIT_OUTCOME,
+    EXTENSION_STATE,
+    SUBSCRIPTION_PHASE,
+    uuid_column,
+)
 
 
 class SubscriptionAuditLog(CreatedAtMixin, db.Model):
@@ -18,7 +24,7 @@ class SubscriptionAuditLog(CreatedAtMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36), db.ForeignKey("pettycashv2.entities.id"), nullable=False
     )
@@ -31,8 +37,8 @@ class SubscriptionAuditLog(CreatedAtMixin, db.Model):
     )
 
     action = db.Column(db.String(20), nullable=False)  # cancel / uncancel / transfer_*
-    phase_before = db.Column(db.String(30), nullable=True)
-    phase_after = db.Column(db.String(30), nullable=True)
+    phase_before = db.Column(SUBSCRIPTION_PHASE, nullable=True)
+    phase_after = db.Column(SUBSCRIPTION_PHASE, nullable=True)
 
     # WHO PAID, before and after. Null on every action that does not move the bill —
     # which is all of them except the transfer family, so null is "not a payer change"
@@ -48,8 +54,8 @@ class SubscriptionAuditLog(CreatedAtMixin, db.Model):
     payer_after = db.Column(db.String(36), nullable=True)
     app_access_until = db.Column(db.DateTime(timezone=True), nullable=True)
     extension_amount = db.Column(db.Integer, nullable=True)
-    extension_state = db.Column(db.String(20), nullable=True)
-    outcome = db.Column(db.String(20), nullable=False)  # succeeded / aborted
+    extension_state = db.Column(EXTENSION_STATE, nullable=True)
+    outcome = db.Column(AUDIT_OUTCOME, nullable=False)  # succeeded / aborted
     # Why the customer said they were leaving, in their own words, from the cancellation
     # dialog. Optional on every path — nobody is made to justify cancelling — so NULL
     # means "didn't say" rather than "not a cancellation"; read ``action`` for that.

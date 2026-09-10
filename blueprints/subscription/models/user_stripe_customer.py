@@ -13,13 +13,14 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
+from blueprints.subscription.models.column_types import uuid_column
 
 
 class UserStripeCustomer(TimestampMixin, db.Model):
     __tablename__ = "user_stripe_customer"
     __table_args__ = {"schema": "pettycashv2"}
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.user.id"),
