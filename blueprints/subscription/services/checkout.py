@@ -537,7 +537,7 @@ def _ensure_nominated(entity_id, user_id) -> None:
 
     THE BACKSTOP FOR CONSENT WITHOUT A CARD. Consenting and nominating are two records,
     and every screen that asks for one asks for the other in the same step — but the
-    callers that do not (onboarding's Buy now, which sets the account default and then
+    callers that do not (onboarding's billing sheet, which sets the account default and then
     authorises) would otherwise leave a company authorised to be billed and billed to
     nothing. Its trial would expire at term end having been told it would convert.
 

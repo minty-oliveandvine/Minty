@@ -747,7 +747,7 @@ def _entity_for_member(user_id, entity_id):
 
 @entity_bp.route("/api/onboarding/payment-method", methods=["GET", "OPTIONS"])
 def onboarding_payment_method_status():
-    """What Step 2's "Buy now" needs to know about this entity's billing.
+    """What Step 2's billing sheet needs to know about this entity's billing.
 
     GET ?entity_id=… → {"has_payment_method": bool, "has_billing_consent": bool}.
 
@@ -756,7 +756,7 @@ def onboarding_payment_method_status():
     says nothing about this entity. Consent is per (entity, payer) and is what decides
     whether this entity's 30-day trial converts to paid at term end or simply lapses.
 
-    Neither gates the wizard: the trial starts either way, so a payer who skips Buy now
+    Neither gates the wizard: the trial starts either way, so a payer who skips the sheet
     still onboards — they just lapse at day 30 instead of converting.
     """
     if request.method == "OPTIONS":
@@ -786,7 +786,7 @@ def onboarding_payment_method_status():
 
     # Local read, deliberately outside the try above: an unreachable Stripe must not be
     # able to report "no consent" for an entity the payer has already authorised, which
-    # would offer them Buy now a second time for something they already bought.
+    # would offer them the billing sheet a second time for something they already have.
     from blueprints.subscription.services import store
 
     return _cors(
@@ -900,7 +900,7 @@ def onboarding_payment_method_complete():
     return _cors(jsonify({"has_payment_method": True}))
 
 
-# --- Onboarding "Buy now" ---------------------------------------------------
+# --- Onboarding billing sheet -----------------------------------------------
 #
 # The four payment-method routes below are deliberate MIRRORS of the payer portal's
 # ``/api/me/billing/payment-methods*``, not a refactor of them: same service functions
@@ -939,7 +939,7 @@ def _billing_call(handler):
 def onboarding_billing_payment_methods():
     """Every card saved on the payer's account, with the default marked.
 
-    GET → the same shape the payer portal renders, so the Buy now sheet and the billing
+    GET → the same shape the payer portal renders, so the billing sheet and the billing
     page cannot drift into describing the same card differently.
     """
     if request.method == "OPTIONS":
@@ -1104,7 +1104,8 @@ def onboarding_billing_authorize():
 
     Body: ``{entity_id, payment_method?}``.
 
-    This is what "Buy now" actually buys. The 30-day trial still runs its full term; what
+    This is what the billing sheet actually secures. The 30-day trial still runs its full
+    term; what
     changes is what happens at the end of it — ``checkout.convert_or_expire_due_trials``
     converts a trial to paid only when the payer has BOTH a card and a consent row for the
     entity, and lets it lapse otherwise. So this is the difference between "converts" and
