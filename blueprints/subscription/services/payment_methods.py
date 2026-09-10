@@ -411,6 +411,55 @@ def list_for_user(user_id) -> dict:
     }
 
 
+def accounts_for_user(user_id) -> dict:
+    """The payer's billing accounts, each with the cards on it.
+
+    What the card picker renders. An ACCOUNT is a name, a set of cards, and the one card
+    it charges; the payer chooses between accounts, not between loose cards, which is the
+    distinction ``payer_billing_group`` has carried since it stopped being "the account
+    default".
+
+    ONE STRIPE READ FOR THE WHOLE PAGE. The card descriptions come from
+    ``list_for_user`` and are looked up by id, rather than each account fetching its own —
+    a payer with three accounts on two cards would otherwise read the same method twice
+    and could render it two different ways.
+
+    A card on the shelf that Stripe no longer knows about is DROPPED from the account
+    rather than shown as a blank row: it was detached at Stripe, and the shelf is a local
+    copy of a fact Stripe owns.
+    """
+    wallet = list_for_user(user_id)
+    by_id = {m["id"]: m for m in wallet["methods"]}
+
+    accounts = []
+    for group in sub_store.billing_groups_for_payer(user_id):
+        cards = [
+            by_id[row.stripe_payment_method_id]
+            for row in sub_store.cards_in_group(group.id)
+            if row.stripe_payment_method_id in by_id
+        ]
+        accounts.append(
+            {
+                "id": group.id,
+                "billing_email": group.billing_email,
+                "billing_company": group.billing_company,
+                "default_id": group.stripe_payment_method_id,
+                "cards": cards,
+                "total": len(cards),
+            }
+        )
+
+    return {
+        "has_account": wallet["has_account"],
+        "accounts": accounts,
+        "total": len(accounts),
+        # The flat wallet as well, because "add a card to an account" and "the payer's
+        # cards" are different questions and the dialog asks both.
+        "methods": wallet["methods"],
+        "default_id": wallet["default_id"],
+    }
+
+
 # --- Adding ------------------------------------------------------------------
 
 
@@ -496,7 +545,15 @@ def _payer_customer_for_confirm(user_id, intent_customer: str | None) -> tuple[s
     return customer_id, True
 
 
-def confirm_setup(user_id, setup_intent_id: str, *, make_default: bool = False) -> dict:
+def confirm_setup(
+    user_id,
+    setup_intent_id: str,
+    *,
+    make_default: bool = False,
+    billing_group_id=None,
+    billing_email=None,
+    billing_company=None,
+) -> dict:
     """Take ownership of a card the browser just confirmed. Returns the fresh list.
 
     The browser confirms the SetupIntent directly with Stripe, so this is the app finding
@@ -510,6 +567,21 @@ def confirm_setup(user_id, setup_intent_id: str, *, make_default: bool = False) 
     Idempotent. Re-running on the same intent re-attaches an already-attached method
     (Stripe accepts it), re-sets the same default, and returns the same list — a
     double-click or a retried request cannot produce two cards or two customers.
+
+    THE BILLING ACCOUNT IS OPTIONAL, AND IS NEVER CREATED BY ACCIDENT.
+
+    * ``billing_group_id`` — put the card on an account that already exists. The account
+      is checked to be the caller's first; a group id from the browser naming someone
+      else's account would otherwise move a card onto it.
+    * ``billing_email`` / ``billing_company`` with no group — OPEN a new account on this
+      card, named. This is the onboarding dialog's path.
+    * neither — save the card and nothing else, exactly as before this existed. That is
+      the payer-portal path, where an account is opened later by the nomination.
+
+    Not idempotent in the same sense as the card itself: a retried request that names no
+    group opens a SECOND account, because two accounts on one card are legal and the
+    service cannot tell a retry from a deliberate second one. The browser passes the
+    account id back on a retry, which is what makes the whole call safe to repeat.
     """
     intent = retrieve_setup_intent(setup_intent_id)
     if not intent:
@@ -558,7 +630,51 @@ def confirm_setup(user_id, setup_intent_id: str, *, make_default: bool = False) 
     if make_default or created_customer or not current_default:
         set_customer_default_payment_method(customer_id, payment_method)
 
-    return list_for_user(user_id)
+    account = _account_for_confirm(
+        user_id, payment_method, billing_group_id, billing_email, billing_company
+    )
+
+    payload = list_for_user(user_id)
+    if account is not None:
+        # Additive: every existing caller reads ``methods`` and is untouched.
+        payload["account"] = {
+            "id": account.id,
+            "billing_email": account.billing_email,
+            "billing_company": account.billing_company,
+            "default_id": account.stripe_payment_method_id,
+        }
+    return payload
+
+
+def _account_for_confirm(
+    user_id, payment_method, billing_group_id, billing_email, billing_company
+):
+    """The billing account this confirmed card belongs to, or None if it names none.
+
+    Split out because it is the only part of ``confirm_setup`` that touches local state,
+    and it must run AFTER Stripe has confirmed the card exists — an account opened for a
+    card that was declined is an account that can never be charged.
+    """
+    if billing_group_id:
+        account = sub_store.billing_group(billing_group_id)
+        # THE OWNERSHIP CHECK. The id came from the browser; without this, naming
+        # another payer's account moves a card onto it.
+        if account is None or str(account.payer_user_id) != str(user_id):
+            raise PaymentMethodError("That billing account couldn't be found.", status=404)
+        sub_store.add_card_to_group(account.id, payment_method)
+        # Commits the shelf row too — ``add_card_to_group`` deliberately leaves the unit
+        # of work open so the two land together. With both fields None this only commits.
+        return sub_store.set_account_identity(
+            account.id, billing_email=billing_email, billing_company=billing_company
+        )
+
+    if billing_email or billing_company:
+        return sub_store.create_billing_account(
+            user_id, payment_method,
+            billing_email=billing_email, billing_company=billing_company,
+        )
+
+    return None
 
 
 # --- Editing, promoting, removing --------------------------------------------

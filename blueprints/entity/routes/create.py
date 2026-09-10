@@ -995,9 +995,21 @@ def onboarding_billing_confirm():
     setup_intent = str(payload.get("setup_intent") or "").strip()
     make_default = bool(payload.get("make_default"))
 
+    # THE BILLING ACCOUNT, and all three are optional. A body carrying none of them
+    # behaves exactly as it did before accounts existed: the card is saved and nothing
+    # else. ``billing_group_id`` puts it on an account the payer already has; an email or
+    # a company with no group opens a new one. The service checks the group is the
+    # caller's own — a group id from a browser is not a permission.
+    billing_group_id = str(payload.get("billing_group_id") or "").strip() or None
+    billing_email = payload.get("billing_email")
+    billing_company = payload.get("billing_company")
+
     return _billing_call(
         lambda user_id: payment_methods.confirm_setup(
-            user_id, setup_intent, make_default=make_default
+            user_id, setup_intent, make_default=make_default,
+            billing_group_id=billing_group_id,
+            billing_email=billing_email,
+            billing_company=billing_company,
         )
     )
 
@@ -1026,6 +1038,64 @@ def onboarding_billing_set_default():
     return _billing_call(
         lambda user_id: payment_methods.set_default(user_id, payment_method)
     )
+
+
+@entity_bp.route("/api/onboarding/billing/accounts", methods=["GET", "POST", "OPTIONS"])
+def onboarding_billing_accounts():
+    """The payer's billing accounts, and the way to open one.
+
+    GET → ``{accounts: [{id, billing_email, billing_company, default_id, cards[]}], …}``.
+    An account is a name, the cards on it, and the one card it charges; the picker
+    chooses between accounts rather than between loose cards.
+
+    POST → open an account. Body: ``{payment_method, billing_email?, billing_company?}``.
+    The card must already be saved — this does not take card details, and cannot: the
+    number only ever exists inside Stripe Elements, and a card becomes the payer's at
+    ``/payment-methods/confirm``. The ordinary onboarding path never calls this at all,
+    because confirm opens the account in the same request the card is saved in; this is
+    for opening a SECOND account on a card the payer already holds.
+
+    OPENING AN ACCOUNT AUTHORISES NOTHING. It names a card and a company for invoices.
+    Billing an entity still needs that entity's own consent — ``/billing/authorize``
+    below — which is a separate call for exactly that reason.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    from blueprints.subscription.services import payment_methods
+
+    if request.method == "GET":
+        return _billing_call(payment_methods.accounts_for_user)
+
+    payload = request.get_json(silent=True) or {}
+    payment_method = str(payload.get("payment_method") or "").strip()
+    if not payment_method:
+        resp = jsonify({"error": "A saved card is required to open a billing account."})
+        resp.status_code = 400
+        return _cors(resp)
+
+    billing_email = payload.get("billing_email")
+    billing_company = payload.get("billing_company")
+
+    def _open(user_id):
+        from blueprints.subscription.services import store as sub_store
+
+        # OWNERSHIP FIRST. ``_owned`` is the same check every mutation in
+        # payment_methods makes: it proves the card is on the caller's own Stripe
+        # customer, so a ``pm_...`` copied from anywhere else cannot open an account.
+        payment_methods._owned(user_id, payment_method)
+        account = sub_store.create_billing_account(
+            user_id, payment_method,
+            billing_email=billing_email, billing_company=billing_company,
+        )
+        return {
+            "id": account.id,
+            "billing_email": account.billing_email,
+            "billing_company": account.billing_company,
+            "default_id": account.stripe_payment_method_id,
+        }
+
+    return _billing_call(_open)
 
 
 @entity_bp.route("/api/onboarding/billing/authorize", methods=["POST", "OPTIONS"])
