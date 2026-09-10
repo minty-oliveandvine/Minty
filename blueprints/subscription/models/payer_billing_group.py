@@ -1,4 +1,4 @@
-"""One card, and the billing cycle that card owns.
+"""A billing account: its identity, its cards, and everything it pays for.
 
 ONE ACCOUNT, SEVERAL SHELVES. ``user_stripe_customer`` used to be the whole billing
 account: one card, one ``paid_through``, one dunning clock, and every company the payer
@@ -9,14 +9,33 @@ A billing group is the smaller unit that replaces it: **one payment method, plus
 everything it pays for**. A payer may have several. ``entity_billing_group`` says which
 companies are on which.
 
+IT IS NOW THE BILLING ACCOUNT, AND IT HAS A NAME. ``v1a01_billing_account`` added
+``billing_email`` and ``billing_company`` — what the payer wants their invoices to say,
+which is not the same thing as who they are. The Stripe customer could not carry it:
+``checkout._payer_identity`` rewrites its email from the ``user`` row on every write, and
+its NAME is the payer's human name because an entity name there would be wrong the moment
+a second entity is added. The identity therefore lives where the money already is, and
+costs no new join on any billing query.
+
+THE CARD COLUMN IS NOW THE DEFAULT AMONG SEVERAL. An account may hold more than one card;
+``billing_account_payment_method`` is the shelf, and ``stripe_payment_method_id`` below is
+the one this account CHARGES. The two are written together by
+``store.set_group_default_card`` — see that model for why the default is deliberately
+recorded in both places.
+
 WHAT MOVED HERE, AND WHY EACH ONE HAD TO.
 
 * ``stripe_payment_method_id`` — the card that will be charged for this group's entities.
-* ``paid_through`` — what THIS card has paid for. One invoice is raised per group, so this
-  is exactly the grain the money is collected at.
-* ``dunning_started_at`` / ``dunning_attempts`` — collection is per card too. A payer with
-  a good card on company A and a dead one on company B must keep A: the decline has to be
-  contained, which it cannot be while the retry clock is a single per-payer value.
+* ``paid_through`` — what THIS ACCOUNT has paid for. One invoice is raised per group, so
+  this is exactly the grain the money is collected at.
+* ``dunning_started_at`` / ``dunning_attempts`` — collection is per account too. A payer
+  with a good card on company A and a dead one on company B must keep A: the decline has
+  to be contained, which it cannot be while the retry clock is a single per-payer value.
+
+  These three were per CARD when a group WAS a card. Since ``v1a01_billing_account`` an
+  account can hold several, so they are per ACCOUNT. The grain has not moved in practice —
+  one invoice per group either way — but the reason has, and the old wording read as
+  though a second card would bring a second cycle with it. It does not.
 
 THIS IS NOT THE OLD PER-ROW ``current_period_end`` COMING BACK. That one was removed for
 drifting between one payer's entities, and it drifted because it was refreshed only when
@@ -48,13 +67,12 @@ from blueprints.subscription.models.column_types import uuid_column
 class PayerBillingGroup(TimestampMixin, db.Model):
     __tablename__ = "payer_billing_group"
     __table_args__ = (
-        # A payer must not hold two groups on one card: the same entity's renewal could
-        # then be claimed by either, and the two would disagree about what was paid.
-        db.UniqueConstraint(
-            "payer_user_id",
-            "stripe_payment_method_id",
-            name="uq_payer_billing_group_payer_card",
-        ),
+        # uq_payer_billing_group_payer_card IS GONE — dropped by
+        # ``v1a01_billing_account``. It said a payer could not hold two groups on one
+        # card, which was right when a group WAS a card and is wrong now: the same card
+        # on two accounts, one company each, is an ordinary arrangement. What it was
+        # protecting — two groups both claiming one entity's renewal — is held by
+        # ``uq_entity_billing_group_entity_payer``, which is where the claim is recorded.
         db.Index("ix_payer_billing_group_payer", "payer_user_id"),
         db.Index("ix_payer_billing_group_dunning", "dunning_started_at"),
         {"schema": "pettycashv2"},
@@ -68,8 +86,21 @@ class PayerBillingGroup(TimestampMixin, db.Model):
         db.ForeignKey("pettycashv2.user.id"),
         nullable=False,
     )
-    # ``pm_...``. Mutable: this is how a card is REPLACED without losing the cycle.
+    # ``pm_...``, and the card this account CHARGES — the default among whatever
+    # ``billing_account_payment_method`` holds. Mutable: this is how a card is REPLACED
+    # without losing the cycle, and ``store.set_group_default_card`` is the only thing
+    # that should write it, because the shelf row has to move with it.
     stripe_payment_method_id = db.Column(db.String(255), nullable=False)
+
+    # --- the account's identity ----------------------------------------------------
+    #
+    # What the payer wants their invoices to say. NULL on every row that predates
+    # ``v1a01_billing_account``, and nullable for good: NOT NULL would mean inventing a
+    # billing company for each of them, and an invented one is worse than none — it
+    # prints on an invoice as though the payer had chosen it. Absent means "not named",
+    # which the application renders as the payer's own details.
+    billing_email = db.Column(db.String(255), nullable=True)
+    billing_company = db.Column(db.String(255), nullable=True)
 
     # --- the cycle this card owns -------------------------------------------------
     #

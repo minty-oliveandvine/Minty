@@ -34,6 +34,7 @@ from blueprints.subscription.constants import (
 )
 from blueprints.subscription.services.billing import plan_code
 from models.db import (
+    BillingAccountPaymentMethod,
     BillingPlan,
     EntityBillingConsent,
     EntityBillingGroup,
@@ -477,6 +478,174 @@ def billing_groups_for_payer(user_id) -> list[PayerBillingGroup]:
     )
 
 
+# --- the cards on an account ---------------------------------------------------------
+#
+# ``payer_billing_group.stripe_payment_method_id`` is the card an account CHARGES.
+# ``billing_account_payment_method`` is every card the payer has put on that account. The
+# default is recorded in both places on purpose — the charge path reads the account row
+# and must not join to find out what to charge — so everything in this section writes the
+# pair together. Nothing else should write either one.
+
+
+def cards_in_group(group_id) -> list[BillingAccountPaymentMethod]:
+    """Every card on this account, default first then oldest first."""
+    if not group_id:
+        return []
+    return (
+        BillingAccountPaymentMethod.query.filter_by(billing_group_id=str(group_id))
+        .order_by(
+            BillingAccountPaymentMethod.is_default.desc(),
+            BillingAccountPaymentMethod.created_at,
+            BillingAccountPaymentMethod.id,
+        )
+        .all()
+    )
+
+
+def _shelf_row(group_id, payment_method_id) -> BillingAccountPaymentMethod | None:
+    return BillingAccountPaymentMethod.query.filter_by(
+        billing_group_id=str(group_id),
+        stripe_payment_method_id=str(payment_method_id),
+    ).one_or_none()
+
+
+def add_card_to_group(
+    group_id, payment_method_id, make_default: bool = False
+) -> BillingAccountPaymentMethod:
+    """Put a card on an account. Find-or-create; does not commit.
+
+    Uncommitted on purpose: every caller is already inside a unit of work that is
+    creating or repointing something else, and a card added by a transaction that then
+    rolls back must not survive it.
+
+    ``make_default`` moves the account's charged card too — the pair is never written
+    apart. Without it the card is simply on the shelf, which is what "add a second card"
+    means when the payer has not asked to switch.
+    """
+    if not group_id or not payment_method_id:
+        raise ValueError("group and payment method are both required")
+
+    row = _shelf_row(group_id, payment_method_id)
+    if row is None:
+        row = BillingAccountPaymentMethod(
+            id=_uuid(),
+            billing_group_id=str(group_id),
+            stripe_payment_method_id=str(payment_method_id),
+            is_default=False,
+        )
+        db.session.add(row)
+        # Flushed for the same reason ``nominate_card_for_entity`` flushes: the caller
+        # may promote this row in the same transaction, and the UPDATE below has to see
+        # it.
+        db.session.flush()
+
+    if make_default:
+        _promote(group_id, row)
+    return row
+
+
+def _promote(group_id, row: BillingAccountPaymentMethod) -> None:
+    """Make one shelf row the account's default, in the database's own terms.
+
+    Demote-then-promote, in that order and in one flush. The partial unique index
+    ``uq_billing_account_payment_method_default`` allows exactly one default per account,
+    so promoting before demoting collides with the card being replaced.
+    """
+    group = billing_group(group_id)
+    if group is None:
+        raise ValueError(f"no billing account {group_id}")
+
+    BillingAccountPaymentMethod.query.filter(
+        BillingAccountPaymentMethod.billing_group_id == str(group_id),
+        BillingAccountPaymentMethod.id != row.id,
+        BillingAccountPaymentMethod.is_default.is_(True),
+    ).update({"is_default": False}, synchronize_session="fetch")
+    db.session.flush()
+
+    row.is_default = True
+    # THE OTHER HALF OF THE PAIR. Renewals and dunning read this column, not the shelf;
+    # setting one without the other bills a card the payer is not being shown, and
+    # nothing raises when it happens.
+    group.stripe_payment_method_id = row.stripe_payment_method_id
+
+
+def set_group_default_card(group_id, payment_method_id) -> PayerBillingGroup:
+    """Switch the card an account charges. Commits.
+
+    Adds the card to the shelf first if it is not already there, so "charge this card
+    instead" cannot leave the account charging something its own list does not contain.
+    """
+    group = billing_group(group_id)
+    if group is None:
+        raise ValueError(f"no billing account {group_id}")
+
+    row = add_card_to_group(group_id, payment_method_id)
+    _promote(group_id, row)
+    db.session.commit()
+    logger.info(
+        "billing: account {} now charges {} (payer {})",
+        group.id, payment_method_id, group.payer_user_id,
+    )
+    return group
+
+
+def create_billing_account(
+    payer_user_id, payment_method_id, billing_email=None, billing_company=None
+) -> PayerBillingGroup:
+    """Open a billing account on a card, with the identity the payer gave. Commits.
+
+    ALWAYS CREATES. Unlike ``nominate_card_for_entity`` this does not find-or-create on
+    the card: since ``v1a01_billing_account`` a payer may hold the same card on two
+    accounts — one company each, separate invoices — so a second account on a familiar
+    card is a legitimate request rather than a duplicate to be folded away.
+
+    Identity is optional and stays optional. An account nobody names renders as the
+    payer's own details, which is what every account did before this existed.
+    """
+    if not payer_user_id or not payment_method_id:
+        raise ValueError("payer and payment method are both required")
+
+    group = PayerBillingGroup(
+        id=_uuid(),
+        payer_user_id=str(payer_user_id),
+        stripe_payment_method_id=str(payment_method_id),
+        billing_email=(str(billing_email).strip() or None) if billing_email else None,
+        billing_company=(
+            (str(billing_company).strip() or None) if billing_company else None
+        ),
+    )
+    db.session.add(group)
+    # Before the shelf row: it carries ``billing_group_id`` as a plain value, so the unit
+    # of work sees no dependency and would batch the child INSERT first.
+    db.session.flush()
+
+    add_card_to_group(group.id, payment_method_id, make_default=True)
+    db.session.commit()
+    logger.info(
+        "billing: payer {} opened account {} on {}",
+        payer_user_id, group.id, payment_method_id,
+    )
+    return group
+
+
+def set_account_identity(group_id, billing_email=None, billing_company=None) -> PayerBillingGroup:
+    """Rename an account. Commits. Passing None for a field leaves it alone.
+
+    Clearing a field takes an explicit empty string, so a caller that only knows one of
+    the two cannot blank the other by omission.
+    """
+    group = billing_group(group_id)
+    if group is None:
+        raise ValueError(f"no billing account {group_id}")
+
+    if billing_email is not None:
+        group.billing_email = str(billing_email).strip() or None
+    if billing_company is not None:
+        group.billing_company = str(billing_company).strip() or None
+    db.session.commit()
+    return group
+
+
 def nomination_for_entity(entity_id, payer_user_id=None) -> EntityBillingGroup | None:
     """The ``entity_billing_group`` row naming this company's card, or None.
 
@@ -544,6 +713,11 @@ def nominate_card_for_entity(
         # unit of work sees no dependency and batches the child INSERT first — straight
         # into a foreign key violation.
         db.session.flush()
+        # The shelf has to be opened with the account. An account whose card list is
+        # empty while it charges a card is exactly the divergence
+        # ``billing_account_payment_method`` exists to prevent, and this is the one path
+        # that creates an account without going through ``create_billing_account``.
+        add_card_to_group(group.id, payment_method_id, make_default=True)
 
     nomination = nomination_for_entity(entity_id, payer)
     if nomination is None:

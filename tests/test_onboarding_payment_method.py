@@ -627,8 +627,20 @@ def test_confirm_makes_the_new_card_the_default_when_asked(app, monkeypatch):
 
     seen = {}
 
-    def _confirm(user_id, setup_intent, *, make_default=False):
-        seen.update(user_id=user_id, setup_intent=setup_intent, make_default=make_default)
+    def _confirm(
+        user_id,
+        setup_intent,
+        *,
+        make_default=False,
+        billing_group_id=None,
+        billing_email=None,
+        billing_company=None,
+    ):
+        seen.update(
+            user_id=user_id, setup_intent=setup_intent, make_default=make_default,
+            billing_group_id=billing_group_id, billing_email=billing_email,
+            billing_company=billing_company,
+        )
         return {"has_account": True, "default_id": "pm_new", "methods": [], "total": 1}
 
     monkeypatch.setattr(payment_methods, "confirm_setup", _confirm)
@@ -641,7 +653,17 @@ def test_confirm_makes_the_new_card_the_default_when_asked(app, monkeypatch):
     )
 
     assert res.status_code == 200
-    assert seen == {"user_id": "u1", "setup_intent": "seti_1", "make_default": True}
+    # The billing-account fields are pinned as ABSENT too: a body that names no account
+    # must not open one, and the route defaulting them to anything but None is how a
+    # plain card save would quietly acquire a billing account it was never asked for.
+    assert seen == {
+        "user_id": "u1",
+        "setup_intent": "seti_1",
+        "make_default": True,
+        "billing_group_id": None,
+        "billing_email": None,
+        "billing_company": None,
+    }
 
 
 def test_authorize_records_consent_for_this_entity_and_charges_nothing(

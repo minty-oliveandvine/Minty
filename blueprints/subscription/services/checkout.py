@@ -724,6 +724,37 @@ def _adopt_session_customer(session_customer: str, user_id) -> str:
     return session_customer
 
 
+def _named_account(user_id):
+    """The payer's oldest NAMED billing account, or None.
+
+    NEVER RAISES, and that is the point. This is only ever asked in order to put a
+    display name on a Stripe customer, and the calls that need one are saving a card or
+    opening a subscription. A billing account that cannot be read — no app context, the
+    table not yet migrated, the database briefly unavailable — must not turn "save this
+    card" into an error. The user record is the fallback, and it is the same answer every
+    account gave before identities existed.
+
+    Oldest first, and unnamed accounts skipped: see ``_payer_identity``.
+    """
+    try:
+        from blueprints.subscription.services import store as sub_store
+
+        accounts = sub_store.billing_groups_for_payer(user_id)
+    except Exception:  # noqa: BLE001 - see the docstring; a name is never worth a failure
+        logger.exception(
+            "subscription: could not read billing accounts for payer {}", user_id
+        )
+        return None
+
+    return next(
+        (
+            a for a in accounts
+            if (a.billing_company or "").strip() or (a.billing_email or "").strip()
+        ),
+        None,
+    )
+
+
 def _payer_identity(user_id) -> dict[str, str]:
     """The payer's display fields for their Stripe customer: ``name``/``email``/``description``.
 
@@ -736,9 +767,32 @@ def _payer_identity(user_id) -> dict[str, str]:
     username because ``first_name``/``last_name`` are not unique and two payers sharing a
     name are otherwise indistinguishable in the Stripe dashboard list.
 
-    These OVERWRITE whatever the payer typed into Checkout — our record is the source of
-    truth for who they are. ``email`` is the exception: it's nullable locally, so when we
-    don't have one we leave Stripe's Checkout-collected address rather than blanking it.
+    THE BILLING ACCOUNT OUTRANKS THE USER RECORD, AND THAT IS A REVERSAL.
+
+    This function used to say the local ``user`` row overwrites whatever the payer typed,
+    full stop — "our record is the source of truth for who they are". It still is for who
+    they ARE. It is not for what their INVOICES SHOULD SAY, and those are different
+    questions: a finance lead paying for a company does not want their own name on the
+    document.
+
+    So ``v1a01_billing_account`` gave ``payer_billing_group`` a ``billing_email`` and a
+    ``billing_company``, and where an account carries them they win here. The user record
+    is the fallback, which is what every account that predates them uses.
+
+    WHICH ACCOUNT, when a payer has several? The oldest — ``billing_groups_for_payer``
+    orders that way — because there is exactly ONE Stripe customer per payer and it can
+    hold exactly one name. This is a display field on a customer that bills for several
+    companies; the per-company truth is on the invoice lines, and always was. Do not
+    "fix" this by making it the most recent account: the customer's name would then
+    change under the payer every time they opened another one.
+
+    Two accounts opened in the same tick share a ``created_at``, and the tie falls to the
+    id. That is arbitrary but STABLE — the same account wins every time it is asked — and
+    stability is the property that matters here. A name that churns is the failure; a
+    name picked from two simultaneous candidates is not.
+
+    ``email`` remains nullable at every level: when neither the account nor the user has
+    one we leave Stripe's own collected address rather than blanking it.
 
     Returns {} if the user can't be loaded; the ``user_id`` stamp still goes on, since
     resolvability matters more than a display name.
@@ -752,14 +806,30 @@ def _payer_identity(user_id) -> dict[str, str]:
         )
         return {}
 
+    named = _named_account(user_id)
+
     fields: dict[str, str] = {}
+
+    company = (named.billing_company or "").strip() if named else ""
     name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-    if name:
+    if company:
+        fields["name"] = company
+    elif name:
         fields["name"] = name
+
+    # ``description`` stays the USERNAME whatever the account says. It is what tells two
+    # payers sharing a name apart in the Stripe dashboard, and a billing company in that
+    # field would make the customer unidentifiable the moment two payers bill for the
+    # same company.
     if user.username:
         fields["description"] = f"@{user.username}"
-    if user.email:
+
+    email = (named.billing_email or "").strip() if named else ""
+    if email:
+        fields["email"] = email
+    elif user.email:
         fields["email"] = user.email
+
     return fields
 
 
