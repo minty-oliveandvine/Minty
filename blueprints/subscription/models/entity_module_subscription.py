@@ -16,6 +16,11 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
+from blueprints.subscription.models.column_types import (
+    EXTENSION_STATE,
+    SUBSCRIPTION_PHASE,
+    uuid_column,
+)
 
 
 class EntityModuleSubscription(TimestampMixin, db.Model):
@@ -27,7 +32,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # --- identity ---
     entity_id = db.Column(
@@ -45,7 +50,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     )
 
     # --- lifecycle ---
-    phase = db.Column(db.String(30), nullable=False)
+    phase = db.Column(SUBSCRIPTION_PHASE, nullable=False)
     # One of: trial, active, past_due, scheduled_cancel, cancelled, expired.
     # Each has a PHASE_* constant in ``constants``; there is no tuple of them all,
     # because nothing validated against one.
@@ -105,7 +110,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     # The amount is recorded here and collected by the next renewal run, so cancelling
     # never depends on a card clearing. Under Stripe this was a pending invoice ITEM
     # swept onto the anchor invoice, and the row carried its id instead.
-    extension_state = db.Column(db.String(20), nullable=True)
+    extension_state = db.Column(EXTENSION_STATE, nullable=True)
     # What the extension is WORTH, in minor units. Under Stripe the amount lived on the
     # pending invoice item and the row only needed its id; billing in-house there is no
     # such item, so the row carries the amount until our own renewal run collects it.

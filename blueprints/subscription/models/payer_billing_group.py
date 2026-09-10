@@ -42,6 +42,7 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
+from blueprints.subscription.models.column_types import uuid_column
 
 
 class PayerBillingGroup(TimestampMixin, db.Model):
@@ -59,7 +60,7 @@ class PayerBillingGroup(TimestampMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # FK to ``user``, not to ``user_stripe_customer`` — the same choice the module rows
     # make. A group can be nominated before the payer has ever been charged.
     payer_user_id = db.Column(

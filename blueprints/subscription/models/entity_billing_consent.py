@@ -31,6 +31,7 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin
+from blueprints.subscription.models.column_types import uuid_column
 
 
 class EntityBillingConsent(CreatedAtMixin, db.Model):
@@ -44,7 +45,7 @@ class EntityBillingConsent(CreatedAtMixin, db.Model):
         {"schema": "pettycashv2"},
     )
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36),
         db.ForeignKey("pettycashv2.entities.id"),

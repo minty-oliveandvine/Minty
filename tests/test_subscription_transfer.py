@@ -26,6 +26,16 @@ ANCHOR = datetime(2027, 9, 1, tzinfo=UTC)
 
 OLD, NEW = "payer-old", "payer-new"
 ENTITY = "entity-1"
+# subscription_transfer.id is uuid as of u1a01_subscription_types, so this one
+# cannot be a readable label the way the ids above still can - those columns
+# point at ``user`` / ``entities`` and are still String(36).
+#
+# IT ALSO MUST CONTAIN HEX LETTERS. SQLAlchemy renders a uuid column on SQLite as
+# the declared type "UUID", which matches none of SQLite's affinity keywords and
+# so gets NUMERIC affinity. A uuid whose hex is all digits - 1111...1111 - is then
+# stored as a REAL and comes back as 1.1111111111141117e+31, which blows up on the
+# read with a bare AttributeError. Postgres does not care; the test database does.
+OFFER = "7a17ffe4-0000-4000-8000-00000000000a"
 
 _attached = False
 
@@ -145,7 +155,7 @@ def _offer(db, transfers, *, status="pending", attempt=0, key=None, expires=None
     from models.db import SubscriptionTransfer
 
     row = SubscriptionTransfer(
-        id="t1", entity_id=ENTITY, from_user_id=OLD, to_user_id=NEW,
+        id=OFFER, entity_id=ENTITY, from_user_id=OLD, to_user_id=NEW,
         status=status, charge_attempt=attempt, charge_key=key,
         expires_at=expires or (NOW + timedelta(days=7)),
         accepted_billed_through=PAID_THROUGH if status != "pending" else None,
@@ -356,7 +366,7 @@ def test_a_retry_after_a_decline_uses_a_fresh_key(db_session, monkeypatch):
     assert transfers.respond_to_transfer(NEW, offer.id, accept=True)[0] is True
 
     keys = [c["key"] for c in calls["charges"]]
-    assert keys == ["transfer-t1-1", "transfer-t1-2"], keys
+    assert keys == [f"transfer-{OFFER}-1", f"transfer-{OFFER}-2"], keys
     assert len(set(keys)) == 2, "a retry must not reuse the claimed key"
 
 
@@ -365,7 +375,7 @@ def test_an_accept_that_died_after_the_charge_is_finished_not_recharged(db_sessi
     is missing — a retried accept must complete it and charge nothing."""
     transfers, calls = _wire(monkeypatch, db_session)
     offer = _offer(db_session, transfers, status="charged", attempt=1,
-                   key="transfer-t1-1")
+                   key=f"transfer-{OFFER}-1")
 
     ok, _msg, _ = transfers.respond_to_transfer(NEW, offer.id, accept=True)
 
@@ -379,7 +389,7 @@ def test_the_repair_step_finishes_a_stranded_handover(db_session, monkeypatch):
     """The push half of the same recovery, for when nobody ever clicks again."""
     transfers, calls = _wire(monkeypatch, db_session)
     offer = _offer(db_session, transfers, status="charged", attempt=1,
-                   key="transfer-t1-1")
+                   key=f"transfer-{OFFER}-1")
 
     result = transfers.repair_stranded(NOW)
 
@@ -417,9 +427,9 @@ def test_a_lapsed_request_is_retired_and_the_payer_who_asked_is_told(db_session,
 
     from models.db import SubscriptionTransfer
 
-    assert transfers.repair_stranded(NOW)["expired"] == ["t1"]
-    assert sent == [("t1", "expired")]
-    assert db_session.session.get(SubscriptionTransfer, "t1").status == "expired"
+    assert transfers.repair_stranded(NOW)["expired"] == [OFFER]
+    assert sent == [(OFFER, "expired")]
+    assert db_session.session.get(SubscriptionTransfer, OFFER).status == "expired"
 
 
 def test_a_request_still_inside_its_window_is_left_alone(db_session, monkeypatch):
@@ -443,10 +453,10 @@ def test_declining_tells_the_payer_who_asked(db_session, monkeypatch):
     monkeypatch.setattr(transfers, "_notify",
                         lambda offer, kind: sent.append((offer.id, kind)))
 
-    ok, _message, _ = transfers.respond_to_transfer(NEW, "t1", accept=False)
+    ok, _message, _ = transfers.respond_to_transfer(NEW, OFFER, accept=False)
 
     assert ok
-    assert sent == [("t1", "declined")]
+    assert sent == [(OFFER, "declined")]
 
 
 def test_a_charging_row_the_processor_never_saw_is_released(db_session, monkeypatch):
@@ -457,7 +467,7 @@ def test_a_charging_row_the_processor_never_saw_is_released(db_session, monkeypa
     transfers, calls = _wire(monkeypatch, db_session)
     monkeypatch.setattr(renewals, "_already_invoiced", lambda cid, key, **kw: None)
     offer = _offer(db_session, transfers, status="charging", attempt=1,
-                   key="transfer-t1-1")
+                   key=f"transfer-{OFFER}-1")
 
     result = transfers.repair_stranded(NOW)
 
@@ -473,7 +483,7 @@ def test_an_unpaid_raised_invoice_is_left_alone(db_session, monkeypatch):
     transfers, calls = _wire(monkeypatch, db_session)
     monkeypatch.setattr(renewals, "_already_invoiced", lambda cid, key, **kw: "open")
     offer = _offer(db_session, transfers, status="charging", attempt=1,
-                   key="transfer-t1-1")
+                   key=f"transfer-{OFFER}-1")
 
     result = transfers.repair_stranded(NOW)
 
@@ -698,8 +708,11 @@ def _real_rows(db, specs):
     from models.db import EntityModuleSubscription
 
     for code, phase in specs:
+        # No explicit id: it is a uuid column as of u1a01_subscription_types, and
+        # the model's own default supplies a valid one. Nothing here reads it -
+        # ``_claims`` keys by function_code.
         db.session.add(EntityModuleSubscription(
-            id=f"ems-{code}", entity_id=ENTITY, function_code=code,
+            entity_id=ENTITY, function_code=code,
             payer_user_id=OLD, phase=phase,
         ))
     db.session.commit()
