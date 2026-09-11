@@ -732,7 +732,7 @@ def set_default(user_id, payment_method_id: str) -> dict:
 # --- The card ONE company is billed on ---------------------------------------
 
 
-def _payer_of(user_id, entity_id) -> str:
+def _payer_of(user_id, entity_id, *, establish_payer: bool = False) -> str:
     """Refuse unless ``user_id`` is the payer for ``entity_id``. Returns the payer id.
 
     THE AUTHORISATION for the per-entity write, and it is deliberately the same test that
@@ -740,11 +740,29 @@ def _payer_of(user_id, entity_id) -> str:
     too): the person whose card is about to be spent on a company is the person who pays
     for it. Being an admin of the company is not enough — an admin who does not pay could
     otherwise move someone else's billing onto a card of their choosing.
+
+    ``establish_payer`` IS FOR ONBOARDING, WHERE THERE IS NOTHING TO BE THE PAYER OF YET.
+
+    The payer is read from ``entity_module_subscription``, and during the wizard that table
+    is empty for the entity: the rows are created at finalize, by
+    ``checkout.start_trials_for_enabled_modules``, because the trial clock must start at
+    All Set rather than at module selection. So the billing sheet asks to nominate a card
+    for a company that has no payer — and the request is precisely the one that
+    ESTABLISHES the payer, which is the same reasoning ``store.may_manage_subscription``
+    already sets out: until a payer exists nobody is being billed, so the first act may
+    create the relationship.
+
+    IT IS NOT A WAY ROUND THE CHECK, and it cannot become one — it only applies when the
+    answer is "nobody". A company that already HAS a payer still 404s for anyone else, flag
+    or no flag. The caller passing it is expected to have proved membership itself; the
+    onboarding route does, via ``_entity_for_member``, and it is the only caller.
     """
     if not entity_id:
         raise PaymentMethodError("No company was given.", status=400)
     payer = sub_store.payer_for_entity(entity_id)
     if payer is None:
+        if establish_payer:
+            return str(user_id)
         raise PaymentMethodError(
             "That company has no subscription to bill yet.", status=409
         )
@@ -755,15 +773,19 @@ def _payer_of(user_id, entity_id) -> str:
     return str(payer)
 
 
-def for_entity(user_id, entity_id) -> dict:
+def for_entity(user_id, entity_id, *, establish_payer: bool = False) -> dict:
     """The saved methods, plus which one THIS company is billed on.
 
     ``nominated_id`` is the answer the picker needs and ``default_id`` is the fallback it
     preselects when there is no nomination yet — the account's main card, offered rather
     than assumed. They are returned separately because the difference is the whole point:
     one is what will be charged for this company, the other is only a suggestion.
+
+    ``establish_payer`` as in ``_payer_of``: it is threaded here because ``set_for_entity``
+    returns through this function, and a nomination that succeeded would otherwise raise on
+    the way back out.
     """
-    _payer_of(user_id, entity_id)
+    _payer_of(user_id, entity_id, establish_payer=establish_payer)
     payload = list_for_user(user_id)
     group = sub_store.billing_group_for_entity(entity_id, user_id)
     payload["entity_id"] = str(entity_id)
@@ -772,7 +794,7 @@ def for_entity(user_id, entity_id) -> dict:
 
 
 def set_for_entity(user_id, entity_id, payment_method_id: str,
-                   *, source: str = "chosen") -> dict:
+                   *, source: str = "chosen", establish_payer: bool = False) -> dict:
     """Put one company on one saved card. Returns the list, with the new nomination.
 
     THE write with billing consequences, and they are confined: from here on this
@@ -789,9 +811,16 @@ def set_for_entity(user_id, entity_id, payment_method_id: str,
     it.
     """
     _owned(user_id, payment_method_id)
-    payer = _payer_of(user_id, entity_id)
+    payer = _payer_of(user_id, entity_id, establish_payer=establish_payer)
+    # THE NOMINATION NAMES THE PAYER IT WAS WRITTEN FOR, and when it established one that
+    # is the caller. Finalize later creates the module rows for whoever completes the
+    # wizard; the two agree because onboarding is one person from start to finish. Were
+    # they ever different, ``card_for_entity`` — which resolves the payer from the module
+    # rows — would not find this nomination, and the entity would hold a card nobody
+    # could see. That is the assumption, stated so it is not rediscovered.
     sub_store.nominate_card_for_entity(entity_id, payer, payment_method_id, source)
-    return for_entity(user_id, entity_id)
+    # Threaded, or the read on the way out raises the 409 the write just stepped past.
+    return for_entity(user_id, entity_id, establish_payer=establish_payer)
 
 
 def _valid_expiry(exp_month, exp_year) -> tuple[int, int]:

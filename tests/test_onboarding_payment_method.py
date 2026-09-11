@@ -711,8 +711,17 @@ def test_authorize_nominates_the_card_it_was_given(app, db_session, monkeypatch)
     entity_id = _entity_with_member(db_session)
     seen = {}
 
-    def _set_for_entity(user_id, ent, pm_id, *, source="chosen"):
-        seen.update(user_id=user_id, entity_id=str(ent), payment_method=pm_id)
+    def _set_for_entity(user_id, ent, pm_id, *, source="chosen", establish_payer=False):
+        # ``establish_payer`` is recorded rather than ignored: during onboarding the
+        # entity has no module rows, so no payer, and without the flag the real
+        # ``set_for_entity`` refuses with "That company has no subscription to bill yet."
+        # A stub that quietly accepted **kwargs would let that regress silently.
+        seen.update(
+            user_id=user_id,
+            entity_id=str(ent),
+            payment_method=pm_id,
+            establish_payer=establish_payer,
+        )
         return {"methods": [], "nominated_id": pm_id}
 
     monkeypatch.setattr(payment_methods, "set_for_entity", _set_for_entity)
@@ -729,6 +738,9 @@ def test_authorize_nominates_the_card_it_was_given(app, db_session, monkeypatch)
         "user_id": "u1",
         "entity_id": str(entity_id),
         "payment_method": "pm_chosen",
+        # The wizard has no module rows yet, so no payer. Without this the real
+        # set_for_entity refuses the nomination and Confirm dies on a 409.
+        "establish_payer": True,
     }
 
 
@@ -835,14 +847,27 @@ def test_status_reports_card_and_consent_separately(app, db_session, monkeypatch
     before = client.get(
         f"/api/onboarding/payment-method?entity_id={entity_id}", headers=headers
     ).get_json()
-    assert before == {"has_payment_method": True, "has_billing_consent": False}
+    # ``card`` is THIS ENTITY'S nominated card, and null here because nothing has been
+    # nominated — deliberately not a fallback to the payer's account default, which is a
+    # different card as soon as they have two.
+    assert before == {
+        "has_payment_method": True,
+        "has_billing_consent": False,
+        "card": None,
+    }
 
     store.record_billing_consent(entity_id, "u1", "confirmed")
 
     after = client.get(
         f"/api/onboarding/payment-method?entity_id={entity_id}", headers=headers
     ).get_json()
-    assert after == {"has_payment_method": True, "has_billing_consent": True}
+    # Consent alone does not conjure a card: recording it nominated nothing, so the
+    # summary row still has nothing to print.
+    assert after == {
+        "has_payment_method": True,
+        "has_billing_consent": True,
+        "card": None,
+    }
 
 
 def test_status_still_reports_consent_when_stripe_is_down(app, db_session, monkeypatch):
@@ -868,4 +893,8 @@ def test_status_still_reports_consent_when_stripe_is_down(app, db_session, monke
         headers={"Authorization": f"Bearer {_token(app)}"},
     ).get_json()
 
-    assert body == {"has_payment_method": False, "has_billing_consent": True}
+    assert body == {
+        "has_payment_method": False,
+        "has_billing_consent": True,
+        "card": None,
+    }

@@ -749,12 +749,21 @@ def _entity_for_member(user_id, entity_id):
 def onboarding_payment_method_status():
     """What Step 2's billing sheet needs to know about this entity's billing.
 
-    GET ?entity_id=… → {"has_payment_method": bool, "has_billing_consent": bool}.
+    GET ?entity_id=… → {"has_payment_method": bool, "has_billing_consent": bool,
+    "card": {…}|null}.
 
-    Two separate questions, and the second is the one that matters. The card is read live
-    from Stripe and belongs to the PAYER, shared across every entity they pay for, so it
-    says nothing about this entity. Consent is per (entity, payer) and is what decides
-    whether this entity's 30-day trial converts to paid at term end or simply lapses.
+    Two separate questions, and the second is the one that matters. ``has_payment_method``
+    is read live from Stripe and belongs to the PAYER, shared across every entity they pay
+    for, so it says nothing about this entity. Consent is per (entity, payer) and is what
+    decides whether this entity's 30-day trial converts to paid at term end or simply
+    lapses.
+
+    ``card`` IS THIS ENTITY'S NOMINATED CARD, not the payer's default — the difference is
+    the whole reason it is here. A caller that wants to print "we will bill you on this
+    card" must print the one this entity is actually nominated on; the account default is
+    a different card as soon as the payer has two, and naming it would tell them they are
+    about to be billed on a card they are not. Null when nothing is nominated, and null
+    is the honest answer rather than a fallback to the default.
 
     Neither gates the wizard: the trial starts either way, so a payer who skips the sheet
     still onboards — they just lapse at day 30 instead of converting.
@@ -789,11 +798,33 @@ def onboarding_payment_method_status():
     # would offer them the billing sheet a second time for something they already have.
     from blueprints.subscription.services import store
 
+    # The card this entity is nominated on, described the same way the billing dialog
+    # describes its rows — both come from ``list_for_user``, so the summary and the picker
+    # cannot render the same card two different ways.
+    #
+    # Best-effort, and separately guarded: a Stripe outage here must degrade to "no card
+    # to show" rather than failing a status check whose other two answers are still good.
+    card = None
+    try:
+        nominated = store.card_for_entity(entity.id, user_id)
+        if nominated:
+            from blueprints.subscription.services import payment_methods
+
+            wallet = payment_methods.list_for_user(user_id)
+            card = next(
+                (m for m in wallet.get("methods", []) if m.get("id") == nominated), None
+            )
+    except Exception:
+        current_app.logger.exception(
+            "onboarding payment-method: could not describe the card for %s", entity.id
+        )
+
     return _cors(
         jsonify(
             {
                 "has_payment_method": has_pm,
                 "has_billing_consent": store.has_billing_consent(entity.id, user_id),
+                "card": card,
             }
         )
     )
@@ -1122,8 +1153,16 @@ def onboarding_billing_authorize():
     on and moves nothing else. Absent, ``_ensure_nominated`` still backstops the older
     clients.
 
-    Consent is recorded before the trials exist — onboarding starts those at finalize — and
-    that is fine: consent is per entity, not per subscription, and outlives the wizard.
+    BOTH HALVES RUN BEFORE ANY SUBSCRIPTION EXISTS — onboarding starts the trials at
+    finalize — and each needs its own reason to be allowed to.
+
+    Consent is per entity rather than per subscription and outlives the wizard, so it
+    simply does not care. The NOMINATION does: it is refused for a company with no payer,
+    and during the wizard no company has one, because the payer is read from
+    ``entity_module_subscription``. This request is the one that establishes the payer,
+    which is why it passes ``establish_payer=True`` — the only caller that does. Membership
+    is already proven above by ``_entity_for_member``, and ``set_for_entity`` still proves
+    the card is this caller's.
 
     Idempotent per payer, so a double-click or a re-opened sheet is harmless.
     """
@@ -1156,7 +1195,9 @@ def onboarding_billing_authorize():
             # payer's ``pm_...`` answers "not found" rather than being nominated. Being a
             # member of the entity — all ``_entity_for_member`` above established — is
             # deliberately not enough to spend somebody else's card.
-            payment_methods.set_for_entity(user_id, entity.id, pm_id)
+            payment_methods.set_for_entity(
+                user_id, entity.id, pm_id, establish_payer=True
+            )
     except payment_methods.PaymentMethodError as exc:
         resp = jsonify({"error": exc.message})
         resp.status_code = exc.status
@@ -1246,12 +1287,21 @@ def onboarding_modules():
 
 @entity_bp.route("/api/onboarding/finalize", methods=["POST", "OPTIONS"])
 def onboarding_finalize():
-    """Clear the mid-onboarding flag so the entity routes to its dashboard
-    on the next entity-list click instead of bouncing back to onboarding.
+    """Finish onboarding: flip the entity live, start its trials, report the trial end.
 
-    Called from the onboarding app's finishOnboarding handler at the end
-    of the wizard. Same JWT/CORS contract as the other /api/onboarding/*
-    routes.
+    POST {entity_id} → {"status": "success", "trial_end": iso8601|null}.
+
+    Clears the mid-onboarding flag so the entity routes to its dashboard on the next
+    entity-list click instead of bouncing back to onboarding, and starts the card-free
+    trials for the modules the wizard enabled.
+
+    ``trial_end`` EXISTS BECAUSE THE ALL SET SCREEN STATES IT. That screen tells the payer
+    their trial has started and when it runs to, so it has to be given the committed date
+    rather than adding 30 days to today in the browser — a prediction that drifts past
+    midnight and is simply wrong if starting the trials failed.
+
+    Called on ARRIVAL at the All Set step, not on the way out of it. Same JWT/CORS
+    contract as the other /api/onboarding/* routes.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -1307,7 +1357,36 @@ def onboarding_finalize():
                 entity_id,
             )
 
-    resp = jsonify({"status": "success"})
+    # The trial's end date, for the All Set screen to state rather than guess.
+    #
+    # READ BACK from the rows rather than returned by the starter above, because this is
+    # also the answer on a REVISIT: the guard skips starting anything once the entity is
+    # active, and the rows are already there. Earliest across the modules — both switched
+    # on share a start so they share an end, but taking the minimum is correct rather than
+    # lucky.
+    #
+    # NULL IS A LEGITIMATE ANSWER and the caller must handle it: starting the trials is
+    # best-effort, and an entity finalised before trials existed has no rows at all. The
+    # screen omits the date rather than inventing one.
+    trial_end = None
+    try:
+        from models.db import EntityModuleSubscription
+
+        ends = [
+            row.trial_end
+            for row in EntityModuleSubscription.query.filter_by(
+                entity_id=str(entity.id)
+            ).all()
+            if row.trial_end is not None
+        ]
+        if ends:
+            trial_end = min(ends).isoformat()
+    except Exception:
+        current_app.logger.exception(
+            "onboarding finalize: could not read the trial end for entity %s", entity_id
+        )
+
+    resp = jsonify({"status": "success", "trial_end": trial_end})
     resp.status_code = 200
     return _cors(resp)
 

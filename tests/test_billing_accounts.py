@@ -346,3 +346,91 @@ def test_an_unreadable_account_never_breaks_naming_the_customer(app, monkeypatch
         "description": "@patpayer",
         "email": "pat@example.com",
     }
+
+
+# --- nominating before a subscription exists ------------------------------------
+#
+# Onboarding asks for a card at step 2, but the module rows that say who the payer IS are
+# not written until finalize, because the trial clock starts at All Set. So the billing
+# sheet's Confirm nominates a card for a company that has no payer yet, and used to be
+# refused with "That company has no subscription to bill yet." These pin the exception
+# that allows it, and its limits.
+
+
+def test_a_company_with_no_payer_still_refuses_a_nomination_by_default(app, db_session):
+    """The 409 is the right answer everywhere except onboarding, and stays the default.
+
+    The in-app billing screens and the payer portal share this code path. For them a
+    company with no subscription really is an error, and silently letting the caller
+    become its payer would be a different bug than the one being fixed.
+    """
+    from blueprints.subscription.services import payment_methods
+
+    user = _user(db_session, "nobody-pays@example.com")
+    entity = _entity(db_session, "Unpaid Ltd")
+
+    with pytest.raises(payment_methods.PaymentMethodError) as caught:
+        payment_methods._payer_of(user.id, entity.id)
+    assert caught.value.status == 409
+
+
+def test_onboarding_may_establish_the_payer_the_company_has_none_of(app, db_session):
+    """The request IS what makes them the payer, so it cannot require them to be one."""
+    from blueprints.subscription.services import payment_methods
+
+    user = _user(db_session, "first-payer@example.com")
+    entity = _entity(db_session, "Fresh Ltd")
+
+    assert payment_methods._payer_of(
+        user.id, entity.id, establish_payer=True
+    ) == str(user.id)
+
+
+def test_establishing_a_payer_is_not_a_way_past_one_that_exists(app, db_session):
+    """THE TEST THAT MATTERS. The flag must only answer "nobody", never "somebody else".
+
+    Were it ever read as "skip the check", any member of a company could move another
+    payer's billing onto a card of their own choosing — which is the exact attack
+    ``_payer_of`` was written to stop.
+    """
+    from blueprints.subscription.constants import PHASE_TRIAL
+    from blueprints.subscription.services import payment_methods, store
+
+    payer = _user(db_session, "pays@example.com")
+    other = _user(db_session, "does-not-pay@example.com")
+    entity = _entity(db_session, "Taken Ltd")
+    store.upsert_module_row(entity.id, "PETTY_CASH", payer.id, phase=PHASE_TRIAL)
+
+    with pytest.raises(payment_methods.PaymentMethodError) as caught:
+        payment_methods._payer_of(other.id, entity.id, establish_payer=True)
+    assert caught.value.status == 404
+
+
+def test_a_card_can_be_nominated_before_the_subscription_exists(app, db_session, monkeypatch):
+    """End to end through ``set_for_entity``, which is what the route actually calls.
+
+    ``_owned`` is stubbed because it reads the card from Stripe; what is under test is the
+    payer resolution either side of it, not the ownership proof. The RETURN TRIP is half
+    the point: ``set_for_entity`` answers through ``for_entity``, which asks ``_payer_of``
+    a second time, so a flag threaded into the write but not the read would raise after
+    the nomination had already been written.
+    """
+    from blueprints.subscription.services import payment_methods, store
+
+    user = _user(db_session, "onboarder@example.com")
+    entity = _entity(db_session, "Wizard Ltd")
+
+    monkeypatch.setattr(payment_methods, "_owned", lambda *a, **k: ("cus_x", {}))
+    monkeypatch.setattr(
+        payment_methods, "list_for_user", lambda _uid: {"methods": [], "default_id": None}
+    )
+
+    payload = payment_methods.set_for_entity(
+        user.id, entity.id, "pm_wizard", establish_payer=True
+    )
+
+    assert payload["nominated_id"] == "pm_wizard"
+    assert store.card_for_entity(entity.id, user.id) == "pm_wizard"
+    # The account opened for it carries the card on its shelf, like every other account.
+    group = store.billing_group_for_entity(entity.id, user.id)
+    assert _cards(store, group.id) == {"pm_wizard": True}

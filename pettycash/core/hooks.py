@@ -175,14 +175,25 @@ def init_app(app, db):
             )
 
         def onboarding_launch_url():
-            """Launch URL into the onboarding wizard (Step 1) for the current user."""
+            """Launch URL into the onboarding wizard (Step 1) for the current user.
+
+            fresh=True for the same reason ``entity.entity_create`` passes it: this
+            global backs a "create entity" button (the empty-state page), so it must
+            start a BRAND-NEW onboarding. Without ``?fresh=1`` the wizard rehydrates
+            its single global session blob from localStorage and drops the user back
+            into the last in-progress entity. A user with no entities only ever sees
+            the empty state, so for them that was every attempt.
+
+            Resuming an in-progress entity is a different path entirely: clicking the
+            entity row, which passes ``entity_id`` (see ``entity.entity_detail``).
+            """
             if not current_user.is_authenticated:
                 return url_for("auth.home")
             from blueprints.entity.routes.create import (
                 onboarding_launch_url as _onboarding_launch_url,
             )
 
-            return _onboarding_launch_url(current_user)
+            return _onboarding_launch_url(current_user, fresh=True)
 
         def is_billing_enabled(entity_id):
             """Check if billing module is enabled for the given entity."""
