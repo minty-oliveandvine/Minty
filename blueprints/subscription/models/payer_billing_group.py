@@ -94,11 +94,25 @@ class PayerBillingGroup(TimestampMixin, db.Model):
 
     # --- the account's identity ----------------------------------------------------
     #
-    # What the payer wants their invoices to say. NULL on every row that predates
-    # ``v1a01_billing_account``, and nullable for good: NOT NULL would mean inventing a
-    # billing company for each of them, and an invented one is worse than none — it
-    # prints on an invoice as though the payer had chosen it. Absent means "not named",
-    # which the application renders as the payer's own details.
+    # What the payer wants their invoices to say. NULLABLE FOR GOOD, and the reason has
+    # nothing to do with legacy rows — that argument expires, and these three do not:
+    #
+    # 1. UNNAMED ACCOUNTS ARE STILL BEING CREATED, as normal behaviour rather than as a
+    #    tail that drains. ``store.nominate_card_for_entity`` opens a group with neither
+    #    field set whenever a payer puts a company on a card that is not yet on an
+    #    account — the card picker's Confirm, entity transfers, and two checkout paths.
+    #    NOT NULL would break all four unless each invented an identity.
+    # 2. NULL IS READ AS A STATE, not as a gap. ``checkout._named_account`` deliberately
+    #    SKIPS accounts whose two fields are both blank so that it returns the oldest
+    #    NAMED one; storing an invented value would make every account look named and
+    #    change which one gets to name the Stripe customer.
+    # 3. An invented billing company is worse than none: it prints on an invoice as
+    #    though the payer had chosen it. Absent means "not named", which the application
+    #    renders as the payer's own details, per field.
+    #
+    # The onboarding "New billing account" form REQUIRES both. That is a rule about what
+    # a payer may CREATE, not an invariant about what exists — everything reading these
+    # columns must still handle NULL.
     billing_email = db.Column(db.String(255), nullable=True)
     billing_company = db.Column(db.String(255), nullable=True)
 
