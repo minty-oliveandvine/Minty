@@ -1,0 +1,106 @@
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error checking token expiration: Instance <User at 0x281a7738990> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error checking token expiration: Instance <User at 0x281a8bd9ed0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error checking token expiration: Instance <User at 0x281a8c09190> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error checking token expiration: Instance <User at 0x281a8e1cc10> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error checking token expiration: Instance <User at 0x281a988aad0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error checking token expiration: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a7738990> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a8bd9ed0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a8c09190> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a8e1cc10> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a988aad0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a9c3aad0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Error ensuring valid token: Instance <User at 0x281a9dad3d0> is not bound to a Session; attribute refresh operation cannot proceed (Background on this error at: https://sqlalche.me/e/20/bhk3)
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 Token refresh failed with status 400: {"error": "invalid_grant"}
+ERROR    services.app_runtime.legacy.bootstrap:token_service.py:39 User missing both access token and refresh token
+ERROR tests/test_admin_system_role_routes.py::test_normal_user_cannot_access_admin_pages[/admin]
+ERROR tests/test_admin_system_role_routes.py::test_normal_user_cannot_access_admin_pages[/admin_dashboard]
+ERROR tests/test_admin_system_role_routes.py::test_normal_user_cannot_change_admin_access_actions[/approve_user/{user_id}-True]
+ERROR tests/test_admin_system_role_routes.py::test_normal_user_cannot_change_admin_access_actions[/reject_user/{user_id}-False]
+ERROR tests/test_admin_system_role_routes.py::test_superuser_can_access_admin_pages[/admin]
+ERROR tests/test_admin_system_role_routes.py::test_superuser_can_access_admin_pages[/admin_dashboard]
+ERROR tests/test_admin_system_role_routes.py::test_superuser_can_change_admin_access_actions[/approve_user/{user_id}-False-True]
+ERROR tests/test_admin_system_role_routes.py::test_superuser_can_change_admin_access_actions[/reject_user/{user_id}-True-False]
+ERROR tests/test_auth_register_login.py::test_login_redirects_normal_user_to_home
+ERROR tests/test_auth_register_login.py::test_login_redirects_superuser_to_admin
+ERROR tests/test_auth_register_login.py::test_register_otp_verify_creates_normal_approved_user
+ERROR tests/test_auth_register_login.py::test_register_otp_verify_refuses_without_terms_agreement
+ERROR tests/test_auth_register_login.py::test_register_otp_verify_rejects_wrong_code
+ERROR tests/test_auth_register_login.py::test_register_post_does_not_create_user_without_otp
+ERROR tests/test_entity_create.py::test_normal_user_can_create_entity_and_becomes_entity_admin
+ERROR tests/test_logout_idle.py::test_idle_timeout_ajax_returns_401_session_expired
+ERROR tests/test_logout_idle.py::test_idle_timeout_redirects_to_logout
+ERROR tests/test_logout_idle.py::test_login_resets_idle_window_despite_stale_last_activity
+ERROR tests/test_logout_idle.py::test_request_within_idle_window_is_allowed
+ERROR tests/test_terms_signup_consent.py::test_a_plain_login_records_nothing
+ERROR tests/test_terms_signup_consent.py::test_a_ticked_box_is_recorded_even_when_the_account_already_exists
+ERROR tests/test_user_presence.py::test_leaving_a_company_keeps_the_session_but_drops_presence
+ERROR tests/test_user_presence.py::test_logging_back_in_returns_user_to_the_list
+ERROR tests/test_user_presence.py::test_login_puts_user_on_the_signed_in_list
+ERROR tests/test_user_presence.py::test_logout_takes_user_off_the_signed_in_list
+ERROR tests/test_xero_scopes.py::test_connect_requests_exact_minimal_scopes
+ERROR tests/test_xero_scopes.py::test_every_xero_call_succeeds_with_granted_scopes
+ERROR tests/test_xero_scopes.py::test_harness_detects_missing_scope
+ERROR tests/test_xero_scopes.py::test_reconnect_requests_same_scopes_as_connect
+FAILED tests/test_entity_create.py::test_normal_user_can_create_entity_and_becomes_entity_admin
+FAILED tests/test_find_user_membership_lookup.py::test_find_user_uses_membership_entity_lookup_instead_of_user_company
+FAILED tests/test_flash_messages_drain.py::test_partial_renders_and_drains_stale_flash
+FAILED tests/test_invitation.py::TestAcceptInvitation::test_accept_creates_user_entity_and_marks_accepted
+FAILED tests/test_invitation.py::TestAcceptInvitation::test_accept_is_idempotent_for_same_user
+FAILED tests/test_invitation.py::TestAcceptInvitation::test_accept_used_token_rejected_for_different_user
+FAILED tests/test_invitation.py::TestAcceptInvitation::test_accept_with_xero_connected_returns_dashboard_hint
+FAILED tests/test_invitation.py::TestAcceptInvitation::test_accept_without_xero_returns_not_connected_hint
+FAILED tests/test_invitation.py::TestAcceptInvitation::test_accept_wrong_email_rejected
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_already_accepted_token_shows_used_state
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_expired_token_errors_without_logout
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_matching_session_case_insensitive
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_matching_session_proceeds_to_handoff
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_mismatched_session_logs_out_and_redirects
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_mismatched_session_with_xero_goes_via_end_session
+FAILED tests/test_invitation.py::TestAcceptInvitationPageEmailBinding::test_no_session_bounces_to_onboarding_auth_with_token
+FAILED tests/test_invitation.py::TestAcceptInvitationRoute::test_accept_page_authenticated_redirects_to_dashboard
+FAILED tests/test_invitation.py::TestAcceptInvitationRoute::test_accept_page_no_xero_redirects_to_not_connected
+FAILED tests/test_invitation.py::TestAcceptInvitationRoute::test_accept_page_unauthenticated_redirects_to_login
+FAILED tests/test_invitation.py::TestAcceptInvitationRoute::test_xero_not_connected_page_renders
+FAILED tests/test_invitation.py::TestCancelInvitation::test_cancel_pending_invitation
+FAILED tests/test_invitation.py::TestCreateInvitation::test_creates_invitation_successfully
+FAILED tests/test_invitation.py::TestCreateInvitation::test_rejects_already_approved_member
+FAILED tests/test_invitation.py::TestCreateInvitation::test_rejects_duplicate_pending_invitation
+FAILED tests/test_invitation.py::TestEmailOtpInviteAcceptance::test_verify_code_rejects_invite_for_wrong_email
+FAILED tests/test_invitation.py::TestEmailOtpInviteAcceptance::test_verify_code_with_invite_grants_entity_access
+FAILED tests/test_invitation.py::TestGetPendingInvitations::test_returns_only_pending
+FAILED tests/test_invitation.py::TestInvitationAPI::test_cancel_invitation_via_api
+FAILED tests/test_invitation.py::TestInvitationAPI::test_list_pending_returns_invitations
+FAILED tests/test_invitation.py::TestInvitationAPI::test_send_duplicate_returns_409
+FAILED tests/test_invitation.py::TestInvitationAPI::test_send_invitation_returns_201
+FAILED tests/test_invitation.py::TestInvitationStateTransitions::test_user_starts_as_non_member_then_becomes_member
+FAILED tests/test_invitation.py::TestResendInvitation::test_resend_blocked_by_cooldown
+FAILED tests/test_invitation.py::TestResendInvitation::test_resend_rotates_token_and_refreshes_expiry
+FAILED tests/test_invitation_expiry.py::test_accept_expired_invitation_is_rejected
+FAILED tests/test_invitation_expiry.py::test_accept_valid_invitation_within_window
+FAILED tests/test_invitation_expiry.py::test_create_invitation_sets_expires_at_about_7_days
+FAILED tests/test_invitation_expiry.py::test_expired_pending_does_not_block_resend
+FAILED tests/test_invite_superuser.py::test_accept_invitation_does_not_promote_normal_user
+FAILED tests/test_invite_superuser.py::test_accept_invitation_promotes_viewall_user
+FAILED tests/test_invite_superuser.py::test_create_invitation_promotes_existing_viewall_user
+FAILED tests/test_logout_idle.py::test_idle_timeout_ajax_returns_401_session_expired
+FAILED tests/test_logout_idle.py::test_idle_timeout_redirects_to_logout
+FAILED tests/test_module_card_lapsed.py::test_the_closing_card_is_the_running_trial_card_plus_one_line
+FAILED tests/test_onboarding_csrf_exempt.py::test_every_onboarding_post_is_csrf_exempt
+FAILED tests/test_permission_policy.py::test_has_permission_denies_without_membership_except_superuser
+FAILED tests/test_share_link_access.py::test_generate_share_link_denies_membership_missing
+FAILED tests/test_subscription_templates.py::test_an_untried_module_says_its_free_trial_is_available
+FAILED tests/test_terms_gate.py::test_invite_terms_status_is_false_once_that_user_has_agreed
+FAILED tests/test_user_permission_matrix_coverage.py::test_matrix_routes_use_expected_permission_checks[blueprints/entity/routes/create.py-entity_create-ENTITY_CREATE]
+FAILED tests/test_user_permission_matrix_coverage.py::test_matrix_routes_use_expected_permission_checks[blueprints/entity/routes/settings.py-entity_settings_module_save-MODULE_MANAGE]
+FAILED tests/test_user_permission_matrix_coverage.py::test_matrix_routes_use_expected_permission_checks[blueprints/entity/routes/settings.py-entity_settings_module_toggle-MODULE_MANAGE]
+FAILED tests/test_user_profile_contract.py::test_my_profile_returns_system_role_and_memberships
+FAILED tests/test_xero_company_writes.py::test_xero_entity_connect_callback_does_not_assign_user_company
+FAILED tests/test_xero_entity_connect_race.py::test_both_users_get_correct_entity_under_concurrent_onboarding
+FAILED tests/test_xero_entity_connect_race.py::test_entity_not_found_returns_error_redirect
+FAILED tests/test_xero_entity_connect_race.py::test_entity_resolved_by_id_in_state
+FAILED tests/test_xero_entity_connect_race.py::test_legacy_fallback_no_entity_id_in_state
+FAILED tests/test_xero_entity_connect_race.py::test_old_code_would_have_corrupted_data_regression_proof
+FAILED tests/test_xero_entity_connect_race.py::test_onboarding_state_variant
+FAILED tests/test_xero_entity_connect_race.py::test_race_condition_two_concurrent_users
+FAILED tests/test_zz_tmp_resend_names.py::test_resend_uses_persisted_names

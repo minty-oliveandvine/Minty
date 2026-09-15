@@ -1,0 +1,3857 @@
+{
+ "generated_from": "tests/_baseline/url_map.json + blueprints/*/routes",
+ "changed_words": {
+  "report": [
+   "date",
+   "cash_sales",
+   "shop_sales",
+   "delivery_sales",
+   "expenses",
+   "receipt_files",
+   "uploaded_by",
+   "company",
+   "xero_integrated_yes",
+   "withdrawal_type",
+   "withdrawal_bank_account",
+   "actual_cash_total",
+   "opening_balance",
+   "cash_addition",
+   "total_sales",
+   "bank_deposit",
+   "closing_balance",
+   "safe_box_balance",
+   "discrepancy_amount",
+   "discrepancy_type"
+  ],
+  "user": [
+   "xero_entity_id",
+   "system_role",
+   "xero_token",
+   "access_token",
+   "refresh_token",
+   "id_token",
+   "expires_in",
+   "token_created_at",
+   "current_entity_id"
+  ],
+  "entities": [
+   "minimum_qty",
+   "deposit_frequency",
+   "deposit_day",
+   "xero_short_code",
+   "period_lock_date",
+   "end_of_year_lock_date"
+  ],
+  "sale": [
+   "sale_name",
+   "value_name",
+   "sale_info_id",
+   "legacy_column"
+  ],
+  "renamed": [
+   "sync_statuc",
+   "xero_reponse_text",
+   "create_at",
+   "ShopExpense",
+   "ReportSaleDetail",
+   "EntityCashDetailV2",
+   "RolePermissions",
+   "Permissions",
+   "Roles"
+  ]
+ },
+ "routes": [
+  {
+   "endpoint": "auth.index",
+   "rule": "/index",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "opening_balance",
+    "shop_sales",
+    "total_sales"
+   ],
+   "touches_via_service": {
+    "update": [
+     "date"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.email_check",
+   "rule": "/auth/email/check",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.email_request_code",
+   "rule": "/auth/email/request-code",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.email_verify_code",
+   "rule": "/auth/email/verify-code",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.email_complete_signup",
+   "rule": "/auth/email/complete",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "complete_email_signup": [
+     "access_token",
+     "system_role",
+     "xero_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.email_handoff",
+   "rule": "/auth/email/handoff",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "accept_invitation": [
+     "create_at"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.home",
+   "rule": "/",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.leave_entity",
+   "rule": "/leave-entity",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "mark_signed_out": [
+     "current_entity_id"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.login",
+   "rule": "/login",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "system_role"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.logout",
+   "rule": "/logout",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.reset_request",
+   "rule": "/reset_password",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.reset_token",
+   "rule": "/reset_password/<token>",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.no_permission",
+   "rule": "/no-permission",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.register",
+   "rule": "/register",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.validate_register",
+   "rule": "/validate_register",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.mytoken",
+   "rule": "/mytoken",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.event_id",
+   "rule": "/event_id",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "auth.check_token",
+   "rule": "/check/token",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "auth.refresh_user_token",
+   "rule": "/refresh_token",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.billing_sync_chart_accounts",
+   "rule": "/api/entities/<string:entity_id>/billing/sync-chart-accounts",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.billing_sync_chart_if_changed",
+   "rule": "/api/entities/<string:entity_id>/billing/sync-chart-if-changed",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_chart_of_accounts_if_changed_background": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.billing_sync_contacts_if_changed",
+   "rule": "/api/entities/<string:entity_id>/billing/sync-contacts-if-changed",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_contacts_if_changed_background": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_create_success",
+   "rule": "/entity/success",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_create",
+   "rule": "/entity/create",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_server_time",
+   "rule": "/api/onboarding/server-time",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "date"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_currencies",
+   "rule": "/api/onboarding/currencies",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_countries",
+   "rule": "/api/onboarding/countries",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_state",
+   "rule": "/api/onboarding/state",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "get_onboarding_state": [
+     "cash_addition",
+     "opening_balance"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_saved_step",
+   "rule": "/api/onboarding/saved-step",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_create_entity",
+   "rule": "/api/onboarding/create",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_update_entity",
+   "rule": "/api/onboarding/entity/<string:entity_id>",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_plans",
+   "rule": "/api/onboarding/plans",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_payment_method_status",
+   "rule": "/api/onboarding/payment-method",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "has_billing_consent": [
+     "company"
+    ],
+    "card_for_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_payment_method_setup",
+   "rule": "/api/onboarding/payment-method/setup",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_payment_method_complete",
+   "rule": "/api/onboarding/payment-method/complete",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_billing_payment_methods",
+   "rule": "/api/onboarding/billing/payment-methods",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_billing_setup_intent",
+   "rule": "/api/onboarding/billing/payment-methods/setup-intent",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_billing_confirm",
+   "rule": "/api/onboarding/billing/payment-methods/confirm",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_billing_set_default",
+   "rule": "/api/onboarding/billing/payment-methods/default",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "set_default": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_billing_accounts",
+   "rule": "/api/onboarding/billing/accounts",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "create_billing_account": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_billing_authorize",
+   "rule": "/api/onboarding/billing/authorize",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "set_for_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_modules",
+   "rule": "/api/onboarding/modules",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_finalize",
+   "rule": "/api/onboarding/finalize",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "date"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_sales_methods",
+   "rule": "/api/onboarding/sales-methods",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "replace_sales_methods": [
+     "legacy_column",
+     "sale_info_id",
+     "sale_name",
+     "value_name"
+    ],
+    "list_sales_methods_grouped": [
+     "sale_name"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_opening_balance",
+   "rule": "/api/onboarding/opening-balance",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "cash_addition",
+    "date",
+    "opening_balance"
+   ],
+   "touches_via_service": {
+    "seed_opening_draft": [
+     "bank_deposit",
+     "cash_addition",
+     "cash_sales",
+     "closing_balance",
+     "company",
+     "date",
+     "delivery_sales",
+     "expenses",
+     "opening_balance",
+     "shop_sales",
+     "total_sales",
+     "uploaded_by"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_account_codes",
+   "rule": "/api/onboarding/account-codes",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "save_account_codes": [
+     "access_token"
+    ],
+    "get_account_code_options": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_contacts",
+   "rule": "/api/onboarding/contacts",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_contacts_create",
+   "rule": "/api/onboarding/contacts/create",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "create_contact": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_xero_disconnect",
+   "rule": "/api/onboarding/xero/disconnect",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "disconnect_entity_xero": [
+     "access_token",
+     "expires_in",
+     "id_token",
+     "refresh_token",
+     "token_created_at",
+     "xero_entity_id"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.onboarding_bill_codes",
+   "rule": "/api/onboarding/bill-codes",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_invite",
+   "rule": "/api/onboarding/invite",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.onboarding_invite_cancel",
+   "rule": "/api/onboarding/invite/cancel",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_list",
+   "rule": "/entity",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "outstanding_terms_context": [
+     "date"
+    ],
+    "get_trial_modules_for_entities": [
+     "company"
+    ],
+    "is_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.report_dashboard",
+   "rule": "/entity/<string:id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token",
+    "bank_deposit",
+    "closing_balance",
+    "company",
+    "date",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "build_subscription_notices": [
+     "company",
+     "date"
+    ],
+    "get_accounts_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "now": [
+     "date"
+    ],
+    "get_entity_account_settings": [
+     "Roles"
+    ],
+    "is_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.delete_entity",
+   "rule": "/entity/<string:id>/delete",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.module_selector",
+   "rule": "/entity/<string:entity_id>/modules",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "resume_presence": [
+     "company",
+     "current_entity_id"
+    ],
+    "is_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.module_reenter",
+   "rule": "/entity/<string:entity_id>/enter",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.billing_relogin",
+   "rule": "/entity/<string:entity_id>/billing-relogin",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.go_to_bills",
+   "rule": "/entity/<string:entity_id>/bills",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "is_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.subscription_notice_api",
+   "rule": "/api/entity/<string:entity_id>/subscription-notice",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "build_subscription_notices": [
+     "company",
+     "date"
+    ],
+    "is_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.get_payment_methods",
+   "rule": "/api/entities/<string:entity_id>/payment-methods",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "list_payment_methods": [
+     "value_name"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.get_available_payment_methods",
+   "rule": "/api/entities/<string:entity_id>/payment-methods/available",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "list_available_methods": [
+     "sale_name"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.add_payment_method",
+   "rule": "/api/entities/<string:entity_id>/payment-methods",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.update_payment_method",
+   "rule": "/api/entities/<string:entity_id>/payment-methods/<string:method_id>",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.delete_payment_method",
+   "rule": "/api/entities/<string:entity_id>/payment-methods/<string:method_id>",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.reorder_payment_methods",
+   "rule": "/api/entities/<string:entity_id>/payment-methods/reorder",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings",
+   "rule": "/entity/<string:entity_id>/settings/xero",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "xero_entity_id"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_xero_accounts_to_db_background": [
+     "access_token"
+    ],
+    "get_all_roles": [
+     "Roles"
+    ],
+    "process_xero_account_mapping_post": [
+     "access_token"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "sync_entity_xero_status": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_users_presence",
+   "rule": "/entity/settings/users/<string:org_id>/presence",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_users",
+   "rule": "/entity/settings/users/<string:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_xero_accounts_to_db_background": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_entity",
+   "rule": "/entity/settings/entity/<string:org_id>",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "end_of_year_lock_date",
+    "period_lock_date"
+   ],
+   "touches_via_service": {
+    "sync_expense_account_info_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_xero_accounts_to_db_background": [
+     "access_token"
+    ],
+    "process_xero_account_mapping_post": [
+     "access_token"
+    ],
+    "sync_contacts_if_changed_background": [
+     "access_token"
+    ],
+    "sync_chart_of_accounts_if_changed": [
+     "access_token"
+    ],
+    "backfill_lock_dates_if_needed_background": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module",
+   "rule": "/entity/settings/module/<string:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "date"
+   ],
+   "touches_via_service": {
+    "get_module_cards": [
+     "company",
+     "date"
+    ],
+    "get_next_payment_date": [
+     "date"
+    ],
+    "next_payment_from_panel": [
+     "date"
+    ],
+    "get_billing_anchor": [
+     "date"
+    ],
+    "build_subscription_panel": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_checkout",
+   "rule": "/entity/settings/module/<string:org_id>/checkout",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_authorize_billing",
+   "rule": "/entity/settings/module/<string:org_id>/authorize-billing",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "set_for_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_payment_methods",
+   "rule": "/entity/settings/module/<string:org_id>/payment-methods",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "for_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_payment_methods_setup_intent",
+   "rule": "/entity/settings/module/<string:org_id>/payment-methods/setup-intent",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_payment_methods_confirm",
+   "rule": "/entity/settings/module/<string:org_id>/payment-methods/confirm",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_payment_methods_default",
+   "rule": "/entity/settings/module/<string:org_id>/payment-methods/default",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "set_default": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_restart_quote",
+   "rule": "/entity/settings/module/<string:org_id>/restart-quote",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "preview_subscribe_modules": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_restart_billing",
+   "rule": "/entity/settings/module/<string:org_id>/restart-billing",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "set_for_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_confirm_billing",
+   "rule": "/entity/settings/module/<string:org_id>/confirm-billing",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_checkout_complete",
+   "rule": "/entity/settings/module/<string:org_id>/checkout-complete",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_start_trial",
+   "rule": "/entity/settings/module/<string:org_id>/start-trial",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_resume_preview",
+   "rule": "/entity/settings/module/<string:org_id>/resume-preview",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "preview_reinstate_modules": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_subscribe_preview",
+   "rule": "/entity/settings/module/<string:org_id>/subscribe-preview",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "preview_subscribe_modules": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_cancel_preview",
+   "rule": "/entity/settings/module/<string:org_id>/cancel-preview",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "preview_cancel_module": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_retry_payment",
+   "rule": "/entity/settings/module/<string:org_id>/retry-payment",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company",
+    "date"
+   ],
+   "touches_via_service": {
+    "retry_now": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_cancel",
+   "rule": "/entity/settings/module/<string:org_id>/cancel",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "cancel_module": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.entity_settings_module_payment_method",
+   "rule": "/entity/settings/module/<string:org_id>/payment-method",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_renew",
+   "rule": "/entity/settings/module/<string:org_id>/renew",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_module_manage_billing",
+   "rule": "/entity/settings/module/<string:org_id>/manage-billing",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_contact_create",
+   "rule": "/entity/contact/create",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_create_contact",
+   "rule": "/report/expense/create_contact",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_submit_all",
+   "rule": "/report/expense/submit_all",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "expenses",
+    "opening_balance"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_add",
+   "rule": "/report/expense/add",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "expenses",
+    "opening_balance"
+   ],
+   "touches_via_service": {
+    "normalize_expense_files": [
+     "ShopExpense",
+     "expenses"
+    ],
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_update",
+   "rule": "/report/expense/update/<string:expense_id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "expenses",
+    "opening_balance"
+   ],
+   "touches_via_service": {
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_edit_submitted",
+   "rule": "/report/expense/edit/<string:expense_id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ShopExpense",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_edit_discrepancy_reason",
+   "rule": "/report/<string:id>/edit/discrepancy-reason",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_edit_withdrawal",
+   "rule": "/report/<string:id>/edit/withdrawal",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "cash_addition",
+    "company",
+    "date",
+    "withdrawal_bank_account",
+    "withdrawal_type",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_delete",
+   "rule": "/report/expense/delete/<string:expense_id>",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "expenses",
+    "opening_balance",
+    "uploaded_by"
+   ],
+   "touches_via_service": {
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.get_draft_totals",
+   "rule": "/api/get_draft_totals",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "expenses",
+    "opening_balance",
+    "total_sales"
+   ],
+   "touches_via_service": {
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.generate_share_link",
+   "rule": "/api/generate_share_link",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.report_publishing_status",
+   "rule": "/api/report/<report_id>/publishing_status",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.expense_upload_files",
+   "rule": "/report/expense/upload_files",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ShopExpense",
+    "company",
+    "expenses"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.expense_draft_get",
+   "rule": "/report/expense/draft/<string:draft_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ShopExpense",
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.expense_draft_patch",
+   "rule": "/report/expense/draft/<string:draft_id>",
+   "methods": [
+    "PATCH"
+   ],
+   "touches": [
+    "ShopExpense",
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.expense_validate_drafts",
+   "rule": "/report/expense/validate_drafts",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ShopExpense"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_cash_count",
+   "rule": "/report/<string:id>/cash_count",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "actual_cash_total",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "discrepancy_amount",
+    "discrepancy_type",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "safe_box_balance",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_cash_count",
+   "rule": "/report/cash_count",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "actual_cash_total",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "discrepancy_amount",
+    "discrepancy_type",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "safe_box_balance",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.create_report",
+   "rule": "/create",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "ShopExpense",
+    "actual_cash_total",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by"
+   ],
+   "touches_via_service": {
+    "future_date_error": [
+     "date"
+    ],
+    "now": [
+     "date"
+    ],
+    "write_sales_detail_rows": [
+     "ReportSaleDetail",
+     "create_at",
+     "legacy_column",
+     "sale_info_id",
+     "value_name"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_deposit",
+   "rule": "/report/<string:id>/deposit",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_deposit",
+   "rule": "/report/deposit",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.download_file",
+   "rule": "/download/<path:filename>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.download_statements",
+   "rule": "/admin/download_statements",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "company",
+    "date"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.download_attachments",
+   "rule": "/download_attachments",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company",
+    "date"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.download_reports_csv",
+   "rule": "/entity/<string:entity_id>/reports/download-csv",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "company",
+    "date",
+    "discrepancy_amount",
+    "discrepancy_type",
+    "expenses",
+    "uploaded_by",
+    "withdrawal_type"
+   ],
+   "touches_via_service": {
+    "get_entity_account_settings": [
+     "Roles"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_ending",
+   "rule": "/report/<string:id>/ending",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.report_ending",
+   "rule": "/report/ending",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.entity_ending_with_report",
+   "rule": "/entity/<string:entity_id>/ending/<string:report_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.convert_report_to_draft",
+   "rule": "/report/<string:report_id>/convert-to-draft",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.entity_ending",
+   "rule": "/entity/<string:entity_id>/ending",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "report.report_expense",
+   "rule": "/report/<string:id>/expense",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "expenses",
+    "opening_balance",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "normalize_expense_files": [
+     "ShopExpense",
+     "expenses"
+    ],
+    "now": [
+     "date"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense",
+   "rule": "/report/expense",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "expenses",
+    "opening_balance",
+    "uploaded_by",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "normalize_expense_files": [
+     "ShopExpense",
+     "expenses"
+    ],
+    "now": [
+     "date"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_expense_extract",
+   "rule": "/report/expense/extract",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "resolve_report_entity_id": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.generate_pdf_report",
+   "rule": "/report/<string:id>/export",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "legacy_column",
+    "opening_balance",
+    "sale_name",
+    "shop_sales",
+    "uploaded_by",
+    "value_name"
+   ],
+   "touches_via_service": {
+    "update": [
+     "date"
+    ],
+    "can_view_report": [
+     "company",
+     "uploaded_by"
+    ],
+    "legacy_column_counts_for_report": [
+     "actual_cash_total",
+     "legacy_column"
+    ],
+    "remove": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_screenshot",
+   "rule": "/report/<string:id>/screenshot",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "can_view_report": [
+     "company",
+     "uploaded_by"
+    ],
+    "remove": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.entity_report_history",
+   "rule": "/entity/<string:entity_id>/reports",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "uploaded_by"
+   ],
+   "touches_via_service": {
+    "get_entity_report_history": [
+     "company",
+     "date",
+     "expenses",
+     "total_sales",
+     "uploaded_by",
+     "xero_integrated_yes"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.minty_report_share",
+   "rule": "/Minty_Report/<path:entity_and_date>/",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company",
+    "date"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.minty_report_ending",
+   "rule": "/Minty_Report_<path:entity_and_date>/ending",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company",
+    "date"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_insert_xero_transaction",
+   "rule": "/insert_xero_transaction",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "create_at"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_check_dept_bank_yest",
+   "rule": "/api/check-dept-bank-yest/<string:entity_id>",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "bank_deposit",
+    "closing_balance",
+    "company",
+    "date"
+   ],
+   "touches_via_service": {
+    "update_xero_deposit_after_change": [
+     "access_token",
+     "date"
+    ],
+    "update_after_deposit_change": [
+     "company",
+     "date"
+    ],
+    "get_entity_account_settings": [
+     "Roles"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_opening",
+   "rule": "/entity/<string:entity_id>/report/opening",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "actual_cash_total",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "safe_box_balance",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "withdrawal_bank_account",
+    "withdrawal_type"
+   ],
+   "touches_via_service": {
+    "future_date_error": [
+     "date"
+    ],
+    "recalculate_report": [
+     "bank_deposit",
+     "cash_addition",
+     "cash_sales",
+     "closing_balance",
+     "delivery_sales",
+     "discrepancy_amount",
+     "expenses",
+     "opening_balance",
+     "shop_sales",
+     "total_sales"
+    ],
+    "get_accounts_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_entity_account_settings": [
+     "Roles"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_opening",
+   "rule": "/report/<string:id>/opening",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token",
+    "actual_cash_total",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "safe_box_balance",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "withdrawal_bank_account",
+    "withdrawal_type"
+   ],
+   "touches_via_service": {
+    "future_date_error": [
+     "date"
+    ],
+    "recalculate_report": [
+     "bank_deposit",
+     "cash_addition",
+     "cash_sales",
+     "closing_balance",
+     "delivery_sales",
+     "discrepancy_amount",
+     "expenses",
+     "opening_balance",
+     "shop_sales",
+     "total_sales"
+    ],
+    "get_accounts_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_entity_account_settings": [
+     "Roles"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_opening",
+   "rule": "/report/opening",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "actual_cash_total",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "safe_box_balance",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "withdrawal_bank_account",
+    "withdrawal_type"
+   ],
+   "touches_via_service": {
+    "future_date_error": [
+     "date"
+    ],
+    "recalculate_report": [
+     "bank_deposit",
+     "cash_addition",
+     "cash_sales",
+     "closing_balance",
+     "delivery_sales",
+     "discrepancy_amount",
+     "expenses",
+     "opening_balance",
+     "shop_sales",
+     "total_sales"
+    ],
+    "get_accounts_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_entity_account_settings": [
+     "Roles"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_detail",
+   "rule": "/report/<string:id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "shop_sales",
+    "total_sales"
+   ],
+   "touches_via_service": {
+    "can_view_report": [
+     "company",
+     "uploaded_by"
+    ],
+    "sales_amounts_by_short_name": [
+     "ReportSaleDetail",
+     "cash_sales",
+     "value_name"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.edit_report",
+   "rule": "/report/edit/<string:id>",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "ShopExpense",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "shop_sales",
+    "value_name"
+   ],
+   "touches_via_service": {
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "write_sales_detail_rows": [
+     "ReportSaleDetail",
+     "create_at",
+     "legacy_column",
+     "sale_info_id",
+     "value_name"
+    ],
+    "upload_file_to_s3": [
+     "date",
+     "expenses"
+    ],
+    "sales_amounts_by_short_name": [
+     "ReportSaleDetail",
+     "cash_sales",
+     "value_name"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.delete_report",
+   "rule": "/report/delete/<string:id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "ShopExpense",
+    "company",
+    "date",
+    "receipt_files"
+   ],
+   "touches_via_service": {
+    "can_delete_report": [
+     "company",
+     "uploaded_by"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.download_report",
+   "rule": "/report/download/<string:id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ShopExpense",
+    "cash_sales",
+    "company",
+    "expenses",
+    "uploaded_by"
+   ],
+   "touches_via_service": {
+    "get_entity_account_settings": [
+     "Roles"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.resume_report",
+   "rule": "/report/resume",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "date",
+    "expenses"
+   ],
+   "touches_via_service": {
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_next_section_for_user": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_sale",
+   "rule": "/report/<string:id>/sale",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "create_at",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "sale_info_id",
+    "sale_name",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "value_name",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "update_report_draft_sales_from_detail": [
+     "delivery_sales",
+     "shop_sales",
+     "total_sales"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_sale",
+   "rule": "/report/sale",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "bank_deposit",
+    "cash_addition",
+    "cash_sales",
+    "closing_balance",
+    "company",
+    "create_at",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "opening_balance",
+    "receipt_files",
+    "sale_info_id",
+    "sale_name",
+    "shop_sales",
+    "total_sales",
+    "uploaded_by",
+    "value_name",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ],
+    "log_history": [
+     "company",
+     "uploaded_by"
+    ],
+    "resolve_report_entity_id": [
+     "company"
+    ],
+    "get_cash_sales_from_detail": [
+     "ReportSaleDetail",
+     "cash_sales"
+    ],
+    "update_report_draft_sales_from_detail": [
+     "delivery_sales",
+     "shop_sales",
+     "total_sales"
+    ],
+    "header_publishing_status_for": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_submitted",
+   "rule": "/report/<string:id>/submitted",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "can_view_report": [
+     "company",
+     "uploaded_by"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_submitted",
+   "rule": "/report/submitted",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company",
+    "xero_integrated_yes"
+   ],
+   "touches_via_service": {
+    "can_view_report": [
+     "company",
+     "uploaded_by"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "report.report_submitted_publish_to_xero",
+   "rule": "/report/submitted/publish_to_xero",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "company",
+    "date",
+    "expenses"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_entity_xero_status": [
+     "access_token"
+    ],
+    "validate_expenses_for_system_accounts": [
+     "ShopExpense",
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.admin_dashboard",
+   "rule": "/admin_dashboard",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "system_role"
+   ],
+   "touches_via_service": {
+    "require_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.admin",
+   "rule": "/admin",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "company",
+    "date",
+    "delivery_sales",
+    "expenses",
+    "shop_sales",
+    "system_role",
+    "total_sales",
+    "uploaded_by"
+   ],
+   "touches_via_service": {
+    "require_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.client_logs",
+   "rule": "/api/client-logs",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "user_management.approve_user",
+   "rule": "/approve_user/<string:user_id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "require_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.reject_user",
+   "rule": "/reject_user/<string:user_id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "require_superuser": [
+     "system_role"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.create_user",
+   "rule": "/minty/api/users/create",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "create_at",
+    "system_role",
+    "xero_entity_id"
+   ],
+   "touches_via_service": {
+    "now": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.find_user",
+   "rule": "/find_user",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "user_management.update_user_details",
+   "rule": "/minty/api/users/<string:user_id>",
+   "methods": [
+    "PATCH"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "check_role_change_or_error": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.update_user_role",
+   "rule": "/minty/api/users/<string:user_id>/role",
+   "methods": [
+    "PATCH"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "check_role_change_or_error": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.delete_user_role",
+   "rule": "/minty/api/users/<string:user_id>/role",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "check_not_last_admin_or_error": [
+     "company"
+    ],
+    "check_not_subscription_payer_or_error": [
+     "company"
+    ],
+    "check_not_pending_subscriber_or_error": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.deactivate_my_account",
+   "rule": "/minty/api/users/me",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [
+    "access_token",
+    "company",
+    "expires_in",
+    "id_token",
+    "refresh_token"
+   ],
+   "touches_via_service": {
+    "check_not_subscription_payer_anywhere_or_error": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.update_my_profile",
+   "rule": "/minty/api/users/me",
+   "methods": [
+    "PATCH"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "user_management.get_my_profile",
+   "rule": "/minty/api/users/me",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "system_role"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.xero_auth",
+   "rule": "/xero_auth",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero.xero_connect_entity",
+   "rule": "/xero_connect",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero.xero_reconnect",
+   "rule": "/xero_reconnect",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero.xero_callback",
+   "rule": "/callback",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token",
+    "expires_in",
+    "id_token",
+    "refresh_token",
+    "token_created_at",
+    "xero_entity_id"
+   ],
+   "touches_via_service": {
+    "upsert_user_token": [
+     "access_token",
+     "expires_in",
+     "id_token",
+     "refresh_token"
+    ],
+    "now": [
+     "date"
+    ],
+    "sync_entity_xero_status": [
+     "access_token"
+    ],
+    "accept_invitation": [
+     "create_at"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.refresh_access_token",
+   "rule": "/api/refresh_xero_token",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero.internal_xero_access_token",
+   "rule": "/api/internal/xero/token",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "resolve_entity_access_token_for_service": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.get_latest_xero_bank_transactions",
+   "rule": "/api/xero/bank-transactions/latest/<entity_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token",
+    "date"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.update_bank_transaction",
+   "rule": "/api/xero/bank-transactions/update/<entity_id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "bank_deposit",
+    "company",
+    "date"
+   ],
+   "touches_via_service": {
+    "get_entity_account_settings": [
+     "Roles"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.get_xero_sync_status",
+   "rule": "/api/entity/<string:entity_id>/xero-sync-status",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero.disconnect_from_xero",
+   "rule": "/entity/settings/xero/disconnect",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token",
+    "expires_in",
+    "id_token",
+    "refresh_token",
+    "token_created_at",
+    "xero_entity_id"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.get_entity_xero_data",
+   "rule": "/api/entity/<string:entity_id>/xero-data",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "get_accounts_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "get_contacts_from_xero": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.remove_connections_all",
+   "rule": "/remove/connections/all",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.debug_xero_settings",
+   "rule": "/debug/xero-settings/<string:entity_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "invitation.accept_invitation_page",
+   "rule": "/invitation/accept/<string:token>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "accept_invitation": [
+     "create_at"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "invitation.xero_not_connected",
+   "rule": "/invitation/xero-not-connected/<string:entity_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "invitation.send_invitation",
+   "rule": "/minty/api/invitation/send",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "invitation.list_pending",
+   "rule": "/minty/api/invitation/<string:entity_id>/pending",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "invitation.cancel_invite",
+   "rule": "/minty/api/invitation/<string:invitation_id>/cancel",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "invitation.resend_invite",
+   "rule": "/minty/api/invitation/<string:invitation_id>/resend",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.accept_page",
+   "rule": "/legal/accept",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "date"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "legal.accept_submit",
+   "rule": "/legal/accept",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "system_role"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "legal.user_consents",
+   "rule": "/minty/api/users/<user_id>/consents",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.terms",
+   "rule": "/legal/terms",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.terms_version",
+   "rule": "/legal/terms/<version>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.privacy",
+   "rule": "/legal/privacy",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.privacy_version",
+   "rule": "/legal/privacy/<version>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.invite_terms_status",
+   "rule": "/legal/invite-terms-status",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.content",
+   "rule": "/legal/content/<kind>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.current",
+   "rule": "/legal/current",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "subscription.my_subscriptions_api",
+   "rule": "/api/me/subscriptions",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "date"
+   ],
+   "touches_via_service": {
+    "build_payer_subscriptions": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_subscriber_options_api",
+   "rule": "/api/me/subscriptions/subscriber-options",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_invite_admin_api",
+   "rule": "/api/me/subscriptions/invite-admin",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "invite_admin_to_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_transfer_initiate_api",
+   "rule": "/api/me/subscriptions/transfer",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "offer_transfer": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_transfer_respond_api",
+   "rule": "/api/me/subscriptions/transfer/respond",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "subscription.my_transfer_cancel_api",
+   "rule": "/api/me/subscriptions/transfer/cancel",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_transfers_api",
+   "rule": "/api/me/subscriptions/transfers",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "incoming_transfers_payload": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_invoices_api",
+   "rule": "/api/me/invoices",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "build_payer_invoices": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_payment_methods_api",
+   "rule": "/api/me/billing/payment-methods",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "subscription.my_payment_method_setup_intent_api",
+   "rule": "/api/me/billing/payment-methods/setup-intent",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "subscription.my_payment_method_confirm_api",
+   "rule": "/api/me/billing/payment-methods/confirm",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "subscription.my_payment_method_default_api",
+   "rule": "/api/me/billing/payment-methods/default",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "set_default": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_entity_payment_method_api",
+   "rule": "/api/me/billing/entity-payment-method",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "company"
+   ],
+   "touches_via_service": {
+    "for_entity": [
+     "company"
+    ],
+    "set_for_entity": [
+     "company"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_payment_method_update_api",
+   "rule": "/api/me/billing/payment-methods/update",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "update": [
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "subscription.my_payment_method_remove_api",
+   "rule": "/api/me/billing/payment-methods/remove",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "remove": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity_settings",
+   "rule": "/entity/<string:entity_id>/settings/xero",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "xero_entity_id"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_xero_accounts_to_db_background": [
+     "access_token"
+    ],
+    "get_all_roles": [
+     "Roles"
+    ],
+    "process_xero_account_mapping_post": [
+     "access_token"
+    ],
+    "get_xero_data_dynamic": [
+     "access_token",
+     "xero_entity_id"
+    ],
+    "sync_entity_xero_status": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity_settings_users",
+   "rule": "/entity/settings/users/<string:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_xero_accounts_to_db_background": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity_settings_entity",
+   "rule": "/entity/settings/entity/<string:org_id>",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [
+    "access_token",
+    "end_of_year_lock_date",
+    "period_lock_date"
+   ],
+   "touches_via_service": {
+    "sync_expense_account_info_from_xero": [
+     "access_token"
+    ],
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ],
+    "sync_xero_accounts_to_db_background": [
+     "access_token"
+    ],
+    "process_xero_account_mapping_post": [
+     "access_token"
+    ],
+    "sync_contacts_if_changed_background": [
+     "access_token"
+    ],
+    "sync_chart_of_accounts_if_changed": [
+     "access_token"
+    ],
+    "backfill_lock_dates_if_needed_background": [
+     "access_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity_settings_module",
+   "rule": "/entity/settings/module/<string:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "date"
+   ],
+   "touches_via_service": {
+    "get_module_cards": [
+     "company",
+     "date"
+    ],
+    "get_next_payment_date": [
+     "date"
+    ],
+    "next_payment_from_panel": [
+     "date"
+    ],
+    "get_billing_anchor": [
+     "date"
+    ],
+    "build_subscription_panel": [
+     "company",
+     "date"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity_report_history",
+   "rule": "/entity/<string:entity_id>/reports",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "uploaded_by"
+   ],
+   "touches_via_service": {
+    "get_entity_report_history": [
+     "company",
+     "date",
+     "expenses",
+     "total_sales",
+     "uploaded_by",
+     "xero_integrated_yes"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "delete_report",
+   "rule": "/report/delete/<string:id>",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "ReportSaleDetail",
+    "ShopExpense",
+    "company",
+    "date",
+    "receipt_files"
+   ],
+   "touches_via_service": {
+    "can_delete_report": [
+     "company",
+     "uploaded_by"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "validate_register",
+   "rule": "/validate_register",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero_auth",
+   "rule": "/xero_auth",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero_connect_entity",
+   "rule": "/xero_connect",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "xero_reconnect",
+   "rule": "/xero_reconnect",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "disconnect_from_xero",
+   "rule": "/entity/settings/xero/disconnect",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "access_token",
+    "expires_in",
+    "id_token",
+    "refresh_token",
+    "token_created_at",
+    "xero_entity_id"
+   ],
+   "touches_via_service": {
+    "ensure_valid_token": [
+     "access_token",
+     "refresh_token"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "approve_admins",
+   "rule": "/admin",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "health_check",
+   "rule": "/health",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  }
+ ],
+ "summary": {
+  "routes": 213,
+  "in_scope": 132
+ }
+}
