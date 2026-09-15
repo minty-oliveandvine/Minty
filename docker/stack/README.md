@@ -9,6 +9,7 @@ that setup covers this repo alone.
 | `minty` | `Minty` | <http://localhost:5001> | Module 1 — Flask app (owns the database schema) |
 | `billing-backend` | `billing-backend` | <http://localhost:8000> | Module 2 — Django API |
 | `billing-frontend` | `billing-frontend` | <http://localhost:3000> | Module 2 — Next.js UI |
+| `onboarding-backend` | `onboarding-backend` | <http://localhost:8001> | Onboarding API — Django, extracted from Minty |
 | `onboarding` | `onboarding` | <http://localhost:3001> | Onboarding — Next.js UI |
 | `db` | — | `localhost:5432` | PostgreSQL 15, shared by both backends |
 
@@ -207,7 +208,7 @@ tables in it. Use one or the other consistently.
 → Docker Desktop isn't running. Start it and wait for the whale icon.
 
 **"port is already allocated"**
-→ Something on your machine already uses 5432/5001/8000/3000/3001. Either stop
+→ Something on your machine already uses 5432/5001/8000/8001/3000/3001. Either stop
 it, or change the matching `*_HOST_PORT` in `.env` (and the `*_PUBLIC_URL` that
 goes with it).
 
@@ -259,6 +260,7 @@ docker compose restart minty billing-backend
 
 # Minty            http://localhost:5001
 # Billing API      http://localhost:8000
+# Onboarding API   http://localhost:8001
 # Billing UI       http://localhost:3000
 # Onboarding UI    http://localhost:3001
 

@@ -1,165 +1,135 @@
-# Petty Cash Management System
+# Minty
 
-A Flask-based web application for managing petty cash transactions and expenses.
+The Flask application behind Minty — companies, users, petty cash, Xero integration and the
+subscription/billing engine. Historically "pettycashv2", and still the repo the other services
+are being carved out of.
 
-## 🌐 Live Deployments
+Runs on **port 5001**.
 
-| Environment | URL | Branch |
-|-------------|-----|--------|
-| **Production** | https://pettycash-oliveandvinehk.onrender.com | `main` |
-| **Staging** | https://staging-pettycash-oliveandvinehk.onrender.com | `staging` |
-| **Development** | https://dev-pettycash-oliveandvinehk.onrender.com | `dev` |
+## The services around it
 
-## 📁 Repository Structure
+Minty is no longer the whole product. It is one of several repos, all against the same
+PostgreSQL database and `pettycashv2` schema:
 
-- **Main Branch**: [https://github.com/ovbenjie/pettycashv2/tree/main](https://github.com/ovbenjie/pettycashv2/tree/main)
-- **Staging Branch**: [https://github.com/ovbenjie/pettycashv2/tree/staging](https://github.com/ovbenjie/pettycashv2/tree/staging)
-- **Development Branch**: [https://github.com/ovbenjie/pettycashv2/tree/dev](https://github.com/ovbenjie/pettycashv2/tree/dev)
+| Repo | What it is | Port |
+|---|---|---|
+| **Minty** (this one) | Flask. Auth, entities, petty cash, Xero, subscriptions | 5001 |
+| `billing-backend` | Django + django-ninja. Bills, payments, Xero bill sync | 8000 |
+| `billing-frontend` | Next.js. The payment-request module and the payer portal | 3000 |
+| `onboarding` | Next.js. The nine-step new-company wizard | 3001 |
+| `onboarding-backend` | Django + django-ninja. The wizard's API, extracted from this repo | 8001 |
 
-## 🐳 Running with Docker (recommended)
+The sibling repos live beside this one (`C:\dev\…`). **Note:** `CLAUDE.md` still says
+`C:\Projects\New_Repo` — that path does not exist.
 
-Docker runs the app **and** a PostgreSQL database in isolated containers, so you
-don't need to install Python or Postgres locally. Everyone on the team gets an
-identical environment from one command.
+Two things hold them together and are easy to get wrong:
 
-### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Windows/Linux)
-- Git
+- **`SECRET_KEY` must be identical across Minty, `billing-backend` and `onboarding-backend`.**
+  Minty mints the HS256 JWTs; the others only verify them. A mismatch is not a loud failure —
+  it is a 401 on every request, which the frontends report as an expired session.
+- **Alembic in this repo owns the schema.** The Django services map onto it with
+  `managed = False` and ship no migrations of their own. A new column starts here.
 
-No Docker Hub account is required — the image is built locally from this repo.
+## Live deployments
 
-### First-time setup
+| Environment | URL |
+|---|---|
+| Production | https://minty.oliveandvinehk.com |
+| Staging | https://staging-olive-and-vine-minty-26bm.onrender.com |
+| Pre-staging | https://pre-staging-olive-and-vine-minty.onrender.com |
+| Development | https://development-olive-and-vine-minty.onrender.com |
 
-1. **Clone and enter the repo**
-   ```bash
-   git clone https://github.com/ovbenjie/pettycashv2.git
-   cd pettycashv2
-   ```
+Taken from `billing-frontend/lib/mintyEnv.ts`, which is what the frontends actually call.
+**Which branch deploys to which environment is configured in the Render dashboard, not in this
+repo** — check there rather than trusting a list here.
 
-2. **Create your local env file**
-   ```bash
-   cp .env.example .env
-   ```
+## Running with Docker (recommended)
 
-3. **Start everything**
-   ```bash
-   cd docker
-   docker compose up --build
-   ```
-   This builds the app image, starts Postgres, waits for the DB, runs migrations,
-   then serves the app. Code changes reload automatically (dev override), so you
-   normally won't need `--build` again unless dependencies change.
+Docker runs the app **and** PostgreSQL in containers, so you need neither Python nor Postgres
+locally. No Docker Hub account — the image is built from this repo.
 
-4. **Open the app** → http://localhost:5001
+### Just Minty and a database
 
-> All commands below assume you are in the `docker/` directory. The dev override
-> (`docker-compose.override.yml`) is applied automatically when you run compose
-> from there, giving you live code-reloading.
+```bash
+git clone https://github.com/minty-oliveandvine/Minty.git
+cd Minty
+cp .env.example .env
+cd docker
+docker compose up --build
+```
 
-### Common commands (run from `docker/`)
+Builds the image, starts Postgres, waits for the DB, then serves the app on
+http://localhost:5001. Code reloads automatically via `docker-compose.override.yml`, which is
+applied when you run compose from inside `docker/`.
+
+### The whole stack
+
+`docker/stack/` brings up Minty, both Django services and both Next.js frontends together,
+building the siblings from `../../../<repo>`. See [docker/stack/README.md](docker/stack/README.md).
+
+```bash
+cd docker/stack
+docker compose up --build
+```
+
+`RUN_MIGRATIONS` defaults to `false` there, because the Alembic chain cannot currently build a
+database from empty.
+
+### Common commands (from `docker/`)
 
 | Task | Command |
-|------|---------|
+|---|---|
 | Start (foreground, see logs) | `docker compose up` |
 | Start in background | `docker compose up -d` |
 | Rebuild after dependency changes | `docker compose up --build` |
 | Stop containers | `docker compose down` |
 | Stop **and wipe the database** | `docker compose down -v` |
 | View app logs | `docker compose logs -f app` |
-| Open a shell in the app container | `docker compose exec app sh` |
+| Shell in the app container | `docker compose exec app sh` |
 | Run a migration manually | `docker compose exec app flask --app main.py db upgrade` |
 
-If you prefer running compose from the project root instead of `cd docker`, pass
-both files explicitly so the dev override still applies:
+From the project root instead, pass both files so the dev override still applies:
+
 ```bash
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml up --build
 ```
 
----
+## Running without Docker
 
-## 🚀 Local Development Setup (without Docker)
+Requires **Python 3.11.9** and a PostgreSQL you can point at.
 
-### Prerequisites
-- Python 3.11.9
-- Git
+```bash
+git clone https://github.com/minty-oliveandvine/Minty.git
+cd Minty
+python -m venv .venv
 
-### Installation & Setup
+# Windows
+.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/ovbenjie/pettycashv2.git
-   cd pettycashv2
-   ```
+pip install -r requirements.txt
+cp .env.example .env          # then fill in the database URIs and SECRET_KEY
+flask --app main.py db upgrade
+flask run --host=localhost --port=5001 --debug
+```
 
-2. **⚠️ IMPORTANT: Switch to dev branch**
-   ```bash
-   git checkout dev
-   ```
+`.env.example` documents every variable. The ones without defaults —  `SECRET_KEY`,
+`WTF_CSRF_SECRET_KEY`, `LOCAL_DATABASE_URI`, `RDS_DATABASE_URI`, `S3_*` — are required, and the
+app raises at startup if any is missing.
 
-3. **Create virtual environment**
-   ```bash
-   python -m venv .venv
-   ```
+## Tests
 
-4. **Activate virtual environment**
-   
-   **Linux/Mac:**
-   ```bash
-   . .venv/scripts/activate
-   ```
-   source .venv/bin/activate
-   
-   **Windows:**
-   ```powershell
-   .venv\Scripts\Activate.ps1
-   ```
+```bash
+pytest
+```
 
-5. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+**The suite is not green at HEAD.** Compare a full run before your change against a full run
+after — never a single file — and grep for `ERROR` as well as `FAILED`, since collection errors
+do not show as failures.
 
-6. **Run the application**
-   ```bash
-   flask run --host=localhost --port=5001 --debug
-   ```
-flask run --host=localhost --port=500x --debug
+## Contributing
 
-7. **Access the application**
-   - Local: http://localhost:5001
-   - Or use the dev deployment: https://dev-pettycash-oliveandvinehk.onrender.com
-
-## 🔧 Development Workflow
-
-### Branch Strategy
-- `main` - Production-ready code
-- `staging` - Pre-production testing
-- `dev` - Active development
-
-### Important Notes
-- **Always work on the `dev` branch** when developing new features
-- Test changes on the dev environment before promoting to staging
-- Ensure all tests pass before merging to main
-
-## 📋 Environment Configuration
-
-Each environment runs on its respective branch:
-- Production deploys from `main`
-- Staging deploys from `staging` 
-- Development deploys from `dev`
-
-## 🤝 Contributing
-
-1. Ensure you're on the `dev` branch
-2. Create a feature branch from `dev`
-3. Make your changes
-4. Test locally
-5. Submit a pull request to `dev`
-
-## 📞 Support
-
-For issues or questions, please contact the development team or create an issue in the GitHub repository.
-
----
-
-**Remember**: Always switch to the `dev` branch before starting development!
+Work happens on `Minty-*` branches (`Minty-PettyCash`, `Minty-BillingBackend`, …), not on
+`main`/`staging`/`dev` — an earlier version of this README described those, and they do not
+exist in this repository. Branch from the one you are working against and open a PR back to it.
