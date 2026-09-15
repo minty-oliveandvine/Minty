@@ -222,6 +222,74 @@ services:
   # ---------------------------------------------------------------------------
   # Onboarding — Next.js UI. Talks only to Flask (Module 1).
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Onboarding API — the wizard's backend, extracted from the Flask app. Django +
+  # django-ninja against the SAME pettycashv2 schema, with managed = False models
+  # and no migrations of its own: Alembic in Minty stays owner-of-record.
+  #
+  # Roughly two thirds of its endpoints are thin proxies back to Flask (Stripe,
+  # Xero tokens, subscription writes — rails only one service may touch), which is
+  # why it needs FLASK_APP_URL even though it shares the database.
+  # ---------------------------------------------------------------------------
+  onboarding-backend:
+    build:
+      context: ${ONBOARDING_BACKEND_PATH:-../../../onboarding-backend}
+      dockerfile: Dockerfile
+    container_name: minty-stack-onboarding-backend
+    restart: unless-stopped
+    env_file:
+      - path: ${ONBOARDING_BACKEND_PATH:-../../../onboarding-backend}/.env
+        required: false
+      - path: ./.env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+      minty:
+        # Waits for the pettycashv2 schema and the Flask tables to exist.
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      PYTHONUNBUFFERED: "1"
+      # Same key as Flask and billing-backend. Flask MINTS the onboarding JWT and
+      # this service only verifies it, so a mismatch is not a boot failure — it is
+      # a 401 on every request, which the wizard reports as an expired session.
+      SECRET_KEY: ${SECRET_KEY:-minty_stack_shared_secret_key}
+      DEBUG: ${DJANGO_DEBUG:-True}
+      ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      POSTGRES_DB: ${POSTGRES_DB:-minty_ref}
+      POSTGRES_USER: ${POSTGRES_USER:-minty_ref_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minty_ref_pass}
+      DB_HOST: db
+      DB_PORT: "5432"
+      # Server-to-server: the proxied endpoints and the Xero token fetch. Internal
+      # service name, so it never leaves the compose network.
+      FLASK_APP_URL: http://minty:5001
+      XERO_TOKEN_SERVICE_URL: http://minty:5001/api/internal/xero/token
+      # Only the wizard calls this API from a browser, so only its origin needs CORS.
+      ONBOARDING_APP_URL: ${ONBOARDING_PUBLIC_URL:-http://localhost:3001}
+      CORS_ALLOWED_ORIGINS: ${ONBOARDING_PUBLIC_URL:-http://localhost:3001}
+      # Must agree with Minty's hardcoded Asia/Hong_Kong, or the two disagree about
+      # what "today" is and the wizard's date picker caps on the wrong day.
+      DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Hong_Kong}
+    ports:
+      - "${ONBOARDING_BACKEND_HOST_PORT:-8001}:8001"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import socket; socket.create_connection(('127.0.0.1', 8001), timeout=3).close()"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    command:
+      - "gunicorn"
+      - "-w"
+      - "${GUNICORN_WORKERS:-4}"
+      - "-b"
+      - "0.0.0.0:8001"
+      - "config.wsgi:application"
+
   onboarding:
     build:
       context: ${ONBOARDING_PATH:-../../../onboarding}
@@ -230,11 +298,16 @@ services:
     restart: unless-stopped
     depends_on:
       - minty
+      - onboarding-backend
     environment:
       # Primary base URL used across the app (browser-facing → localhost).
       NEXT_PUBLIC_MODULE1_API_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
-      # Legacy fallback still read by the auth pages; keep it on the same host.
+      # Legacy fallback still read by lib/flaskBase.js; keep it on the same host.
       NEXT_PUBLIC_API_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      # The extracted onboarding API. Browser-facing, so localhost rather than the
+      # internal service name. Which paths go here vs to Flask is decided in the
+      # wizard's lib/apiRoutes.js.
+      NEXT_PUBLIC_ONBOARDING_API_URL: ${ONBOARDING_BACKEND_PUBLIC_URL:-http://localhost:8001}
       NODE_ENV: development
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
