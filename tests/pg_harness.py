@@ -105,27 +105,21 @@ def _drop_database(admin_uri: str, dbname: str) -> None:
         conn.close()
 
 
-def build() -> BuiltDatabase:
-    """Create the database, run the schema file, rename the schema. Returns its URI."""
+def build_schema(db_uri: str, schema_sql: Path = DEFAULT_SCHEMA_SQL, rename_to: str | None = None) -> int:
+    """Run ``01_schema_rebased.sql`` into an EXISTING database and return the table count.
+
+    The file drops and recreates ``pettycash_test``; whatever else the database
+    holds (a ``pettycashv2`` being migrated, say) is untouched. ``rename_to``
+    applies the cutover's rename-swap afterwards — the test suite asks for
+    ``pettycashv2`` so the models see the schema they name; the migration
+    rehearsal (scripts/pettycash_test/rehearse.py) leaves it as built, because
+    its loaders address ``pettycash_test`` explicitly.
+    """
     import psycopg2
 
-    admin_uri = os.environ["MINTY_TEST_PG_URI"]
-    dbname = os.environ.get("MINTY_TEST_PG_DBNAME", "minty_test")
-    keep = os.environ.get("MINTY_TEST_PG_KEEP") == "1"
-    schema_sql = Path(os.environ.get("MINTY_TEST_SCHEMA_SQL", DEFAULT_SCHEMA_SQL))
+    schema_sql = Path(schema_sql)
     if not schema_sql.exists():
         raise RuntimeError(f"schema file not found: {schema_sql}")
-
-    _drop_database(admin_uri, dbname)
-    conn = psycopg2.connect(admin_uri)
-    try:
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute(f'CREATE DATABASE "{dbname}" ENCODING \'UTF8\' TEMPLATE template0')
-    finally:
-        conn.close()
-
-    db_uri = _with_database(admin_uri, dbname)
 
     # psql, not psycopg2: the file has $$-quoted bodies and a DO block, and psql's
     # parser is the one the file was written for. ON_ERROR_STOP so a half-built
@@ -140,26 +134,53 @@ def build() -> BuiltDatabase:
         env=env,
     )
     if proc.returncode != 0:
-        _drop_database(admin_uri, dbname)
         raise RuntimeError(
             f"schema build failed (psql exit {proc.returncode}):\n{proc.stderr[-4000:]}"
         )
 
+    schema = rename_to or BUILT_SCHEMA
     conn = psycopg2.connect(db_uri)
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute(f"ALTER SCHEMA {BUILT_SCHEMA} RENAME TO {APP_SCHEMA}")
+            if rename_to:
+                cur.execute(f"ALTER SCHEMA {BUILT_SCHEMA} RENAME TO {rename_to}")
             cur.execute(
                 "SELECT count(*) FROM information_schema.tables "
                 "WHERE table_schema = %s AND table_type = 'BASE TABLE'",
-                (APP_SCHEMA,),
+                (schema,),
             )
             (n_tables,) = cur.fetchone()
     finally:
         conn.close()
     if n_tables < 50:
+        raise RuntimeError(f"schema build produced only {n_tables} tables in {schema}")
+    return n_tables
+
+
+def build() -> BuiltDatabase:
+    """Create the database, run the schema file, rename the schema. Returns its URI."""
+    import psycopg2
+
+    admin_uri = os.environ["MINTY_TEST_PG_URI"]
+    dbname = os.environ.get("MINTY_TEST_PG_DBNAME", "minty_test")
+    keep = os.environ.get("MINTY_TEST_PG_KEEP") == "1"
+    schema_sql = Path(os.environ.get("MINTY_TEST_SCHEMA_SQL", DEFAULT_SCHEMA_SQL))
+
+    _drop_database(admin_uri, dbname)
+    conn = psycopg2.connect(admin_uri)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{dbname}" ENCODING \'UTF8\' TEMPLATE template0')
+    finally:
+        conn.close()
+
+    db_uri = _with_database(admin_uri, dbname)
+    try:
+        build_schema(db_uri, schema_sql, rename_to=APP_SCHEMA)
+    except Exception:
         _drop_database(admin_uri, dbname)
-        raise RuntimeError(f"schema build produced only {n_tables} tables in {APP_SCHEMA}")
+        raise
 
     return BuiltDatabase(uri=db_uri, dbname=dbname, admin_uri=admin_uri, keep=keep)

@@ -78,6 +78,12 @@ def new_id() -> str:
     return str(uuid.uuid4())
 
 
+def _now():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
 def login(client, user, *, accepted_terms=True) -> None:
     """Sign in as ``user``. The terms gate (blueprints/legal) blocks every route until the
     live Terms version is accepted, so a signed-in user has agreed unless a test says
@@ -137,7 +143,9 @@ def seed_module(db, code="PETTY_CASH", name="Petty Cash"):
 
     row = EntityFunction.query.filter_by(function_code=code).first()
     if row is None:
-        row = EntityFunction(id=new_id(), function_code=code, function_name=name, is_active=True)
+        now = _now()
+        row = EntityFunction(id=new_id(), function_code=code, function_name=name, is_active=True,
+                             description=name, created_at=now, updated_at=now)
         db.session.add(row)
         db.session.commit()
     return row
@@ -155,7 +163,7 @@ def make_user(db, email="user@test.com", *, system_role=None, first_name="Test",
         username=email,
         first_name=first_name,
         last_name=last_name,
-        password=generate_password_hash("password123"),
+        password=generate_password_hash("password123", method="pbkdf2:sha256"),  # the app's method; scrypt overflows the 150-char column on Postgres
         system_role=system_role or User.SYSTEM_ROLE_NORMAL,
         approved=True,
     )
@@ -186,10 +194,12 @@ def make_entity(db, owner, *, name="Acme Shop", role="admin", currency=None, cou
     db.session.add(UserEntity(user_id=owner.id, entity_id=entity.id, role=role, approved=True))
     for code in modules:
         fn = seed_module(db, code, code.replace("_", " ").title())
+        now = _now()
         db.session.add(
             EntityFunctionMap(
                 id=new_id(), entity_id=entity.id, entity_function_id=fn.id,
-                is_enabled=True, created_by="entity_create",
+                is_enabled=True, created_by="entity_create", enabled_at=now,
+                created_at=now, updated_at=now,
             )
         )
     db.session.commit()
