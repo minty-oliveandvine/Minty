@@ -92,17 +92,33 @@ def pytest_configure(config):
         "through routes/services; in Postgres mode it is expected to fail until the models "
         "match the redesigned schema (phase C), so failures there are reported as xfail.",
     )
+    config.addinivalue_line(
+        "markers",
+        "pipeline: the migration rehearsal (scripts/pettycash_test/rehearse.py) as a test. "
+        "Opt-in via MINTY_REHEARSAL_DUMP; needs the real dataset and a Postgres server.",
+    )
+
+
+# Characterisation modules still waiting for their phase C unit. In Postgres mode their tests
+# are reported as xfail (the models do not match the redesigned schema yet). A unit REMOVES its
+# module here when it is green on Postgres; from then on a regression there is a hard failure.
+# docs/modernisation_plan.md, Part 1 C0 rule 4.
+PG_PENDING = {
+    "test_char_report_lifecycle.py",   # C3 + C4
+    "test_char_sales_methods.py",      # C3
+    "test_char_access.py",             # C1 + C6
+}
 
 
 def pytest_collection_modifyitems(config, items):
     if not pg_harness.enabled():
         return
     for item in items:
-        if item.get_closest_marker("char"):
+        if item.get_closest_marker("char") and item.path.name in PG_PENDING:
             item.add_marker(pytest.mark.xfail(
                 strict=False,
-                reason="Postgres from 01_schema_rebased.sql: the current models do not match yet "
-                       "(APPLICATION_CHANGES.md). Becomes a hard test as phase C lands.",
+                reason=f"{item.path.name} is in PG_PENDING: its phase C unit has not landed "
+                       "(docs/modernisation_plan.md). Remove it from the set when the unit is green.",
             ))
 
 

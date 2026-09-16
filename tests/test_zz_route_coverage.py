@@ -24,7 +24,17 @@ MISSES = HERE / "_baseline" / "route_coverage_misses.txt"
 def test_every_schema_touching_route_is_exercised(app):
     inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
     in_scope = {r["endpoint"]: r for r in inventory["routes"] if r["in_scope"]}
-    hit = app.extensions.get("hit_endpoints", set())
+    hit = set(app.extensions.get("hit_endpoints", set()))
+    # Legacy aliases: the same view is registered twice on one rule (``entity_settings`` next to
+    # ``entity.entity_settings``, ``delete_report`` next to ``report.delete_report``). A request
+    # to the rule reaches the view whichever name Flask records, so a hit on one counts for all
+    # endpoints that share the rule and methods.
+    by_rule: dict[tuple, set] = {}
+    for r in inventory["routes"]:
+        by_rule.setdefault((r["rule"], tuple(r["methods"])), set()).add(r["endpoint"])
+    for twins in by_rule.values():
+        if twins & hit:
+            hit |= twins
     misses = sorted(e for e in in_scope if e not in hit)
     covered = len(in_scope) - len(misses)
     lines = [f"# {covered}/{len(in_scope)} schema-touching endpoints exercised", ""]

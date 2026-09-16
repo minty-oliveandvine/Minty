@@ -1,0 +1,57 @@
+"""No template or static script may name a column a finished phase C unit removed.
+
+The route tests render Jinja and the browser suite (e2e/) runs the wizard's JavaScript, but
+neither reads every template. This is the cheap backstop: once a unit has landed, the words it
+retired may not appear under templates/ or static/js/ at all. The list grows per unit -
+add the unit's retired names when its gate is green (docs/modernisation_plan.md, Part 1 C0.9).
+
+Deliberately word-boundary matches on identifiers, so ``cash_sales`` does not trip on
+``totalCashSales`` and ``date`` is not on the list at all.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# unit -> the identifiers it retires. Empty until C1 lands; every entry here is enforced.
+RETIRED: dict[str, tuple[str, ...]] = {
+    # "C1": ("xero_entity_id", "access_token", "refresh_token", "id_token", "expires_in",
+    #        "token_created_at", "current_entity_id", "xero_token"),
+    # "C2": ("minimum_qty", "deposit_frequency", "deposit_day", "xero_short_code",
+    #        "period_lock_date", "end_of_year_lock_date"),
+    # "C3": ("value_name", "sale_info_id", "legacy_column"),
+    # "C4": ("cash_sales", "shop_sales", "delivery_sales", "receipt_files", "uploaded_by",
+    #        "xero_integrated_yes", "withdrawal_type", "withdrawal_bank_account",
+    #        "actual_cash_total", "shop_expense", "report_sale_detail"),
+    # "C5": ("sync_statuc", "xero_reponse_text"),
+    # "C6": ("role_permissions", "invitations"),
+}
+
+SCAN = [ROOT / "templates", ROOT / "static" / "js"]
+SUFFIXES = {".html", ".js", ".jinja", ".jinja2"}
+
+
+def _files():
+    for base in SCAN:
+        if base.exists():
+            yield from (p for p in base.rglob("*") if p.suffix in SUFFIXES)
+
+
+@pytest.mark.parametrize("unit", sorted(RETIRED) or ["(no unit finished yet)"])
+def test_retired_column_names_are_gone_from_templates_and_scripts(unit):
+    words = RETIRED.get(unit, ())
+    if not words:
+        pytest.skip("no phase C unit has retired any names yet")
+    pattern = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(map(re.escape, words)) + r")(?![A-Za-z0-9_])")
+    hits: list[str] = []
+    for path in _files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for n, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                hits.append(f"{path.relative_to(ROOT)}:{n}: {line.strip()[:120]}")
+    assert not hits, f"{unit} retired {words} but they are still referenced:\n" + "\n".join(hits[:40])
