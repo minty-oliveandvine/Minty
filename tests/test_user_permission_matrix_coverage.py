@@ -353,11 +353,9 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "entity_create",
             "ENTITY_CREATE",
         ),
-        (
-            "blueprints/entity/routes/list.py",
-            "delete_entity",
-            "ENTITY_DELETE",
-        ),
+        # ``delete_entity`` (ENTITY_DELETE) went with the entity soft-delete in C2 of
+        # docs/modernisation_plan.md: entity_status has no 'deleted' and nothing linked to
+        # the route. The permission stays in the matrix for the day a real delete exists.
         (
             "blueprints/entity/routes/settings.py",
             "entity_settings_users",

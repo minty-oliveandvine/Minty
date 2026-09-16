@@ -130,7 +130,7 @@ def day(value) -> str:
 
 
 def modules_phrase(codes) -> str:
-    """``['PETTY_CASH', 'BILL']`` -> ``'Petty Cash and Payment Request'``."""
+    """``['PETTY_CASH', 'PAYMENT_REQUEST']`` -> ``'Petty Cash and Payment Request'``."""
     names = [_module_name(code) for code in codes if code]
     if not names:
         return "your modules"
@@ -140,7 +140,8 @@ def modules_phrase(codes) -> str:
 
 
 def _module_name(code: str) -> str:
-    pretty = {"PETTY_CASH": "Petty Cash", "BILL": "Payment Request"}
+    # BILL is the plan word (billing_plan.code); PAYMENT_REQUEST the module code.
+    pretty = {"PETTY_CASH": "Petty Cash", "PAYMENT_REQUEST": "Payment Request", "BILL": "Payment Request"}
     key = str(code or "").strip().upper()
     return pretty.get(key, key.title().replace("_", " "))
 

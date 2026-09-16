@@ -38,8 +38,8 @@ COVERED_TO = datetime(2026, 8, 25, 12, tzinfo=UTC)
 
 PRICES = {
     frozenset({"PETTY_CASH"}): (28000, "Petty Cash"),
-    frozenset({"BILL"}): (28000, "Payment Request"),
-    frozenset({"BILL", "PETTY_CASH"}): (40000, "Super Minty"),
+    frozenset({"PAYMENT_REQUEST"}): (28000, "Payment Request"),
+    frozenset({"PAYMENT_REQUEST", "PETTY_CASH"}): (40000, "Super Minty"),
 }
 
 
@@ -101,8 +101,8 @@ def test_resuming_beside_a_live_module_quotes_the_bundle(monkeypatch):
     """The other module keeps running, so the entity really will be on Super Minty."""
     checkout = _wire(
         monkeypatch,
-        [_row("BILL", "active"), _row("PETTY_CASH", "scheduled_cancel")],
-        covered={"BILL", "PETTY_CASH"},
+        [_row("PAYMENT_REQUEST", "active"), _row("PETTY_CASH", "scheduled_cancel")],
+        covered={"PAYMENT_REQUEST", "PETTY_CASH"},
     )
 
     assert _preview(checkout)["monthly"] == 40000
@@ -114,9 +114,9 @@ def test_resuming_when_the_other_module_is_also_leaving_quotes_the_solo_price(mo
     customer they would pay 120/month more than they will."""
     checkout = _wire(
         monkeypatch,
-        [_row("BILL", "scheduled_cancel"), _row("PETTY_CASH", "scheduled_cancel")],
+        [_row("PAYMENT_REQUEST", "scheduled_cancel"), _row("PETTY_CASH", "scheduled_cancel")],
         # Both were PAID FOR this period, which is exactly why the two sets diverge.
-        covered={"BILL", "PETTY_CASH"},
+        covered={"PAYMENT_REQUEST", "PETTY_CASH"},
     )
 
     assert _preview(checkout)["monthly"] == 28000
@@ -135,7 +135,7 @@ def test_a_module_that_already_lapsed_does_not_count_toward_the_bundle(monkeypat
     of what the entity pays from next period."""
     checkout = _wire(
         monkeypatch,
-        [_row("BILL", "cancelled"), _row("PETTY_CASH", "scheduled_cancel")],
+        [_row("PAYMENT_REQUEST", "cancelled"), _row("PETTY_CASH", "scheduled_cancel")],
         covered={"PETTY_CASH"},
     )
 
@@ -147,8 +147,8 @@ def test_a_past_due_module_still_counts(monkeypatch):
     still owed, so it is part of what the entity will be paying."""
     checkout = _wire(
         monkeypatch,
-        [_row("BILL", "past_due"), _row("PETTY_CASH", "scheduled_cancel")],
-        covered={"BILL", "PETTY_CASH"},
+        [_row("PAYMENT_REQUEST", "past_due"), _row("PETTY_CASH", "scheduled_cancel")],
+        covered={"PAYMENT_REQUEST", "PETTY_CASH"},
     )
 
     assert _preview(checkout)["monthly"] == 40000
@@ -189,11 +189,11 @@ def test_the_charge_today_still_counts_a_module_that_is_winding_down(monkeypatch
     checkout = _wire(
         monkeypatch,
         [
-            _row("BILL", "scheduled_cancel", ext_state="pending"),
+            _row("PAYMENT_REQUEST", "scheduled_cancel", ext_state="pending"),
             _row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
                  access_until=COVERED_TO),
         ],
-        covered={"BILL", "PETTY_CASH"},
+        covered={"PAYMENT_REQUEST", "PETTY_CASH"},
     )
     seen = _capture_build(monkeypatch)
 
@@ -201,7 +201,7 @@ def test_the_charge_today_still_counts_a_module_that_is_winding_down(monkeypatch
 
     assert result["monthly"] == 28000, "recurring drops the module that is leaving"
     assert seen, "the preview must actually price something"
-    assert "BILL" in seen[0]["before"], (
+    assert "PAYMENT_REQUEST" in seen[0]["before"], (
         "the charge today still prices against the days already paid for"
     )
 
@@ -222,7 +222,7 @@ def test_after_a_renewal_a_resume_is_a_FRESH_JOIN_not_a_bundle_upgrade(monkeypat
     checkout = _wire(
         monkeypatch,
         [
-            _row("BILL", "scheduled_cancel", ext_state="invoiced",
+            _row("PAYMENT_REQUEST", "scheduled_cancel", ext_state="invoiced",
                  access_until=COVERED_TO + timedelta(days=1)),
             _row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
                  access_until=COVERED_TO),
@@ -250,7 +250,7 @@ def test_resuming_BOTH_quotes_what_the_two_renew_calls_will_actually_charge(monk
     checkout = _wire(
         monkeypatch,
         [
-            _row("BILL", "scheduled_cancel", ext_state="invoiced",
+            _row("PAYMENT_REQUEST", "scheduled_cancel", ext_state="invoiced",
                  access_until=COVERED_TO + timedelta(days=1)),
             _row("PETTY_CASH", "scheduled_cancel", ext_state="invoiced",
                  access_until=COVERED_TO),
@@ -261,9 +261,9 @@ def test_resuming_BOTH_quotes_what_the_two_renew_calls_will_actually_charge(monk
 
     entity = SimpleNamespace(id="e1", name="Demo Co")
     user = SimpleNamespace(id="payer-1")
-    checkout.preview_reinstate_modules(entity, user, ["BILL", "PETTY_CASH"])
+    checkout.preview_reinstate_modules(entity, user, ["PAYMENT_REQUEST", "PETTY_CASH"])
 
-    assert [s["before"] for s in seen] == [set(), {"BILL"}], (
+    assert [s["before"] for s in seen] == [set(), {"PAYMENT_REQUEST"}], (
         "BILL joins an empty line; PETTY_CASH is then a step up from BILL"
     )
-    assert [s["after"] for s in seen] == [{"BILL"}, {"BILL", "PETTY_CASH"}]
+    assert [s["after"] for s in seen] == [{"PAYMENT_REQUEST"}, {"PAYMENT_REQUEST", "PETTY_CASH"}]

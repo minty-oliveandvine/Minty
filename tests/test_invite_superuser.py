@@ -51,7 +51,7 @@ def _make_entity(db, Entity, name="Test Corp"):
         name=name,
         country_code="HK",
         currency_code="HKD",
-        status="active",
+        status="disconnected",
     )
     db.session.add(entity)
     db.session.commit()

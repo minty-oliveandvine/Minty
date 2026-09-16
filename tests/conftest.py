@@ -107,7 +107,10 @@ PG_PENDING = {
     "test_char_report_lifecycle.py",   # C3 + C4
     "test_char_sales_methods.py",      # C3
     "test_char_access.py",             # C6 (C1 done)
-    "test_char_xero_tokens.py",        # C2: every case inserts an entities row (minimum_qty …)
+    "test_char_entities.py",           # C3: creating a company seeds sale_info (entity_id column)
+    # one case, not the module: the Xero settings page it renders after the disconnect
+    # loads the roles table (C6)
+    "test_char_xero_tokens.py::test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect",
 }
 
 
@@ -115,7 +118,8 @@ def pytest_collection_modifyitems(config, items):
     if not pg_harness.enabled():
         return
     for item in items:
-        if item.get_closest_marker("char") and item.path.name in PG_PENDING:
+        pending = item.path.name in PG_PENDING or f"{item.path.name}::{item.originalname}" in PG_PENDING
+        if item.get_closest_marker("char") and pending:
             item.add_marker(pytest.mark.xfail(
                 strict=False,
                 reason=f"{item.path.name} is in PG_PENDING: its phase C unit has not landed "

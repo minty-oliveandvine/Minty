@@ -16,6 +16,7 @@ from blueprints.auth.system_roles import (
 )
 from blueprints.shared.enums import SystemRole
 from models.db import db, tz
+from blueprints.shared.column_types import MintyUuid
 
 
 class User(UserMixin, db.Model):
@@ -39,7 +40,7 @@ class User(UserMixin, db.Model):
     SYSTEM_ROLE_SUPERUSER = USER_SYSTEM_ROLE_SUPERUSER
     SYSTEM_ROLE_DEFAULT = USER_SYSTEM_ROLE_DEFAULT
     SYSTEM_ROLE_VALUES = USER_SYSTEM_ROLE_VALUES
-    id = db.Column(db.Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(100), nullable=True, unique=True)
     # Xero-side identity (from the OAuth id_token email claim). Kept distinct
     # from `email` (the personal/OTP identity) so we can tell "same person"

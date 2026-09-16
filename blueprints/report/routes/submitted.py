@@ -178,12 +178,10 @@ def report_submitted_publish_to_xero():
             )
 
         # Re-sync a status that isn't "connected" before publishing; it may
-        # simply be stale. Only genuinely disconnected states are worth a
-        # warning -- "active" is the normal post-onboarding status set by
-        # blueprints/entity/routes/create.py, and "onboarding" is benign, so
-        # warning on `!= "connected"` fired on healthy entities every publish.
+        # simply be stale. entity_status is onboarding / connected / disconnected
+        # (C2); only "disconnected" is worth a warning, "onboarding" is benign.
         if entity.status != "connected":
-            if entity.status in ("disconnected", "cancelled"):
+            if entity.status == "disconnected":
                 logger.warning(
                     f"Entity {entity_id} status is '{entity.status}', but attempting to publish with stored tokens"
                 )

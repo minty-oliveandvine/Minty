@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RETIRED: dict[str, tuple[str, ...]] = {
     "C1": ("xero_entity_id", "access_token", "refresh_token", "id_token", "expires_in",
            "token_created_at", "current_entity_id", "xero_token"),
-    # "C2": ("minimum_qty", "deposit_frequency", "deposit_day", "xero_short_code",
-    #        "period_lock_date", "end_of_year_lock_date"),
+    "C2": ("minimum_qty", "deposit_frequency", "deposit_day", "xero_short_code",
+           "period_lock_date", "end_of_year_lock_date"),
     # "C3": ("value_name", "sale_info_id", "legacy_column"),
     # "C4": ("cash_sales", "shop_sales", "delivery_sales", "receipt_files", "uploaded_by",
     #        "xero_integrated_yes", "withdrawal_type", "withdrawal_bank_account",

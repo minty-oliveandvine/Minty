@@ -20,7 +20,7 @@ class CurrencyInfo(db.Model):
     currency_code = db.Column(db.CHAR(3), unique=True, nullable=False)
     currency_name = db.Column(db.String(100), nullable=False)
     symbol = db.Column(db.String(10), nullable=False, default="")
-    decimal_places = db.Column(db.Integer, nullable=False, default=2)
+    decimal_places = db.Column(db.SmallInteger, nullable=False, default=2)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(
         db.TIMESTAMP(timezone=True),

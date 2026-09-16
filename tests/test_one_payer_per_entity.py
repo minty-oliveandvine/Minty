@@ -71,7 +71,7 @@ def _user(db, email):
 def _entity(db, name="Acme"):
     from models.db import Entity
 
-    row = Entity(id=str(uuid.uuid4()), name=name, status="active")
+    row = Entity(id=str(uuid.uuid4()), name=name, status="disconnected")
     db.session.add(row)
     db.session.commit()
     return row
@@ -87,10 +87,10 @@ def test_a_second_module_joins_the_entitys_existing_payer(app, db_session):
         second = _user(db_session, "second@test.com")
 
         store.upsert_module_row(entity.id, "PETTY_CASH", first.id, phase="trial")
-        store.upsert_module_row(entity.id, "BILL", second.id, phase="trial")
+        store.upsert_module_row(entity.id, "PAYMENT_REQUEST", second.id, phase="trial")
 
         rows = store.module_rows_for_entity(entity.id)
-        assert {r.function_code for r in rows} == {"PETTY_CASH", "BILL"}
+        assert {r.function_code for r in rows} == {"PETTY_CASH", "PAYMENT_REQUEST"}
         assert {r.payer_user_id for r in rows} == {str(first.id)}, (
             "the second module must join the established payer, not open a second one"
         )
@@ -126,7 +126,7 @@ def test_the_first_payer_is_still_free_to_be_anyone(app, db_session):
         entity = _entity(db_session)
         someone = _user(db_session, "someone@test.com")
 
-        store.upsert_module_row(entity.id, "BILL", someone.id, phase="trial")
+        store.upsert_module_row(entity.id, "PAYMENT_REQUEST", someone.id, phase="trial")
 
         assert store.payer_for_entity(entity.id) == str(someone.id)
 
@@ -141,8 +141,8 @@ def test_entities_do_not_share_a_payer_with_each_other(app, db_session):
         a = _user(db_session, "a@test.com")
         b = _user(db_session, "b@test.com")
 
-        store.upsert_module_row(one.id, "BILL", a.id, phase="trial")
-        store.upsert_module_row(two.id, "BILL", b.id, phase="trial")
+        store.upsert_module_row(one.id, "PAYMENT_REQUEST", a.id, phase="trial")
+        store.upsert_module_row(two.id, "PAYMENT_REQUEST", b.id, phase="trial")
 
         assert store.payer_for_entity(one.id) == str(a.id)
         assert store.payer_for_entity(two.id) == str(b.id)
@@ -156,11 +156,11 @@ def test_repeat_writes_by_the_established_payer_are_untouched(app, db_session):
         entity = _entity(db_session)
         owner = _user(db_session, "owner2@test.com")
 
-        store.upsert_module_row(entity.id, "BILL", owner.id, phase="trial")
-        store.upsert_module_row(entity.id, "BILL", owner.id, phase="active")
+        store.upsert_module_row(entity.id, "PAYMENT_REQUEST", owner.id, phase="trial")
+        store.upsert_module_row(entity.id, "PAYMENT_REQUEST", owner.id, phase="active")
         store.upsert_module_row(entity.id, "PETTY_CASH", owner.id, phase="active")
 
         rows = store.module_rows_for_entity(entity.id)
         assert len(rows) == 2
         assert {r.payer_user_id for r in rows} == {str(owner.id)}
-        assert store.module_row(entity.id, "BILL").phase == "active"
+        assert store.module_row(entity.id, "PAYMENT_REQUEST").phase == "active"

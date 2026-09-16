@@ -89,7 +89,7 @@ def main() -> int:
             return row
 
         petty = module("PETTY_CASH", "Petty Cash", "Petty cash reports")
-        bill = module("BILL", "Payment Request", "Bills and payments (Module 2)")
+        bill = module("PAYMENT_REQUEST", "Payment Request", "Bills and payments (Module 2)")
         db.session.commit()
 
         # --- the user --------------------------------------------------------------
@@ -112,7 +112,7 @@ def main() -> int:
         # --- the entity ------------------------------------------------------------
         entity = Entity.query.filter_by(name=E2E_ENTITY_NAME).first()
         if entity is None:
-            entity = Entity(id=str(uuid.uuid4()), name=E2E_ENTITY_NAME, status="active",
+            entity = Entity(id=str(uuid.uuid4()), name=E2E_ENTITY_NAME, status="disconnected",
                             currency_id=hkd.id, country_code="HK")
             db.session.add(entity)
             db.session.flush()
@@ -121,8 +121,8 @@ def main() -> int:
         for fn in (petty, bill):  # both modules on: the Minty wizard AND the payment-request app
             if EntityFunctionMap.query.filter_by(entity_id=entity.id, entity_function_id=fn.id).first() is None:
                 now = datetime.now(timezone.utc)
-                db.session.add(EntityFunctionMap(id=str(uuid.uuid4()), entity_id=entity.id, entity_function_id=fn.id,
-                                                 is_enabled=True, created_by="entity_create", enabled_at=now,
+                db.session.add(EntityFunctionMap(entity_id=entity.id, entity_function_id=fn.id,
+                                                 is_enabled=True, created_by=user.id, enabled_at=now,
                                                  created_at=now, updated_at=now))
         db.session.commit()
 

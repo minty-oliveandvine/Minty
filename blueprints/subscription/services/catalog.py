@@ -15,7 +15,8 @@ a change of interface. The two Stripe-only fields are gone:
   never from a stored price id.
 
 ``billing_plan`` is keyed by the sorted SET of module codes — ``BILL``, ``PETTY_CASH``,
-``BILL+PETTY_CASH``. A single-module plan is one code; a bundle is two or more. That is
+``BILL+PETTY_CASH`` (the plan words; the module code is PAYMENT_REQUEST, see
+``billing.plan_code``). A single-module plan is one code; a bundle is two or more. That is
 the whole distinction between the two views below.
 """
 from __future__ import annotations
@@ -24,6 +25,7 @@ from dataclasses import dataclass
 
 from flask import g, has_app_context
 from loguru import logger
+from blueprints.subscription.services.billing import plan_modules
 
 # Per-request memo for ``available_plans``. Same shape and lifetime as ``policy.current``
 # and ``money.decimal_places`` — cached on ``g``, so it is per-request and thread-safe.
@@ -146,7 +148,8 @@ def _build_available_plans() -> list[PlanView]:
     ids = _function_ids()
     plans = []
     for plan in _single_plans():
-        code = (plan.code or "").upper()
+        # the MODULE code (PAYMENT_REQUEST), whatever word the plan row uses (BILL)
+        (code,) = plan_modules(plan.code) or ("",)
         interval, count = _interval(plan)
         plans.append(
             PlanView(
@@ -184,7 +187,7 @@ def bundle_plan() -> BundlePlanView | None:
     plan = max(multi, key=lambda p: len(p.code.split("+")))
     interval, count = _interval(plan)
     return BundlePlanView(
-        function_codes=tuple(sorted(c.upper() for c in plan.code.split("+"))),
+        function_codes=plan_modules(plan.code),
         display_name=plan.display_name,
         amount=int(plan.amount),
         currency_code=(plan.currency or "").upper(),

@@ -68,7 +68,7 @@ def _user(db, email):
 def _entity(db, name="Acme"):
     from models.db import Entity
 
-    row = Entity(id=str(uuid.uuid4()), name=name, status="active")
+    row = Entity(id=str(uuid.uuid4()), name=name, status="disconnected")
     db.session.add(row)
     db.session.commit()
     return row

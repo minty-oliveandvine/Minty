@@ -72,7 +72,7 @@ class _FakeUser:
     email = "u1@example.com"
 
 
-def _plan(code="BILL", fn_id="fn_bill"):
+def _plan(code="PAYMENT_REQUEST", fn_id="fn_bill"):
     from blueprints.subscription.services import catalog
 
     return catalog.PlanView(
@@ -414,7 +414,7 @@ def _seed_catalog(db):
     from models.db import EntityFunction
 
     rows = {}
-    for code, name in (("PETTY_CASH", "Petty Cash"), ("BILL", "Payment Request")):
+    for code, name in (("PETTY_CASH", "Petty Cash"), ("PAYMENT_REQUEST", "Payment Request")):
         row = EntityFunction(
             id=str(uuid.uuid4()), function_code=code, function_name=name,
             description=f"{name} module", is_active=True,
@@ -461,7 +461,7 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
     # the two sources had to be merged and could disagree.
     class _Row:
         entity_id = "e1"
-        function_code = "BILL"
+        function_code = "PAYMENT_REQUEST"
         payer_user_id = U1
         phase = "trial"
         trial_end = now + timedelta(days=20)
@@ -482,10 +482,10 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
 
     cards = {c["code"]: c for c in modules.get_module_cards("e1")}
 
-    assert cards["BILL"]["subscription_status"] == "trialing"
-    assert cards["BILL"]["needs_card"] is expected_nudge
+    assert cards["PAYMENT_REQUEST"]["subscription_status"] == "trialing"
+    assert cards["PAYMENT_REQUEST"]["needs_card"] is expected_nudge
     # Which banner to show: "add a payment method" vs "confirm billing for this company".
-    assert cards["BILL"]["needs_consent_only"] is expected_consent_only
+    assert cards["PAYMENT_REQUEST"]["needs_consent_only"] is expected_consent_only
     # A module with no subscription at all is never nudged — there's no trial to save.
     assert cards["PETTY_CASH"]["needs_card"] is False
 

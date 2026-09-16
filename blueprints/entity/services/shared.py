@@ -30,8 +30,13 @@ def check_user_has_entities(user_id):
     return count > 0
 
 
-def create_entity_for_user(user_id, entity_name, country_code, currency_id):
+def create_entity_for_user(user_id, entity_name, country_code, currency_id, *,
+                           status="onboarding"):
     """Create an entity owned (admin) by ``user_id`` plus its default settings.
+
+    ``status`` is the ``entity_status`` the row starts in: ``onboarding`` (the wizard,
+    the default and the database's) or ``disconnected`` for the legacy create form, whose
+    company is live at once and has no Xero organisation yet.
 
     ``country_code`` is the ISO alpha-2 country_info PK and ``currency_id``
     a currency_info uuid (the entities columns are FKs to those registries —
@@ -72,6 +77,7 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_id):
         entity = Entity(
             id=str(_uuid.uuid4()),
             name=name,
+            status=status,
             country_code=country_code or None,
             currency_id=currency_id or None,
         )
@@ -88,7 +94,7 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_id):
         # blueprint load order independent of the modules service.
         from blueprints.entity.services.modules import apply_default_modules
 
-        _data, _status = apply_default_modules(entity.id)
+        _data, _status = apply_default_modules(entity.id, user_id=str(user_id))
         if _status != 200:
             logger.error(
                 f"Default modules not seeded for entity {entity.id}: {_data}"

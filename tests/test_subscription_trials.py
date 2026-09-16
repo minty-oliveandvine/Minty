@@ -54,7 +54,7 @@ class _Row:
     CANCELLED one (which keeps its free days but must never convert).
     """
 
-    def __init__(self, code="BILL", payer="u1", entity_id="e1", phase="trial",
+    def __init__(self, code="PAYMENT_REQUEST", payer="u1", entity_id="e1", phase="trial",
                  trial_end=None):
         self.entity_id = entity_id
         self.function_code = code
@@ -64,7 +64,7 @@ class _Row:
         self.first_billed_at = None
 
 
-def _plan(code="BILL"):
+def _plan(code="PAYMENT_REQUEST"):
     from blueprints.subscription.services import catalog
 
     return catalog.PlanView(
@@ -180,11 +180,11 @@ def test_trial_start_bills_nothing_and_writes_the_row(monkeypatch):
     monkeypatch.setattr(changes, "issue_change", _boom)
     monkeypatch.setattr(checkout, "create_setup_checkout_session", _boom)
 
-    result = checkout.start_module_trials(_FakeEntity(), _FakeUser(), ["BILL"])
+    result = checkout.start_module_trials(_FakeEntity(), _FakeUser(), ["PAYMENT_REQUEST"])
 
-    assert result == ["BILL"]
+    assert result == ["PAYMENT_REQUEST"]
     entity_id, code, payer, fields = calls["writes"][0]
-    assert (entity_id, code, payer) == ("e1", "BILL", "u1")  # acting user is the payer
+    assert (entity_id, code, payer) == ("e1", "PAYMENT_REQUEST", "u1")  # acting user is the payer
     assert fields["phase"] == "trial"
     # No ``trial_used`` / ``trial_start``: both were written here and read nowhere, and
     # the schema no longer carries them. "Has this module been trialled" is answered by
@@ -195,7 +195,7 @@ def test_trial_start_bills_nothing_and_writes_the_row(monkeypatch):
     # Access runs to trial_end, which is TRIAL_PERIOD_DAYS out from now.
     assert fields["app_access_until"] == fields["trial_end"]
     assert fields["trial_end"] - _NOW == timedelta(days=checkout.TRIAL_PERIOD_DAYS)
-    assert calls["access"] == [("e1", "BILL", True)]  # module switched on
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", True)]  # module switched on
 
 
 def test_trial_rejected_when_module_already_has_a_row(monkeypatch):
@@ -203,7 +203,7 @@ def test_trial_rejected_when_module_already_has_a_row(monkeypatch):
     checkout, calls = _setup(monkeypatch, existing_row=_Row())
 
     with pytest.raises(checkout.CheckoutError) as exc:
-        checkout.start_module_trials(_FakeEntity(), _FakeUser(), ["BILL"])
+        checkout.start_module_trials(_FakeEntity(), _FakeUser(), ["PAYMENT_REQUEST"])
 
     assert exc.value.status == 409
     assert calls["writes"] == []
@@ -221,14 +221,14 @@ def test_onboarding_finalize_starts_app_trials(monkeypatch):
     checkout, calls = _setup(monkeypatch)
     monkeypatch.setattr(
         "blueprints.entity.services.modules.get_enabled_modules_for_entities",
-        lambda ids: {"e1": {"BILL"}},
+        lambda ids: {"e1": {"PAYMENT_REQUEST"}},
     )
 
     created = checkout.start_trials_for_enabled_modules(_FakeEntity(), _FakeUser())
 
     assert len(created) == 1
-    assert calls["writes"][0][1] == "BILL"
-    assert calls["access"] == [("e1", "BILL", True)]
+    assert calls["writes"][0][1] == "PAYMENT_REQUEST"
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", True)]
 
 
 # --- ending a trial: converting -----------------------------------------------
@@ -240,15 +240,15 @@ def test_conversion_is_collected_by_an_in_house_invoice(monkeypatch):
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
     from blueprints.subscription.services import store
 
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result["converted"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert result["converted"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
     assert len(calls["charged"]) == 1
     charge = calls["charged"][0]
     assert charge["customer"] == "cus_1"
-    assert charge["after"] == {"BILL"}
+    assert charge["after"] == {"PAYMENT_REQUEST"}
     assert (charge["start"], charge["end"]) == (_ANCHOR, _PERIOD_END)
     # The account's cycle is NOT touched. This charge covered one entity, and
     # ``paid_through`` speaks for the whole payer: ``renewals.due_renewals`` reads it to
@@ -273,7 +273,7 @@ def test_a_first_conversion_still_starts_the_cycle(monkeypatch):
     from blueprints.subscription.services import store
 
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=None)
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     checkout.convert_or_expire_due_trials()
 
@@ -290,16 +290,16 @@ def test_two_modules_due_together_bill_as_one_change(monkeypatch):
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
     from blueprints.subscription.services import store
 
-    rows = [_Row(code="PETTY_CASH"), _Row(code="BILL")]
+    rows = [_Row(code="PETTY_CASH"), _Row(code="PAYMENT_REQUEST")]
     monkeypatch.setattr(store, "due_trials", lambda now, limit=None: rows)
 
     result = checkout.convert_or_expire_due_trials()
 
     # ONE charge carrying BOTH codes -> one invoice.
     assert len(calls["charged"]) == 1
-    assert calls["charged"][0]["after"] == {"BILL", "PETTY_CASH"}
+    assert calls["charged"][0]["after"] == {"PAYMENT_REQUEST", "PETTY_CASH"}
     assert result["expired"] == []
-    assert {entry["code"] for entry in result["converted"]} == {"BILL", "PETTY_CASH"}
+    assert {entry["code"] for entry in result["converted"]} == {"PAYMENT_REQUEST", "PETTY_CASH"}
 
 
 def test_conversion_records_the_payers_billing_anchor(monkeypatch):
@@ -312,7 +312,7 @@ def test_conversion_records_the_payers_billing_anchor(monkeypatch):
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=None)
     from blueprints.subscription.services import store
 
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     checkout.convert_or_expire_due_trials()
 
@@ -330,7 +330,7 @@ def test_the_anchor_is_recorded_once_and_never_moved(monkeypatch):
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=datetime(2026, 9, 8, 13, tzinfo=UTC))
     from blueprints.subscription.services import store
 
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     checkout.convert_or_expire_due_trials()
 
@@ -342,13 +342,13 @@ def test_an_unpaid_in_house_invoice_expires_the_trial(monkeypatch):
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR, paid=False)
     from blueprints.subscription.services import store
 
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
     assert result["converted"] == []
-    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
-    assert calls["access"] == [("e1", "BILL", False)]  # access revoked, not granted
+    assert result["expired"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", False)]  # access revoked, not granted
 
 
 def test_an_unpaid_conversion_invoice_is_VOIDED_not_left_open(monkeypatch):
@@ -365,12 +365,12 @@ def test_an_unpaid_conversion_invoice_is_VOIDED_not_left_open(monkeypatch):
     checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR, paid=False)
     voided: list[str] = []
     monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
     assert voided == ["in_1"]
-    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert result["expired"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
 
 
 def test_a_DECLINED_card_voids_its_conversion_invoice(monkeypatch):
@@ -394,13 +394,13 @@ def test_a_DECLINED_card_voids_its_conversion_invoice(monkeypatch):
 
     monkeypatch.setattr(changes, "issue_change", _declined)
     monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
     assert voided == ["in_declined"]
     assert result["converted"] == []
-    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert result["expired"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
 
 
 def test_a_failure_with_no_invoice_raised_voids_nothing(monkeypatch):
@@ -416,12 +416,12 @@ def test_a_failure_with_no_invoice_raised_voids_nothing(monkeypatch):
 
     monkeypatch.setattr(changes, "issue_change", _exploded)
     monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
     assert voided == []
-    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert result["expired"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
 
 
 def test_a_void_that_fails_still_expires_the_trial(monkeypatch):
@@ -434,11 +434,11 @@ def test_a_void_that_fails_still_expires_the_trial(monkeypatch):
         raise RuntimeError("processor unreachable")
 
     monkeypatch.setattr(billing_gateway, "void_invoice", _boom)
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert result["expired"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
 
 
 def test_a_PAID_conversion_voids_nothing(monkeypatch):
@@ -448,12 +448,12 @@ def test_a_PAID_conversion_voids_nothing(monkeypatch):
     checkout, _calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)  # paid=True
     voided: list[str] = []
     monkeypatch.setattr(billing_gateway, "void_invoice", lambda iid: voided.append(iid))
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     result = checkout.convert_or_expire_due_trials()
 
     assert voided == []
-    assert result["converted"] == [{"entity_id": "e1", "code": "BILL"}]
+    assert result["converted"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
 
 
 # --- ending a trial: expiring -------------------------------------------------
@@ -473,9 +473,9 @@ def test_due_trial_without_a_card_expires_and_revokes_access(monkeypatch):
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]}
     assert calls["writes"][-1][3]["phase"] == "expired"
-    assert calls["access"] == [("e1", "BILL", False)]  # access revoked
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", False)]  # access revoked
 
 
 def test_due_trial_expires_when_the_entity_never_consented_to_billing(monkeypatch):
@@ -496,9 +496,9 @@ def test_due_trial_expires_when_the_entity_never_consented_to_billing(monkeypatc
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]}
     assert calls["writes"][-1][3]["phase"] == "expired"
-    assert calls["access"] == [("e1", "BILL", False)]
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", False)]
 
 
 def test_due_trial_expires_when_no_card_is_nominated_for_the_entity(monkeypatch):
@@ -519,9 +519,9 @@ def test_due_trial_expires_when_no_card_is_nominated_for_the_entity(monkeypatch)
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]}
     assert calls["writes"][-1][3]["phase"] == "expired"
-    assert calls["access"] == [("e1", "BILL", False)]
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", False)]
 
 
 def test_a_conversion_is_charged_to_the_card_the_company_is_on(monkeypatch):
@@ -533,7 +533,7 @@ def test_a_conversion_is_charged_to_the_card_the_company_is_on(monkeypatch):
         store, "billing_group_for_entity",
         lambda eid, uid=None: _Group(id="g2", card="pm_second", paid_through=_ANCHOR),
     )
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     checkout.convert_or_expire_due_trials()
 
@@ -553,7 +553,7 @@ def test_a_second_card_gets_its_own_cycle_started(monkeypatch):
         store, "billing_group_for_entity",
         lambda eid, uid=None: _Group(id="g2", card="pm_second", paid_through=None),
     )
-    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="BILL")])
+    monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [_Row(code="PAYMENT_REQUEST")])
 
     checkout.convert_or_expire_due_trials()
 
@@ -577,9 +577,9 @@ def test_a_cancelled_trial_expires_instead_of_converting(monkeypatch):
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "BILL"}]}
+    assert result == {"converted": [], "expired": [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]}
     assert calls["writes"][-1][3]["phase"] == "expired"
-    assert calls["access"] == [("e1", "BILL", False)]  # free days used up, access ends
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", False)]  # free days used up, access ends
 
 
 def test_due_trial_without_a_customer_expires(monkeypatch):
@@ -592,8 +592,8 @@ def test_due_trial_without_a_customer_expires(monkeypatch):
 
     result = checkout.convert_or_expire_due_trials()
 
-    assert result["expired"] == [{"entity_id": "e1", "code": "BILL"}]
-    assert calls["access"] == [("e1", "BILL", False)]
+    assert result["expired"] == [{"entity_id": "e1", "code": "PAYMENT_REQUEST"}]
+    assert calls["access"] == [("e1", "PAYMENT_REQUEST", False)]
 
 
 def test_one_failing_entity_does_not_stop_the_rest(monkeypatch):
@@ -602,7 +602,7 @@ def test_one_failing_entity_does_not_stop_the_rest(monkeypatch):
     checkout, calls = _setup(monkeypatch, now=_NOW, anchor=_ANCHOR)
     from blueprints.subscription.services import store
 
-    bad, good = _Row(code="BILL", entity_id="e1"), _Row(code="PETTY_CASH", entity_id="e2")
+    bad, good = _Row(code="PAYMENT_REQUEST", entity_id="e1"), _Row(code="PETTY_CASH", entity_id="e2")
     monkeypatch.setattr(store, "due_trials", lambda now, limit=None: [bad, good])
 
     # The first entity blows up; the second must still be processed.

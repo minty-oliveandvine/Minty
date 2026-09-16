@@ -81,10 +81,10 @@ def test_a_running_trial_is_reported(app, monkeypatch):
 def test_a_cancelled_trial_is_still_a_trial(app, monkeypatch):
     """Cancelling a trial stops it converting; it does not end the free days."""
     row = _Row(
-        "e1", "BILL", phase="scheduled_cancel",
+        "e1", "PAYMENT_REQUEST", phase="scheduled_cancel",
         app_access_until=datetime.now(UTC) + timedelta(days=3),
     )
-    assert _trials(app, monkeypatch, [row]) == {"e1": {"BILL"}}
+    assert _trials(app, monkeypatch, [row]) == {"e1": {"PAYMENT_REQUEST"}}
 
 
 def test_a_trial_past_its_term_but_awaiting_the_pass_still_counts(app, monkeypatch):
@@ -106,17 +106,17 @@ def test_a_trial_nothing_ever_closed_out_stops_counting(app, monkeypatch):
 def test_a_lapsed_cancelled_trial_stops_counting(app, monkeypatch):
     """No closing-window slack outside ``phase = trial`` — nothing is due to run for it."""
     row = _Row(
-        "e1", "BILL", phase="scheduled_cancel",
+        "e1", "PAYMENT_REQUEST", phase="scheduled_cancel",
         app_access_until=datetime.now(UTC) - timedelta(minutes=30),
     )
     assert _trials(app, monkeypatch, [row]) == {}
 
 
 def test_rows_are_grouped_per_entity(app, monkeypatch):
-    rows = [_Row("e1", "PETTY_CASH"), _Row("e1", "BILL"), _Row("e2", "BILL")]
+    rows = [_Row("e1", "PETTY_CASH"), _Row("e1", "PAYMENT_REQUEST"), _Row("e2", "PAYMENT_REQUEST")]
     assert _trials(app, monkeypatch, rows, entity_ids=("e1", "e2")) == {
-        "e1": {"PETTY_CASH", "BILL"},
-        "e2": {"BILL"},
+        "e1": {"PETTY_CASH", "PAYMENT_REQUEST"},
+        "e2": {"PAYMENT_REQUEST"},
     }
 
 

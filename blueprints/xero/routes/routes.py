@@ -1063,19 +1063,10 @@ def xero_callback():
                 # leave the entity intact and return to the Accounting step.
                 logger.info("Onboarding Xero connect cancelled/denied by user")
                 return _onboarding_xero_return(False)
-            entity = (
-                Entity.query.get(entity_id)
-                if entity_id
-                else Entity.query.order_by(desc(Entity.created_at)).first()
-            )
-            if entity is None:
-                logger.error(f"Entity Connect cancel: entity '{entity_id}' not found")
-                return redirect(url_for("entity.entity_list"))
-            entity.status = "cancelled"
-            db.session.commit()
-            logger.info(
-                "Newly created petty cash entity status set to cancelled")
-            logger.error(f"Error in xero auth {error}")
+            # Declining the Xero consent screen leaves the company as it was: a live
+            # company without a Xero org is simply 'disconnected' (entity_status has no
+            # 'cancelled' - that word belongs to subscriptions).
+            logger.info(f"Xero connect cancelled/denied for entity '{entity_id}': {error}")
             flash("Your new petty cash entity is ready!", "success")
             return redirect(url_for("entity.entity_list"))
     elif base_state == "entity_reconnect":
