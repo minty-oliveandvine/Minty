@@ -73,7 +73,7 @@
         <h1 class="text-center">Admin Report Dashboard</h1>
 
         <!-- Super Admin Only: Link to Admin Dashboard -->
-        {% if current_user.system_role == 'superuser' %}
+        {% if current_user.system_role == 'superadmin' %}
         <div class="text-center mb-4">
             <a href="{{ url_for('user_management.admin_dashboard') }}" class="btn btn-primary">Go to Admin Dashboard</a>
         </div>
@@ -172,7 +172,7 @@
                         <td>{{ report.date.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                         <td>
                             <a href="{{ url_for('report.report_detail', id=report.id) }}" class="btn btn-success">View</a>
-                            {% if current_user.system_role == 'superuser' %}
+                            {% if current_user.system_role == 'superadmin' %}
                                 <a href="{{ url_for('report.download_report', id=report.id) }}" class="btn btn-primary">Download</a>
                             {% endif %}
                         </td>

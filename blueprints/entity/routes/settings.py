@@ -405,12 +405,14 @@ def entity_settings(entity_id=None):
             # If current user doesn't have access, try to find a user who does
             if not xero_tenant_name and org.xero_org_id:
                 try:
-                    # Find a user whose xero_entity_id matches the entity's
-                    # xero_org_id
-                    owner_user = User.query.filter(
-                        User.xero_entity_id == str(org.xero_org_id),
-                        User.access_token.isnot(None),
-                    ).first()
+                    # The person who connected this company holds the token
+                    # (entities.connected_by_user_id; the user-side tenant copy is gone)
+                    owner_user = (
+                        User.query.get(org.connected_by_user_id)
+                        if org.connected_by_user_id else None
+                    )
+                    if owner_user is not None and not owner_user.access_token:
+                        owner_user = None
 
                     if owner_user:
                         # Try to validate and use the owner's token

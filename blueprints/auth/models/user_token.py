@@ -14,24 +14,24 @@ class UserToken(db.Model):
     __tablename__ = "user_token"
     __table_args__ = {"schema": "pettycashv2"}
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(db.Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
-        db.String(36),
+        db.Uuid(as_uuid=False),
         db.ForeignKey("pettycashv2.user.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
     )
     access_token = db.Column(db.Text, nullable=True)
-    access_token_obtained_at = db.Column(db.TIMESTAMP, nullable=True)
+    access_token_obtained_at = db.Column(db.DateTime(timezone=True), nullable=True)
     access_token_expires_in = db.Column(db.Integer, nullable=True)
     refresh_token = db.Column(db.Text, nullable=True)
     id_token = db.Column(db.Text, nullable=True)
-    refresh_token_last_used_at = db.Column(db.TIMESTAMP, nullable=True)
+    refresh_token_last_used_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(
-        db.TIMESTAMP, server_default=db.func.current_timestamp(), nullable=False
+        db.DateTime(timezone=True), server_default=db.func.current_timestamp(), nullable=False
     )
     updated_at = db.Column(
-        db.TIMESTAMP,
+        db.DateTime(timezone=True),
         server_default=db.func.current_timestamp(),
         onupdate=db.func.current_timestamp(),
         nullable=False,

@@ -1,6 +1,6 @@
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 from flask_mail import Message
@@ -11,6 +11,16 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from blueprints.auth.models.email_otp import EmailOtp
 from blueprints.auth.services.identity import resolve_user_by_email
 from models.db import User, db
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """``email_otp`` timestamps are ``timestamptz``; Postgres hands them back aware, SQLite
+    hands them back naive (and they were written as UTC). Compare in one time zone."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 # A code is valid for 60 seconds; after it expires the user may request a new
 # one (the resend cooldown matches so a resend lands right as the code lapses).
@@ -42,8 +52,8 @@ def _lockout_remaining_seconds(otp: EmailOtp) -> int:
     """
     if otp is None or otp.attempts < MAX_OTP_ATTEMPTS or not otp.created_at:
         return 0
-    unlock_at = otp.created_at + timedelta(minutes=LOCKOUT_MINUTES)
-    remaining = (unlock_at - datetime.utcnow()).total_seconds()
+    unlock_at = _as_utc(otp.created_at) + timedelta(minutes=LOCKOUT_MINUTES)
+    remaining = (unlock_at - _utcnow()).total_seconds()
     return int(remaining) if remaining > 0 else 0
 
 
@@ -76,7 +86,7 @@ def request_email_otp(email: str) -> tuple[bool, str | None]:
 
     if (
         latest
-        and (datetime.utcnow() - latest.created_at).total_seconds()
+        and (_utcnow() - _as_utc(latest.created_at)).total_seconds()
         < RESEND_COOLDOWN_SECONDS
     ):
         return False, "Please wait a moment before requesting another code."
@@ -97,7 +107,7 @@ def request_email_otp(email: str) -> tuple[bool, str | None]:
         EmailOtp(
             email=email,
             code_hash=generate_password_hash(code, method="pbkdf2:sha256"),
-            expires_at=datetime.utcnow() + timedelta(seconds=OTP_EXPIRY_SECONDS),
+            expires_at=_utcnow() + timedelta(seconds=OTP_EXPIRY_SECONDS),
             attempts=carried_attempts,
         )
     )
@@ -153,7 +163,7 @@ def verify_email_otp(
         otp.attempts = 0
         db.session.commit()
 
-    if otp.expires_at and otp.expires_at < datetime.utcnow():
+    if otp.expires_at and _as_utc(otp.expires_at) < _utcnow():
         return None, "This code has expired. Please request a new one.", None
     # Single-use: a code that's already been verified can't be replayed.
     if otp.verified_at is not None:
@@ -172,7 +182,7 @@ def verify_email_otp(
             )
         return None, "Invalid code.", None
 
-    otp.verified_at = datetime.utcnow()
+    otp.verified_at = _utcnow()
     otp.attempts = 0  # success → clear the brute-force counter for this email
     db.session.commit()
 

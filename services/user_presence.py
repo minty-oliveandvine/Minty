@@ -65,14 +65,10 @@ SEEN_REFRESH_SECONDS = 60
 
 
 def now() -> datetime:
-    """Naive HK-local, the convention every TIMESTAMP on `user` already follows.
-
-    Written naive on purpose: the columns are TIMESTAMP WITHOUT TIME ZONE, and
-    handing the driver an aware value leaves the stored wall-clock at the mercy
-    of the session's TimeZone setting. Dropping the offset here makes what we
-    write and what we compare against provably the same clock.
-    """
-    return datetime.now(tz).replace(tzinfo=None)
+    """Aware, HK-local. ``signed_in_at`` / ``last_seen_at`` are ``timestamptz`` (C1), so an
+    aware value is stored as the instant it names whatever the session's TimeZone is; a
+    naive one would be read as session-local and land up to eight hours off."""
+    return datetime.now(tz)
 
 
 def presence_window_seconds() -> int:
@@ -87,23 +83,13 @@ def presence_window_seconds() -> int:
 
 
 def is_signed_in_clause(entity_id=None):
-    """SQLAlchemy criterion for "this user is signed in to ``entity_id`` right now".
+    """SQLAlchemy criterion for "this user is signed in to Minty right now".
 
-    THREE conditions, and the entity is not optional in spirit. The two stamps are
-    facts about the person — they signed in, and we have seen them since — while the
-    question a company's Users page asks is "who is here, in THIS company". Answering
-    it from the stamps alone listed anyone signed in to Minty on every company they
-    belonged to at once, which is the bug this argument exists to fix.
+    Two stamps, both required: ``signed_in_at`` alone would keep a closed browser on
+    the list; ``last_seen_at`` alone would put a logged-out user back on it the moment
+    any lingering session touched the app.
 
-    ``signed_in_at`` alone would keep a closed browser on the list; ``last_seen_at``
-    alone would put a logged-out user back on it the moment any lingering session
-    touched the app; and without ``current_entity_id`` the answer belongs to no
-    company in particular.
-
-    Omitting ``entity_id`` asks the looser question — signed in to Minty at all,
-    wherever they are. Nothing on the Users page wants that; it is here for callers
-    that genuinely mean "anywhere", and it is deliberately the awkward one to reach
-    for rather than the default.
+    ``entity_id`` is accepted and ignored - see the note in the body.
     """
     cutoff = now() - timedelta(seconds=presence_window_seconds())
     conditions = [
@@ -111,8 +97,12 @@ def is_signed_in_clause(entity_id=None):
         User.last_seen_at.isnot(None),
         User.last_seen_at >= cutoff,
     ]
-    if entity_id is not None:
-        conditions.append(User.current_entity_id == str(entity_id))
+    # ``user.current_entity_id`` is gone (docs/schema/01_schema_rebased.sql, item 14 — removed
+    # on instruction, with the cost stated): both stamps are facts about the PERSON, so the
+    # only question this can answer is "signed in to Minty". ``entity_id`` is accepted so
+    # every caller keeps compiling, and it narrows nothing. Settings > Users therefore lists
+    # everyone signed in, on every company they belong to, until presence is rebuilt on a
+    # per-company record.
     return and_(*conditions)
 
 
@@ -161,7 +151,7 @@ def mark_signed_in(user) -> None:
     would place them wherever they were when the previous one ended.
     """
     stamp = now()
-    _stamp(user, signed_in_at=stamp, last_seen_at=stamp, current_entity_id=None)
+    _stamp(user, signed_in_at=stamp, last_seen_at=stamp)
 
 
 def mark_signed_out(user) -> None:
@@ -173,7 +163,7 @@ def mark_signed_out(user) -> None:
     ``last_seen_at`` would read as never-stamped, and ``refresh_presence`` would
     adopt them straight back onto the list.
     """
-    _stamp(user, signed_in_at=None, last_seen_at=now(), current_entity_id=None)
+    _stamp(user, signed_in_at=None, last_seen_at=now())
 
 
 def resume_presence(user, entity_id) -> None:
@@ -201,7 +191,6 @@ def resume_presence(user, entity_id) -> None:
         user,
         last_seen_at=stamp,
         signed_in_at=func.coalesce(User.signed_in_at, stamp),
-        current_entity_id=str(entity_id) if entity_id else None,
     )
 
 
@@ -249,6 +238,5 @@ def refresh_presence(user, entity_id=None) -> None:
             else_=None,
         ),
     }
-    if entity_id:
-        values["current_entity_id"] = str(entity_id)
+    # ``entity_id`` no longer changes anything stored - see is_signed_in_criterion.
     _stamp(user, **values)

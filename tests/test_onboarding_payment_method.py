@@ -22,6 +22,12 @@ from datetime import datetime, timedelta, timezone
 import jwt
 import pytest
 
+# user.id is a uuid (C1); SQLite refuses a non-hex literal outright. Named so the tests
+# still read as "user 1 / user 2 / a stranger".
+U1 = "0a7d0e6e-0000-4000-8000-000000000001"
+U2 = "0a7d0e6e-0000-4000-8000-000000000002"
+U9 = "0a7d0e6e-0000-4000-8000-000000000009"
+
 
 _schema_attached = False
 
@@ -62,7 +68,7 @@ class _FakeEntity:
 
 
 class _FakeUser:
-    id = "u1"
+    id = U1
     email = "u1@example.com"
 
 
@@ -187,10 +193,10 @@ def test_setup_session_creates_no_customer_for_a_new_payer(monkeypatch):
         _FakeEntity(), _FakeUser(), "https://app/ok", "https://app/no"
     )
 
-    assert searched == ["u1"]
+    assert searched == [U1]
     assert captured["customer_id"] is None
     # The payer still has to be recoverable at completion.
-    assert captured["metadata"]["user_id"] == "u1"
+    assert captured["metadata"]["user_id"] == U1
     assert captured["metadata"]["entity_id"] == "e1"
 
 
@@ -228,7 +234,7 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
             "customer": "cus_1",
             "setup_intent": {"payment_method": "pm_new"},
             "metadata": {
-                "purpose": "payment_method", "entity_id": "e1", "user_id": "u1",
+                "purpose": "payment_method", "entity_id": "e1", "user_id": U1,
             },
         },
     )
@@ -263,17 +269,17 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
     # recover it, named after the PAYER (not the entity), and mapped locally.
     assert stamped == [(
         "cus_1",
-        {"metadata": {"user_id": "u1"}, "name": "Pat Payer",
+        {"metadata": {"user_id": U1}, "name": "Pat Payer",
          "description": "@patpayer", "email": "pat@example.com"},
     )]
-    assert mapped == [("u1", "cus_1")]
+    assert mapped == [(U1, "cus_1")]
     # Entering a card in THIS entity's Checkout is consent to bill it — otherwise the
     # payer would be asked to confirm again straight after typing their card.
-    assert consents == [("e1", "u1", "card")]
+    assert consents == [("e1", U1, "card")]
     # ...and it is the choice of card for it. Two records, one step. Without the second,
     # the company would be authorised to be billed and billed to nothing — its renewal
     # skipped and its trial expiring at term end having been told it would convert.
-    assert nominations == [("e1", "u1", "pm_new", "capture")]
+    assert nominations == [("e1", U1, "pm_new", "capture")]
 
 
 def test_complete_adopts_the_payers_existing_customer_over_a_duplicate(monkeypatch):
@@ -297,7 +303,7 @@ def test_complete_adopts_the_payers_existing_customer_over_a_duplicate(monkeypat
         lambda sid: {
             "customer": "cus_DUPLICATE",
             "setup_intent": {"payment_method": "pm_new"},
-            "metadata": {"entity_id": "e1", "user_id": "u1"},
+            "metadata": {"entity_id": "e1", "user_id": U1},
         },
     )
     monkeypatch.setattr(
@@ -337,7 +343,7 @@ def test_payer_identity_names_the_customer_after_the_user_not_the_entity(monkeyp
 
     monkeypatch.setattr(models_db, "User", _UserModel)
 
-    assert checkout._payer_identity("u1") == {
+    assert checkout._payer_identity(U1) == {
         "name": "Pat Payer",
         "description": "@patpayer",
         "email": "pat@example.com",
@@ -361,7 +367,7 @@ def test_payer_identity_omits_a_missing_email_rather_than_blanking_it(monkeypatc
 
     monkeypatch.setattr(models_db, "User", _UserModel)
 
-    assert "email" not in checkout._payer_identity("u1")
+    assert "email" not in checkout._payer_identity(U1)
 
 
 def test_payer_identity_is_empty_when_the_user_is_gone(monkeypatch):
@@ -391,7 +397,7 @@ def test_complete_rejects_another_entitys_session(monkeypatch):
         lambda sid: {
             "customer": "cus_OTHER",
             "setup_intent": {"payment_method": "pm_x"},
-            "metadata": {"entity_id": "e_SOMEONE_ELSE", "user_id": "u9"},
+            "metadata": {"entity_id": "e_SOMEONE_ELSE", "user_id": U9},
         },
     )
 
@@ -456,7 +462,7 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
     class _Row:
         entity_id = "e1"
         function_code = "BILL"
-        payer_user_id = "u1"
+        payer_user_id = U1
         phase = "trial"
         trial_end = now + timedelta(days=20)
         app_access_until = now + timedelta(days=20)
@@ -486,7 +492,7 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
 
 # --- the endpoints the wizard calls ----------------------------------------
 
-def _token(app, user_id="u1"):
+def _token(app, user_id=U1):
     return jwt.encode(
         {
             "user_id": user_id,
@@ -529,7 +535,7 @@ def test_payment_method_status_endpoint_requires_membership(app, db_session):
 # its term; consent is what makes it convert at the end instead of lapsing.
 
 
-def _entity_with_member(db, user_id="u1"):
+def _entity_with_member(db, user_id=U1):
     """A real entity the bearer is a member of, so the routes' membership check passes."""
     import uuid as _uuid
 
@@ -657,7 +663,7 @@ def test_confirm_makes_the_new_card_the_default_when_asked(app, monkeypatch):
     # must not open one, and the route defaulting them to anything but None is how a
     # plain card save would quietly acquire a billing account it was never asked for.
     assert seen == {
-        "user_id": "u1",
+        "user_id": U1,
         "setup_intent": "seti_1",
         "make_default": True,
         "billing_group_id": None,
@@ -693,9 +699,9 @@ def test_authorize_records_consent_for_this_entity_and_charges_nothing(
 
     assert res.status_code == 200
     assert res.get_json() == {"has_billing_consent": True}
-    assert store.has_billing_consent(entity_id, "u1") is True
+    assert store.has_billing_consent(entity_id, U1) is True
     # Per (entity, PAYER) — someone else's agreement is not this payer's.
-    assert store.has_billing_consent(entity_id, "u2") is False
+    assert store.has_billing_consent(entity_id, U2) is False
 
 
 def test_authorize_nominates_the_card_it_was_given(app, db_session, monkeypatch):
@@ -735,7 +741,7 @@ def test_authorize_nominates_the_card_it_was_given(app, db_session, monkeypatch)
 
     assert res.status_code == 200
     assert seen == {
-        "user_id": "u1",
+        "user_id": U1,
         "entity_id": str(entity_id),
         "payment_method": "pm_chosen",
         # The wizard has no module rows yet, so no payer. Without this the real
@@ -774,7 +780,7 @@ def test_authorize_nominates_before_it_records_consent(app, db_session, monkeypa
     )
 
     assert res.status_code == 404
-    assert store.has_billing_consent(entity_id, "u1") is False
+    assert store.has_billing_consent(entity_id, U1) is False
 
 
 def test_authorize_without_a_card_still_works(app, db_session):
@@ -791,7 +797,7 @@ def test_authorize_without_a_card_still_works(app, db_session):
     )
 
     assert res.status_code == 200
-    assert store.has_billing_consent(entity_id, "u1") is True
+    assert store.has_billing_consent(entity_id, U1) is True
 
 
 def test_authorize_is_idempotent(app, db_session):
@@ -813,7 +819,7 @@ def test_authorize_is_idempotent(app, db_session):
         assert res.status_code == 200
 
     assert (
-        EntityBillingConsent.query.filter_by(entity_id=entity_id, user_id="u1").count()
+        EntityBillingConsent.query.filter_by(entity_id=entity_id, user_id=U1).count()
         == 1
     )
 
@@ -856,7 +862,7 @@ def test_status_reports_card_and_consent_separately(app, db_session, monkeypatch
         "card": None,
     }
 
-    store.record_billing_consent(entity_id, "u1", "confirmed")
+    store.record_billing_consent(entity_id, U1, "confirmed")
 
     after = client.get(
         f"/api/onboarding/payment-method?entity_id={entity_id}", headers=headers
@@ -880,7 +886,7 @@ def test_status_still_reports_consent_when_stripe_is_down(app, db_session, monke
     from blueprints.subscription.services import checkout, store
 
     entity_id = _entity_with_member(db_session)
-    store.record_billing_consent(entity_id, "u1", "confirmed")
+    store.record_billing_consent(entity_id, U1, "confirmed")
 
     def _down(_entity):
         raise RuntimeError("stripe is down")
