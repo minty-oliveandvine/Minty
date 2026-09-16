@@ -120,7 +120,7 @@ def _module_names() -> dict[str, str]:
 
     Falls back to the code itself, which is what ``get_module_cards`` does — a catalog
     row can be missing in a half-seeded environment and a table with a blank column is
-    worse than one reading "BILL".
+    worse than one reading "PAYMENT_REQUEST".
     """
     names = {code: code for code in MODULE_CODES}
     try:

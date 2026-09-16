@@ -104,7 +104,7 @@ def notices(app, monkeypatch):
 
 def test_nothing_wrong_says_nothing(notices):
     """A healthy entity must not be interrupted at all."""
-    result = notices([_card("PETTY_CASH", "Petty Cash"), _card("BILL", "Payment")])
+    result = notices([_card("PETTY_CASH", "Petty Cash"), _card("PAYMENT_REQUEST", "Payment")])
 
     assert result["items"] == []
     assert result["severity"] is None
@@ -112,7 +112,7 @@ def test_nothing_wrong_says_nothing(notices):
 
 def test_past_due_names_the_module_and_the_deadline(notices):
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due",
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
                access_end_long="19 Aug 2026")]
     )
 
@@ -127,7 +127,7 @@ def test_past_due_names_the_module_and_the_deadline(notices):
 def test_past_due_without_a_deadline_still_says_something_actionable(notices):
     """access_end_long is None once the date has passed — don't render "None"."""
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due")]
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")]
     )
 
     assert "None" not in result["items"][0]["detail"]
@@ -155,7 +155,7 @@ def test_trial_without_a_card_is_distinguished_from_one_needing_consent(notices)
 
 def test_pending_cancel_reports_when_access_ends(notices):
     result = notices(
-        [_card("BILL", "Payment", pending_cancel=True, access_end_long="1 Sep 2026")]
+        [_card("PAYMENT_REQUEST", "Payment", pending_cancel=True, access_end_long="1 Sep 2026")]
     )
 
     item = result["items"][0]
@@ -274,7 +274,7 @@ def test_every_applicable_item_appears_not_just_the_worst(notices):
         [
             _card("PETTY_CASH", "Petty Cash", pending_cancel=True,
                   access_end_long="1 Sep 2026"),
-            _card("BILL", "Payment", subscription_status="past_due",
+            _card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
                   access_end_long="19 Aug 2026"),
         ]
     )
@@ -289,7 +289,7 @@ def test_items_are_ordered_worst_first(notices):
         [
             _card("PETTY_CASH", "Petty Cash", pending_cancel=True,
                   access_end_long="1 Sep 2026"),
-            _card("BILL", "Payment", subscription_status="past_due",
+            _card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
                   access_end_long="19 Aug 2026"),
         ]
     )
@@ -306,11 +306,11 @@ def test_the_notice_is_entity_wide_not_per_module(notices):
     user staring at a working page while the other module dies.
     """
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due",
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
                access_end_long="19 Aug 2026")]
     )
 
-    assert result["items"][0]["module_code"] == "BILL"
+    assert result["items"][0]["module_code"] == "PAYMENT_REQUEST"
 
 
 # --- who may act ------------------------------------------------------------
@@ -318,7 +318,7 @@ def test_the_notice_is_entity_wide_not_per_module(notices):
 
 def test_the_payer_is_offered_the_action(notices):
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due")],
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
         can_manage=True,
     )
 
@@ -330,7 +330,7 @@ def test_a_non_payer_is_told_who_to_ask_instead(notices, stub_user):
     stub_user(first_name="Pay", last_name="Er", email="payer@test.com")
 
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due")],
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
         can_manage=False,
         payer="payer-id",
         user_id="someone-else",
@@ -346,7 +346,7 @@ def test_a_payer_with_no_name_falls_back_to_their_email(notices, stub_user):
     stub_user(first_name="", last_name="", email="payer@test.com")
 
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due")],
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
         can_manage=False,
         payer="payer-id",
         user_id="someone-else",
@@ -359,7 +359,7 @@ def test_a_payer_with_no_name_falls_back_to_their_email(notices, stub_user):
 def test_the_payer_is_not_named_to_themselves(notices):
     """"Managed by you" is noise — the payer already has the buttons."""
     result = notices(
-        [_card("BILL", "Payment", subscription_status="past_due")],
+        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
         payer="user-1",
         user_id="user-1",
     )

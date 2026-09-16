@@ -63,3 +63,27 @@ class EntityRole(_DbEnum):
     ACCOUNTANT = "accountant"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
+
+
+class EntityStatus(_DbEnum):
+    """``entity_status`` — where a company stands: still in the wizard, or live with /
+    without a Xero organisation linked (decided 2026-09-15; the old ``active``,
+    ``cancelled`` and ``deleted`` words are gone — a cancelled subscription is a
+    subscription state, and nothing links to the soft-delete)."""
+
+    pg_name = nonmember("entity_status")
+
+    ONBOARDING = "onboarding"
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+
+
+class ModuleCode(_DbEnum):
+    """``module_code`` — Minty's two modules (item 20). ``PAYMENT_REQUEST`` was ``BILL``
+    in the code; ``billing_plan.code`` keeps the old word by decision, so the plan key
+    is mapped (``subscription/services/billing.plan_code``)."""
+
+    pg_name = nonmember("module_code")
+
+    PETTY_CASH = "PETTY_CASH"
+    PAYMENT_REQUEST = "PAYMENT_REQUEST"

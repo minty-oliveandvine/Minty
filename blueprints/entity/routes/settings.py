@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import billing_settings_app_url
 from blueprints.entity.services.settings import (
-    COA_INCLUDED_TYPES, backfill_lock_dates_if_needed_background,
+    COA_INCLUDED_TYPES,
     sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
     sync_expense_account_info_from_xero, sync_xero_accounts_to_db_background,
     sync_xero_coa_pettycash)
@@ -1098,9 +1098,6 @@ def entity_settings_entity(org_id):
                     org_id, rec_err,
                 )
 
-            if org.xero_org_id and (org.period_lock_date is None or org.end_of_year_lock_date is None):
-                backfill_lock_dates_if_needed_background(org.id, current_user.access_token, org.xero_org_id)
-
         # Country / currency registries: the dropdowns list the active rows
         # and preselect via the entity's country_code / currency_id FKs.
         (
@@ -1365,7 +1362,7 @@ def _nominate_if_given(org_id, payload):
 def entity_settings_module_checkout(org_id):
     """Subscribe the entity to one or more modules — one paid subscription each.
 
-    Body: ``{"codes": ["BILL", ...]}`` (empty → auto-resolve the single unsubscribed
+    Body: ``{"codes": ["PAYMENT_REQUEST", ...]}`` (empty → auto-resolve the single unsubscribed
     module). When the entity already has a saved card the subscriptions are created
     immediately and the response is ``{"created": [codes]}`` (client reloads). When
     no card is on file the response is ``{"url": <setup checkout url>}`` to capture
@@ -1904,7 +1901,7 @@ def entity_settings_module_checkout_complete(org_id):
 def entity_settings_module_start_trial(org_id):
     """Start a card-free trial for one or more never-subscribed modules.
 
-    Body: ``{"codes": ["BILL", ...]}``. Each module must be trial-eligible (no
+    Body: ``{"codes": ["PAYMENT_REQUEST", ...]}``. Each module must be trial-eligible (no
     Stripe subscription history in any status); a module that already used its
     trial is rejected (the UI offers paid checkout for those instead). Access is
     granted immediately by enabling the module in entity_function_map; the
@@ -1927,7 +1924,8 @@ def entity_settings_module_start_trial(org_id):
 
     data, status = {"modules": {}}, 200
     for code in started:
-        data, status = set_entity_module(org_id, code, True, actor="subscription")
+        data, status = set_entity_module(org_id, code, True, actor="subscription",
+                                         user_id=str(current_user.id))
         if status != 200:
             return jsonify(data), status
     return jsonify(data), status
@@ -2052,7 +2050,7 @@ def entity_settings_module_cancel_preview(org_id):
 
         {"kind": "paid", "access_until": "February 04, 2027",
          "amount_formatted": "120.00", "currency": "HKD", "charged_now": false,
-         "remaining": ["BILL"], "remaining_amount": "280.00"}
+         "remaining": ["PAYMENT_REQUEST"], "remaining_amount": "280.00"}
 
     Same permission as the cancel itself: it discloses what the payer would be billed,
     so it is not more public than the action it describes.

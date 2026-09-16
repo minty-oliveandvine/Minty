@@ -57,7 +57,7 @@ def _catalog(db):
     from models.db import EntityFunction
 
     rows = {}
-    for code in ("PETTY_CASH", "BILL"):
+    for code in ("PETTY_CASH", "PAYMENT_REQUEST"):
         row = EntityFunction(
             id=str(uuid.uuid4()),
             function_code=code,
@@ -75,7 +75,6 @@ def _grant(db, entity_id, function_row, *, enabled: bool):
 
     db.session.add(
         EntityFunctionMap(
-            id=str(uuid.uuid4()),
             entity_id=entity_id,
             entity_function_id=function_row.id,
             is_enabled=enabled,
@@ -123,12 +122,12 @@ def test_an_explicitly_disabled_grant_is_off_on_both_sides(app, db_session):
     catalog = _catalog(db_session)
     entity_id = str(uuid.uuid4())
     _grant(db_session, entity_id, catalog["PETTY_CASH"], enabled=False)
-    _grant(db_session, entity_id, catalog["BILL"], enabled=True)
+    _grant(db_session, entity_id, catalog["PAYMENT_REQUEST"], enabled=True)
 
     with app.app_context():
         wizard, gate = _both_views(entity_id)
 
-    assert wizard == ["BILL"]
+    assert wizard == ["PAYMENT_REQUEST"]
     assert wizard == gate
 
 

@@ -34,7 +34,7 @@ SUMMARY = {
     "currency": "HKD",
     "currency_code": "HKD",
     "bundle_amount": Decimal("400"),
-    "bundle_codes": ["BILL", "PETTY_CASH"],
+    "bundle_codes": ["PAYMENT_REQUEST", "PETTY_CASH"],
 }
 
 
@@ -72,7 +72,7 @@ def test_a_trial_converting_before_the_invoice_date_is_on_that_invoice(app):
     """
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert panel["next_invoice"]["date"] == "28 Aug 2026"
@@ -89,7 +89,7 @@ def test_a_trial_converting_after_the_invoice_date_is_not(app):
     """
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_AFTER),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert panel["next_invoice"]["amount"] == "HKD 280"
@@ -102,7 +102,7 @@ def test_a_trial_that_will_not_convert_is_never_on_the_invoice(app):
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE,
               needs_card=True),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert panel["next_invoice"]["amount"] == "HKD 280"
@@ -114,7 +114,7 @@ def test_a_pending_cancel_is_off_the_invoice_but_its_extension_is_on_it(app):
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
               pending_cancel=True, ext="120"),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert panel["next_invoice"]["amount"] == "HKD 400", "280 recurring + 120 extension"
@@ -128,7 +128,7 @@ def test_a_cancellation_is_its_own_row_not_part_of_the_renewal(app):
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
               pending_cancel=True, ext="120"),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert [(u["label"], u["amount"]) for u in panel["upcoming_charges"]] == [
@@ -143,7 +143,7 @@ def test_a_cancellation_survives_having_no_renewal_to_ride(app):
     """92fb66f4: a trial beside a module winding down. Nothing of this entity renews, so
     there was no renewal row to fold the extension into and the charge vanished from a
     list titled "upcoming charges" — while remaining perfectly real."""
-    winding = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+    winding = _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH,
                     pending_cancel=True, ext="62.89")
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
@@ -162,7 +162,7 @@ def test_no_paid_module_means_no_next_invoice_date_to_quote(app):
     next run, and the trial rows carry the conversion dates instead."""
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
-        _card("BILL", "Payment Request", status="trialing", end=_AFTER),
+        _card("PAYMENT_REQUEST", "Payment Request", status="trialing", end=_AFTER),
     ])
 
     assert panel["next_invoice"] is None
@@ -183,7 +183,7 @@ def test_past_due_is_still_billed_and_marked_overdue(app):
     """
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash"),
-        _card("BILL", "Payment Request", status="past_due", end=_PAID_THROUGH,
+        _card("PAYMENT_REQUEST", "Payment Request", status="past_due", end=_PAID_THROUGH,
               pending_cancel=True),
     ])
 
@@ -202,7 +202,7 @@ def test_past_due_is_not_listed_as_winding_down(app):
     carries it for past_due. Without it this test passes on the winding_down list's other
     condition and asserts nothing, which is exactly how it slipped through first time.
     """
-    past_due = _card("BILL", "Payment Request", status="past_due", end=_PAID_THROUGH,
+    past_due = _card("PAYMENT_REQUEST", "Payment Request", status="past_due", end=_PAID_THROUGH,
                      pending_cancel=True)
     past_due["access_end_long"] = "7 Aug 2026"
     panel = _panel(app, [_card("PETTY_CASH", "Petty Cash"), past_due])
@@ -213,7 +213,7 @@ def test_past_due_is_not_listed_as_winding_down(app):
 def test_a_scheduled_cancellation_still_winds_down(app):
     """The other half of the same flag: an actual cancellation bills no further, keeps
     access to its date, and must still say so."""
-    card = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+    card = _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH,
                  pending_cancel=True)
     card["access_end_long"] = "12 Sep 2026"
     panel = _panel(app, [_card("PETTY_CASH", "Petty Cash", status="active",
@@ -237,7 +237,7 @@ def test_upcoming_charges_are_in_date_order(app):
     """
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert [(u["label"], u["date"]) for u in panel["upcoming_charges"]] == [
@@ -251,7 +251,7 @@ def test_a_conversion_and_the_renewal_are_both_listed(app):
     the conversion's own proration, which was collected eight days earlier."""
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert len(panel["upcoming_charges"]) == 2
@@ -265,7 +265,7 @@ def test_a_trial_that_will_not_convert_is_not_an_upcoming_charge(app):
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE,
               needs_card=True),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert [u["label"] for u in panel["upcoming_charges"]] == ["Renewal"]
@@ -278,7 +278,7 @@ def test_trials_only_lists_the_conversions_and_no_renewal(app):
     conversions are the whole list."""
     panel = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
-        _card("BILL", "Payment Request", status="trialing", end=_AFTER),
+        _card("PAYMENT_REQUEST", "Payment Request", status="trialing", end=_AFTER),
     ])
 
     assert [u["label"] for u in panel["upcoming_charges"]] == [
@@ -297,7 +297,7 @@ def test_a_whole_bundle_converting_on_one_day_is_one_row(app):
     400 — so two rows asked them to reconcile a 280 and a 120 that appear nowhere.
     """
     a = _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE)
-    b = _card("BILL", "Payment Request", status="trialing", end=_BEFORE)
+    b = _card("PAYMENT_REQUEST", "Payment Request", status="trialing", end=_BEFORE)
     a["conversion_charge"] = Decimal("280")
     b["conversion_charge"] = Decimal("120")
 
@@ -312,7 +312,7 @@ def test_conversions_on_different_days_stay_separate(app):
     """The grouping is per DAY. Trials a fortnight apart convert a fortnight apart, and
     collapsing them would name money on a date it is not taken."""
     a = _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE)
-    b = _card("BILL", "Payment Request", status="trialing", end=_AFTER)
+    b = _card("PAYMENT_REQUEST", "Payment Request", status="trialing", end=_AFTER)
     a["conversion_charge"] = Decimal("280")
     b["conversion_charge"] = Decimal("120")
 
@@ -333,7 +333,7 @@ def test_a_same_day_conversion_that_is_not_the_bundle_keeps_its_module_name(app)
 
     panel = _panel(app, [
         trial,
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
 
     assert ("Petty Cash converts", "HKD 280") in [
@@ -373,11 +373,11 @@ def test_the_bundle_note_never_quotes_a_per_module_price(app):
     comparison, and the note now reads the same trialing or paid."""
     paid = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH),
-        _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH),
+        _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH),
     ])
     trialing = _panel(app, [
         _card("PETTY_CASH", "Petty Cash", status="trialing", end=_BEFORE),
-        _card("BILL", "Payment Request", status="trialing", end=_BEFORE),
+        _card("PAYMENT_REQUEST", "Payment Request", status="trialing", end=_BEFORE),
     ], anchor=None)
 
     assert paid["note"] == "Super Minty price — save HKD 160"
@@ -438,7 +438,7 @@ def test_an_empty_panel_still_offers_a_way_in(app):
 def test_a_cancellation_reaches_manage_not_subscribe(app):
     """Re-ticking a cancelled module is the only undo, so it takes precedence over the
     "take something up" caption."""
-    winding = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+    winding = _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH,
                     pending_cancel=True)
     winding["access_end_long"] = "12 Sep 2026"
 
@@ -456,7 +456,7 @@ def test_cancelling_the_bundle_is_one_notice_naming_the_plan(app):
     module names describes it as two, and neither line is the thing that happened."""
     a = _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
               pending_cancel=True)
-    b = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH,
+    b = _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH,
               pending_cancel=True)
     a["access_end_long"] = b["access_end_long"] = "19 Oct 2026"
 
@@ -472,7 +472,7 @@ def test_cancelling_one_module_names_that_module(app):
     a = _card("PETTY_CASH", "Petty Cash", status="active", end=_PAID_THROUGH,
               pending_cancel=True)
     a["access_end_long"] = "19 Oct 2026"
-    b = _card("BILL", "Payment Request", status="active", end=_PAID_THROUGH)
+    b = _card("PAYMENT_REQUEST", "Payment Request", status="active", end=_PAID_THROUGH)
 
     panel = _panel(app, [a, b])
 
@@ -485,7 +485,7 @@ def test_past_due_is_never_called_cancelled(app):
     """It carries the same winding-down flag but nothing was cancelled — dunning is still
     retrying the charge. Saying "cancelled" to someone we are about to bill again is the
     wrong error to make."""
-    past_due = _card("BILL", "Payment Request", status="past_due", end=_PAID_THROUGH,
+    past_due = _card("PAYMENT_REQUEST", "Payment Request", status="past_due", end=_PAID_THROUGH,
                      pending_cancel=True)
     past_due["access_end_long"] = "7 Aug 2026"
 
@@ -498,7 +498,7 @@ def test_past_due_is_never_called_cancelled(app):
 def test_a_cancelled_trial_is_ending_not_cancelled(app):
     """Nothing was bought and nothing ends early — the free days run to the date they
     always would. Calling that "cancelled" describes a purchase that never happened."""
-    trial = _card("BILL", "Payment Request", status="trialing", end=_AFTER,
+    trial = _card("PAYMENT_REQUEST", "Payment Request", status="trialing", end=_AFTER,
                   pending_cancel=True)
     trial["trial_cancelled"] = True
     trial["access_end_long"] = "11 Sep 2026"

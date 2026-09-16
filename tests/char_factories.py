@@ -63,9 +63,28 @@ def reset_database(app):
 
 
 def truncate_all(app):
+    """Empty every table the models know.
+
+    Postgres: one ``TRUNCATE ... CASCADE`` - the schema's real foreign keys (many of which
+    the models do not declare) make per-table DELETEs fail in the wrong order, and a
+    swallowed failure left ``currency_info`` rows behind for the next test to trip on.
+    SQLite: per-table deletes, dependents first.
+    """
     from models.db import db
 
     db.session.rollback()
+    if db.engine.dialect.name == "postgresql":
+        # only the tables that exist: until phase C is over some models still name tables
+        # the rebased schema renamed (roles/permissions -> role/permission, C6 ...)
+        present = {
+            r[0] for r in db.session.execute(db.text(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'pettycashv2'"
+            ))
+        }
+        names = ", ".join(t.fullname for t in db.metadata.sorted_tables if t.name in present)
+        db.session.execute(db.text(f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE"))
+        db.session.commit()
+        return
     for table in reversed(db.metadata.sorted_tables):
         try:
             db.session.execute(table.delete())
@@ -179,12 +198,12 @@ def make_user(db, email="user@test.com", *, system_role=None, first_name="Test",
 
 
 def make_entity(db, owner, *, name="Acme Shop", role="admin", currency=None, country=None,
-                modules=("PETTY_CASH",), status="active"):
+                modules=("PETTY_CASH",), status="disconnected"):
     """An entity the owner belongs to, with the given modules switched on.
 
-    ``created_by`` on the module map row is the label today's code writes
-    (``entity_create``); the redesign makes it the creator's user id. Tests read
-    the effect (the module is on), never the column.
+    ``status`` is the ``entity_status`` enum: a live company with no Xero organisation is
+    ``disconnected`` (``connect_xero`` makes it ``connected``). ``created_by`` on the module
+    map row is the owner, as the app writes it (schema section 4).
     """
     from models.db import Entity, EntityFunctionMap, UserEntity
 
@@ -203,8 +222,8 @@ def make_entity(db, owner, *, name="Acme Shop", role="admin", currency=None, cou
         now = _now()
         db.session.add(
             EntityFunctionMap(
-                id=new_id(), entity_id=entity.id, entity_function_id=fn.id,
-                is_enabled=True, created_by="entity_create", enabled_at=now,
+                entity_id=entity.id, entity_function_id=fn.id,
+                is_enabled=True, created_by=owner.id, enabled_at=now,
                 created_at=now, updated_at=now,
             )
         )
@@ -361,6 +380,7 @@ def connect_xero(db, user, entity, *, tenant_id: str, tokens: dict):
     row.xero_org_id = tenant_id
     row.connected_by_user_id = user.id
     row.last_connected_at = datetime.now(timezone.utc)
+    row.status = "connected"  # what the callback writes (xero/routes/routes.py)
     db.session.commit()
     store_xero_tokens(db, user, tokens)
 

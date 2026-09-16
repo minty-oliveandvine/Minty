@@ -50,7 +50,7 @@ def _make_entity(db, Entity, name="Test Corp", xero_org_id=None):
         name=name,
         country_code="HK",
         currency_code="HKD",
-        status="active",
+        status="disconnected",
         xero_org_id=xero_org_id,
     )
     db.session.add(entity)

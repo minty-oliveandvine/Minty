@@ -60,7 +60,7 @@ def _seed_catalog(db):
     """The module catalog rows the names in the plan list come from."""
     from models.db import EntityFunction
 
-    for code, name in (("PETTY_CASH", "Petty Cash"), ("BILL", "Payment Request")):
+    for code, name in (("PETTY_CASH", "Petty Cash"), ("PAYMENT_REQUEST", "Payment Request")):
         db.session.add(
             EntityFunction(
                 id=str(uuid.uuid4()),
@@ -92,7 +92,7 @@ def _bundle():
     from blueprints.subscription.services import catalog
 
     return catalog.BundlePlanView(
-        function_codes=("PETTY_CASH", "BILL"),
+        function_codes=("PETTY_CASH", "PAYMENT_REQUEST"),
         display_name="Super Minty",
         amount=40000,
         currency_code="HKD",
@@ -104,7 +104,7 @@ def _bundle():
 def _wire_catalog(monkeypatch, *, plans=None, bundle=True):
     """Point the plan catalog at fixed plan views."""
     if plans is None:
-        plans = [_plan("PETTY_CASH", "fn_pc"), _plan("BILL", "fn_bill")]
+        plans = [_plan("PETTY_CASH", "fn_pc"), _plan("PAYMENT_REQUEST", "fn_bill")]
     monkeypatch.setattr(f"{_CATALOG}.available_plans", lambda: plans)
     monkeypatch.setattr(f"{_CATALOG}.bundle_plan", lambda: (_bundle() if bundle else None))
 
@@ -119,7 +119,7 @@ def test_catalog_normalizes_amounts_and_bundle(db_session, monkeypatch):
     catalog = modules.get_module_plan_catalog()
 
     by_code = {p["code"]: p for p in catalog["plans"]}
-    assert set(by_code) == {"PETTY_CASH", "BILL"}
+    assert set(by_code) == {"PETTY_CASH", "PAYMENT_REQUEST"}
     # 28000 (cents) -> 280.00, not 28000.
     assert by_code["PETTY_CASH"]["amount"] == 280.0
     assert by_code["PETTY_CASH"]["formatted_amount"] == "280.00"
@@ -127,11 +127,11 @@ def test_catalog_normalizes_amounts_and_bundle(db_session, monkeypatch):
     assert by_code["PETTY_CASH"]["billing_interval"] == "month"
     # The label shown on the summary line comes from the catalog, not the code.
     assert by_code["PETTY_CASH"]["name"] == "Petty Cash"
-    assert by_code["BILL"]["name"] == "Payment Request"
+    assert by_code["PAYMENT_REQUEST"]["name"] == "Payment Request"
     # The bundle IS the discount: 40000 -> 400.00 for both modules together, and the
     # wizard is told which modules it covers so it can price the cart the same way.
     assert catalog["bundle_amount"] == 400.0
-    assert catalog["bundle_codes"] == ["BILL", "PETTY_CASH"]
+    assert catalog["bundle_codes"] == ["PAYMENT_REQUEST", "PETTY_CASH"]
     assert catalog["bundle_currency"] == "HKD"
     # The wizard needs the trial length to label "Due today / free for N days".
     assert catalog["trial_period_days"] == 30
@@ -173,7 +173,7 @@ def test_single_module_pays_full_price(db_session, monkeypatch):
 
     catalog = modules.get_module_plan_catalog()
 
-    lines = [p for p in catalog["plans"] if p["code"] == "BILL"]
+    lines = [p for p in catalog["plans"] if p["code"] == "PAYMENT_REQUEST"]
     subtotal = sum(p["amount"] for p in lines)
     picked = sorted(p["code"] for p in lines)
     total = catalog["bundle_amount"] if picked == catalog["bundle_codes"] else subtotal
@@ -245,7 +245,7 @@ def test_plans_endpoint_returns_the_catalog(app, monkeypatch):
                 }
             ],
             "bundle_amount": 400.0,
-            "bundle_codes": ["BILL", "PETTY_CASH"],
+            "bundle_codes": ["PAYMENT_REQUEST", "PETTY_CASH"],
             "bundle_currency": "HKD",
             "trial_period_days": 30,
         },
@@ -260,7 +260,7 @@ def test_plans_endpoint_returns_the_catalog(app, monkeypatch):
     body = res.get_json()
     assert body["plans"][0]["code"] == "PETTY_CASH"
     assert body["bundle_amount"] == 400.0
-    assert body["bundle_codes"] == ["BILL", "PETTY_CASH"]
+    assert body["bundle_codes"] == ["PAYMENT_REQUEST", "PETTY_CASH"]
     assert body["trial_period_days"] == 30
     # Cross-origin from the wizard: the CORS contract must hold like the siblings.
     assert "Access-Control-Allow-Origin" in res.headers

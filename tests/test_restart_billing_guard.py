@@ -85,8 +85,8 @@ def test_both_modes_may_restart(as_payer, monkeypatch, mode):
     "requested",
     [
         [],                          # nothing ticked
-        ["BILL"],                    # did not lapse
-        ["PETTY_CASH", "BILL"],      # one good, one not — refused whole
+        ["PAYMENT_REQUEST"],                    # did not lapse
+        ["PETTY_CASH", "PAYMENT_REQUEST"],      # one good, one not — refused whole
         ["NOT_A_MODULE"],            # not a module at all
     ],
 )
@@ -108,13 +108,13 @@ def test_picking_one_of_two_lapsed_modules_is_allowed(as_payer, monkeypatch):
     """Forcing the bundle would sell a module the customer may have let go on purpose."""
     monkeypatch.setattr(
         "blueprints.subscription.services.consent.lapsed_trial_for_entity",
-        lambda eid, uid=None, **kw: _lapsed(codes=("PETTY_CASH", "BILL")),
+        lambda eid, uid=None, **kw: _lapsed(codes=("PETTY_CASH", "PAYMENT_REQUEST")),
     )
 
-    _state, codes, error = as_payer._restart_state_and_codes("e1", ["BILL"])
+    _state, codes, error = as_payer._restart_state_and_codes("e1", ["PAYMENT_REQUEST"])
 
     assert error is None
-    assert codes == ["BILL"]
+    assert codes == ["PAYMENT_REQUEST"]
 
 
 # --- 3 and 4. the order money happens in --------------------------------------

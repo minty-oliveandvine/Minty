@@ -23,7 +23,6 @@ an unambiguous DB record.
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
@@ -33,12 +32,15 @@ from loguru import logger
 # that did went to ``subscription.services`` (``money``, ``display``, ``cards``, ``panel``,
 # ``notices``, ``access_sweep``). What is left is the entity-side module GATE -- who may
 # use which module, and the writes that grant it.
+from blueprints.shared.enums import ModuleCode
 from models.db import EntityFunction, EntityFunctionMap, db
 
-# Canonical module codes. Keep in sync with the catalog seed in
-# migration b8f3a2c1d4e5_seed_modules_and_backfill.
-MODULE_PETTY_CASH = "PETTY_CASH"
-MODULE_BILL = "BILL"
+# Canonical module codes: the ``module_code`` enum (blueprints/shared/enums.py, schema item
+# 20). The Payment Request module's code is PAYMENT_REQUEST; ``MODULE_BILL`` keeps its
+# historical name so the ~50 call sites read as before. ``billing_plan.code`` still says
+# ``BILL`` by decision - ``subscription.services.billing.plan_code`` maps it.
+MODULE_PETTY_CASH = ModuleCode.PETTY_CASH.value
+MODULE_BILL = ModuleCode.PAYMENT_REQUEST.value
 MODULE_CODES: tuple[str, ...] = (MODULE_PETTY_CASH, MODULE_BILL)
 
 # How long after ``trial_end`` a trial the subscription pass has not closed out yet still
@@ -56,10 +58,13 @@ TRIAL_CLOSING_WINDOW = timedelta(hours=6)
 # row yet, and the one place the name is written down.
 BUNDLE_DISPLAY_NAME = "Super Minty"
 
-# Audit-trail values for entity_function_map.created_by (column is 36 chars).
+# Why a module row is being written. Not stored (entity_function_map.created_by is the
+# person, schema section 4); the paid-subscription guard in ``set_entity_module`` keys on
+# ``actor == ACTOR_SUBSCRIPTION`` and the callers still say who they are.
 ACTOR_ONBOARDING = "onboarding"
 ACTOR_CLI = "cli"
 ACTOR_ENTITY_CREATE = "entity_create"
+ACTOR_SUBSCRIPTION = "subscription"
 
 # Default entitlement for a freshly created entity (non-onboarding path): nothing.
 # Access is a projection of the module's entity_module_subscription row, so a brand
@@ -343,7 +348,7 @@ LOGIN_SID_SESSION_KEY = "login_sid"
 
 
 def apply_module_selection(
-    entity_id: str, selected_code: str, *, actor: str
+    entity_id: str, selected_code: str, *, actor: str, user_id: str | None = None
 ) -> tuple[dict, int]:
     """Set this entity's modules from a single-select choice.
 
@@ -359,11 +364,11 @@ def apply_module_selection(
         )
 
     pairs = {code: (code == selected_code) for code in MODULE_CODES}
-    return _write_pairs(entity_id, pairs, actor=actor)
+    return _write_pairs(entity_id, pairs, actor=actor, user_id=user_id)
 
 
 def apply_module_selections(
-    entity_id: str, selected_codes, *, actor: str
+    entity_id: str, selected_codes, *, actor: str, user_id: str | None = None
 ) -> tuple[dict, int]:
     """Set this entity's modules from a multi-select choice.
 
@@ -386,11 +391,11 @@ def apply_module_selections(
         )
 
     pairs = {code: (code in selected) for code in MODULE_CODES}
-    return _write_pairs(entity_id, pairs, actor=actor)
+    return _write_pairs(entity_id, pairs, actor=actor, user_id=user_id)
 
 
 def apply_default_modules(
-    entity_id: str, *, actor: str = ACTOR_ENTITY_CREATE
+    entity_id: str, *, actor: str = ACTOR_ENTITY_CREATE, user_id: str | None = None
 ) -> tuple[dict, int]:
     """Seed a new entity's module entitlements with the default state.
 
@@ -404,7 +409,7 @@ def apply_default_modules(
     if not entity_id:
         return {"error": "entity_id is required"}, 400
 
-    return _write_pairs(entity_id, dict(DEFAULT_MODULE_STATE), actor=actor)
+    return _write_pairs(entity_id, dict(DEFAULT_MODULE_STATE), actor=actor, user_id=user_id)
 
 
 def _module_has_paid_subscription(entity_id: str, code: str) -> bool:
@@ -435,7 +440,7 @@ def _module_has_paid_subscription(entity_id: str, code: str) -> bool:
 
 
 def set_entity_module(
-    entity_id: str, code: str, enabled: bool, *, actor: str
+    entity_id: str, code: str, enabled: bool, *, actor: str, user_id: str | None = None
 ) -> tuple[dict, int]:
     """Flip one module on/off for an entity without touching the others.
 
@@ -456,7 +461,7 @@ def set_entity_module(
     # revokes access through the subscription webhook).
     if (
         not enabled
-        and actor != "subscription"
+        and actor != ACTOR_SUBSCRIPTION
         and _module_has_paid_subscription(entity_id, code)
     ):
         return (
@@ -467,7 +472,7 @@ def set_entity_module(
             409,
         )
 
-    return _write_pairs(entity_id, {code: bool(enabled)}, actor=actor)
+    return _write_pairs(entity_id, {code: bool(enabled)}, actor=actor, user_id=user_id)
 
 
 # The daily access reconciler moved to ``subscription.services.access_sweep`` -- it is
@@ -484,16 +489,20 @@ from blueprints.subscription.services.access_sweep import (  # noqa: E402, F401
 
 
 def _write_pairs(
-    entity_id: str, pairs: Mapping[str, bool], *, actor: str
+    entity_id: str, pairs: Mapping[str, bool], *, actor: str, user_id: str | None = None
 ) -> tuple[dict, int]:
     """Upsert one row per (entity_id, function_code) in ``pairs``.
 
     Existing rows are mutated in place so audit history (created_at /
     created_by) is preserved; only enabled_at or disabled_at is bumped on
     actual state changes, and updated_at is bumped every write.
+
+    ``user_id`` is the person doing it and lands in ``created_by`` on a NEW row; None
+    (the CLI, the subscription sync, a seed) leaves it NULL. ``actor`` is the reason and
+    is not stored - see ACTOR_*.
     """
+    del actor  # behaviour is keyed on it by the callers; the row does not record it
     now = datetime.now(timezone.utc)
-    actor_trim = (actor or "")[:36]
     codes = list(pairs.keys())
 
     catalog = (
@@ -521,13 +530,12 @@ def _write_pairs(
         row = by_fn_id.get(fn.id)
         if row is None:
             row = EntityFunctionMap(
-                id=str(uuid.uuid4()),
                 entity_id=entity_id,
                 entity_function_id=fn.id,
                 is_enabled=enabled,
                 enabled_at=now if enabled else None,
                 disabled_at=None if enabled else now,
-                created_by=actor_trim,
+                created_by=str(user_id) if user_id else None,
                 created_at=now,
                 updated_at=now,
             )

@@ -65,19 +65,43 @@ class Period:
         return int((self.end - at).total_seconds())
 
 
+#: ``billing_plan.code`` keeps the word BILL for the Payment Request module by decision
+#: (schema item 20), while ``entity_function.function_code`` says PAYMENT_REQUEST. The
+#: plan key is derived from module codes, so the module word is mapped to the plan word
+#: here - in exactly one place - and back in ``plan_modules``.
+PLAN_WORD_BY_MODULE = {"PAYMENT_REQUEST": "BILL"}
+MODULE_BY_PLAN_WORD = {v: k for k, v in PLAN_WORD_BY_MODULE.items()}
+
+
 def plan_code(codes) -> str:
     """Canonical key for the SET of modules a plan bills: upper-cased, deduped, sorted.
 
-    Sorting is what makes it canonical — {PETTY_CASH, BILL} and {BILL, PETTY_CASH} are
+    Sorting is what makes it canonical - {PETTY_CASH, PAYMENT_REQUEST} and the reverse are
     the same plan and must not become two catalog rows. Derived in exactly one place so
-    a lookup and a write can never disagree about the spelling.
+    a lookup and a write can never disagree about the spelling. Module codes are mapped to
+    the plan's words (``PAYMENT_REQUEST`` -> ``BILL``); an already-mapped word passes through,
+    so a caller holding ``plan.code.split("+")`` gets the same key.
 
     Lives here, not on the model, so it can be imported without pulling in ``models.db``.
     """
-    wanted = sorted({str(c).strip().upper() for c in (codes or []) if str(c).strip()})
+    wanted = sorted({
+        PLAN_WORD_BY_MODULE.get(w, w)
+        for w in (str(c).strip().upper() for c in (codes or []))
+        if w
+    })
     if not wanted:
         raise ValueError("a plan needs at least one module code")
     return "+".join(wanted)
+
+
+def plan_modules(code: str) -> tuple[str, ...]:
+    """The module codes a ``billing_plan.code`` bills, sorted: ``'BILL+PETTY_CASH'`` ->
+    ``('PAYMENT_REQUEST', 'PETTY_CASH')``. The inverse of ``plan_code``."""
+    return tuple(sorted(
+        MODULE_BY_PLAN_WORD.get(w, w)
+        for w in (part.strip().upper() for part in (code or "").split("+"))
+        if w
+    ))
 
 
 def _require_aware(name: str, value: datetime) -> datetime:

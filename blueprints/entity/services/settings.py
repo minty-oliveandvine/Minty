@@ -965,44 +965,6 @@ def sync_contacts_if_changed_background(
     )
 
 
-def backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id):
-    """Fetch and persist Xero lock dates for an entity if either date is missing."""
-    try:
-        entity = Entity.query.get(entity_id)
-        if not entity:
-            logger.warning("backfill_lock_dates_if_needed: entity not found entity=%s", entity_id)
-            return
-        if not xero_org_id:
-            return
-        if entity.period_lock_date is not None and entity.end_of_year_lock_date is not None:
-            return
-
-        from blueprints.xero.services.integration import \
-            get_organisation_lock_dates
-        lock_dates = get_organisation_lock_dates(access_token, xero_org_id)
-        entity.period_lock_date = lock_dates["period_lock_date"]
-        entity.end_of_year_lock_date = lock_dates["end_of_year_lock_date"]
-        db.session.commit()
-        logger.info(
-            "backfill_lock_dates_if_needed: saved entity=%s period=%s eoy=%s",
-            entity_id, entity.period_lock_date, entity.end_of_year_lock_date,
-        )
-    except Exception as exc:
-        db.session.rollback()
-        logger.warning("backfill_lock_dates_if_needed: failed entity=%s: %s", entity_id, exc)
-
-
-def backfill_lock_dates_if_needed_background(entity_id, access_token, xero_org_id, flask_app=None):
-    """Fire-and-forget version — runs backfill_lock_dates_if_needed in a daemon thread."""
-    _run_in_background(
-        "backfill_lock_dates_if_needed_background",
-        backfill_lock_dates_if_needed,
-        entity_id, access_token, xero_org_id,
-        entity_id=entity_id,
-        flask_app=flask_app,
-    )
-
-
 _EXPENSE_COA_TYPES = ("EXPENSE", "DIRECTCOSTS", "INVENTORY")
 # Account types never shown in the Module 1 Chart of Accounts selector.
 COA_EXCLUDED_TYPES = frozenset({
@@ -1442,17 +1404,6 @@ def sync_all_entities_contacts_and_accounts(flask_app=None):
                         "sync_all_entities: chart sync failed entity=%s: %s",
                         entity_id, exc,
                     )
-
-                if entity.period_lock_date is None or entity.end_of_year_lock_date is None:
-                    try:
-                        backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id)
-                        logger.info("sync_all_entities: lock date backfill entity=%s", entity_id)
-                    except Exception as exc:
-                        db.session.rollback()
-                        logger.error(
-                            "sync_all_entities: lock date backfill failed entity=%s: %s",
-                            entity_id, exc,
-                        )
 
             except Exception as exc:
                 logger.error(

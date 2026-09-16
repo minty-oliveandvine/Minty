@@ -1,6 +1,7 @@
 import uuid
 
 from models.db import db
+from blueprints.shared.column_types import MintyUuid
 
 
 class UserToken(db.Model):
@@ -14,9 +15,9 @@ class UserToken(db.Model):
     __tablename__ = "user_token"
     __table_args__ = {"schema": "pettycashv2"}
 
-    id = db.Column(db.Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
-        db.Uuid(as_uuid=False),
+        MintyUuid(),
         db.ForeignKey("pettycashv2.user.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,

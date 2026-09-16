@@ -66,7 +66,7 @@ def _trial_card(code, name):
 _TRIAL_PANEL = {
     "is_empty": False, "currency": "HK$", "lines": [], "note": None,
     "total": "HK$400", "winding_down": [], "upcoming_charges": [], "footer": "",
-    "primary_action": "subscribe_stripe", "subscribe_codes": ["PETTY_CASH", "BILL"],
+    "primary_action": "subscribe_stripe", "subscribe_codes": ["PETTY_CASH", "PAYMENT_REQUEST"],
 }
 
 
@@ -76,9 +76,9 @@ def _render_trial(app, **overrides):
     ctx = dict(
         org=_FakeOrg(),
         module_cards=[_trial_card("PETTY_CASH", "Petty Cash"),
-                      _trial_card("BILL", "Payment Request")],
+                      _trial_card("PAYMENT_REQUEST", "Payment Request")],
         subscription_summary={"currency": "HK$", "bundle_amount": 400,
-                              "bundle_codes": ["BILL", "PETTY_CASH"],
+                              "bundle_codes": ["PAYMENT_REQUEST", "PETTY_CASH"],
                               "bundle_name": "Super Minty"},
         subscription_panel=_TRIAL_PANEL,
         can_manage_modules=True,
@@ -121,7 +121,7 @@ def test_trial_is_decided_in_the_modal_not_on_the_cards(app):
     assert "Subscribe to Minty" in section
     # And the modal carries one row per trialing module.
     assert 'data-keep-code="PETTY_CASH"' in scripts
-    assert 'data-keep-code="BILL"' in scripts
+    assert 'data-keep-code="PAYMENT_REQUEST"' in scripts
     assert scripts.count('data-keep-state="trial"') == 2
 
 
@@ -136,7 +136,7 @@ def test_a_running_trial_cannot_be_cancelled_from_the_ui(app):
     """
     section, scripts = _render_trial(app)
 
-    for code in ("PETTY_CASH", "BILL"):
+    for code in ("PETTY_CASH", "PAYMENT_REQUEST"):
         tag = _keep_input(scripts, code)
         assert "disabled" in tag, f"{code}'s trial row must not be untickable"
         assert "checked" in tag, f"{code} is live, so its row stays ticked"
@@ -245,7 +245,7 @@ def test_paid_variant_lists_modules_the_entity_does_not_have(app):
     row too — unticked, and tagged so ticking it goes through checkout."""
     paid_card = _trial_card("PETTY_CASH", "Petty Cash")
     paid_card.update(subscription_status="active", needs_card=False)
-    available = _trial_card("BILL", "Payment Request")
+    available = _trial_card("PAYMENT_REQUEST", "Payment Request")
     available.update(subscription_status=None, needs_card=False, trial_eligible=True)
 
     _, scripts = _render_trial(
@@ -275,7 +275,7 @@ def test_an_untried_module_says_its_free_trial_is_available(app):
     trial, and the card said only "not active" beside it, which reads as the same dead
     end as the other two.
     """
-    untried = _trial_card("BILL", "Payment Request")
+    untried = _trial_card("PAYMENT_REQUEST", "Payment Request")
     untried.update(subscription_status=None, needs_card=False, trial_eligible=True)
 
     section, _ = _render_trial(app, module_cards=[untried])
@@ -290,7 +290,7 @@ def test_an_untried_module_says_its_free_trial_is_available(app):
 def test_a_used_up_trial_is_not_offered_one(app):
     """The mirror of the above, and the reason the two cannot both render: a spent
     trial still has its subscription row, and ``trial_eligible`` requires no row."""
-    spent = _trial_card("BILL", "Payment Request")
+    spent = _trial_card("PAYMENT_REQUEST", "Payment Request")
     spent.update(subscription_status=None, needs_card=False,
                  trial_eligible=False, trial_expired=True)
 

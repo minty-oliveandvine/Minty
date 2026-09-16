@@ -28,6 +28,8 @@ class _Plan:
         self.currency = currency
 
 
+from blueprints.subscription.services.billing import plan_code
+
 PLANS = {
     "BILL": _Plan("Payment Request", 28000),
     "PETTY_CASH": _Plan("Petty Cash", 28000),
@@ -40,7 +42,8 @@ def _wire(monkeypatch, plans=None):
     catalog = PLANS if plans is None else plans
     monkeypatch.setattr(
         store, "billing_plan_for_codes",
-        lambda codes: catalog.get("+".join(sorted(str(c).upper() for c in codes))),
+        # keyed by plan words (BILL), asked with module codes (PAYMENT_REQUEST): plan_code maps
+        lambda codes: catalog.get(plan_code(codes)),
     )
     return changes
 
@@ -58,7 +61,7 @@ def test_oracle_upgrade_credits_the_old_price_and_charges_the_new(monkeypatch):
                     datetime(2026, 10, 8, 13, tzinfo=UTC))
 
     invoice = changes.build_change(
-        "e1", "Alpha Co", ["PETTY_CASH"], ["PETTY_CASH", "BILL"],
+        "e1", "Alpha Co", ["PETTY_CASH"], ["PETTY_CASH", "PAYMENT_REQUEST"],
         period, datetime(2026, 10, 1, 13, tzinfo=UTC),
     )
 
@@ -74,7 +77,7 @@ def test_oracle_a_new_line_joining_mid_period_has_nothing_to_credit(monkeypatch)
                     datetime(2026, 12, 8, 13, tzinfo=UTC))
 
     invoice = changes.build_change(
-        "e2", "Beta Co", [], ["PETTY_CASH", "BILL"],
+        "e2", "Beta Co", [], ["PETTY_CASH", "PAYMENT_REQUEST"],
         period, datetime(2026, 11, 10, 13, tzinfo=UTC),
     )
 
@@ -94,7 +97,7 @@ def test_a_downgrade_bills_nothing_and_credits_nothing(monkeypatch):
                     datetime(2026, 10, 8, 13, tzinfo=UTC))
 
     assert changes.build_change(
-        "e1", "Alpha Co", ["PETTY_CASH", "BILL"], ["BILL"],
+        "e1", "Alpha Co", ["PETTY_CASH", "PAYMENT_REQUEST"], ["PAYMENT_REQUEST"],
         period, datetime(2026, 10, 1, 13, tzinfo=UTC),
     ) is None
 
@@ -105,7 +108,7 @@ def test_no_change_bills_nothing(monkeypatch):
                     datetime(2026, 10, 8, 13, tzinfo=UTC))
 
     assert changes.build_change(
-        "e1", "Alpha Co", ["BILL"], ["BILL"], period,
+        "e1", "Alpha Co", ["PAYMENT_REQUEST"], ["PAYMENT_REQUEST"], period,
         datetime(2026, 10, 1, 13, tzinfo=UTC),
     ) is None
 
@@ -117,7 +120,7 @@ def test_an_unpriceable_TARGET_is_refused_not_guessed(monkeypatch):
                     datetime(2026, 10, 8, 13, tzinfo=UTC))
 
     assert changes.build_change(
-        "e1", "Alpha Co", [], ["BILL", "PETTY_CASH"], period,
+        "e1", "Alpha Co", [], ["PAYMENT_REQUEST", "PETTY_CASH"], period,
         datetime(2026, 10, 1, 13, tzinfo=UTC),
     ) is None
 
@@ -130,7 +133,7 @@ def test_an_unpriceable_CURRENT_set_is_refused_too(monkeypatch):
                     datetime(2026, 10, 8, 13, tzinfo=UTC))
 
     assert changes.build_change(
-        "e1", "Alpha Co", ["PETTY_CASH"], ["BILL", "PETTY_CASH"], period,
+        "e1", "Alpha Co", ["PETTY_CASH"], ["PAYMENT_REQUEST", "PETTY_CASH"], period,
         datetime(2026, 10, 1, 13, tzinfo=UTC),
     ) is None
 
@@ -144,12 +147,12 @@ def test_the_change_key_distinguishes_two_changes_in_the_same_minute(monkeypatch
     changes = _wire(monkeypatch)
     at = datetime(2026, 10, 1, 13, tzinfo=UTC)
 
-    assert changes.change_key("e1", at, ["BILL"]) != changes.change_key(
-        "e1", at, ["BILL", "PETTY_CASH"]
+    assert changes.change_key("e1", at, ["PAYMENT_REQUEST"]) != changes.change_key(
+        "e1", at, ["PAYMENT_REQUEST", "PETTY_CASH"]
     )
     # ...and is stable for the same change, so a retry after a crash is recognised.
-    assert changes.change_key("e1", at, ["PETTY_CASH", "BILL"]) == changes.change_key(
-        "e1", at, ["BILL", "PETTY_CASH"]
+    assert changes.change_key("e1", at, ["PETTY_CASH", "PAYMENT_REQUEST"]) == changes.change_key(
+        "e1", at, ["PAYMENT_REQUEST", "PETTY_CASH"]
     )
 
 
@@ -170,7 +173,7 @@ def test_an_already_invoiced_change_is_not_charged_again(monkeypatch):
                     datetime(2026, 12, 8, 13, tzinfo=UTC))
 
     result = changes.issue_change(
-        "cus_1", "e2", "Beta Co", [], ["PETTY_CASH", "BILL"],
+        "cus_1", "e2", "Beta Co", [], ["PETTY_CASH", "PAYMENT_REQUEST"],
         period, datetime(2026, 11, 10, 13, tzinfo=UTC),
     )
 
@@ -232,7 +235,7 @@ def test_a_trialing_module_is_not_billed_yet_so_does_not_count(monkeypatch):
     """Counting it would price the change against a plan nobody is paying for."""
     from blueprints.subscription.services import checkout
 
-    _stub_rows(monkeypatch, [_Row("PETTY_CASH", "active"), _Row("BILL", "trial")])
+    _stub_rows(monkeypatch, [_Row("PETTY_CASH", "active"), _Row("PAYMENT_REQUEST", "trial")])
 
     assert checkout._billed_codes_in_house("e1") == {"PETTY_CASH"}
 
@@ -345,7 +348,7 @@ def test_converting_a_trial_prices_it_against_what_the_entity_ALREADY_bills(monk
     monkeypatch.setattr(checkout, "_finish_conversion", lambda *a, **k: None)
     monkeypatch.setattr(
         store, "module_rows_for_entity",
-        lambda eid: [_Row("PETTY_CASH", "active"), _Row("BILL", "trial")],
+        lambda eid: [_Row("PETTY_CASH", "active"), _Row("PAYMENT_REQUEST", "trial")],
     )
 
     seen = {}
@@ -356,8 +359,8 @@ def test_converting_a_trial_prices_it_against_what_the_entity_ALREADY_bills(monk
 
     monkeypatch.setattr(checkout, "_bill_module_change_in_house", _bill)
 
-    billable, doomed = checkout._convert_due_trials("e1", [_Row("BILL", "trial")])
+    billable, doomed = checkout._convert_due_trials("e1", [_Row("PAYMENT_REQUEST", "trial")])
 
     assert seen["current"] == {"PETTY_CASH"}   # was set() — the bug
-    assert seen["codes"] == {"BILL"}
+    assert seen["codes"] == {"PAYMENT_REQUEST"}
     assert len(billable) == 1 and doomed == []

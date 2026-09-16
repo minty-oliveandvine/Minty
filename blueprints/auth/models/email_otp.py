@@ -2,13 +2,14 @@ import uuid
 from datetime import datetime, timezone
 
 from models.db import db
+from blueprints.shared.column_types import MintyUuid
 
 
 class EmailOtp(db.Model):
     __tablename__ = "email_otp"
     __table_args__ = {"schema": "pettycashv2"}
 
-    id = db.Column(db.Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(100), nullable=False, index=True)
     code_hash = db.Column(db.String(255), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
