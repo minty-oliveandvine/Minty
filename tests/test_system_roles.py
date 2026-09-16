@@ -11,12 +11,16 @@ from blueprints.auth.system_roles import (
 from models.db import User
 
 
-def test_normalize_system_role_limits_values_to_normal_and_superuser():
-    assert SYSTEM_ROLE_VALUES == (SYSTEM_ROLE_NORMAL, SYSTEM_ROLE_SUPERUSER)
+def test_normalize_system_role_limits_values_to_the_system_role_enum():
+    # The words are the database's ``system_role`` enum (C1): normal / admin / superadmin.
+    assert SYSTEM_ROLE_VALUES == (SYSTEM_ROLE_NORMAL, "admin", SYSTEM_ROLE_SUPERUSER)
+    assert SYSTEM_ROLE_SUPERUSER == "superadmin"
     assert normalize_system_role(None) == SYSTEM_ROLE_DEFAULT
     assert normalize_system_role("normal") == SYSTEM_ROLE_NORMAL
-    assert normalize_system_role(" SUPERUSER ") == SYSTEM_ROLE_SUPERUSER
-    assert normalize_system_role("admin") == SYSTEM_ROLE_DEFAULT
+    assert normalize_system_role(" SUPERADMIN ") == SYSTEM_ROLE_SUPERUSER
+    assert normalize_system_role(" SUPERUSER ") == SYSTEM_ROLE_SUPERUSER, "pre-rename spelling (old JWTs)"
+    assert normalize_system_role("admin") == "admin"
+    assert normalize_system_role("unexpected") == SYSTEM_ROLE_DEFAULT
 
 
 def test_legacy_role_mapping_promotes_only_admin_variants_to_superuser():

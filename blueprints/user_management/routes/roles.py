@@ -293,10 +293,7 @@ def deactivate_my_account():
 
     # Data retention policy: keep historical records, deactivate account only.
     current_user.approved = False
-    current_user.access_token = None
-    current_user.refresh_token = None
-    current_user.id_token = None
-    current_user.expires_in = None
+    current_user.clear_tokens()
     db.session.commit()
     logout_user()
     return (

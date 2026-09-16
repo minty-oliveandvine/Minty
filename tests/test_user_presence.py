@@ -309,10 +309,11 @@ def test_the_signed_in_fragment_stands_up_on_its_own(app, db_session):
         assert "No one's signed in at the moment." in empty
 
 
-def test_being_in_one_company_does_not_list_you_in_another(app, db_session):
-    """The reported bug. Presence lives on the user — signed in, seen recently —
-    but the Users page asks about a company. Without recording WHICH company, one
-    sign-in listed the person as present in every company they belonged to."""
+def test_presence_is_a_fact_about_the_person_not_the_company(app, db_session):
+    """Schema item 14 (docs/schema/01_schema_rebased.sql): ``user.current_entity_id`` is gone,
+    so Settings > Users answers "who is signed in to Minty" - a person who opened one company
+    is listed in every company they belong to. This test pins that decision and its cost;
+    it replaces the per-company assertions that held while the column existed."""
     from services.user_presence import is_signed_in_clause, resume_presence
     from models.db import User
 
@@ -329,34 +330,16 @@ def test_being_in_one_company_does_not_list_you_in_another(app, db_session):
             return user.id in {r[0] for r in rows}
 
         assert present_in("entity-one") is True
-        assert present_in("entity-two") is False
+        assert present_in("entity-two") is True, "item 14: presence is not narrowed by company"
 
-
-def test_moving_to_another_company_moves_you_between_the_lists(app, db_session):
-    """A person is in one place at a time, so arriving in B leaves A."""
-    from services.user_presence import is_signed_in_clause, resume_presence
-    from models.db import User
-
-    user = _make_user(db_session, username="mover.user")
-    with app.test_request_context("/"):
-        def present_in(entity_id):
-            rows = (
-                db_session.session.query(User.id)
-                .filter(is_signed_in_clause(entity_id))
-                .all()
-            )
-            return user.id in {r[0] for r in rows}
-
-        resume_presence(user, "entity-one")
         resume_presence(user, "entity-two")
-
-        assert present_in("entity-one") is False
+        assert present_in("entity-one") is True
         assert present_in("entity-two") is True
 
 
-def test_signing_in_places_you_in_no_company_yet(app, db_session):
-    """Signing in lands you on the entity list, having chosen none — so a fresh
-    session must not inherit wherever the last one ended."""
+def test_signing_in_lists_you_everywhere_you_belong(app, db_session):
+    """A fresh session is signed in to Minty; with no per-company record there is nothing
+    for it to inherit or to shed."""
     from services.user_presence import (is_signed_in_clause, mark_signed_in,
                                         resume_presence)
     from models.db import User
@@ -371,8 +354,7 @@ def test_signing_in_places_you_in_no_company_yet(app, db_session):
             .filter(is_signed_in_clause("entity-one"))
             .all()
         )
-        assert user.id not in {r[0] for r in rows}
-        # Still signed in to Minty, just not inside a company.
+        assert user.id in {r[0] for r in rows}
         assert _reload(db_session, user.id).signed_in_at is not None
 
 

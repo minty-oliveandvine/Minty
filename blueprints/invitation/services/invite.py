@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from flask import current_app, url_for
 from flask_mail import Message
@@ -377,8 +377,8 @@ def accept_invitation(
             entity_id=invitation.entity_id,
             role=invitation.role,
             approved=True,
-            joined_at=datetime.utcnow(),
-            create_at=datetime.utcnow(),
+            joined_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
         )
         db.session.add(user_entity)
 

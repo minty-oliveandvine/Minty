@@ -28,13 +28,14 @@ def test_normalize_role_aliases():
 def test_normalize_system_role_aliases():
     assert normalize_system_role(None) == "normal"
     assert normalize_system_role("normal") == "normal"
-    assert normalize_system_role("SUPERUSER") == "superuser"
+    assert normalize_system_role("SUPERADMIN") == "superadmin"
+    assert normalize_system_role("SUPERUSER") == "superadmin"  # pre-rename spelling
     assert normalize_system_role("unexpected") == "normal"
 
 
 def test_legacy_role_to_system_role_promotes_only_admin_variants():
-    assert legacy_role_to_system_role("admin") == "superuser"
-    assert legacy_role_to_system_role("super admin") == "superuser"
+    assert legacy_role_to_system_role("admin") == "superadmin"
+    assert legacy_role_to_system_role("super admin") == "superadmin"
     assert legacy_role_to_system_role("cashier") == "normal"
     assert legacy_role_to_system_role("accountant") == "normal"
 

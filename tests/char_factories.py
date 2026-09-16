@@ -103,7 +103,13 @@ def login(client, user, *, accepted_terms=True) -> None:
 
 
 def seed_currency(db, code="HKD", *, denominations=(1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1)):
-    """A currency with its cash denominations (what a cash count is made of)."""
+    """A currency with its cash denominations (what a cash count is made of).
+
+    ``denominations=()`` seeds the currency alone - for tests that never count cash
+    (identity, tokens, entities). ``cash_info`` changes shape in C4; until then its
+    rows cannot be written to the rebased schema, and a test that does not need them
+    should not fail on them.
+    """
     from models.db import CashInfo, CurrencyInfo
 
     currency = CurrencyInfo(
@@ -330,3 +336,42 @@ def install_fake_mail(monkeypatch) -> FakeMail:
     fake = FakeMail()
     monkeypatch.setattr(flask_mail._MailMixin, "send", lambda self, message: fake.send(message))
     return fake
+
+
+# ---- Xero connection state ---------------------------------------------------------
+
+
+def store_xero_tokens(db, user, tokens: dict):
+    """Through the real service - the same call the OAuth callback and every refresh make
+    (services/auth/token_service.apply_refreshed_tokens). Today that writes the user_token
+    row AND the shadow columns on ``user``; C1 collapses it to the row."""
+    from models.db import User
+    from services.auth.token_service import apply_refreshed_tokens
+
+    assert apply_refreshed_tokens(User.query.get(user.id), tokens), "apply_refreshed_tokens stored nothing"
+
+
+def connect_xero(db, user, entity, *, tenant_id: str, tokens: dict):
+    """The end state of a successful OAuth callback for ``entity`` by ``user``."""
+    from datetime import datetime, timezone
+
+    from models.db import Entity
+
+    row = Entity.query.get(entity.id)
+    row.xero_org_id = tenant_id
+    row.connected_by_user_id = user.id
+    row.last_connected_at = datetime.now(timezone.utc)
+    db.session.commit()
+    store_xero_tokens(db, user, tokens)
+
+
+def age_xero_token(db, user, *, seconds: int):
+    """Make the stored access token look ``seconds`` old (setup, not an assertion)."""
+    from datetime import datetime, timedelta
+
+    from models.db import UserToken
+
+    row = UserToken.query.filter_by(user_id=user.id).first()
+    assert row is not None
+    row.access_token_obtained_at = datetime.now() - timedelta(seconds=seconds)
+    db.session.commit()

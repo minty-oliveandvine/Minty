@@ -6,11 +6,9 @@ into the ``system_role`` enum (D6 restores the column). What is pinned is the be
 tables back: the superuser gate, the role hierarchy when assigning roles, the invitation
 lifecycle and the terms gate. See docs/modernisation_plan.md, Part 1 B3 group 6.
 
-FINDING F3 (recorded here because this is where it bites): the code's system roles are
-``normal`` / ``superuser`` (blueprints/auth/system_roles.py) while the schema's enum is
-``('normal','admin','superadmin')``. One side has to move at phase C step 1 and the
-enum-coverage check must pass afterwards; these tests read behaviour (who reaches /admin),
-not the stored word, so they survive either answer.
+F3 (closed in C1): the code wrote ``superuser`` where the schema's ``system_role`` enum says
+``superadmin``. ``blueprints/auth/system_roles.py`` now takes its words from
+``blueprints/shared/enums.SystemRole``; ``superuser`` is still accepted on read (old JWTs).
 """
 
 from __future__ import annotations
@@ -102,7 +100,8 @@ def test_profile_reports_the_system_role_and_memberships(company, client):
     assert body["memberships"][0]["role"] == "admin"
 
     F.login(client, superuser)
-    assert profile(client)["user"]["system_role"] == "superuser"
+    # the database's word (system_role enum); "superuser" was the code's until C1
+    assert profile(client)["user"]["system_role"] == "superadmin"
 
 
 def test_superuser_can_approve_and_reject_pending_users(company, client, app, db):

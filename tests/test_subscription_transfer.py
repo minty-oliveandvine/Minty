@@ -24,7 +24,8 @@ PERIOD_END = datetime(2027, 10, 1, tzinfo=UTC)
 # else that happens to match.
 ANCHOR = datetime(2027, 9, 1, tzinfo=UTC)
 
-OLD, NEW = "payer-old", "payer-new"
+# user.id is a uuid (C1); SQLite refuses a non-hex literal outright.
+OLD, NEW = "0a7d0e6e-0000-4000-8000-00000000001d", "0a7d0e6e-0000-4000-8000-00000000002e"
 ENTITY = "entity-1"
 # subscription_transfer.id is uuid as of u1a01_subscription_types, so this one
 # cannot be a readable label the way the ids above still can - those columns

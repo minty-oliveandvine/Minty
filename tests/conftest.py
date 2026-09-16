@@ -106,7 +106,8 @@ def pytest_configure(config):
 PG_PENDING = {
     "test_char_report_lifecycle.py",   # C3 + C4
     "test_char_sales_methods.py",      # C3
-    "test_char_access.py",             # C1 + C6
+    "test_char_access.py",             # C6 (C1 done)
+    "test_char_xero_tokens.py",        # C2: every case inserts an entities row (minimum_qty …)
 }
 
 
@@ -213,6 +214,13 @@ def app(built_database) -> Iterator:
 
             def _attach_schema(dbapi_conn, _record):
                 dbapi_conn.execute(f"ATTACH DATABASE '{posix}' AS pettycashv2")
+                # Postgres-only functions the code calls in raw SQL. Advisory locks are a
+                # no-op on SQLite (one process, one connection at a time); hashtext is
+                # any stable int. Without these, every path through the Xero refresh lock
+                # (services/auth/token_service.py) dies on SQLite before it is tested.
+                dbapi_conn.create_function("pg_try_advisory_lock", 2, lambda ns, key: 1)
+                dbapi_conn.create_function("pg_advisory_unlock", 2, lambda ns, key: 1)
+                dbapi_conn.create_function("hashtext", 1, lambda text: hash(text) & 0x7FFFFFFF)
 
             with flask_app.app_context():
                 event.listen(db.engine, "connect", _attach_schema)
