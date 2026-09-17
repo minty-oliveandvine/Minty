@@ -50,8 +50,8 @@ def _make_entity(db, *, name: str) -> str:
     entity = Entity(
         id=entity_id,
         name=name,
-        country_code="HK",
-        currency_code="HKD",
+        # no country: an FK to a reference row this test does not seed
+        # currency_code left entities in C2 (currency_id FK)
     )
     db.session.add(entity)
     db.session.commit()
@@ -93,7 +93,6 @@ def _add_membership(db, *, user_id: str, entity_id: str, role: str) -> None:
         role=role,
         approved=True,
         joined_at=datetime.utcnow(),
-        create_at=datetime.utcnow(),
     )
     db.session.add(membership)
     db.session.commit()

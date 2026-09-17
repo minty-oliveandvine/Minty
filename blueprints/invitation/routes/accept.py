@@ -8,7 +8,7 @@ from loguru import logger
 from blueprints.invitation import invitation_bp
 from blueprints.invitation.models.invitation import Invitation
 from blueprints.shared.entity_display import build_entity_acronym
-from models.db import Entity
+from models.db import Entity, db
 
 
 @invitation_bp.route("/invitation/accept/<string:token>", methods=["GET"])
@@ -29,6 +29,21 @@ def accept_invitation_page(token):
             "This invitation doesn't work anymore — it may have already been used.",
             "warning",
         )
+        return redirect(url_for("auth.home"))
+
+    # An expired link stops here rather than handing the person off to the onboarding
+    # /auth page only to be refused after the OTP. Marked expired lazily, the way
+    # accept_invitation() does.
+    from blueprints.invitation.services.invite import _is_invitation_expired
+
+    if _is_invitation_expired(invitation):
+        invitation.status = "expired"
+        db.session.commit()
+        logger.info(
+            "invitation.accept_link.expired invitation={} entity={}",
+            invitation.id, invitation.entity_id,
+        )
+        flash("This invitation has expired — please ask for a new one.", "warning")
         return redirect(url_for("auth.home"))
 
     logger.info(

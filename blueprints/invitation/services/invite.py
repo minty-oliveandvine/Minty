@@ -11,6 +11,7 @@ from loguru import logger
 
 from blueprints.invitation.models.invitation import Invitation
 from models.db import Entity, User, UserEntity, db, tz
+from blueprints.shared.enums import InvitationStatus
 
 # Invitations are valid for this many days from creation (Hong Kong time).
 INVITATION_TTL_DAYS = int(os.environ.get("INVITATION_TTL_DAYS", 7))
@@ -418,7 +419,7 @@ def cancel_invitation(invitation_id: str) -> tuple[bool, str | None]:
     invitation = Invitation.query.filter_by(id=invitation_id, status="pending").first()
     if not invitation:
         return False, "Invitation not found or already processed."
-    invitation.status = "cancelled"
+    invitation.status = InvitationStatus.REVOKED  # the enum word for "cancelled"
     db.session.commit()
     return True, None
 
