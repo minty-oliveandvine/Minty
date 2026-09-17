@@ -51,7 +51,7 @@ class TermsConsent(db.Model):
             "user_id", "terms_version", name="uq_terms_consent_user_version"
         ),
         db.Index("ix_terms_consent_user", "user_id"),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(
@@ -62,7 +62,7 @@ class TermsConsent(db.Model):
         # Section 13 of the Terms allows permanent deletion of a user. Keeping
         # consent records about a deleted person is data we would have no
         # reason to hold, so they go with them.
-        db.ForeignKey("pettycashv2.user.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.user.id", ondelete="CASCADE"),
         nullable=False,
     )
     terms_version = db.Column(db.String(32), nullable=False)

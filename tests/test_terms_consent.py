@@ -19,12 +19,12 @@ _schema_attached = False
 
 @pytest.fixture
 def db_session(app, tmp_path_factory):
-    """SQLite stand-in for the `pettycashv2` schema.
+    """SQLite stand-in for the `pettycashv3` schema.
 
     The house pattern elsewhere attaches ``':memory:'`` on a single borrowed
     connection. That is unreliable here: an in-memory attachment belongs to the
     connection that made it, so a second connection from the pool sees a
-    *different*, empty `pettycashv2` — and whether a test passes then depends on
+    *different*, empty `pettycashv3` — and whether a test passes then depends on
     which connection the pool happens to hand out.
 
     Two changes make it deterministic: attach a real file (so every connection
@@ -40,14 +40,14 @@ def db_session(app, tmp_path_factory):
         engine = db.engine
         if not _schema_attached:
             schema_path = str(
-                tmp_path_factory.mktemp("schema") / "pettycashv2.sqlite"
+                tmp_path_factory.mktemp("schema") / "pettycashv3.sqlite"
             ).replace("\\", "/")
 
             @event.listens_for(engine, "connect")
             def _attach_schema(dbapi_connection, _record):  # noqa: ANN001
                 try:
                     dbapi_connection.execute(
-                        f"ATTACH DATABASE '{schema_path}' AS pettycashv2"
+                        f"ATTACH DATABASE '{schema_path}' AS pettycashv3"
                     )
                 except Exception:
                     # Already attached on this connection — harmless.

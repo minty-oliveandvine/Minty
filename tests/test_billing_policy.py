@@ -22,7 +22,7 @@ from blueprints.subscription.services import policy
 
 class _Row:
     """A ``billing_policy`` row. The real model is not used: the test app is SQLite,
-    where the ``pettycashv2`` schema it points at is not materialised."""
+    where the ``pettycashv3`` schema it points at is not materialised."""
 
     def __init__(self, trial=30, cancel=30, window=10, offsets="1,3,5,7"):
         self.trial_days = trial

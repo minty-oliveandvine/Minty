@@ -23,7 +23,7 @@ def db_session(app):
         if not _schema_attached:
             with db.engine.connect() as conn:
                 try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
+                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
                     conn.commit()
                 except Exception:
                     pass

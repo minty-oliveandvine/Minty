@@ -35,7 +35,7 @@ _schema_attached = False
 @pytest.fixture()
 def db_session(app):
     """A live schema for the membership lookup the routes do. Mirrors the fixture in
-    tests/test_entity_create.py — the models live in the ``pettycashv2`` schema, so
+    tests/test_entity_create.py — the models live in the ``pettycashv3`` schema, so
     attach it in memory before create_all."""
     global _schema_attached
     from models.db import db
@@ -44,7 +44,7 @@ def db_session(app):
         if not _schema_attached:
             with db.engine.connect() as conn:
                 try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
+                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
                     conn.commit()
                 except Exception:
                     pass

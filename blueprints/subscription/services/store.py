@@ -10,7 +10,7 @@ subscriptions plus whatever app-owned state Stripe had nowhere to hold; with the
 biller retired there is nothing to mirror, and Stripe is only the payment rail the
 invoices are issued against. Higher-level services call these helpers; unit tests mock
 THIS module rather than a database (the test app runs on SQLite, where the
-``pettycashv2`` schema isn't materialised).
+``pettycashv3`` schema isn't materialised).
 
 Each mutating helper commits its own unit of work, mirroring
 ``entity.services.modules.set_entity_module``.

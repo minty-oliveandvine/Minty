@@ -54,7 +54,7 @@ _ROLE_TO_PETTYCASH_SETTINGS_COLUMN = {
 def get_entity_account_settings(entity_id, account_type):
     """Resolve a petty cash role to its mapped Xero account.
 
-    Roles are mapped per entity in pettycashv2.entity_pettycash_settings. Each
+    Roles are mapped per entity in pettycashv3.entity_pettycash_settings. Each
     role column FKs into account_info, which holds the underlying Xero account.
     The return shape matches the legacy entity_account_xero-backed lookup so
     every caller (Xero posting, reports, form rehydration) keeps working.

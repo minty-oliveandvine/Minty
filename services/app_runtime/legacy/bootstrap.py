@@ -386,7 +386,7 @@ def create_app():
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24
     app.config["WTF_CSRF_TIME_LIMIT"] = 24 * 60 * 60
     if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
-        app.config["SESSION_SQLALCHEMY_SCHEMA"] = "pettycashv2"
+        app.config["SESSION_SQLALCHEMY_SCHEMA"] = "pettycashv3"
     Session(app)
 
     if app.config["ENV"] != "production":

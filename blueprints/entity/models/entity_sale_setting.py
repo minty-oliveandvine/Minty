@@ -16,13 +16,13 @@ from models.db import db
 
 class EntitySaleSetting(db.Model):
     __tablename__ = "entity_sale_setting"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     entity_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"), primary_key=True,
+        MintyUuid(), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"), primary_key=True,
     )
     sale_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv2.sale_info.id", ondelete="RESTRICT"), primary_key=True,
+        MintyUuid(), db.ForeignKey("pettycashv3.sale_info.id", ondelete="RESTRICT"), primary_key=True,
     )
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     display_order = db.Column(db.Integer, nullable=True)

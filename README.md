@@ -1,7 +1,7 @@
 # Minty
 
 The Flask application behind Minty — companies, users, petty cash, Xero integration and the
-subscription/billing engine. Historically "pettycashv2", and still the repo the other services
+subscription/billing engine. Historically "pettycashv3", and still the repo the other services
 are being carved out of.
 
 Runs on **port 5001**.
@@ -9,7 +9,7 @@ Runs on **port 5001**.
 ## The services around it
 
 Minty is no longer the whole product. It is one of several repos, all against the same
-PostgreSQL database and `pettycashv2` schema:
+PostgreSQL database and `pettycashv3` schema:
 
 | Repo | What it is | Port |
 |---|---|---|

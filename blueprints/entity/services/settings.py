@@ -93,7 +93,7 @@ def invalidate_entity_xero_cache(entity_id, old_org_id):
     try:
         bill_accounts_removed = db.session.execute(
             text(
-                "DELETE FROM pettycashv2.entity_bill_account_xero "
+                "DELETE FROM pettycashv3.entity_bill_account_xero "
                 "WHERE entity_id = :entity_id"
             ),
             {"entity_id": str(entity_id)},
@@ -573,7 +573,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
 
     Module 2 (bills) counterpart of sync_xero_coa_pettycash. Reads the
     already-synced account_info table (no Xero API call) and inserts a matching
-    pettycashv2.entity_bill_account_xero row for any eligible account that does
+    pettycashv3.entity_bill_account_xero row for any eligible account that does
     not have one yet. Eligible == account type in BILL_COA_INCLUDED_TYPES
     (the bill CoA allowlist, which also includes FIXED).
 
@@ -589,7 +589,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
     run together with sync_xero_accounts_to_db on the settings page GET.
     Returns (inserted, refreshed).
     """
-    _TBL = "pettycashv2.entity_bill_account_xero"
+    _TBL = "pettycashv3.entity_bill_account_xero"
 
     eligible_accounts = AccountInfo.query.filter(
         AccountInfo.entity_id == entity_id,
@@ -657,7 +657,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
                 f"DELETE FROM {_TBL} b "
                 "WHERE b.entity_id = :eid "
                 "AND NOT EXISTS ("
-                "  SELECT 1 FROM pettycashv2.account_info a "
+                "  SELECT 1 FROM pettycashv3.account_info a "
                 "  WHERE a.entity_id = :eid "
                 "    AND a.xero_account_id = b.xero_account_id"
                 ")"
@@ -883,7 +883,7 @@ def _check_account_info_diff(entity_id, xero_by_id):
 
 def _check_bill_account_diff(entity_id, xero_by_id):
     """Compare Module 2 entity_bill_account_xero rows against Xero snapshot."""
-    _TBL = "pettycashv2.entity_bill_account_xero"
+    _TBL = "pettycashv3.entity_bill_account_xero"
 
     rows = db.session.execute(
         text(
@@ -976,7 +976,7 @@ COA_INCLUDED_TYPES = frozenset({
     "DIRECTCOSTS", "EXPENSE", "OVERHEADS", "PREPAYMENT",
 })
 # Allowlist for the Module 2 Bill Chart of Accounts. Sync only writes these
-# Xero account types into pettycashv2.entity_bill_account_xero.
+# Xero account types into pettycashv3.entity_bill_account_xero.
 BILL_COA_INCLUDED_TYPES = frozenset({
     "DIRECTCOSTS", "EXPENSE", "FIXED", "OVERHEADS", "PREPAYMENT",
 })

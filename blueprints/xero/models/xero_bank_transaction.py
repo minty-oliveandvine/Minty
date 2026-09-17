@@ -1,11 +1,11 @@
-﻿from uuid import uuid4
+from uuid import uuid4
 
 from models.db import db
 
 
 class XeroBankTransaction(db.Model):
     __tablename__ = "xero_bank_transaction"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
     sync_report_id = db.Column(db.String(36))
     type = db.Column(db.String(10), nullable=False)

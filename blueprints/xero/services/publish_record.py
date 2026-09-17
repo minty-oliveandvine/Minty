@@ -4,7 +4,7 @@ Publishing a petty-cash report posts to Xero's *collection* endpoints, so
 without a record of what came back a republish creates a second copy of every
 transaction. This module is that record.
 
-It lives in ``pettycashv2.xero_report_sync``, which already exists and needed
+It lives in ``pettycashv3.xero_report_sync``, which already exists and needed
 no migration: only ``id`` is NOT NULL, and ``xero_reponse_text`` (the typo is
 in the column name) is unbounded nullable text. Migration r9a09 describes that
 table as "the audit trail of what was pushed to Xero -- the record that detects

@@ -53,7 +53,7 @@ def reset_database(app):
     if not _schema_attached:
         with db.engine.connect() as conn:
             try:
-                conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
+                conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
                 conn.commit()
             except Exception:  # Postgres: the schema is real
                 pass
@@ -78,7 +78,7 @@ def truncate_all(app):
         # the rebased schema renamed (roles/permissions -> role/permission, C6 ...)
         present = {
             r[0] for r in db.session.execute(db.text(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'pettycashv2'"
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'pettycashv3'"
             ))
         }
         names = ", ".join(t.fullname for t in db.metadata.sorted_tables if t.name in present)

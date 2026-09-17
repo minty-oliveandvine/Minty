@@ -36,7 +36,7 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
         db.Index(
             "ix_subscription_invoice_group", "billing_group_id", "period_start"
         ),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -57,7 +57,7 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
 
     currency = db.Column(
         db.CHAR(3),
-        db.ForeignKey("pettycashv2.currency_info.currency_code"),
+        db.ForeignKey("pettycashv3.currency_info.currency_code"),
         nullable=False,
     )
     # Minor units, like every other amount in this schema. Never a float.
@@ -118,13 +118,13 @@ class SubscriptionInvoiceLine(CreatedAtMixin, db.Model):
     __table_args__ = (
         db.Index("ix_subscription_invoice_line_invoice_id", "invoice_id"),
         db.Index("ix_subscription_invoice_line_entity_id", "entity_id"),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     invoice_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv2.subscription_invoice.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.subscription_invoice.id", ondelete="CASCADE"),
         nullable=False,
     )
     # Every line is attributable to exactly ONE entity — the property that made these

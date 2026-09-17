@@ -6,14 +6,14 @@ from models.db import db
 
 
 class CurrencyInfo(db.Model):
-    """Mirror of pettycashv2.currency_info.
+    """Mirror of pettycashv3.currency_info.
 
     id is a uuid primary key (gen_random_uuid() server-side); currency_code
     carries the 3-letter ISO 4217 code and is unique.
     """
 
     __tablename__ = "currency_info"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )

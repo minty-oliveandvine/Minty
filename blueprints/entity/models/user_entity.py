@@ -7,20 +7,20 @@ from blueprints.shared.column_types import MintyUuid
 
 class UserEntity(db.Model):
     __tablename__ = "user_entity"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     user_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv2.user.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.user.id", ondelete="CASCADE"),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
     entity_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
         primary_key=True,
     )
     role = db.Column(
-        db.Enum(EntityRole, name="entity_role", schema="pettycashv2", native_enum=True,
+        db.Enum(EntityRole, name="entity_role", schema="pettycashv3", native_enum=True,
                 create_type=False, values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )

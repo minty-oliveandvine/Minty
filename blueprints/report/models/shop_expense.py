@@ -1,14 +1,14 @@
-﻿from uuid import uuid4
+from uuid import uuid4
 
 from models.db import db
 
 
 class ShopExpense(db.Model):
     __tablename__ = "shop_expense"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
     report_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.report.id"), nullable=False
+        db.String(36), db.ForeignKey("pettycashv3.report.id"), nullable=False
     )
     item = db.Column(db.String(150), nullable=False)
     amount = db.Column(db.Float, nullable=False)

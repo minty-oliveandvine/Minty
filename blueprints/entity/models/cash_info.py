@@ -16,14 +16,14 @@ class CashInfo(db.Model):
     """
 
     __tablename__ = "cash_info"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     cash_id = db.Column(db.Integer, primary_key=True)
     currency_id = db.Column(
-        UUID(as_uuid=False), db.ForeignKey("pettycashv2.currency_info.id")
+        UUID(as_uuid=False), db.ForeignKey("pettycashv3.currency_info.id")
     )
     # Legacy. Superseded by currency_id; dropped with the v3 schema.
     country_code = db.Column(
-        db.String(3), db.ForeignKey("pettycashv2.country_info.country_code")
+        db.String(3), db.ForeignKey("pettycashv3.country_info.country_code")
     )
     # 'note' | 'coin'
     type = db.Column(db.String(10))

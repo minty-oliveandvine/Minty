@@ -1,20 +1,20 @@
-﻿from datetime import datetime
+from datetime import datetime
 
 from models.db import db
 
 
 class ReportHistory(db.Model):
     __tablename__ = "report_history"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(db.Integer, primary_key=True)
     report_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"),
         nullable=False,
     )
     company = db.Column(db.String(150), nullable=False, index=True)
     user_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.user.id", ondelete="SET NULL")
+        db.String(36), db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL")
     )
     action = db.Column(db.String(50), nullable=False)
     field_changed = db.Column(db.String(255), nullable=True)

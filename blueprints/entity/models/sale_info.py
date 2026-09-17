@@ -19,13 +19,13 @@ from models.db import db
 
 class SaleInfo(db.Model):
     __tablename__ = "sale_info"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     CASH_VALUE_NAME = "cash_sales"
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
     type = db.Column(
-        db.Enum(SaleType, name="sale_type", schema="pettycashv2", native_enum=True,
+        db.Enum(SaleType, name="sale_type", schema="pettycashv3", native_enum=True,
                 create_type=False, values_callable=lambda e: [m.value for m in e]),
         nullable=False, default=SaleType.OTHER,
     )

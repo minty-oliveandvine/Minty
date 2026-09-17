@@ -15,7 +15,7 @@ class ReportCashCount(db.Model):
     __table_args__ = (
         db.UniqueConstraint("report_id", "cash_id", name="report_cash_count_uq"),
         db.CheckConstraint("quantity >= 0", name="chk_rcc_qty"),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     # Re-pointed at report.id in r8a08. It referenced report_draft.id, which
@@ -24,12 +24,12 @@ class ReportCashCount(db.Model):
     # a report and its draft share one id.
     report_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.report.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"),
         nullable=False,
     )
     cash_id = db.Column(
         db.Integer,
-        db.ForeignKey("pettycashv2.cash_info.cash_id", ondelete="RESTRICT"),
+        db.ForeignKey("pettycashv3.cash_info.cash_id", ondelete="RESTRICT"),
         nullable=False,
     )
     quantity = db.Column(db.Integer, nullable=False, default=0)

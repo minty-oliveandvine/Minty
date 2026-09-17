@@ -1,6 +1,6 @@
 """Token-authenticated Bill Account Code settings for onboarding (Step 7).
 
-The bill chart of accounts lives in ``pettycashv2.entity_bill_account_xero``
+The bill chart of accounts lives in ``pettycashv3.entity_bill_account_xero``
 (the Module 2 / Bills snapshot) with an ``is_active`` flag deciding which codes
 appear when adding a bill. This mirrors that tick state for the onboarding Bill
 Settings step: ensure the snapshot is backfilled from ``account_info`` (no live
@@ -17,7 +17,7 @@ from blueprints.entity.services.settings import sync_xero_coa_bill
 from models.db import Entity, db
 from services.permission_policy import Permission, has_permission_by_user_id
 
-_TBL = "pettycashv2.entity_bill_account_xero"
+_TBL = "pettycashv3.entity_bill_account_xero"
 
 
 def _code_sort_key(code):

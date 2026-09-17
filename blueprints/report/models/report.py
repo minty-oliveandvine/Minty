@@ -7,7 +7,7 @@ from models.db import db, tz
 
 class Report(db.Model):
     __tablename__ = "report"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     transaction_date = db.Column(db.Date, nullable=False)
     next_transaction_date = db.Column(db.Date, nullable=True)
@@ -29,7 +29,7 @@ class Report(db.Model):
     closing_balance = db.Column(db.Float, nullable=True)
     receipt_files = db.Column(db.Text)
     uploaded_by = db.Column(
-        db.String(150), db.ForeignKey("pettycashv2.user.username"), nullable=True
+        db.String(150), db.ForeignKey("pettycashv3.user.username"), nullable=True
     )
     company = db.Column(db.String(150), nullable=False)
     shop_expenses = db.relationship("ShopExpense", backref="report", lazy=True)
