@@ -469,7 +469,7 @@
             window.sendLogToDataDog('info', isRepublish ? 'Republish success' : 'Publish success', { entityId: String(entityId), reportId: String(reportId) });
           }
           publishingSuccess(successMsg);
-        } else if (data.status === 'processing') {
+        } else if (data.status === 'publishing') {
           setPublishingProgress(15, actionLabel);
           pollPublishStatus(reportId, entityId, isRepublish);
         } else {

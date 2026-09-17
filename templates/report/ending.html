@@ -308,7 +308,7 @@ document.addEventListener('submit', function(e){
                <!-- Payment methods breakdown (hidden by default) -->
                <div id="paymentMethodsBreakdown" class="hidden">
                  <div class="flex gap-6">
-                   {% set sales_data = current_draft if current_draft else report_draft %}
+                   {% set sales_data = current_draft %}
                    <!-- Column 1: Electronic Sales -->
                    <div class="flex-1">
                      <div>
@@ -544,16 +544,16 @@ document.addEventListener('submit', function(e){
           </div>
           {% if discrepancy_amount and discrepancy_amount != 0 %}
           <!-- Discrepancy Details Section -->
-          <div class="{% if discrepancy_type == 'shortage' %}bg-red-50 {% else %}bg-green-50{% endif %} rounded-lg p-4 mb-6">
+          <div class="{% if discrepancy_type == 'short' %}bg-red-50 {% else %}bg-green-50{% endif %} rounded-lg p-4 mb-6">
             <div class="flex items-start">
               <div class="flex-shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6" style="color: {% if discrepancy_type == 'shortage' %}#EF4444{% else %}#22C55E{% endif %};">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6" style="color: {% if discrepancy_type == 'short' %}#EF4444{% else %}#22C55E{% endif %};">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
                 </svg>
               </div>
               <div class="ml-3 flex-1 min-w-0">
-                <h3 class="text-sm font-medium {% if discrepancy_type == 'shortage' %}text-red-800{% else %}text-green-800{% endif %}">
-                  {% if discrepancy_type == "shortage" %}
+                <h3 class="text-sm font-medium {% if discrepancy_type == 'short' %}text-red-800{% else %}text-green-800{% endif %}">
+                  {% if discrepancy_type == "short" %}
                     Cash Shortage: <span class="break-all">{{ currency_symbol }}{{ "{:,.2f}".format(discrepancy_amount|abs) }}</span>
                   {% else %}
                     Cash Surplus: <span class="break-all">{{ currency_symbol }}{{ "{:,.2f}".format(discrepancy_amount) }}</span>

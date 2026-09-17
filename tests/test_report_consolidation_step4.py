@@ -32,20 +32,15 @@ def _source(rel: str) -> str:
 
 
 def _fake_db_returning(scalar_value):
-    """Minimal stand-in for `db` whose query(...).filter(...).scalar() answers.
+    """Minimal stand-in for `db` whose session.get(Report, id) answers with a report
+    whose ``actual_cash_total`` is ``scalar_value``.
 
-    legacy_column_counts_for_report reads report.actual_cash_total through
-    db.session.query(...).filter(...).scalar(); that one value is the whole
-    dependency, so faking it keeps the test on the logic under test.
+    legacy_column_counts_for_report reads report.actual_cash_total (a derived figure
+    since C4: None when never counted, 0.0 for an all-zero count); that one value is the
+    whole dependency, so faking it keeps the test on the logic under test.
     """
-    class _Q:
-        def filter(self, *_a, **_k):
-            return self
-
-        def scalar(self):
-            return scalar_value
-
-    return SimpleNamespace(session=SimpleNamespace(query=lambda *_a, **_k: _Q()))
+    report = SimpleNamespace(actual_cash_total=scalar_value)
+    return SimpleNamespace(session=SimpleNamespace(get=lambda *_a, **_k: report))
 
 
 # ---------------------------------------------------------------------------

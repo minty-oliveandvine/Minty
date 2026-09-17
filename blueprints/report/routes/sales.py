@@ -122,7 +122,6 @@ def report_sale(id=None):
                 Report.expenses,
                 Report.bank_deposit,
                 Report.closing_balance,
-                Report.receipt_files,
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
@@ -173,7 +172,7 @@ def report_sale(id=None):
             header_publishing_status=header_publishing_status_for(report_id=(report.id if report else None)),
             report=report,
             current_section="sales",
-            completed_sections=report.completed_sections if report else ["opening"],
+            completed_sections=(report.completed_sections or ["opening"]) if report else ["opening"],
             is_draft=True,
             draft_id=report.id if report else None,
             current_user=current_user,
@@ -297,8 +296,8 @@ def report_sale(id=None):
                 )
                 total_sales = total_shop_sales + total_delivery_sales
 
-                report_draft.shop_sales = total_shop_sales
-                report_draft.delivery_sales = total_delivery_sales
+                # stored aggregates: cash, everything-but-cash, their sum
+                report_draft.nocashsale_total = total_sales - safe_float(cash_sales)
                 report_draft.total_sales = total_sales
 
                 # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
@@ -340,13 +339,9 @@ def report_sale(id=None):
                         # with id=full_report.id), so both already resolve the
                         # same report_sale_detail rows. Only cash and the
                         # aggregate caches are stored per-row.
-                        existing_report.cash_sales = report_draft.cash_sales
-                        existing_report.shop_sales = report_draft.shop_sales
-                        existing_report.delivery_sales = report_draft.delivery_sales
+                        existing_report.cashsale_total = report_draft.cashsale_total
+                        existing_report.nocashsale_total = report_draft.nocashsale_total
                         existing_report.total_sales = report_draft.total_sales
-                        existing_report.date = datetime.now(
-                            tz
-                        )  # Update date to current timestamp
                         # Recalculate closing balance
                         cash_sales_for_report = get_cash_sales_from_detail(
                             existing_report.id,
@@ -402,7 +397,6 @@ def report_sale(id=None):
                     if report_sale_detail:
                         # Update existing record
                         report_sale_detail.amount = amount
-                        report_sale_detail.create_at = datetime.now()
                         logger.info(
                             f"Updated ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
                         )
@@ -411,12 +405,7 @@ def report_sale(id=None):
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_draft.id,
-                            # Catalog link, so the row stays self-describing
-                            # even if this sale_info row is later removed.
-                            sale_info_id=sale.sale_id,
-                            type=sale.type.value if sale.type is not None else None,
                             amount=amount,
-                            create_at=datetime.now(),
                         )
                         db.session.add(report_sale_detail)
                         logger.info(
@@ -498,8 +487,7 @@ def report_sale(id=None):
                     )
                     total_sales = total_shop_sales + total_delivery_sales
 
-                    report_draft.shop_sales = total_shop_sales
-                    report_draft.delivery_sales = total_delivery_sales
+                    report_draft.nocashsale_total = total_sales - safe_float(cash_sales)
                     report_draft.total_sales = total_sales
 
                     # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
@@ -558,7 +546,6 @@ def report_sale(id=None):
                         if report_sale_detail:
                             # Update existing record
                             report_sale_detail.amount = amount
-                            report_sale_detail.create_at = datetime.now()
                             logger.info(
                                 f"Updated ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
                             )
@@ -567,12 +554,7 @@ def report_sale(id=None):
                             report_sale_detail = ReportSaleDetail(
                                 sale_id=sale.sale_id,
                                 report_id=report_draft.id,
-                                # Catalog link, so the row stays self-describing
-                                # even if this sale_info row is later removed.
-                                sale_info_id=sale.sale_id,
-                                type=sale.type.value if sale.type is not None else None,
                                 amount=amount,
-                                create_at=datetime.now(),
                             )
                             db.session.add(report_sale_detail)
                             logger.info(
@@ -689,18 +671,12 @@ def report_sale(id=None):
                     if report_sale_detail:
                         # Update the amount and update timestamp
                         report_sale_detail.amount = amount
-                        report_sale_detail.create_at = datetime.now()
                     else:
                         # Insert new detail
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_draft.id,
-                            # Catalog link, so the row stays self-describing
-                            # even if this sale_info row is later removed.
-                            sale_info_id=sale.sale_id,
-                            type=sale.type.value if sale.type is not None else None,
                             amount=amount,
-                            create_at=datetime.now(),
                         )
                         db.session.add(report_sale_detail)
                         logger.info(
@@ -875,13 +851,12 @@ def report_sale(id=None):
                 db.session.query(
                     ReportSaleDetail.sale_id,
                     ReportSaleDetail.amount,
-                    ReportSaleDetail.type,
                     SaleInfo.sale_name,
                     SaleInfo.value_name,
                 )
                 .join(SaleInfo, SaleInfo.id == ReportSaleDetail.sale_id, isouter=True)
                 .filter(ReportSaleDetail.report_id == existing_draft.id)
-                .order_by(ReportSaleDetail.create_at.desc())
+                .order_by(ReportSaleDetail.created_at.desc())
                 .all()
             )
 
@@ -977,7 +952,7 @@ def report_sale(id=None):
             # Add stepper data for dynamic progress display
             current_section="sales",  # Always set to current page
             completed_sections=(
-                existing_draft.completed_sections if existing_draft else ["opening"]
+                (existing_draft.completed_sections or ["opening"]) if existing_draft else ["opening"]
             ),
             is_latest_report=is_latest_report,
             transaction_date=transaction_date,

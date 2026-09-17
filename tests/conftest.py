@@ -24,6 +24,13 @@ import pg_harness  # tests/ is on sys.path via rootdir conftest; no package __in
 # collection start, makes the first registry complete whatever the test modules import.
 import models.db  # noqa: E402,F401
 
+# Two route-unit modules stub pandas with ``sys.modules.setdefault("pandas", SimpleNamespace(...))``
+# at import time. Collected before anything imported the real library, the stub then serves
+# the whole session and the CSV export 500s ("no attribute 'Index'") - the order-dependence
+# test_history_csv_lists_the_days_movements used to show. Importing pandas here first makes
+# their setdefault a no-op.
+import pandas  # noqa: E402,F401
+
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TESTS_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -104,14 +111,10 @@ def pytest_configure(config):
 # module here when it is green on Postgres; from then on a regression there is a hard failure.
 # docs/modernisation_plan.md, Part 1 C0 rule 4.
 PG_PENDING = {
-    "test_char_report_lifecycle.py",   # C3 + C4
     "test_char_access.py",             # C6 (C1 done)
-    # single cases (C1/C2/C3 tables are green; these touch the next units' tables)
-    "test_char_sales_methods.py::test_methods_switched_on_are_the_ones_the_sales_form_offers",       # C4 report.date
-    "test_char_sales_methods.py::test_the_sales_page_offers_one_input_per_enabled_method_plus_cash",  # C4 report.date
-    "test_char_sales_methods.py::test_switching_a_method_off_keeps_the_amount_an_old_report_recorded",  # C4
-    "test_char_entities.py::test_onboarding_create_starts_the_company_in_onboarding_and_the_wizard_can_read_it_back",  # C4 (/state reads report)
+    # single cases (C1-C4 tables are green; these touch the next units' tables)
     "test_char_entities.py::test_the_settings_pages_render_for_an_admin",  # C6 roles (the Xero settings page)
+    "test_char_entities.py::test_onboarding_create_starts_the_company_in_onboarding_and_the_wizard_can_read_it_back",  # C6 (/state lists invitations)
     # one case, not the module: the Xero settings page it renders after the disconnect
     # loads the roles table (C6)
     "test_char_xero_tokens.py::test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect",

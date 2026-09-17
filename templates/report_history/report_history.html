@@ -509,9 +509,9 @@
                     </div>
                   </div>
                   <div class="flex flex-col min-[414px]:mr-4 min-[640px]:mr-6 min-[1024px]:mr-20">
-                    <div class="relative {% if report.publishing_status == 'partially_published' and report.publish_reasons %}group cursor-help{% endif %} px-1.5 py-1 min-[414px]:px-2 min-[414px]:py-1.5 min-[640px]:px-3 min-[640px]:py-2 rounded-lg inline-flex flex-col w-fit {% if report.xero_integrated_yes == True %}bg-[#E6F2FF]{% elif report.publishing_status == 'partially_published' %}bg-[#E6F2FF]{% elif report.status == 'draft' %}bg-[#EBEEF2]{% elif report.status == 'posted' %}bg-[#FFF0F0]{% endif %}">
-                      <span class="text-[9px] min-[414px]:text-[10px] min-[640px]:text-xs font-medium whitespace-nowrap inline-flex items-center {% if report.xero_integrated_yes == True %}text-[#007BFF]{% elif report.publishing_status == 'partially_published' %}text-[#007BFF]{% elif report.status == 'draft' %}text-[#546881]{% elif report.status == 'posted' %}text-[#FF6B6B]{% endif %}">{% if report.xero_integrated_yes == True %}Published{% elif report.publishing_status == 'partially_published' %}Partially Published{% elif report.status == 'posted' %}Submitted{% else %}{{ (report.status or 'draft')|capitalize }}{% endif %}{% if report.publishing_status == 'partially_published' and report.publish_reasons %}<svg class="w-3 h-3 ml-1 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>{% endif %}</span>
-                      {% if report.publishing_status == 'partially_published' and report.publish_reasons %}
+                    <div class="relative {% if report.publishing_status == 'failed' and report.publish_reasons %}group cursor-help{% endif %} px-1.5 py-1 min-[414px]:px-2 min-[414px]:py-1.5 min-[640px]:px-3 min-[640px]:py-2 rounded-lg inline-flex flex-col w-fit {% if report.xero_integrated_yes == True %}bg-[#E6F2FF]{% elif report.publishing_status == 'failed' %}bg-[#E6F2FF]{% elif report.status == 'draft' %}bg-[#EBEEF2]{% elif report.status == 'submitted' %}bg-[#FFF0F0]{% endif %}">
+                      <span class="text-[9px] min-[414px]:text-[10px] min-[640px]:text-xs font-medium whitespace-nowrap inline-flex items-center {% if report.xero_integrated_yes == True %}text-[#007BFF]{% elif report.publishing_status == 'failed' %}text-[#007BFF]{% elif report.status == 'draft' %}text-[#546881]{% elif report.status == 'submitted' %}text-[#FF6B6B]{% endif %}">{% if report.xero_integrated_yes == True %}Published{% elif report.publishing_status == 'failed' %}Publish failed{% elif report.status == 'submitted' %}Submitted{% else %}{{ (report.status or 'draft')|capitalize }}{% endif %}{% if report.publishing_status == 'failed' and report.publish_reasons %}<svg class="w-3 h-3 ml-1 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>{% endif %}</span>
+                      {% if report.publishing_status == 'failed' and report.publish_reasons %}
                       <div class="absolute hidden group-hover:block z-[60] right-0 top-full mt-2 w-max max-w-[16rem] min-[640px]:max-w-[18rem] bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-xl normal-case font-normal text-left">
                         <span class="absolute -top-1 right-3 w-2 h-2 rotate-45 bg-gray-900"></span>
                         <p class="font-semibold mb-1">Publish issues:</p>
@@ -520,7 +520,7 @@
                       {% endif %}
                     </div>
                     <div class="flex flex-col text-[8px] min-[414px]:text-[9px] min-[640px]:text-[10px] min-[1024px]:text-sm text-gray-600 mt-0.5 min-[414px]:mt-1">
-                      <span class="timestamp-display" data-timestamp="{% if report.xero_integrated_yes == True %}{% set published_history = report.report_histories|selectattr('action', 'equalto', 'published')|first %}{{ published_history.timestamp.isoformat() if published_history and published_history.timestamp else (report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp.isoformat() if (report.report_histories|selectattr('action', 'equalto', 'posted')|first) and (report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp else (report.date.isoformat() if report.date else '') }}{% elif report.status == 'posted' %}{% set posted_history = report.report_histories|selectattr('action', 'equalto', 'posted')|first %}{{ posted_history.timestamp.isoformat() if posted_history and posted_history.timestamp else (report.date.isoformat() if report.date else '') }}{% else %}{{ report.date.isoformat() if report.date else '' }}{% endif %}">{% if report.xero_integrated_yes == True %}{% set published_history = report.report_histories|selectattr('action', 'equalto', 'published')|first %}{{ published_history.timestamp.strftime('%d %b %Y %H:%M') if published_history and published_history.timestamp else ((report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp.strftime('%d %b %Y %H:%M') if (report.report_histories|selectattr('action', 'equalto', 'posted')|first) and (report.report_histories|selectattr('action', 'equalto', 'posted')|first).timestamp else (report.date.strftime('%d %b %Y %H:%M') if report.date else '')) }}{% elif report.status == 'posted' %}{% set posted_history = report.report_histories|selectattr('action', 'equalto', 'posted')|first %}{{ posted_history.timestamp.strftime('%d %b %Y %H:%M') if posted_history and posted_history.timestamp else (report.date.strftime('%d %b %Y %H:%M') if report.date else '') }}{% else %}{{ report.date.strftime('%d %b %Y %H:%M') if report.date else '' }}{% endif %}</span>
+                      <span class="timestamp-display" data-timestamp="{% if report.xero_integrated_yes == True %}{{ (report.published_at or report.date).isoformat() if (report.published_at or report.date) else '' }}{% elif report.status == 'submitted' %}{{ (report.submitted_at or report.date).isoformat() if (report.submitted_at or report.date) else '' }}{% else %}{{ report.date.isoformat() if report.date else '' }}{% endif %}">{% if report.xero_integrated_yes == True %}{{ (report.published_at or report.date).strftime('%d %b %Y %H:%M') if (report.published_at or report.date) else '' }}{% elif report.status == 'submitted' %}{{ (report.submitted_at or report.date).strftime('%d %b %Y %H:%M') if (report.submitted_at or report.date) else '' }}{% else %}{{ report.date.strftime('%d %b %Y %H:%M') if report.date else '' }}{% endif %}</span>
                       <span>by {{report.first_name}}</span>
                     </div>
                   </div>
@@ -577,7 +577,7 @@
                             <span class="text-sm font-medium">View</span>
                           </div>
                           {% if can_publish %}
-                          {% if not report.xero_integrated_yes and report.publishing_status != 'partially_published' %}
+                          {% if not report.xero_integrated_yes and report.publishing_status != 'failed' %}
                           <div class="w-full px-4 py-3 transition-colors flex items-center justify-left gap-2 text-gray-600 {% if report.status != 'draft' %}hover:bg-gray-50 cursor-pointer{% else %}opacity-50 cursor-not-allowed{% endif %}" title="{% if report.status == 'draft' %}Please finish the report before publishing{% else %}Publish to Xero{% endif %}" data-report-id="{{ report.id }}" data-publishing-state="idle" onclick="event.stopPropagation(); {% if report.status != 'draft' %}handlePublish('{{ report.id }}', '{{ entity_id }}', this, {{ 'true' if report.publishing_status == 'completed' else 'false' }}, '{{ report.transaction_date.strftime('%d %b %Y').upper() }}'){% endif %}">
                             <svg class="animate-spin h-4 w-4 text-gray-600 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" data-spinner>
                               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -1563,7 +1563,7 @@
             if (ps === 'completed' || integrated) {
               clearInterval(interval);
               publishingSuccess(entityId);
-            } else if (ps === 'partially_published') {
+            } else if (ps === 'failed' && Array.isArray(data.failure_reasons) && data.failure_reasons.length) {
               clearInterval(interval);
               publishingPartial(entityId, data.failure_reasons);
             } else if (ps === 'failed') {
@@ -1629,7 +1629,7 @@
 
         if (data.status === 'success') {
           publishingSuccess(entityId);
-        } else if (data.status === 'processing') {
+        } else if (data.status === 'publishing') {
           setPublishingProgress(15, actionLabel);
           pollPublishStatus(reportId, entityId, isRepublish);
         } else {

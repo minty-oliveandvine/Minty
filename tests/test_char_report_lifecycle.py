@@ -262,6 +262,12 @@ def history_rows(client, entity):
     return page.get_data(as_text=True)
 
 
+def history_badges(client, entity) -> list[str]:
+    """The status word each row's badge shows (the JS on the page also says "Published")."""
+    html = history_rows(client, entity)
+    return re.findall(r'inline-flex items-center [^"]*">(Published|Publish failed|Submitted|Draft)', html)
+
+
 def test_exact_cash_count_has_no_discrepancy(shop, client):
     owner, entity = shop
     F.login(client, owner)
@@ -377,13 +383,8 @@ def test_convert_to_draft_reopens_the_report_at_opening(shop, client):
     assert resume.status_code == 302 and "/report/opening" in resume.headers["Location"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING F1: revert_report_to_draft deletes the report's ShopExpense rows "
-    "(services/ending.py) on the assumption that draft expenses live elsewhere and "
-    "re-submitting rebuilds them; since drafts and reports became one row they do not, "
-    "so a reverted report loses its expenses (closing 800.00 instead of 775.00). "
-    "Expected behaviour asserted here; flip when fixed in phase C."))
 def test_convert_to_draft_keeps_the_expenses(shop, client):
+    """F1 (fixed in C4): reverting no longer deletes the expense lines."""
     owner, entity = shop
     F.login(client, owner)
     report_id, closing = post_report(client, entity)
@@ -393,6 +394,40 @@ def test_convert_to_draft_keeps_the_expenses(shop, client):
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["total_expenses"]) == money("25.00"), totals
     assert money(totals["closing_balance"]) == closing, totals
+
+
+def test_an_edit_after_a_xero_publish_drops_the_report_back_to_submitted(shop, client, app):
+    """draft -> submitted -> published; an edit that diverges from Xero is submitted again
+    (publishable afresh), and the publish markers that warn about duplicates stay."""
+    from datetime import datetime, timezone
+
+    from blueprints.shared.enums import ReportStatus
+    from models.db import Report, db
+
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity)
+
+    with app.app_context():
+        report = db.session.get(Report, report_id)
+        assert report.status == ReportStatus.SUBMITTED and report.submitted_at is not None
+        # what a complete Xero publish writes (publish.py), without Xero
+        report.status = ReportStatus.PUBLISHED
+        report.published_at = datetime.now(timezone.utc)
+        report.xero_integrated = True
+        report.publishing_status = "completed"
+        db.session.commit()
+    assert history_badges(client, entity) == ["Published"]
+
+    resp = client.post(f"/report/{report_id}/edit/discrepancy-reason", data={"discrepancy_reason": "recounted"})
+
+    assert resp.status_code == 200, resp.data[:300]
+    with app.app_context():
+        report = db.session.get(Report, report_id)
+        assert report.status == ReportStatus.SUBMITTED
+        assert report.xero_integrated is False
+        assert report.publishing_status == "completed" and report.published_at is not None
+    assert history_badges(client, entity) == ["Submitted"]
 
 
 def test_delete_posted_report_removes_it_from_history(shop, client, s3):
@@ -407,12 +442,8 @@ def test_delete_posted_report_removes_it_from_history(shop, client, s3):
     assert client.get(f"/report/{report_id}").status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING F2: delete_report only removes the keys in report.receipt_files from S3; "
-    "expense receipts (ShopExpense.files) are left behind in the bucket. report.receipt_files "
-    "does not exist in the redesign, so the cleanup has to move to the expense rows in phase C. "
-    "Expected behaviour asserted here; flip when fixed."))
 def test_delete_posted_report_removes_its_receipts_from_storage(shop, client, s3):
+    """F2 (fixed in C4): the expense lines' receipts go with the report."""
     owner, entity = shop
     F.login(client, owner)
     report_id, _ = post_report(client, entity)

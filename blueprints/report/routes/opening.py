@@ -10,7 +10,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
-                                               ensure_report_row_for_draft,
                                                future_date_error,
                                                header_publishing_status_for,
                                                recalculate_report,
@@ -359,15 +358,15 @@ def report_opening(id=None, entity_id=None):
     if id and not existing_draft:
         # Was a two-entity full outer join filtering BOTH ids to `id`, which
         # collapsed to an inner join and returned nothing whenever either row
-        # was missing. withdrawal_type and withdrawal_bank_account live on
-        # `report` since r1a01, so one table answers the whole question.
+        # was missing. withdrawal_type lives on `report` (cash_addition_type), so
+        # one table answers the whole question.
         report = Report.query.filter(Report.id == id).first()
         if report:
             default_report = {
                 "adjusted_opening_balance": report.opening_balance,
                 "cash_addition": 0,
                 "withdrawal": report.withdrawal_type or "personal",
-                "bank_account": report.withdrawal_bank_account or "",
+                "bank_account": "",  # the main bank account on the settings, not per report
             }
             # Determine if this is the latest report (most recent
             # transaction_date) or old report
@@ -419,10 +418,10 @@ def report_opening(id=None, entity_id=None):
                 # For new reports, start with opening as current and no
                 # completed sections
                 "current_section": "opening",  # Always set to current page
-                "completed_sections": report.completed_sections,
+                "completed_sections": report.completed_sections or [],  # NULL on legacy drafts
                 "bank_accounts": bank_accounts,
                 "withdrawal_type": report.withdrawal_type or "personal",
-                "withdrawal_bank_account": report.withdrawal_bank_account or "",
+                "withdrawal_bank_account": "",
             }
 
             return render_template(
@@ -573,8 +572,8 @@ def report_opening(id=None, entity_id=None):
                         cash_addition=cash_addition,
                         adjusted_opening_balance=opening_balance +
                         cash_addition,
-                        uploaded_by=existing_report.uploaded_by,
-                        company=existing_report.company,
+                        created_by=existing_report.created_by,
+                        entity_id=existing_report.entity_id,
                         status="draft",
                     )
                     db.session.add(report_draft)
@@ -585,8 +584,8 @@ def report_opening(id=None, entity_id=None):
                         opening_balance + cash_addition
                     )
 
-                report_draft.withdrawal_type = withdrawal
-                report_draft.withdrawal_bank_account = bank_account
+                report_draft.cash_addition_type = withdrawal
+                # the bank account is the one on entity_pettycash_settings (schema item 13)
 
                 # Ensure opening is in completed sections
                 if not report_draft.completed_sections:
@@ -667,8 +666,7 @@ def report_opening(id=None, entity_id=None):
                     )
                     report_draft.next_transaction_date = transaction_date + \
                         timedelta(days=1)
-                    report_draft.withdrawal_type = withdrawal
-                    report_draft.withdrawal_bank_account = bank_account
+                    report_draft.cash_addition_type = withdrawal
                     if not report_draft.completed_sections:
                         report_draft.completed_sections = []
                     if "opening" not in report_draft.completed_sections:
@@ -781,20 +779,18 @@ def report_opening(id=None, entity_id=None):
                         cash_addition=cash_addition,
                         adjusted_opening_balance=adjusted_opening_balance,
                         # Set all sales to 0 for opening entry
-                        cash_sales=0.0,
-                        shop_sales=0.0,
-                        delivery_sales=0.0,
+                        cashsale_total=0.0,
+                        nocashsale_total=0.0,
                         total_sales=0.0,
-                        expenses=0.0,
+                        expense_total=0.0,
                         bank_deposit=0.0,
                         closing_balance=adjusted_opening_balance,
                         # Initialize progress tracking
                         current_section="opening",
                         completed_sections=[],
-                        uploaded_by=current_user.username,
-                        withdrawal_type=withdrawal,
-                        withdrawal_bank_account=bank_account,
-                        company=entity_id,
+                        created_by=current_user.id,
+                        cash_addition_type=withdrawal,
+                        entity_id=entity_id,
                         status="draft",
                     )
                 db.session.add(report_draft)
@@ -822,8 +818,8 @@ def report_opening(id=None, entity_id=None):
             # Store withdrawal information for later use when publishing to
             # Xero
             if withdrawal and bank_account:
-                report_draft.withdrawal_type = withdrawal
-                report_draft.withdrawal_bank_account = bank_account
+                report_draft.cash_addition_type = withdrawal
+                # the bank account is the one on entity_pettycash_settings (schema item 13)
                 logger.info(
                     f"Set withdrawal info: type={withdrawal}, bank_account={bank_account}"
                 )
@@ -1003,11 +999,7 @@ def report_opening(id=None, entity_id=None):
                 if existing_draft.withdrawal_type
                 else "personal"
             ),
-            "bank_account": (
-                existing_draft.withdrawal_bank_account
-                if existing_draft.withdrawal_bank_account
-                else ""
-            ),
+            "bank_account": "",  # the main bank account on the settings, not per report
         }
 
         # Use draft data - ensure we get the most current completed_sections
@@ -1028,11 +1020,7 @@ def report_opening(id=None, entity_id=None):
                 if existing_draft.withdrawal_type
                 else "personal"
             ),
-            "withdrawal_bank_account": (
-                existing_draft.withdrawal_bank_account
-                if existing_draft.withdrawal_bank_account
-                else ""
-            ),
+            "withdrawal_bank_account": "",  # the main bank account on the settings
         }
 
     else:
@@ -1236,7 +1224,7 @@ def report_opening(id=None, entity_id=None):
         company_bank=company_bank,
         # Add stepper data for dynamic progress display
         current_section="opening",  # Always set to current page regardless of database value
-        completed_sections=existing_draft.completed_sections if existing_draft else [],
+        completed_sections=(existing_draft.completed_sections or []) if existing_draft else [],
         bank_accounts=bank_accounts,
         personal_bank_account=personal_bank_account,
         is_latest_report=is_latest_report,

@@ -16,6 +16,8 @@ from blueprints.report import report_bp
 from blueprints.report.services.file_downsize import downsize_bytes
 from blueprints.report.services.history import log_history
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
+from blueprints.report.services.shared import mark_diverged_from_xero
+from blueprints.shared.column_types import cents
 from blueprints.report.services.share import create_share_link_for_report
 from blueprints.report.services.shared import get_cash_sales_from_detail
 from blueprints.xero.services.publish_errors import latest_publish_reason_items
@@ -400,13 +402,17 @@ def report_expense_submit_all():
                 item=item,
                 amount=amount,
                 remarks=remarks,
-                files=",".join(file_paths),
                 contact_id=contact_id,
                 contact_name=contact_name,
                 account_id=account_id,
                 account_code=account_code,
                 item_code=item_code,
             )
+            for uploaded, file_path in zip(files, file_paths):
+                expense.add_receipt(
+                    file_path, original_name=uploaded.filename, mime_type=uploaded.mimetype,
+                    uploaded_by=current_user.id,
+                )
             expenses.append(expense)
             total_expenses += amount
 
@@ -687,13 +693,17 @@ def report_expense_add():
             item=item,
             amount=amount,
             remarks=remarks,
-            files=",".join(file_paths),
             contact_id=contact_id,
             contact_name=contact_name,
             account_id=account_id,
             account_code=account_code,
             item_code=item_code,
         )
+        for uploaded, file_path in zip(files, file_paths):
+            expense.add_receipt(
+                file_path, original_name=uploaded.filename, mime_type=uploaded.mimetype,
+                uploaded_by=current_user.id,
+            )
         db.session.add(expense)
         # Pair with a shop_expense row (Stage 4b) — see the note above.
         db.session.flush()  # Generate expense.id
@@ -812,7 +822,7 @@ def report_expense_update(expense_id):
             return jsonify(
                 {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
 
-        draft = expense.report_draft
+        draft = expense.report
         if not draft:
             return jsonify(
                 {"status": "error", "message": "I don't see a draft for that yet."}), 404
@@ -882,7 +892,10 @@ def report_expense_update(expense_id):
                     file_index=idx if len(new_files) > 1 else None,
                 )
                 file_paths.append(file_path)
-            expense.files = ",".join(file_paths)
+            expense.set_receipts(
+                [(path, f.filename, f.mimetype) for f, path in zip(new_files, file_paths)],
+                uploaded_by=current_user.id,
+            )
 
         expense.item = item
         expense.amount = amount
@@ -1050,11 +1063,10 @@ def report_expense_edit_submitted(expense_id):
                     file_index=idx if len(new_files) > 1 else None,
                 )
                 file_paths.append(file_path)
-            # Store as Format A (comma-separated S3 keys) and clear any stale
-            # Format B metadata in the separate s3_key column.
-            expense.files = ",".join(file_paths)
-            if hasattr(expense, "s3_key"):
-                expense.s3_key = None
+            expense.set_receipts(
+                [(path, f.filename, f.mimetype) for f, path in zip(new_files, file_paths)],
+                uploaded_by=current_user.id,
+            )
 
         # Non-balance fields only — the amount is never touched.
         expense.remarks = remarks
@@ -1070,7 +1082,7 @@ def report_expense_edit_submitted(expense_id):
         # left intact so the publish flow still knows it was previously published
         # and can warn about Xero duplicates.
         if report:
-            report.xero_integrated_yes = False
+            mark_diverged_from_xero(report)
 
         db.session.commit()
         return jsonify(
@@ -1143,9 +1155,9 @@ def report_edit_discrepancy_reason(id):
         #     codebase ever read it back. publish.py, the download and the
         #     export-screenshot paths all read `report` directly.
 
-        # Editing diverges the report from Xero — revert it to "Submitted" while
+        # Editing diverges the report from Xero — back to "submitted" while
         # keeping publishing_status as the "was previously published" marker.
-        report.xero_integrated_yes = False
+        mark_diverged_from_xero(report)
 
         db.session.commit()
         return jsonify(
@@ -1208,20 +1220,14 @@ def report_edit_withdrawal(id):
                 ),
                 400,
             )
-        bank_account = (request.form.get("withdrawal_bank_account") or "").strip()
+        # The bank account is not per report: a company withdrawal always comes from
+        # the main bank account on entity_pettycash_settings (schema item 13), which is
+        # what the form's hidden field carries too.
+        report.cash_addition_type = withdrawal_type
 
-        # Draft and submitted share one row and one id; fall back
-        # to the company+date match Xero uses if the id link is ever missing.
-        resolved_bank_account = bank_account if withdrawal_type == "company" else ""
-
-        # `report` is the row — the draft-side write that used to mirror this
-        # was redundant once the two became one.
-        report.withdrawal_type = withdrawal_type
-        report.withdrawal_bank_account = resolved_bank_account
-
-        # Editing diverges the report from Xero — revert it to "Submitted" while
+        # Editing diverges the report from Xero — back to "submitted" while
         # keeping publishing_status as the "was previously published" marker.
-        report.xero_integrated_yes = False
+        mark_diverged_from_xero(report)
 
         db.session.commit()
         return jsonify(
@@ -1229,7 +1235,7 @@ def report_edit_withdrawal(id):
                 "status": "success",
                 "message": "Withdrawal source updated successfully.",
                 "withdrawal_type": report.withdrawal_type,
-                "withdrawal_bank_account": report.withdrawal_bank_account or "",
+                "withdrawal_bank_account": "",
             }
         )
     except Exception as e:
@@ -1262,7 +1268,7 @@ def report_expense_delete(expense_id):
             return jsonify(
                 {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
 
-        draft = expense.report_draft
+        draft = expense.report
         if not draft:
             return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
         entity_id = draft.company
@@ -1284,9 +1290,11 @@ def report_expense_delete(expense_id):
             )
 
         deleted_amount = expense.amount
+        from blueprints.report.services.s3_storage import delete_expense_with_receipts
         from models.db import db
 
-        db.session.delete(expense)
+        # the receipt goes with the line (F2)
+        delete_expense_with_receipts(expense)
 
         # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
         # exists from draft creation via ensure_shop_expense_for_draft, and
@@ -1433,7 +1441,7 @@ def get_draft_totals():
         )
         exp_total = float(calculated_total or 0)
         # Same as expense save: opening + cash_addition + cash_sales − expenses − bank_deposit
-        computed_closing = (
+        computed_closing = cents(
             opening_bal
             + cash_addition_val
             + cash_sales_val
@@ -1522,7 +1530,7 @@ def report_publishing_status(report_id):
         failure_reason = None
         failure_reasons = []
         failure_reason_items = []
-        if report.publishing_status in ("failed", "partially_published"):
+        if report.publishing_status == "failed":
             # Pull the most recent ``publish_failed`` history row so the
             # frontend can show the user *why* it failed / was only partially
             # published (archived contact, inactive account, etc.) instead of a
@@ -1692,21 +1700,14 @@ def expense_upload_files():
                     500,
                 )
 
-            # Build files metadata JSON (mirrors the pattern used by submit_all).
-            # mime_type reflects the stored bytes (PNG may have been re-encoded
-            # to JPEG), not the original upload.
-            files_meta = json.dumps(
-                {"original_filename": original_filename, "mime_type": out_mime or file.mimetype}
-            )
-
-            # WRITE FLIP (Step 3).
+            # WRITE FLIP (Step 3). The receipt is an attachment row: its name and
+            # type are what the person uploaded (the type reflects the stored bytes -
+            # a PNG may have been re-encoded to JPEG).
             expense_draft = ShopExpense(
                 report_id=report_draft_id,
                 # Required DB NOT NULL field — use a placeholder until filled in
                 item="",
                 amount=0.0,
-                files=files_meta,
-                s3_key=s3_key,
                 # Detail fields intentionally null until PATCH
                 remarks=None,
                 contact_id=None,
@@ -1714,6 +1715,10 @@ def expense_upload_files():
                 account_id=None,
                 account_code=None,
                 item_code=None,
+            )
+            expense_draft.add_receipt(
+                s3_key, original_name=original_filename, mime_type=out_mime or file.mimetype,
+                file_size=len(downsized), uploaded_by=current_user.id,
             )
             db.session.add(expense_draft)
             # Pair with a shop_expense row so expense reads can move off
@@ -1768,33 +1773,16 @@ def expense_draft_get(draft_id):
     if not expense:
         return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
-    entity_id = expense.report_draft.company
+    entity_id = expense.report.company
     if not has_permission(current_user, Permission.REPORT_VIEW_OWN, entity_id):
         return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}), 403
 
-    # Determine which S3 key to use for the presigned preview URL.
-    #
-    # Rule 1 — files is a plain S3 path string (legacy submit_all format):
-    #   use files directly as the S3 key.
-    # Rule 2 — files is a JSON object {"original_filename": ..., "mime_type": ...}
-    #   (new upload_files format): use expense.s3_key.
-    _files_s3_key = None
-    try:
-        meta = json.loads(expense.files) if expense.files else {}
-        if isinstance(meta, dict):
-            # Rule 2: JSON format — use the dedicated s3_key column
-            _files_s3_key = expense.s3_key
-        else:
-            # Unexpected JSON type — fall back to s3_key column
-            _files_s3_key = expense.s3_key
-            meta = {}
-    except (ValueError, TypeError):
-        # Rule 1: plain string path — use it directly as the S3 key
-        meta = {}
-        _files_s3_key = expense.files if expense.files else expense.s3_key
-
-    # Infer mime_type from file extension when not stored in meta
-    _mime_type = meta.get("mime_type", "")
+    # The first receipt's attachment row carries the key, the uploaded name and type.
+    receipt = expense.receipt
+    _files_s3_key = receipt.file_path if receipt is not None else None
+    _mime_type = (receipt.mime_type if receipt is not None else "") or ""
+    if _mime_type == "application/octet-stream":
+        _mime_type = ""
     if not _mime_type and _files_s3_key:
         _ext = os.path.splitext(_files_s3_key)[1].lower()
         _ext_mime_map = {
@@ -1806,8 +1794,7 @@ def expense_draft_get(draft_id):
         }
         _mime_type = _ext_mime_map.get(_ext, "")
 
-    # Infer original_filename from S3 key when not stored in meta
-    _original_filename = meta.get("original_filename", "")
+    _original_filename = (receipt.original_name if receipt is not None else "") or ""
     if not _original_filename and _files_s3_key:
         _original_filename = os.path.basename(_files_s3_key)
 
@@ -1856,7 +1843,7 @@ def expense_draft_patch(draft_id):
     if not expense:
         return jsonify({"status": "error", "message": "I don't see a draft for that yet."}), 404
 
-    entity_id = expense.report_draft.company
+    entity_id = expense.report.company
     if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
         return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to do that."}), 403
 
@@ -1941,11 +1928,7 @@ def expense_validate_drafts():
 
     for d in drafts:
         if not d.amount or d.amount <= 0 or not d.contact_id or not d.account_id:
-            try:
-                meta = json.loads(d.files) if d.files else {}
-            except (ValueError, TypeError):
-                meta = {"original_filename": d.files or "unknown"}
-            filename = meta.get("original_filename", "unknown")
+            filename = d.receipt.original_name if d.receipt is not None else "unknown"
             return jsonify(
                 {
                     "status": "incomplete",

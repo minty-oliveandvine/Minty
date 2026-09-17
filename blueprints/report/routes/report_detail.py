@@ -13,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history
 from blueprints.report.services.report_detail import has_route
-from blueprints.report.services.s3_storage import (delete_files_from_s3,
+from blueprints.report.services.s3_storage import (delete_expense_with_receipts,
+                                                   delete_files_from_s3,
                                                    get_s3_bucket,
                                                    get_s3_client,
                                                    upload_file_to_s3)
@@ -99,7 +100,8 @@ def report_detail(id):
             - bank_deposit
         )
 
-        files = report.receipt_files.split(",") if report.receipt_files else []
+        # receipts hang off the expense lines now (attachment rows), not the report
+        files = [key for expense in report.shop_expenses for key in expense.receipt_keys]
         file_urls = []
         for file in files:
             if file:
@@ -220,14 +222,17 @@ def edit_report(id):
                 delivery_sales_data=delivery_sales_data,
             )
 
-            old_expenses = ShopExpense.query.filter_by(report_id=report.id).all()
-            for expense in old_expenses:
-                if expense.files:
-                    delete_files_from_s3(expense.files.split(","))
-
-            db.session.query(ShopExpense).filter_by(report_id=report.id).delete(
-                synchronize_session=False
-            )
+            # The form re-posts every line; the ones it keeps name their receipts in
+            # existing_files[n], and those objects must survive the rewrite.
+            kept_keys = set()
+            index = 0
+            while f"shopExpenses[{index}][item]" in request.form:
+                kept_keys.update(
+                    key for key in request.form.get(f"existing_files[{index}]", "").split(",") if key
+                )
+                index += 1
+            for expense in ShopExpense.query.filter_by(report_id=report.id).all():
+                delete_expense_with_receipts(expense, keep_keys=kept_keys)
 
             total_expenses = 0
             index = 0
@@ -266,15 +271,21 @@ def edit_report(id):
                                 )
                                 file_paths.append(file_path)
 
-                    db.session.add(
-                        ShopExpense(
-                            report_id=report.id,
-                            item=item,
-                            amount=amount,
-                            remarks=remarks,
-                            files=",".join(file_paths),
-                        )
+                    rewritten = ShopExpense(
+                        report_id=report.id,
+                        item=item,
+                        amount=amount,
+                        remarks=remarks,
                     )
+                    uploaded_by_name = {
+                        path: (uploaded.filename, uploaded.mimetype)
+                        for uploaded, path in zip([f for f in files if f], file_paths)
+                    } if files and any(file.filename for file in files) else {}
+                    rewritten.set_receipts(
+                        [(path, *uploaded_by_name.get(path, (None, None))) for path in file_paths],
+                        uploaded_by=current_user.id,
+                    )
+                    db.session.add(rewritten)
 
                     total_expenses += amount
                     index += 1
@@ -388,6 +399,16 @@ def delete_report(id):
         """
         ReportSaleDetail.query.filter_by(report_id=report_id).delete()
 
+    def _delete_expenses_with_receipts(report_id):
+        """Delete a report's expense lines and their receipts (F2)."""
+        expenses = ShopExpense.query.filter_by(report_id=report_id).all()
+        logger.info(
+            f"Deleting {len(expenses)} expense lines and "
+            f"{sum(len(e.attachments) for e in expenses)} receipts of report {report_id}"
+        )
+        for expense in expenses:
+            delete_expense_with_receipts(expense)
+
     try:
         # Step 4a-6: the whole "no Report row, fall back to a ReportDraft"
         # branch that used to sit here is gone. It existed for drafts predating
@@ -445,14 +466,9 @@ def delete_report(id):
             )
             db.session.add(prev_report)
 
-        if report.receipt_files:
-            for file_key in report.receipt_files.split(","):
-                try:
-                    s3_client.delete_object(Bucket=bucket, Key=file_key)
-                except Exception as e:
-                    logger.warning(f"Failed to delete file {file_key} from S3: {e}")
-
-        ShopExpense.query.filter_by(report_id=report.id).delete()
+        # The receipts go with the report: every expense line's attachments are
+        # removed from S3 and their rows deleted with the line (F2).
+        _delete_expenses_with_receipts(report.id)
         _delete_report_children(report.id)
 
         # The paired-ReportDraft delete that sat here went with Step 4a-6 —
@@ -472,7 +488,7 @@ def delete_report(id):
         )
 
         for draft in other_drafts:
-            ShopExpense.query.filter_by(report_id=draft.id).delete()
+            _delete_expenses_with_receipts(draft.id)
             _delete_report_children(draft.id)
             # One row per sibling now (Step 4a-6) — delete it directly.
             paired_sibling = Report.query.filter_by(id=draft.id).first()

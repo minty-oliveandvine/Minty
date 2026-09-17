@@ -115,3 +115,63 @@ class SaleType(_DbEnum):
             return cls(key)
         except ValueError:
             return None
+
+
+class ReportStatus(_DbEnum):
+    """``report_status`` — where a day's report stands. ``submitted`` is what the code used to
+    call ``posted``; ``published`` is written only when the Xero publish succeeds (schema
+    header, report_status derivation). ``partially_published`` no longer exists."""
+
+    pg_name = nonmember("report_status")
+
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    PUBLISHED = "published"
+    VOID = "void"
+
+
+class PublishStatus(_DbEnum):
+    """``publish_status`` — the Xero publish job's own state on ``report.publishing_status``
+    (``processing`` -> ``publishing``, ``not_published``/NULL -> ``unpublished``)."""
+
+    pg_name = nonmember("publish_status")
+
+    UNPUBLISHED = "unpublished"
+    PUBLISHING = "publishing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DiscrepancyType(_DbEnum):
+    """``discrepancy_type`` — the cash count against the book balance (``shortage`` -> ``short``,
+    ``surplus`` -> ``over``)."""
+
+    pg_name = nonmember("discrepancy_type")
+
+    NONE = "none"
+    OVER = "over"
+    SHORT = "short"
+
+    @classmethod
+    def normalize(cls, word) -> "DiscrepancyType":
+        key = str(word or "none").strip().lower()
+        return {"shortage": cls.SHORT, "surplus": cls.OVER, "": cls.NONE}.get(key) or cls(key)
+
+
+class CashType(_DbEnum):
+    """``cash_type`` — a denomination is a coin or a note."""
+
+    pg_name = nonmember("cash_type")
+
+    COIN = "coin"
+    NOTE = "note"
+
+
+class ExpenseAttachmentRole(_DbEnum):
+    """``expense_attachment_role`` — what a file on an expense line is."""
+
+    pg_name = nonmember("expense_attachment_role")
+
+    RECEIPT = "receipt"
+    INVOICE = "invoice"
+    OTHER = "other"

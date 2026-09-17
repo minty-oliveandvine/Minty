@@ -502,7 +502,7 @@ class TestReceiptUpload:
         from types import SimpleNamespace
 
         expense = SimpleNamespace(
-            files="https://cdn.example.test/receipt.png",
+            s3_key="https://cdn.example.test/receipt.png",  # the first receipt's key (C4)
             remarks="fuel receipt",
             item="fuel",
         )

@@ -22,4 +22,4 @@ class CountryInfo(db.Model):
     phone_code = db.Column(db.String(10))
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     display_order = db.Column(db.Integer, nullable=False, default=999)
-    cash_info = db.relationship("CashInfo", backref="country_info", lazy=True)
+    # cash_info is keyed on currency, not country (its country_code went with the redesign)

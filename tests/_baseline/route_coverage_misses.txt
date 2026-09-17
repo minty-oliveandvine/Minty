@@ -1,5 +1,3 @@
-# 122/125 schema-touching endpoints exercised
+# 124/125 schema-touching endpoints exercised
 
 report.expense_draft_patch                              PATCH     /report/expense/draft/<string:draft_id>            ShopExpense, company
-user_management.delete_user_role                        DELETE    /minty/api/users/<string:user_id>/role             via check_not_last_admin_or_error, check_not_pending_subscriber_or_error, check_not_subscription_payer_or_error
-user_management.get_my_profile                          GET       /minty/api/users/me                                system_role

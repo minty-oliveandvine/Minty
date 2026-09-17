@@ -313,7 +313,16 @@ def install_fake_s3(monkeypatch) -> FakeS3:
     from blueprints.report.services import s3_storage
 
     fake = FakeS3()
+    real = s3_storage.get_s3_client
     monkeypatch.setattr(s3_storage, "get_s3_client", lambda: fake)
+    # Route modules import the function by name (``from ...s3_storage import
+    # get_s3_client``), so the name they bound must be patched too - or the delete
+    # paths in report_detail.py reach for the real endpoint while the uploads land here.
+    import sys
+
+    for module in list(sys.modules.values()):
+        if getattr(module, "__name__", "").startswith("blueprints.") and getattr(module, "get_s3_client", None) is real:
+            monkeypatch.setattr(module, "get_s3_client", lambda: fake)
     return fake
 
 

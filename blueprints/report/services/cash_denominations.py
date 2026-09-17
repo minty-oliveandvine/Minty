@@ -196,7 +196,8 @@ def save_cash_count_details(report_id, counts_by_cash_id):
     face_values = {
         row.cash_id: row.cash_value
         for row in CashInfo.query.filter(
-            CashInfo.cash_id.in_(list(counts_by_cash_id) or [0])
+            # cash_id is a uuid now: no junk placeholder for the empty case
+            CashInfo.cash_id.in_(list(counts_by_cash_id) or [None])
         ).all()
     }
 
@@ -276,11 +277,8 @@ def legacy_column_counts_for_report(report_id):
 
     from models.db import Report
 
-    counted = (
-        db.session.query(Report.actual_cash_total)
-        .filter(Report.id == report_id)
-        .scalar()
-    )
+    report = db.session.get(Report, report_id)
+    counted = report.actual_cash_total if report is not None else None
     if counted is None:
         return None  # never counted -> caller 404s
 

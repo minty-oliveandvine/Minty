@@ -143,6 +143,30 @@ def download_file_from_s3(s3_key):
     return None
 
 
+def delete_expense_with_receipts(expense, *, keep_keys=()):
+    """Delete an expense line together with its receipts (F2).
+
+    The S3 objects go first (except ``keep_keys`` - files another line is taking
+    over), then the line (its link rows go with it), then the ``attachment`` rows no
+    line points at any more. Flushes; the caller commits.
+    """
+    from blueprints.report.models.shop_expense import Attachment, ReportExpenseAttachment
+    from models.db import db
+
+    keep = set(keep_keys or ())
+    attachments = list(expense.attachments)
+    delete_files_from_s3([a.file_path for a in attachments if a.file_path not in keep])
+    db.session.delete(expense)
+    db.session.flush()
+    for attachment in attachments:
+        still_linked = (
+            db.session.query(ReportExpenseAttachment.id).filter_by(attachment_id=attachment.id).first()
+        )
+        if still_linked is None and attachment.file_path not in keep:
+            db.session.delete(attachment)
+    db.session.flush()
+
+
 def delete_files_from_s3(file_paths):
     if not file_paths:
         return

@@ -32,8 +32,7 @@ def generate_pdf_report(id):
                 Report,
                 Entity) .join(
                 Entity,
-                Entity.id.cast(
-                    db.String) == Report.company,
+                Entity.id == Report.entity_id,  # both uuid since C2/C4; the cast is gone
                 full=True) .filter(
                 Report.id == id) .first())
         if query_result is None:

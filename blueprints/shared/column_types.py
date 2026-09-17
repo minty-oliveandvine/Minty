@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import CHAR
+from sqlalchemy import CHAR, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.types import TypeDecorator
 
@@ -59,3 +59,37 @@ class MintyUuid(TypeDecorator):
     @property
     def python_type(self):
         return str
+
+
+def Money(precision: int = 14, scale: int = 2):
+    """The schema's ``numeric(14,2)`` money column.
+
+    ``asdecimal=False``: the Python side still computes in ``float`` in a few hundred places
+    (form values via ``safe_float``, balance arithmetic, Jinja formatting), and Decimal would
+    break every ``Decimal + float`` on the way. The DATABASE is exact - a float ``0.30000000000000004``
+    lands as ``0.30`` and comes back as ``0.3`` - which is the guarantee the redesign asked
+    for; moving the in-process arithmetic to Decimal is a later, separate pass.
+    """
+    return Numeric(precision, scale, asdecimal=False)
+
+
+def pg_enum(enum_cls):
+    """``db.Enum`` for one of ``blueprints/shared/enums``: the Postgres type is the enum's
+    ``pg_name`` in the ``pettycashv3`` schema, never created by SQLAlchemy, stored by value."""
+    from sqlalchemy import Enum
+
+    return Enum(
+        enum_cls, name=enum_cls.pg_name, schema="pettycashv3", native_enum=True,
+        create_type=False, values_callable=lambda e: [m.value for m in e],
+    )
+
+
+def cents(value) -> float:
+    """A money figure computed in Python, back to whole cents.
+
+    The columns are ``numeric(14,2)`` (exact) but the application still adds floats, so a
+    sum of exact cents can come out as 0.9999999999999999. Every figure that is the result
+    of arithmetic and is shown or stored goes through here; a value read straight from a
+    column does not need to.
+    """
+    return round(float(value or 0), 2)
