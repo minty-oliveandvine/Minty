@@ -1,6 +1,6 @@
 """Characterisation: Xero OAuth tokens - stored, refreshed, handed to services, cleared.
 
-C1 of docs/modernisation_plan.md moves the six token columns off ``user`` and makes
+C1 of docs/modernisation/modernisation_plan.md moves the six token columns off ``user`` and makes
 ``user_token`` the only store (the schema already says so; the code keeps a shadow copy on
 the user row and hydrates it). Everything here is observed through the endpoints and the
 service that hand tokens out, with the Xero identity server stubbed at ``requests`` -

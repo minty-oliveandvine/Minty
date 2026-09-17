@@ -9,7 +9,7 @@ be kept in sync.
 This runbook is self-contained. It covers what is **left**; the completed
 stages are summarised only enough to explain why the remaining ones are safe.
 
-Companion to `docs/cash_denomination_migration_runbook.md` — same structure.
+Companion to `docs/archive/runbooks/cash_denomination_migration_runbook.md` — same structure.
 The two are independent.
 
 **Status as of 31 Jul 2026:** the application is fully working, Xero publish
@@ -30,14 +30,14 @@ nothing degrades if it waits.
 
 **Everything is code-complete and verified on localhost as of 4 Aug 2026.**
 Nothing has been deployed and no migration has been run on production.
-See `docs/report_consolidation_step_4_runbook.md` for the per-unit detail.
+See `docs/archive/runbooks/report_consolidation_step_4_runbook.md` for the per-unit detail.
 
 **Step 3.5 status (3 Aug 2026).** All writers to the three tables are gone;
 `grep -rn "ReportCashCountDraft(\|ReportDetail(\|ReportExpenseDetail("
 blueprints/` returns only the model definitions. Remaining reads are the
 legacy-fallback path in `cash_denominations.py` and the four cascade-deletes in
 `report_detail.py`, both deliberately kept until Step 4 — see
-`docs/report_consolidation_step_3_5_runbook.md`.
+`docs/archive/runbooks/report_consolidation_step_3_5_runbook.md`.
 
 **Two migrations ship with Step 3.5. Both are required before Step 4:**
 

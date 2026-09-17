@@ -84,7 +84,7 @@
     // fetch() with its own .catch(). That makes this the only chokepoint where a
     // failure can be stopped from reaching the user as developer text. Anything
     // matching a fingerprint below is swapped for the caller's fallback.
-    // See ERROR_MESSAGE_LEAKS.md for the copy standard.
+    // See docs/features/ERROR_MESSAGE_LEAKS.md for the copy standard.
     var RAW_ERROR_PATTERNS = [
       /failed to fetch/i, /networkerror/i, /load failed/i,
       /unexpected token/i, /unexpected end of/i, /json\.parse/i,

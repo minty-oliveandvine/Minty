@@ -8,12 +8,12 @@ which denominations they log.
 
 **Design:** merges the naming and structure of the proposed v3 schema
 (`01_schema.sql` section F) with four corrections. Rationale for each is in
-`docs/cash_denomination_schema_review.md`. This migration is a **step toward**
+`docs/archive/runbooks/cash_denomination_schema_review.md`. This migration is a **step toward**
 v3, not away from it.
 
 This runbook is self-contained. You should not need any prior context.
 
-Companion to `docs/sales_method_migration_runbook.md` — same structure, same
+Companion to `docs/archive/runbooks/sales_method_migration_runbook.md` — same structure, same
 discipline. The two are **independent**; neither blocks the other.
 
 ---
@@ -436,6 +436,6 @@ the resolve/total/save logic is schema-independent.
    to a surplus. Verify this is intended; out of scope here.
 
 3. **Feed the four corrections back to the v3 author** — see
-   `docs/cash_denomination_schema_review.md`. Points 1 (the `type` in the
+   `docs/archive/runbooks/cash_denomination_schema_review.md`. Points 1 (the `type` in the
    uniqueness constraint) and 2 (`entity_cash_setting`) are the ones that
    change their DDL.

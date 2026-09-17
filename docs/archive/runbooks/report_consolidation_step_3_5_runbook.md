@@ -5,8 +5,8 @@ to record what Step 3.5 actually did — an earlier draft of this file was lost
 in a rebase, and `report_consolidation_step_4_runbook.md` §4a-5 depends on
 knowing exactly which fallbacks were deliberately left in place and why.
 
-Companion to `docs/report_consolidation_runbook.md` (the index) and
-`docs/report_consolidation_step_4_runbook.md` (what comes next).
+Companion to `docs/archive/runbooks/report_consolidation_runbook.md` (the index) and
+`docs/archive/runbooks/report_consolidation_step_4_runbook.md` (what comes next).
 
 **Baseline:** `17c6bcd2`, which contains `fe87216a` (Steps 1–3).
 

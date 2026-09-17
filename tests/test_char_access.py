@@ -4,7 +4,7 @@ The redesign renames ``roles``/``permissions``/``role_permissions`` to the singu
 ``invitations`` to ``invitation``, narrows ``invitation_status`` and turns ``user.system_role``
 into the ``system_role`` enum (D6 restores the column). What is pinned is the behaviour those
 tables back: the superuser gate, the role hierarchy when assigning roles, the invitation
-lifecycle and the terms gate. See docs/modernisation_plan.md, Part 1 B3 group 6.
+lifecycle and the terms gate. See docs/modernisation/modernisation_plan.md, Part 1 B3 group 6.
 
 F3 (closed in C1): the code wrote ``superuser`` where the schema's ``system_role`` enum says
 ``superadmin``. ``blueprints/auth/system_roles.py`` now takes its words from

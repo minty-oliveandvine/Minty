@@ -2,7 +2,7 @@
 
 **Scope:** Step 4 only. Steps 1–3 are deployed; Step 3.5 is code-complete and
 awaits `r7a07` + browser verification. Companion to
-`docs/report_consolidation_runbook.md`, which stays the index.
+`docs/archive/runbooks/report_consolidation_runbook.md`, which stays the index.
 
 **Written:** 3 Aug 2026, against the working tree on
 `report/step-3.5-implementation`.
@@ -539,7 +539,7 @@ late means throwing away a finished unit.
    denomination runbook.
 2. **4d** — reshape the Xero PKs (B), or accept that deleting a report erases
    its publish audit trail (A)?
-3. **`docs/report_consolidation_step_3_5_runbook.md`** is referenced by the
+3. **`docs/archive/runbooks/report_consolidation_step_3_5_runbook.md`** is referenced by the
    parent runbook at line 34 but **does not exist** in `docs/`. If it was
    written and not committed, it should land before Step 4 begins — 4a-5
    depends on knowing exactly which fallbacks Step 3.5 deliberately left in

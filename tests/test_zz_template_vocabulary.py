@@ -3,7 +3,7 @@
 The route tests render Jinja and the browser suite (e2e/) runs the wizard's JavaScript, but
 neither reads every template. This is the cheap backstop: once a unit has landed, the words it
 retired may not appear under templates/ or static/js/ at all. The list grows per unit -
-add the unit's retired names when its gate is green (docs/modernisation_plan.md, Part 1 C0.9).
+add the unit's retired names when its gate is green (docs/modernisation/modernisation_plan.md, Part 1 C0.9).
 
 Deliberately word-boundary matches on identifiers, so ``cash_sales`` does not trip on
 ``totalCashSales`` and ``date`` is not on the list at all.

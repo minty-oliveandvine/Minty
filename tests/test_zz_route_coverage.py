@@ -14,6 +14,9 @@ inventory only when the routes themselves change (see docs/modernisation_plan.md
 from __future__ import annotations
 
 import json
+import os
+
+import pytest
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -21,10 +24,15 @@ INVENTORY = HERE / "_baseline" / "route_inventory.json"
 MISSES = HERE / "_baseline" / "route_coverage_misses.txt"
 
 
-def test_every_schema_touching_route_is_exercised(app):
+def route_coverage_misses(hit) -> tuple[list[str], int]:
+    """(the in-scope endpoints never requested, how many are in scope); writes the misses file.
+
+    Shared with ``tests/conftest.py``: under pytest-xdist every worker only sees its own
+    requests, so the controller merges the workers' hit sets at session end and calls this.
+    """
     inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
     in_scope = {r["endpoint"]: r for r in inventory["routes"] if r["in_scope"]}
-    hit = set(app.extensions.get("hit_endpoints", set()))
+    hit = set(hit)
     # Legacy aliases: the same view is registered twice on one rule (``entity_settings`` next to
     # ``entity.entity_settings``, ``delete_report`` next to ``report.delete_report``). A request
     # to the rule reaches the view whichever name Flask records, so a hit on one counts for all
@@ -43,7 +51,15 @@ def test_every_schema_touching_route_is_exercised(app):
         why = ", ".join(r["touches"]) or "via " + ", ".join(sorted(r["touches_via_service"]))
         lines.append(f"{e:55} {' '.join(r['methods']):9} {r['rule']:50} {why}")
     MISSES.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return misses, len(in_scope)
+
+
+def test_every_schema_touching_route_is_exercised(app):
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        pytest.skip("under pytest-xdist the controller checks route coverage at session end "
+                    "(tests/conftest.py pytest_sessionfinish)")
+    misses, total = route_coverage_misses(app.extensions.get("hit_endpoints", set()))
     assert not misses, (
-        f"{len(misses)} of {len(in_scope)} schema-touching endpoints were never requested "
+        f"{len(misses)} of {total} schema-touching endpoints were never requested "
         f"(see {MISSES.relative_to(HERE.parent)})"
     )

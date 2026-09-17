@@ -1,4 +1,4 @@
-"""Shared setup for the characterisation suite (docs/modernisation_plan.md, Part 1 B3).
+"""Shared setup for the characterisation suite (docs/modernisation/modernisation_plan.md, Part 1 B3).
 
 These tests pin behaviour *through routes and services* so the schema redesign can be
 applied underneath them. Everything here therefore goes through the real code path
