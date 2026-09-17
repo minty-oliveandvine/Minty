@@ -22,7 +22,7 @@ Knobs:
 
 The file creates schema ``pettycash_test``; the models say ``pettycashv3``. The build
 ends with ``ALTER SCHEMA pettycash_test RENAME TO pettycashv3`` — the same rename the
-rehearsal ends with before the schema is dumped for Supabase (docs/modernisation_plan.md,
+rehearsal ends with before the schema is dumped for Supabase (docs/modernisation/modernisation_plan.md,
 Part 1 phase E; ``pettycashv3`` is the permanent name, decided 2026-09-16). Enum types, the
 ``set_updated_at`` trigger function and the ``tracker`` view travel with the schema;
 nothing in the file names the schema inside a function body, so the rename is safe.
@@ -112,7 +112,7 @@ def build_schema(db_uri: str, schema_sql: Path = DEFAULT_SCHEMA_SQL, rename_to: 
     holds (a ``pettycashv3`` being migrated, say) is untouched. ``rename_to``
     applies the cutover's rename-swap afterwards — the test suite asks for
     ``pettycashv3`` so the models see the schema they name; the migration
-    rehearsal (scripts/pettycash_test/rehearse.py) leaves it as built, because
+    rehearsal (scripts/schema_migration/rehearse.py) leaves it as built, because
     its loaders address ``pettycash_test`` explicitly.
     """
     import psycopg2
