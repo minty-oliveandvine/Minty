@@ -16,11 +16,16 @@ months later, not legacy from some earlier era of the product.
 -----------------------------------------------------------------------------
 RUN THE BACKFILL FIRST. THIS IS NOT OPTIONAL.
 
-``scripts/backfill_billing_groups.py`` is what moves the data, and it moves it by
-COPYING these three columns onto each payer's group — it does not derive them
+``scripts/backfill_billing_groups.py`` was what moved the data, and it moved it by
+COPYING these three columns onto each payer's group — it did not derive them
 from anything else, and Stripe cannot supply them (``paid_through`` is Minty's own
 conclusion about what a payer has paid for, not a fact Stripe holds). Drop these
 first and the backfill has nothing left to read.
+
+The script was retired on 2026-09-17 (see y1a01's docstring): every database this
+revision still has to run on holds zero ``user_stripe_customer`` rows with a cycle
+to move, so the rule above is satisfied vacuously. If that ever stops being true,
+recover the script from git history (last present at commit 3d5fde3) before running.
 
 The gate is one query, and it must return zero on every database this revision
 will reach:
