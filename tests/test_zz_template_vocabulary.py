@@ -35,7 +35,7 @@ RETIRED: dict[str, tuple[str, ...]] = {
     # expense.html's form and dropped by the model - the JS field is C4 leftover, not a column.
     "C4": ("receipt_files", "withdrawal_bank_account", "shop_expense", "report_sale_detail",
            "report_draft", "partially_published"),
-    # "C5": ("sync_statuc", "xero_reponse_text"),
+    "C5": ("sync_statuc", "xero_reponse_text", "create_at"),
     # "C6": ("role_permissions", "invitations"),
 }
 

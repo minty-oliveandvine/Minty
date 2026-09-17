@@ -2359,9 +2359,9 @@ def update_xero_report_sync(report_id, xero_response_text=None):
             sync = XeroReportSync(report_id=report_id)
             db.session.add(sync)
 
-        sync.sync_statuc = "completed"
-        sync.completed_at = datetime.now()
-        sync.xero_reponse_text = xero_response_text
+        sync.sync_status = "completed"
+        sync.completed_at = datetime.now(timezone.utc)
+        sync.xero_response_text = xero_response_text
         db.session.commit()
         return True
     except Exception as exc:

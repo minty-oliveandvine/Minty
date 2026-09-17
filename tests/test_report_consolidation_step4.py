@@ -294,34 +294,27 @@ class TestAllZeroCashCountIsDistinguishable:
 # 5. The Xero audit trail must survive a report deletion (r9a09 / Step 4d)
 # ---------------------------------------------------------------------------
 
-class TestXeroAuditTrailSurvivesReportDeletion:
+class TestXeroSyncRowsGoWithTheReport:
+    """The schema (C5) reversed r9a09: xero_report_sync.report_id and
+    xero_bank_transfer.sync_report_id are NOT NULL and ON DELETE CASCADE. A publish record
+    for a report that no longer exists protects nothing, so it goes with the report - and the
+    application deletes the rows itself so SQLite (no FK enforcement) behaves like Postgres.
+    """
 
-    def test_app_does_not_delete_the_audit_rows(self):
-        """delete_report must NOT delete xero_report_sync / xero_bank_transfer.
-
-        r9a09 flips those FKs to ON DELETE SET NULL so the publish record —
-        the thing that detects a double-publish — outlives the report. If the
-        application deletes the rows itself, that migration achieves nothing.
-        """
+    def test_app_deletes_the_sync_rows_with_the_report(self):
         src = _source("blueprints/report/routes/report_detail.py")
         for model, col in (("XeroReportSync", "report_id"),
-                           ("XeroBankTransfer", "sync_report_id")):
-            assert not re.search(
-                rf"{model}\.query\.filter_by\([^)]*{col}[^)]*\)\.delete\(\)", src
-            ), (
-                f"{model} rows must not be deleted with the report — they are "
-                "the Xero publish audit trail (r9a09 sets the FK to SET NULL)"
-            )
+                           ("XeroBankTransfer", "sync_report_id"),
+                           ("XeroBankTransaction", "sync_report_id")):
+            assert re.search(
+                rf"{model}\.query\.filter_by\({col}=report_id\)\.delete\(\)", src
+            ), f"{model} rows must be deleted with the report (schema: ON DELETE CASCADE)"
 
-    def test_models_declare_set_null(self):
+    def test_models_declare_cascade_and_not_null(self):
         for rel, col in (("blueprints/xero/models/xero_report_sync.py", "report_id"),
                          ("blueprints/xero/models/xero_bank_transfer.py", "sync_report_id")):
             src = _source(rel)
-            assert 'ondelete="SET NULL"' in src, (
-                f"{rel}: {col} must be ON DELETE SET NULL so a report deletion "
-                "does not erase the Xero publish audit trail"
-            )
-            assert "primary_key=True" not in src.split(col)[1][:300], (
-                f"{rel}: {col} must not be part of the primary key — a PK "
-                "column cannot be SET NULL, which is what forced CASCADE"
-            )
+            block = src.split(f"{col} = db.Column(")[1][:300]
+            assert 'ondelete="CASCADE"' in block, f"{rel}: {col} goes with the report (schema)"
+            assert "nullable=False" in block, f"{rel}: {col} is NOT NULL (schema)"
+            assert "primary_key=True" not in block, f"{rel}: {col} is not part of the primary key"
