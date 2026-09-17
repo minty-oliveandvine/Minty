@@ -54,7 +54,8 @@ test.describe('entity settings', () => {
       const res = await page.request.get(`/api/entities/${entityId}/payment-methods`);
       const body = await res.json();
       return (body.payment_methods as Array<{ name: string; type: string; enabled: boolean }>)
-        .filter((m) => m.enabled && m.type === 'Electronic').map((m) => m.name);
+        .filter((m) => m.enabled && m.type === 'electronic') // the sale_type enum word since C3
+        .map((m) => m.name);
     }, { timeout: 15_000 }).toContain('Octopus');
     // and the wizard's sales page offers it (the posted report's page still lists every method)
     await page.goto(`/report/sale?entity_id=${entityId}&transaction_date=${reportDate(-1)}`, { waitUntil: 'domcontentloaded' });
