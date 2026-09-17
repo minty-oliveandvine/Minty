@@ -279,6 +279,9 @@ def test_cancelled_invitation_disappears_and_its_link_dies(company, client, app,
 
     assert resp.status_code == 200, resp.data[:300]
     assert pending(client, entity) == []
+    with app.app_context():
+        # the invitation_status word for a cancelled invite (was "cancelled" before C6)
+        assert Invitation.query.get(invitation_id).status == "revoked"
     dead = client.get(f"/invitation/accept/{token}")
     assert dead.status_code in (302, 404)
     if dead.status_code == 302:

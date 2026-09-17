@@ -111,13 +111,8 @@ def pytest_configure(config):
 # module here when it is green on Postgres; from then on a regression there is a hard failure.
 # docs/modernisation_plan.md, Part 1 C0 rule 4.
 PG_PENDING = {
-    "test_char_access.py",             # C6 (C1 done)
-    # single cases (C1-C4 tables are green; these touch the next units' tables)
-    "test_char_entities.py::test_the_settings_pages_render_for_an_admin",  # C6 roles (the Xero settings page)
-    "test_char_entities.py::test_onboarding_create_starts_the_company_in_onboarding_and_the_wizard_can_read_it_back",  # C6 (/state lists invitations)
-    # one case, not the module: the Xero settings page it renders after the disconnect
-    # loads the roles table (C6)
-    "test_char_xero_tokens.py::test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect",
+    # empty since C6: every characterisation module is green on Postgres; a regression
+    # there is a hard failure. (C7-C9 add their own modules and graduate them the same way.)
 }
 
 

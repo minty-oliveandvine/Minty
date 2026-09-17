@@ -158,6 +158,18 @@ class DiscrepancyType(_DbEnum):
         return {"shortage": cls.SHORT, "surplus": cls.OVER, "": cls.NONE}.get(key) or cls(key)
 
 
+class InvitationStatus(_DbEnum):
+    """``invitation_status`` — a team invite's life. ``revoked`` is what the code called
+    ``cancelled`` (the Settings → Users "cancel" button)."""
+
+    pg_name = nonmember("invitation_status")
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
 class CashType(_DbEnum):
     """``cash_type`` — a denomination is a coin or a note."""
 

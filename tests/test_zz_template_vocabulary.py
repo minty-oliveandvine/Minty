@@ -36,7 +36,9 @@ RETIRED: dict[str, tuple[str, ...]] = {
     "C4": ("receipt_files", "withdrawal_bank_account", "shop_expense", "report_sale_detail",
            "report_draft", "partially_published"),
     "C5": ("sync_statuc", "xero_reponse_text", "create_at"),
-    # "C6": ("role_permissions", "invitations"),
+    # C6: the table names. ``invitations`` is also the English plural in comments and the
+    # API's JSON key (``data.invitations``), so only the join table's name is retired.
+    "C6": ("role_permissions",),
 }
 
 SCAN = [ROOT / "templates", ROOT / "static" / "js"]

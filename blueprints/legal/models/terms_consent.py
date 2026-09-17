@@ -21,7 +21,7 @@ agreed to precisely what, and when" — which is the whole question. `source`,
 
 import uuid
 
-from sqlalchemy.dialects.postgresql import UUID
+from blueprints.shared.column_types import MintyUuid
 
 from models.db import db
 
@@ -54,11 +54,9 @@ class TermsConsent(db.Model):
         {"schema": "pettycashv3"},
     )
 
-    id = db.Column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
-        db.String(36),
+        MintyUuid(),
         # Section 13 of the Terms allows permanent deletion of a user. Keeping
         # consent records about a deleted person is data we would have no
         # reason to hold, so they go with them.
