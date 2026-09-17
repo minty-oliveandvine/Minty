@@ -1,37 +1,27 @@
-.venv
-node_modules
-__pycache__/*
-__pycache__/logging_settings.cpython-311.pyc
-__pycache__/utils.cpython-311.pyc
-migrations/__pycache__/*    
-migrations/versions/__pycache__/*
+# --- Environments and tooling caches ---------------------------------------
+.venv/
+venv/
+node_modules/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+.next/
 .vscode/
-.vscode/launch.json
-app.log
-.env
 .DS_Store
-venv
-CLAUDE.md
 
-# Runtime + test artifacts. None of these are source, and two of them were leaking
-# production data into the repo: a full pettycashv2 dump and the billing service logs.
+# --- Secrets ---------------------------------------------------------------
+# .env.example is the documented template and stays tracked.
+.env
+.env.bak*
+
+# --- Runtime + test artifacts ----------------------------------------------
+# None of these are source, and two of them once leaked production data into
+# the repo: a full pettycashv2 dump and the billing service logs.
 *.log
 *.log.zip
 *.sqlite
 
-# Database dumps — these contain real customer data. Never commit them. Once
-# committed a dump stays in history whether or not the file is later deleted.
-backups/
-*.dump
-*.sql.gz
-prod_*.dump
-local_before_restore_*.dump
-*.sql
-!scripts/*.sql
-!migrations/**/*.sql
-
-# Flask instance folder — generated PDFs/DOCX of real reports, temp files.
+# Flask instance folder: generated PDFs/DOCX of real reports, temp files.
 # Never commit: these contain customer financial data.
 instance/
 
@@ -39,5 +29,25 @@ instance/
 # a non-database session backend; see docker/docker-entrypoint.sh).
 flask_session/
 
-# Word/Excel lock files (created when a doc is open)
+# Playwright
+test-results/
+playwright-report/
+
+# Word/Excel lock files (created while a doc is open)
 ~$*
+
+# --- Database dumps: these contain real customer data. Never commit them. --
+# Once committed a dump stays in history whether or not the file is later
+# deleted. *.sql is ignored by default for the same reason; the two exceptions
+# are DDL and loaders (no row data): alembic renders and the schema docs.
+backups/
+*.dump
+*.sql.gz
+*.sql
+!migrations/**/*.sql
+!docs/**/*.sql
+
+# --- Retired -----------------------------------------------------------------
+# Untracked 2026-09-17: the March-2026 reorg leftovers (sqlite DBs, .exe files,
+# logs, session files) and the planning docs that went with them.
+.archived/
