@@ -13,12 +13,12 @@ class UserToken(db.Model):
     """
 
     __tablename__ = "user_token"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv2.user.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.user.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
     )

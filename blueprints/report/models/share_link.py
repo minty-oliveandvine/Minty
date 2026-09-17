@@ -1,11 +1,11 @@
-﻿from uuid import uuid4
+from uuid import uuid4
 
 from models.db import db
 
 
 class ShareLink(db.Model):
     __tablename__ = "share_link"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
     path_segment = db.Column(db.String(255), unique=True, nullable=False, index=True)
     token = db.Column(db.Text, nullable=False)

@@ -42,7 +42,7 @@ def jsonify(data):
 
 
 def decode_jwt(token):
-    # Decode id token to get user info to enter to pettycashv2 db
+    # Decode id token to get user info to enter to pettycashv3 db
     decoded = jwt.decode(
         token,
         options={

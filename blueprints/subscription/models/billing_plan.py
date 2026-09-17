@@ -38,7 +38,7 @@ from blueprints.subscription.models.column_types import uuid_column
 
 class BillingPlan(TimestampMixin, db.Model):
     __tablename__ = "billing_plan"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # The module SET this plan bills — see ``plan_code``.
@@ -48,7 +48,7 @@ class BillingPlan(TimestampMixin, db.Model):
     amount = db.Column(db.Integer, nullable=False)
     currency = db.Column(
         db.CHAR(3),
-        db.ForeignKey("pettycashv2.currency_info.currency_code"),
+        db.ForeignKey("pettycashv3.currency_info.currency_code"),
         nullable=False,
     )
     # Monthly only in practice — the business sells nothing else, and no other interval

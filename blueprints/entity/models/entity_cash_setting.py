@@ -11,15 +11,15 @@ class EntityCashSetting(db.Model):
     """
 
     __tablename__ = "entity_cash_setting"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     entity_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
         primary_key=True,
     )
     cash_id = db.Column(
         db.Integer,
-        db.ForeignKey("pettycashv2.cash_info.cash_id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.cash_info.cash_id", ondelete="CASCADE"),
         primary_key=True,
     )
     is_active = db.Column(db.Boolean, nullable=False, default=True)

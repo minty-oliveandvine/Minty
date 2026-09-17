@@ -40,7 +40,7 @@ from sqlalchemy.dialects.postgresql import ENUM, UUID
 
 from blueprints.subscription import constants
 
-SCHEMA = "pettycashv2"
+SCHEMA = "pettycashv3"
 
 
 def uuid_column():

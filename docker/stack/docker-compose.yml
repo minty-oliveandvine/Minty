@@ -27,7 +27,7 @@ name: minty-stack
 services:
   # ---------------------------------------------------------------------------
   # Shared database. Module 1 (Flask) and Module 2 (Django) both live in the
-  # `pettycashv2` schema of this one database — that sharing is the whole point,
+  # `pettycashv3` schema of this one database — that sharing is the whole point,
   # so they must never be pointed at separate databases.
   # ---------------------------------------------------------------------------
   db:
@@ -52,7 +52,7 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Module 1 — Flask. Owns the schema: its entrypoint creates `pettycashv2` and
+  # Module 1 — Flask. Owns the schema: its entrypoint creates `pettycashv3` and
   # runs the Alembic migrations, so everything else waits for it to be healthy.
   # ---------------------------------------------------------------------------
   minty:
@@ -120,7 +120,7 @@ services:
       - "main:app"
 
   # ---------------------------------------------------------------------------
-  # Module 2 — Django API. Reads Flask's tables through `search_path=pettycashv2`,
+  # Module 2 — Django API. Reads Flask's tables through `search_path=pettycashv3`,
   # so it can only migrate after Flask has created that schema.
   # ---------------------------------------------------------------------------
   billing-backend:
@@ -138,7 +138,7 @@ services:
       db:
         condition: service_healthy
       minty:
-        # Waits for the pettycashv2 schema and the Flask tables to exist.
+        # Waits for the pettycashv3 schema and the Flask tables to exist.
         condition: service_healthy
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
@@ -224,7 +224,7 @@ services:
   # ---------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
   # Onboarding API — the wizard's backend, extracted from the Flask app. Django +
-  # django-ninja against the SAME pettycashv2 schema, with managed = False models
+  # django-ninja against the SAME pettycashv3 schema, with managed = False models
   # and no migrations of its own: Alembic in Minty stays owner-of-record.
   #
   # Roughly two thirds of its endpoints are thin proxies back to Flask (Stripe,
@@ -246,7 +246,7 @@ services:
       db:
         condition: service_healthy
       minty:
-        # Waits for the pettycashv2 schema and the Flask tables to exist.
+        # Waits for the pettycashv3 schema and the Flask tables to exist.
         condition: service_healthy
     environment:
       DJANGO_SETTINGS_MODULE: config.settings

@@ -7,7 +7,7 @@ from blueprints.shared.column_types import MintyUuid
 
 class EmailOtp(db.Model):
     __tablename__ = "email_otp"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(100), nullable=False, index=True)

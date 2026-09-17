@@ -72,7 +72,7 @@ every dependency). Later starts are much faster.
 Startup is ordered, and that order matters:
 
 1. `db` comes up and passes its health check.
-2. `minty` creates the `pettycashv2` schema, then starts serving.
+2. `minty` creates the `pettycashv3` schema, then starts serving.
 3. `billing-backend` waits for `minty` to be **healthy** — it is a tenant of
    Flask's schema and must never get there first.
 4. The two frontends start.
@@ -213,7 +213,7 @@ it, or change the matching `*_HOST_PORT` in `.env` (and the `*_PUBLIC_URL` that
 goes with it).
 
 **`billing-backend` exits with "Database/schema not ready"**
-→ `minty` never got as far as creating the `pettycashv2` schema. Read its logs
+→ `minty` never got as far as creating the `pettycashv3` schema. Read its logs
 first: `docker compose logs minty`.
 
 **The app loads but every page errors on a missing table**

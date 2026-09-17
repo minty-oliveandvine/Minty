@@ -5,12 +5,12 @@ from models.db import db
 
 class Invitation(db.Model):
     __tablename__ = "invitations"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
+        db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
         nullable=False,
     )
     email = db.Column(db.String(150), nullable=False)
@@ -25,7 +25,7 @@ class Invitation(db.Model):
     status = db.Column(db.String(20), nullable=False, default="pending")
     invited_by = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.user.id", ondelete="SET NULL"),
+        db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"),
         nullable=True,
     )
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())

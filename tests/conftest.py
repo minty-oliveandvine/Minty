@@ -203,10 +203,10 @@ def app(built_database) -> Iterator:
                 flask_app.extensions["hit_endpoints"].add(_request.endpoint)
 
         if built_database is None:
-            # SQLite: the models say schema "pettycashv2", which SQLite only knows as an
+            # SQLite: the models say schema "pettycashv3", which SQLite only knows as an
             # ATTACHed database. The per-file fixtures ATTACH ':memory:' on ONE pooled
             # connection, so a second connection sees no schema at all and create_all
-            # fails with "unknown database pettycashv2" whenever the pool hands out a
+            # fails with "unknown database pettycashv3" whenever the pool hands out a
             # different connection. Attach a shared FILE on every new connection
             # instead; the fixtures' own ATTACH then fails harmlessly (name in use).
             from sqlalchemy import event
@@ -215,13 +215,13 @@ def app(built_database) -> Iterator:
 
             # Per process, so two pytest runs at once (a full run in the background
             # while one file is iterated on) do not fight over the same file.
-            schema_path = os.path.abspath(f"tmp_test_pettycashv2_{os.getpid()}.sqlite")
+            schema_path = os.path.abspath(f"tmp_test_pettycashv3_{os.getpid()}.sqlite")
             if os.path.exists(schema_path):
                 os.remove(schema_path)
             posix = schema_path.replace("\\", "/")
 
             def _attach_schema(dbapi_conn, _record):
-                dbapi_conn.execute(f"ATTACH DATABASE '{posix}' AS pettycashv2")
+                dbapi_conn.execute(f"ATTACH DATABASE '{posix}' AS pettycashv3")
                 # Postgres-only functions the code calls in raw SQL. Advisory locks are a
                 # no-op on SQLite (one process, one connection at a time); hashtext is
                 # any stable int. Without these, every path through the Xero refresh lock
@@ -251,7 +251,7 @@ def app(built_database) -> Iterator:
 
                 with flask_app.app_context():
                     db.engine.dispose()
-                os.remove(os.path.abspath(f"tmp_test_pettycashv2_{os.getpid()}.sqlite"))
+                os.remove(os.path.abspath(f"tmp_test_pettycashv3_{os.getpid()}.sqlite"))
             except Exception:
                 pass
         for key, value in old_env.items():

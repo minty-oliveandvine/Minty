@@ -18,13 +18,13 @@ class Entity(db.Model):
     """
 
     __tablename__ = "entities"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     country_code = db.Column(
-        db.CHAR(2), db.ForeignKey("pettycashv2.country_info.country_code")
+        db.CHAR(2), db.ForeignKey("pettycashv3.country_info.country_code")
     )
     currency_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv2.currency_info.id")
+        MintyUuid(), db.ForeignKey("pettycashv3.currency_info.id")
     )
     name = db.Column(db.String(100), nullable=False)
     # Onboarding Step 1 contact details for the company (not the signed-up
@@ -38,7 +38,7 @@ class Entity(db.Model):
     timezone = db.Column(db.String(30))
     note = db.Column(db.Text)
     status = db.Column(
-        db.Enum(EntityStatus, name="entity_status", schema="pettycashv2", native_enum=True,
+        db.Enum(EntityStatus, name="entity_status", schema="pettycashv3", native_enum=True,
                 create_type=False, values_callable=lambda e: [m.value for m in e]),
         nullable=False, default=EntityStatus.ONBOARDING,
     )
@@ -61,7 +61,7 @@ class Entity(db.Model):
     last_accessed_at = db.Column(db.DateTime(timezone=True), nullable=True)
     last_accessed_by_user_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv2.user.id", ondelete="SET NULL"),
+        db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"),
         nullable=True,
     )
     xero_tenant_name = db.Column(db.String(255), nullable=True)
@@ -76,7 +76,7 @@ class Entity(db.Model):
     # publish uses (replaces the old user.xero_entity_id, C1).
     connected_by_user_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv2.user.id", ondelete="RESTRICT"),
+        db.ForeignKey("pettycashv3.user.id", ondelete="RESTRICT"),
         nullable=True,
     )
     xero_contact = db.relationship(

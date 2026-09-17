@@ -29,7 +29,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
         db.UniqueConstraint(
             "entity_id", "function_code", name="uq_ems_entity_function"
         ),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -37,14 +37,14 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     # --- identity ---
     entity_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.entities.id"),
+        db.ForeignKey("pettycashv3.entities.id"),
         nullable=False,
         index=True,
     )
     function_code = db.Column(db.String(100), nullable=False, index=True)  # PETTY_CASH / BILL
     payer_user_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        db.ForeignKey("pettycashv3.user.id"),
         nullable=False,
         index=True,
     )

@@ -4,7 +4,7 @@ from models.db import db
 
 
 class CountryInfo(db.Model):
-    """Mirror of pettycashv2.country_info.
+    """Mirror of pettycashv3.country_info.
 
     country_code (ISO 3166-1 alpha-2) is the primary key; alpha3_code carries
     the alpha-3 code. currency_id links to the currency registry (ON DELETE
@@ -12,12 +12,12 @@ class CountryInfo(db.Model):
     """
 
     __tablename__ = "country_info"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
     country_code = db.Column(db.CHAR(2), primary_key=True)
     alpha3_code = db.Column(db.CHAR(3), nullable=False)
     country_name_en = db.Column(db.String(100), nullable=False)
     currency_id = db.Column(
-        UUID(as_uuid=False), db.ForeignKey("pettycashv2.currency_info.id")
+        UUID(as_uuid=False), db.ForeignKey("pettycashv3.currency_info.id")
     )
     phone_code = db.Column(db.String(10))
     is_active = db.Column(db.Boolean, nullable=False, default=True)

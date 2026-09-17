@@ -75,7 +75,7 @@ class PayerBillingGroup(TimestampMixin, db.Model):
         # ``uq_entity_billing_group_entity_payer``, which is where the claim is recorded.
         db.Index("ix_payer_billing_group_payer", "payer_user_id"),
         db.Index("ix_payer_billing_group_dunning", "dunning_started_at"),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -83,7 +83,7 @@ class PayerBillingGroup(TimestampMixin, db.Model):
     # make. A group can be nominated before the payer has ever been charged.
     payer_user_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        db.ForeignKey("pettycashv3.user.id"),
         nullable=False,
     )
     # ``pm_...``, and the card this account CHARGES — the default among whatever

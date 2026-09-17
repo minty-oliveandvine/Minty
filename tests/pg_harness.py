@@ -20,10 +20,10 @@ Knobs:
     MINTY_TEST_SCHEMA_SQL  path to the schema file           default docs/schema/01_schema_rebased.sql
     PG_BIN                 directory holding psql.exe        default: PATH, then C:\\Program Files\\PostgreSQL\\*\\bin
 
-The file creates schema ``pettycash_test``; the models say ``pettycashv2``. The build
-ends with ``ALTER SCHEMA pettycash_test RENAME TO pettycashv2`` — the same rename-swap
-the production cutover uses (docs/modernisation_plan.md, Part 1 phase E) — so the
-harness exercises exactly the mechanism production will. Enum types, the
+The file creates schema ``pettycash_test``; the models say ``pettycashv3``. The build
+ends with ``ALTER SCHEMA pettycash_test RENAME TO pettycashv3`` — the same rename the
+rehearsal ends with before the schema is dumped for Supabase (docs/modernisation_plan.md,
+Part 1 phase E; ``pettycashv3`` is the permanent name, decided 2026-09-16). Enum types, the
 ``set_updated_at`` trigger function and the ``tracker`` view travel with the schema;
 nothing in the file names the schema inside a function body, so the rename is safe.
 
@@ -45,7 +45,7 @@ from urllib.parse import urlsplit, urlunsplit
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA_SQL = REPO_ROOT / "docs" / "schema" / "01_schema_rebased.sql"
 BUILT_SCHEMA = "pettycash_test"  # what 01_schema_rebased.sql creates
-APP_SCHEMA = "pettycashv2"       # what every model's __table_args__ says
+APP_SCHEMA = "pettycashv3"       # what every model's __table_args__ says
 
 
 def enabled() -> bool:
@@ -109,9 +109,9 @@ def build_schema(db_uri: str, schema_sql: Path = DEFAULT_SCHEMA_SQL, rename_to: 
     """Run ``01_schema_rebased.sql`` into an EXISTING database and return the table count.
 
     The file drops and recreates ``pettycash_test``; whatever else the database
-    holds (a ``pettycashv2`` being migrated, say) is untouched. ``rename_to``
+    holds (a ``pettycashv3`` being migrated, say) is untouched. ``rename_to``
     applies the cutover's rename-swap afterwards — the test suite asks for
-    ``pettycashv2`` so the models see the schema they name; the migration
+    ``pettycashv3`` so the models see the schema they name; the migration
     rehearsal (scripts/pettycash_test/rehearse.py) leaves it as built, because
     its loaders address ``pettycash_test`` explicitly.
     """

@@ -22,7 +22,7 @@ DUMP = os.environ.get("MINTY_REHEARSAL_DUMP")
 pytestmark = pytest.mark.pipeline
 
 
-@pytest.mark.skipif(not DUMP, reason="set MINTY_REHEARSAL_DUMP to a pg_dump -Fc of pettycashv2")
+@pytest.mark.skipif(not DUMP, reason="set MINTY_REHEARSAL_DUMP to a pg_dump -Fc of pettycashv3")
 def test_rehearsal_is_all_green(tmp_path: Path) -> None:
     dbname = os.environ.get("MINTY_REHEARSAL_DB", "pcreh_pytest")
     proc = subprocess.run(

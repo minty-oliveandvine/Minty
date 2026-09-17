@@ -252,7 +252,7 @@ class TestAllZeroCashCountIsDistinguishable:
 
         Uses fakes rather than the sqlite fixture, matching
         test_report_deposit_change.py — the models are schema-qualified
-        (pettycashv2.*) and sqlite has no schemas.
+        (pettycashv3.*) and sqlite has no schemas.
         """
         from blueprints.report.services import cash_denominations as cd
 

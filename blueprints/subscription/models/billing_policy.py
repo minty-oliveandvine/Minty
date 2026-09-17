@@ -14,7 +14,7 @@ class BillingPolicy(db.Model):
     """Singleton (``id`` is always 1). Commercial policy, not arithmetic."""
 
     __tablename__ = "billing_policy"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": "pettycashv3"}
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=False, default=1)
 

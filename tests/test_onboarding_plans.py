@@ -28,7 +28,7 @@ _schema_attached = False
 def db_session(app):
     """A live schema for the catalog queries (EntityFunction / CurrencyInfo).
 
-    Mirrors tests/test_entity_create.py: the models live in the ``pettycashv2``
+    Mirrors tests/test_entity_create.py: the models live in the ``pettycashv3``
     schema, so attach it in memory before create_all.
     """
     global _schema_attached
@@ -38,7 +38,7 @@ def db_session(app):
         if not _schema_attached:
             with db.engine.connect() as conn:
                 try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
+                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
                     conn.commit()
                 except Exception:
                     pass

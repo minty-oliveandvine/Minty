@@ -42,20 +42,20 @@ class EntityBillingConsent(CreatedAtMixin, db.Model):
         db.UniqueConstraint(
             "entity_id", "user_id", name="uq_entity_billing_consent_entity_user"
         ),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.entities.id"),
+        db.ForeignKey("pettycashv3.entities.id"),
         nullable=False,
     )
     # Who agreed. FK to user (not user_stripe_customer) for the same reason the
     # subscription mirror does it: consent can be recorded before a customer exists.
     user_id = db.Column(
         db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        db.ForeignKey("pettycashv3.user.id"),
         nullable=False,
         index=True,
     )

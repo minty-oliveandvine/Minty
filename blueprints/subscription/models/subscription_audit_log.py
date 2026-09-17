@@ -21,19 +21,19 @@ class SubscriptionAuditLog(CreatedAtMixin, db.Model):
     __table_args__ = (
         db.Index("ix_sub_audit_entity_created", "entity_id", "created_at"),
         db.Index("ix_sub_audit_payer_created", "payer_user_id", "created_at"),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.entities.id"), nullable=False
+        db.String(36), db.ForeignKey("pettycashv3.entities.id"), nullable=False
     )
     function_code = db.Column(db.String(100), nullable=False)
     payer_user_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.user.id"), nullable=False
+        db.String(36), db.ForeignKey("pettycashv3.user.id"), nullable=False
     )
     actor_user_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.user.id"), nullable=True
+        db.String(36), db.ForeignKey("pettycashv3.user.id"), nullable=True
     )
 
     action = db.Column(db.String(20), nullable=False)  # cancel / uncancel / transfer_*

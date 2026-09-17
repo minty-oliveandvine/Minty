@@ -11,10 +11,10 @@ class AccountInfo(db.Model):
             "xero_account_id",
             name="uq_account_info_entity_xero_account",
         ),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
-    entity_id = db.Column(db.String(36), db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"))
+    entity_id = db.Column(db.String(36), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"))
     type = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(80), nullable=False)
     xero_account_id = db.Column(db.String(36))

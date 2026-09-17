@@ -34,13 +34,13 @@ class SubscriptionEmailLog(CreatedAtMixin, db.Model):
         # same job must collide here rather than both deciding they are first.
         db.UniqueConstraint("event", "dedupe_key", name="uq_sub_email_event_key"),
         db.Index("ix_sub_email_user_created", "user_id", "created_at"),
-        {"schema": "pettycashv2"},
+        {"schema": "pettycashv3"},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # The payer. Nullable FK is wrong here — an email with no recipient is not a row.
     user_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.user.id"), nullable=False
+        db.String(36), db.ForeignKey("pettycashv3.user.id"), nullable=False
     )
     event = db.Column(db.String(40), nullable=False)
     # Whatever makes this send unique for this event: a renewal period key, a dunning
