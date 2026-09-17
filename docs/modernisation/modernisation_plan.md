@@ -848,20 +848,20 @@ Each unit gets its own short plan (files, tests, gate) when it starts; C1's is t
   **all green twice on the production dataset** (`pcreh_full`, `pcreh_full2`; 137–159 s ⇒ a 5-minute
   window) and a third time as `minty_cleanse`. The eight data traps the real dataset held are handled
   and asserted (see memory `minty-one-hop-pipeline`).
-- **Step 4 done 2026-09-17** (record: `phase_d_step4_20260917.md` beside this file). A fresh
-  rehearsal into `minty_d4` from the 09-16 dump on the current `01` and the closed phase C code:
-  ALL GREEN in 247 s (restore 3.2 · upgrade 30.2 · build 0.7 · 00 0.2 · 02 2.2 · 03 202.8 ·
-  04 2.0 · 04+ 4.1 · manifest 1.7), then `ALTER SCHEMA pettycash_test RENAME TO pettycashv3`.
-  Against it: audit 0 in all three repos; the three apps repointed (`.env` files, restored
-  afterwards); Minty 1677 / billing-backend 441 / onboarding-backend 369 on Postgres; Minty e2e
-  19, billing-frontend e2e 13, onboarding e2e 23 (twice). The manual checklist as queries: a real
-  superadmin signs in, the admin dashboard and the 88-company list render, the three chosen
-  companies answer "Module not active" (the decided `m1a01` state); **125 entity-months of
-  report totals over the last 3 months identical to the cent** (2,498 reports; the old side is
-  float with residue, the new is `numeric`); 930 bills / 929 lines / 4,656 audit rows identical,
-  three companies identical per status; 0 subscription rows on both sides. The 47 `m1a01`
-  companies are listed in the record for the runbook. One fix, in `onboarding/e2e/xeroFake.ts`
-  (a `/state` poll the browser abandoned mid-navigation failed a spec intermittently).
+- **Step 4 done 2026-09-17.** A fresh rehearsal into `minty_d4` from the 09-16 dump on the
+  current `01` and the closed phase C code: ALL GREEN in 247 s (restore 3.2 · upgrade 30.2 ·
+  build 0.7 · 00 0.2 · 02 2.2 · 03 202.8 · 04 2.0 · 04+ 4.1 · manifest 1.7), then
+  `ALTER SCHEMA pettycash_test RENAME TO pettycashv3`. Against it: audit 0 in all three repos;
+  the three apps repointed (`.env` files, restored afterwards); Minty 1677 / billing-backend 441 /
+  onboarding-backend 369 on Postgres; Minty e2e 19, billing-frontend e2e 13, onboarding e2e 23
+  (twice). The manual checklist as queries: a real superadmin signs in, the admin dashboard and
+  the company list render, the sampled companies answer "Module not active" (the `m1a01` state
+  as then decided); report totals over the last 3 months identical to the cent for every
+  entity-month (the old side is float with residue, the new is `numeric`); bills, lines and
+  audit rows identical in count and per status; 0 subscription rows on both sides. The list of
+  `m1a01` companies is produced by the runbook query below, not kept in the repo. One fix, in
+  `onboarding/e2e/xeroFake.ts` (a `/state` poll the browser abandoned mid-navigation failed a
+  spec intermittently).
 - **Step 5 done 2026-09-16 on a fresh dump of the old host** (`PROD09162026.backup`, 4,959
   reports, still Alembic `f3a1c2b4d6e8`): `00` caught the two values five weeks had added
   (`partially_published` on 3 Test_1 reports → `failed`; one `Admin` role → normalised, both
