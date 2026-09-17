@@ -151,7 +151,9 @@ def app(built_database) -> Iterator:
     if built_database is not None:
         db_uri = built_database.uri
     else:
-        db_path = os.path.abspath("tmp_test.sqlite")
+        # one file per pytest-xdist worker; the plain name when running serially
+        worker = os.environ.get("PYTEST_XDIST_WORKER")
+        db_path = os.path.abspath(f"tmp_test{'_' + worker if worker else ''}.sqlite")
         db_uri = "sqlite:///" + db_path.replace("\\", "/")
 
     env = {

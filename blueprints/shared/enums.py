@@ -170,6 +170,56 @@ class InvitationStatus(_DbEnum):
     REVOKED = "revoked"
 
 
+class SubscriptionPhase(_DbEnum):
+    """``subscription_phase`` — ``entity_module_subscription.phase`` and the audit log's
+    before/after. The words are ``blueprints.subscription.constants.PHASE_*``."""
+
+    pg_name = nonmember("subscription_phase")
+
+    TRIAL = "trial"
+    ACTIVE = "active"
+    PAST_DUE = "past_due"
+    SCHEDULED_CANCEL = "scheduled_cancel"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class ExtensionState(_DbEnum):
+    """``extension_state`` — the cancel-extension charge. ``deleted`` / ``credited`` /
+    ``refunded`` are legacy terminal states nothing produces today; rows still hold them."""
+
+    pg_name = nonmember("extension_state")
+
+    PENDING = "pending"
+    INVOICED = "invoiced"
+    DELETED = "deleted"
+    CREDITED = "credited"
+    REFUNDED = "refunded"
+
+
+class TransferStatus(_DbEnum):
+    """``transfer_status`` — a change-of-payer offer (``subscription_transfer.status``)."""
+
+    pg_name = nonmember("transfer_status")
+
+    PENDING = "pending"
+    CHARGING = "charging"
+    CHARGED = "charged"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class AuditOutcome(_DbEnum):
+    """``audit_outcome`` — ``subscription_audit_log.outcome``."""
+
+    pg_name = nonmember("audit_outcome")
+
+    SUCCEEDED = "succeeded"
+    ABORTED = "aborted"
+
+
 class CashType(_DbEnum):
     """``cash_type`` — a denomination is a coin or a note."""
 

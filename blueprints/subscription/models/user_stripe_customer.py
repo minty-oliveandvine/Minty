@@ -13,7 +13,10 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
-from blueprints.subscription.models.column_types import uuid_column
+from blueprints.subscription.models.column_types import (
+    tz_datetime,
+    uuid_column,
+)
 
 
 class UserStripeCustomer(TimestampMixin, db.Model):
@@ -22,7 +25,7 @@ class UserStripeCustomer(TimestampMixin, db.Model):
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
-        db.String(36),
+        uuid_column(),
         db.ForeignKey("pettycashv3.user.id"),
         nullable=False,
         unique=True,
@@ -40,7 +43,7 @@ class UserStripeCustomer(TimestampMixin, db.Model):
     # later period — the exact bug the engine is built to avoid.
     #
     # Null until the payer's first paid module: an app-level trial has no cycle.
-    anchor_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    anchor_at = db.Column(tz_datetime(), nullable=True)
     # Billing currency, fixed at the first charge — a payer's invoices must not mix.
     currency = db.Column(
         db.CHAR(3),

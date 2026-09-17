@@ -61,7 +61,10 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
-from blueprints.subscription.models.column_types import uuid_column
+from blueprints.subscription.models.column_types import (
+    tz_datetime,
+    uuid_column,
+)
 
 
 class PayerBillingGroup(TimestampMixin, db.Model):
@@ -82,7 +85,7 @@ class PayerBillingGroup(TimestampMixin, db.Model):
     # FK to ``user``, not to ``user_stripe_customer`` — the same choice the module rows
     # make. A group can be nominated before the payer has ever been charged.
     payer_user_id = db.Column(
-        db.String(36),
+        uuid_column(),
         db.ForeignKey("pettycashv3.user.id"),
         nullable=False,
     )
@@ -120,11 +123,11 @@ class PayerBillingGroup(TimestampMixin, db.Model):
     #
     # NULL until this card has actually collected something. ``due_renewals`` skips a
     # NULL, which is what stops a freshly nominated card being billed for history.
-    paid_through = db.Column(db.DateTime(timezone=True), nullable=True)
+    paid_through = db.Column(tz_datetime(), nullable=True)
 
     # Anchor for the whole retry schedule, and deliberately not "last attempt at" — see
     # ``services.dunning``. NULL = this card is not in collection.
-    dunning_started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    dunning_started_at = db.Column(tz_datetime(), nullable=True)
     dunning_attempts = db.Column(db.Integer, nullable=False, server_default="0")
 
     def __repr__(self):

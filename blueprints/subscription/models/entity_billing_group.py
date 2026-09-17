@@ -48,13 +48,13 @@ class EntityBillingGroup(TimestampMixin, db.Model):
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
-        db.String(36),
+        uuid_column(),
         db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
         nullable=False,
     )
     # Whose nomination this is. FK to ``user`` for the same reason the group's is.
     payer_user_id = db.Column(
-        db.String(36),
+        uuid_column(),
         db.ForeignKey("pettycashv3.user.id"),
         nullable=False,
     )

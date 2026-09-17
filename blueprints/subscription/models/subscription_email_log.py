@@ -21,7 +21,9 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin
-from blueprints.subscription.models.column_types import uuid_column
+from blueprints.subscription.models.column_types import (
+    uuid_column,
+)
 
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
@@ -40,7 +42,7 @@ class SubscriptionEmailLog(CreatedAtMixin, db.Model):
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # The payer. Nullable FK is wrong here — an email with no recipient is not a row.
     user_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv3.user.id"), nullable=False
+        uuid_column(), db.ForeignKey("pettycashv3.user.id"), nullable=False
     )
     event = db.Column(db.String(40), nullable=False)
     # Whatever makes this send unique for this event: a renewal period key, a dunning

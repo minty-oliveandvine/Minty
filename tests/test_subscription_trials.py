@@ -108,6 +108,9 @@ def _setup(monkeypatch, *, existing_row=None, now=None, anchor=None, paid=True):
     cycle = {"anchor": anchor}
 
     monkeypatch.setattr(f"{_CATALOG}.plan_for_module", lambda code: _plan(code))
+    # "no mapping row" makes _resolve_customer_id ask Stripe by search; these are unit
+    # tests, so Stripe has never heard of anyone (the two no-customer tests depend on it)
+    monkeypatch.setattr(checkout, "find_customer_by_user", lambda uid: None)
     monkeypatch.setattr(store, "module_row", lambda eid, code: existing_row)
     # Default these tests to a CONSENTED entity so they keep testing what they're about
     # (conversion mechanics). The consent gate itself is covered separately.
@@ -667,6 +670,12 @@ def test_module_card_surfaces_an_app_level_trial(app, monkeypatch):
         function_code = _Column()
 
     monkeypatch.setattr(modules_mod, "EntityFunction", _FakeEntityFunction)
+    # the cards live in subscription/services/cards.py (modules.py is a re-export shim) and
+    # bind EntityFunction themselves; patching the shim alone left the real query running
+    # against whatever tables an earlier test had happened to create
+    from blueprints.subscription.services import cards as cards_mod
+
+    monkeypatch.setattr(cards_mod, "EntityFunction", _FakeEntityFunction)
     monkeypatch.setattr(modules_mod, "MODULE_CODES", ("PETTY_CASH",))
     monkeypatch.setattr(modules_mod, "_entity_customer_id", lambda eid: None)
     monkeypatch.setattr(store, "module_rows_for_entity", lambda eid: [_TrialRow()])

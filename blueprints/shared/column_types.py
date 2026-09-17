@@ -29,7 +29,7 @@ import uuid
 
 from sqlalchemy import CHAR, Numeric
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.types import TypeDecorator
+from sqlalchemy.types import DateTime, TypeDecorator
 
 
 class MintyUuid(TypeDecorator):
@@ -93,3 +93,24 @@ def cents(value) -> float:
     column does not need to.
     """
     return round(float(value or 0), 2)
+
+
+class AwareDateTime(TypeDecorator):
+    """``timestamptz`` that always comes back timezone-aware.
+
+    Postgres returns an aware datetime for a ``timestamp with time zone`` column; SQLite
+    (the test path until C10) returns it naive, and the billing layer refuses a naive
+    stamp rather than guess a zone (``billing._require_aware``). The subscription services
+    had grown per-caller ``_aware()`` repairs for that; the type does it once, on the way
+    out. Naive values are UTC - which is what every writer in the application stores.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            from datetime import timezone
+
+            return value.replace(tzinfo=timezone.utc)
+        return value
