@@ -238,7 +238,7 @@ def settings_url(entity_id) -> str:
 # a masthead that is broken by default.
 
 LOGO_CID = "minty-logo"
-#: Built by ``scripts/build_email_assets.py`` from ``static/img/new_logo.png``, not that
+#: Built by ``scripts/subscription/build_email_assets.py`` from ``static/img/new_logo.png``, not that
 #: file itself: the source is a padded 571x379 canvas weighing 98KB, and this one is
 #: attached to EVERY message the billing system sends. Trimmed and downsized it is ~19KB.
 LOGO_PATH = ("img", "email", "logo.png")
@@ -252,7 +252,7 @@ ILLUSTRATION_CID = "minty-art"
 def illustration_path(event: str) -> tuple[str, ...]:
     """Where ``event``'s illustration lives under ``static/``.
 
-    Built by ``scripts/build_email_assets.py``, which trims and downsizes the source art;
+    Built by ``scripts/subscription/build_email_assets.py``, which trims and downsizes the source art;
     the files here are ~10-40KB, not the ~1MB originals in ``static/img``.
     """
     return ("img", "email", f"{event}.png")
