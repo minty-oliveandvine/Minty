@@ -18,6 +18,7 @@ from blueprints.shared.entity_display import entity_badge_data
 from models.db import Entity, Report, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
+from blueprints.shared.column_types import cents
 
 
 @report_bp.route("/report/cash_count", methods=["GET", "POST"])
@@ -85,7 +86,6 @@ def report_cash_count(id=None):
                 Report.expenses,
                 Report.bank_deposit,
                 Report.closing_balance,
-                Report.receipt_files,
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
@@ -311,15 +311,15 @@ def report_cash_count(id=None):
 
             # Calculate discrepancy: expected cash count balance - cash count
             # balance - safe box balance
-            discrepancy = (
-                total_cash_count - expected_cash_count_balance
-            ) + safe_box_balance
+            discrepancy = cents(
+                (total_cash_count - expected_cash_count_balance) + safe_box_balance
+            )
             actual_cash_total = total_cash_count
             # Determine discrepancy type and amount
             if (
                 discrepancy < -0.01 or discrepancy > 0.01
             ):  # Use small threshold to avoid floating point issues
-                discrepancy_type = "shortage" if discrepancy < 0 else "surplus"
+                discrepancy_type = "short" if discrepancy < 0 else "over"
                 discrepancy_amount = discrepancy
             else:
                 discrepancy_type = "none"
@@ -353,12 +353,8 @@ def report_cash_count(id=None):
             current_draft.discrepancy_type = discrepancy_type
             current_draft.safe_box_balance = safe_box_balance
             # report.actual_cash_total had NO writer before Step 3.5. r1a01
-            # hoisted the column and opening.py prefers it, but every
-            # assignment targeted cashcount_draft and the draft mirror
-            # deliberately excluded this column — so the preferred read always
-            # found NULL and fell through. It seeds the NEXT report's opening
-            # balance, so without this the Step 4 drop would silently zero it.
-            current_draft.actual_cash_total = total_cash_count
+            # actual_cash_total is derived: the sum of the report_cash_count rows written
+            # below (Report.actual_cash_total). Nothing to store here.
 
             logger.info(
                 f"  Updated current_draft.discrepancy_amount: {current_draft.discrepancy_amount}"

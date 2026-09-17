@@ -1,4 +1,6 @@
 <!-- Reusable Stepper Component -->
+{# NULL on legacy drafts: never iterate None #}
+{% set completed_sections = completed_sections or [] %}
 {# current_page: The page user is currently viewing (for UI highlighting) #}
 {% set current_page = current_section %}
 {# latest_step: The latest step reached in the draft (for Continue Report navigation) #}
@@ -9,9 +11,6 @@
 {# Priority 2: Check if org.draft_current_section exists (dashboard context) #}
 {% elif org is defined and org.draft_current_section %}
   {% set latest_step = org.draft_current_section %}
-{# Priority 3: Check if report_draft exists (alternative variable name) #}
-{% elif report_draft is defined and report_draft and report_draft.current_section %}
-  {% set latest_step = report_draft.current_section %}
 {# Priority 4: Check if existing_draft exists (another alternative) #}
 {% elif existing_draft is defined and existing_draft and existing_draft.current_section %}
   {% set latest_step = existing_draft.current_section %}

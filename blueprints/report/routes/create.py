@@ -169,18 +169,16 @@ def create_report():
                 next_transaction_date=next_transaction_date,
                 opening_balance=opening_balance,
                 cash_addition=cash_addition,
-                # cash_sales stays a column — separate concept from the
-                # catalog-driven methods, with its own totals branch.
-                cash_sales=shop_sales_data.get("cash", 0),
-                # Aggregates are cheap caches, read in ~20 places.
-                shop_sales=total_shop_sales,
-                delivery_sales=total_delivery_sales,
+                # the stored aggregates: cash, everything-but-cash, and their sum;
+                # shop/delivery come from the report_sale rows written below
+                cashsale_total=shop_sales_data.get("cash", 0),
+                nocashsale_total=total_sales - shop_sales_data.get("cash", 0),
                 total_sales=total_sales,
-                expenses=total_expenses,
+                expense_total=total_expenses,
                 bank_deposit=bank_deposit,
                 closing_balance=closing_balance,
-                uploaded_by=current_user.username,
-                company=entity_id,
+                created_by=current_user.id,
+                entity_id=entity_id,
             )
 
             db.session.add(report)

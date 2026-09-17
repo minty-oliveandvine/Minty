@@ -27,9 +27,14 @@ RETIRED: dict[str, tuple[str, ...]] = {
     # C3 retires the per-company copies of the catalogue's columns and the old type words.
     # ``value_name`` itself STAYS (it is the form-field convention, now on sale_info).
     "C3": ("sale_info_id", "legacy_column", "create_date"),
-    # "C4": ("cash_sales", "shop_sales", "delivery_sales", "receipt_files", "uploaded_by",
-    #        "xero_integrated_yes", "withdrawal_type", "withdrawal_bank_account",
-    #        "actual_cash_total", "shop_expense", "report_sale_detail"),
+    # C4 retires what the report no longer has. ``cash_sales`` / ``expenses`` / ``uploaded_by`` /
+    # ``xero_integrated_yes`` / ``withdrawal_type`` STAY as model synonyms (and ``cash_sales``
+    # is the form-field convention); ``shop_sales`` / ``delivery_sales`` / ``actual_cash_total``
+    # stay as derived hybrids. ``partially_published`` went with the enum (``posted`` is an
+    # English word in comments, so it is checked by hand). ``item_code`` is still posted by
+    # expense.html's form and dropped by the model - the JS field is C4 leftover, not a column.
+    "C4": ("receipt_files", "withdrawal_bank_account", "shop_expense", "report_sale_detail",
+           "report_draft", "partially_published"),
     # "C5": ("sync_statuc", "xero_reponse_text"),
     # "C6": ("role_permissions", "invitations"),
 }

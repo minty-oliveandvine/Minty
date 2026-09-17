@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import uuid
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import time
 import requests
 
@@ -15,6 +15,7 @@ from loguru import logger
 
 from blueprints.report.services.shared import update_report_after_deposit_change
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
+from blueprints.shared.enums import DiscrepancyType, ReportStatus
 from models.db import (AccountInfo, Report, ReportHistory, User, XeroReportSync, Entity, ShopExpense, XeroContactSync, db)
 from services.auth.token_service import ensure_valid_token, resolve_xero_token
 from services.helpers.xero_bridge import (get_entity_account_settings,
@@ -1058,11 +1059,11 @@ def upload_each_file(expense, entity, bank_transction_id, access_token=None):
                 logger.error("current_user not available and no access_token provided for file upload")
                 return False
 
-        if not expense or not expense.files:
+        if not expense or not expense.s3_key:
             logger.warning("No file found for expense, skipping upload")
             return False
 
-        file_url = expense.files
+        file_url = expense.s3_key  # the first receipt's key
         file_format = file_url.split(".")[-1]
         file_name = (expense.remarks or expense.item) + "." + file_format
         file_name = file_name.replace(" ", "_")
@@ -1605,18 +1606,19 @@ def xero_discrepancy(entity_id, report, date, access_token=None, pfr=None, exist
         discrepancy_type = report.discrepancy_type
 
         # Validate discrepancy_type is set correctly
-        if not discrepancy_type or discrepancy_type not in ["surplus", "shortage"]:
+        discrepancy_type = DiscrepancyType.normalize(discrepancy_type).value if discrepancy_type else None
+        if not discrepancy_type or discrepancy_type not in ["over", "short"]:
             logger.error(
                 f"Invalid or missing discrepancy_type '{discrepancy_type}' for report {report.id}. "
-                f"Expected 'surplus' or 'shortage'"
+                f"Expected 'over' or 'short'"
             )
             _record_module_error(pfr, "Discrepancy", "the discrepancy type is not set")
             return (0, 1)
 
         # Set Xero transaction type based on discrepancy type
-        if discrepancy_type == "shortage":
+        if discrepancy_type == "short":
             type = "SPEND"
-        elif discrepancy_type == "surplus":
+        elif discrepancy_type == "over":
             type = "RECEIVE"
         else:
             # This should never happen due to validation above, but adding as safety check
@@ -1816,7 +1818,7 @@ def _sweep_removed_objects(entity_id, posted_report, org_id, access_token, pfr):
         # Entity-level modules whose amount has since gone to zero.
         zeroed = []
         if not (posted_report.discrepancy_amount and posted_report.discrepancy_type
-                in ("surplus", "shortage")):
+                in ("over", "short")):
             zeroed.append(("discrepancy", "BANK_TRANSACTION"))
         if not (posted_report.cash_sales and posted_report.cash_sales > 0):
             zeroed.append(("invoices", "INVOICE"))
@@ -2027,7 +2029,7 @@ def xero_integrated_module(entity_id, date, posted_report, access_token=None, re
         #Discrepancy
         if (posted_report.discrepancy_amount and
             (posted_report.discrepancy_amount > 0 or posted_report.discrepancy_amount < 0) and
-            posted_report.discrepancy_type in ["surplus", "shortage"]):
+            posted_report.discrepancy_type in ["over", "short"]):
             if _should_run("discrepancy"):
                 _record("discrepancy", xero_discrepancy(
                     entity_id, posted_report, date, access_token=access_token, pfr=pfr,
@@ -2378,10 +2380,8 @@ def _set_report_processing_status(
     if publish_message is not None:
         history = ReportHistory(
             report_id=report.id,
-            company=report.company,
             user_id=user_id,
             action=publish_message,
-            timestamp=datetime.now(),
         )
         db.session.add(history)
     return report
@@ -2394,8 +2394,8 @@ def process_xero_integration_background(
     Background function to process Xero integration without blocking the HTTP request.
 
     ``prior_status`` is the report's publishing_status *before* this run flipped it
-    to "processing".  When it is "partially_published" we do a *selective
-    re-publish*: only the parts that failed last time are retried, so already-
+    to "publishing".  When it is "failed" we look at the history for the parts that
+    DID land and do a *selective re-publish*: only the rest is retried, so already-
     published transactions are never posted to Xero again.
     """
     try:
@@ -2440,7 +2440,7 @@ def process_xero_integration_background(
                 # Selective re-publish: when re-publishing a partial report, only
                 # retry the parts that didn't make it to Xero last time.
                 retry_filter = None
-                if prior_status == "partially_published":
+                if prior_status == "failed":
                     recent_history = (
                         ReportHistory.query.filter(
                             ReportHistory.report_id == report_id,
@@ -2491,33 +2491,33 @@ def process_xero_integration_background(
                     return
 
                 if failed == 0:
-                    # Everything attempted landed in Xero (or nothing to publish).
-                    posted_report.xero_integrated_yes = True
+                    # Everything attempted landed in Xero (or nothing to publish): the report
+                    # is PUBLISHED - the report_status word, not only the integration flag.
+                    posted_report.xero_integrated = True
                     posted_report.publishing_status = "completed"
+                    posted_report.status = ReportStatus.PUBLISHED
+                    posted_report.published_at = datetime.now(timezone.utc)
                     db.session.add(
                         ReportHistory(
                             report_id=posted_report.id,
-                            company=posted_report.company,
                             user_id=user.id,
                             action="published",
-                            timestamp=datetime.now(),
                         )
                     )
                 else:
                     # Some or all transactions failed.  Distinguish a full
                     # failure from a partial publish (some succeeded, some not).
-                    posted_report.xero_integrated_yes = False
+                    posted_report.xero_integrated = False
+                    # publish_status has no 'partially_published' (schema): a partial publish is
+                    # 'failed' with the history saying which parts landed, and the next publish
+                    # retries only the rest (retry_filter above).
+                    posted_report.publishing_status = "failed"
                     if selective or succeeded > 0:
-                        # Selective re-publish always keeps the report partial when
-                        # anything remains: earlier parts are already live in Xero,
-                        # so it can never regress to a full "failed".
-                        posted_report.publishing_status = "partially_published"
                         logger.warning(
                             "Xero publish partial for report "
                             f"{posted_report.id}: {succeeded} ok, {failed} failed. "
                             f"Reasons: {reasons}")
                     else:
-                        posted_report.publishing_status = "failed"
                         failed_modules = [
                             key for key, val in modules.items()
                             if val.get("status") != "success"
@@ -2528,11 +2528,9 @@ def process_xero_integration_background(
                     db.session.add(
                         ReportHistory(
                             report_id=posted_report.id,
-                            company=posted_report.company,
                             user_id=user.id,
                             action=PublishFailureReason.HISTORY_ACTION_LABEL,
                             new_value=json.dumps(reason_items),
-                            timestamp=datetime.now(),
                         )
                     )
                 db.session.commit()

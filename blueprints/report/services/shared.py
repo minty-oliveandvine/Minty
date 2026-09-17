@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.shared.enums import SaleType
-from models.db import (Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
+from models.db import (Report, ReportSale, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 
@@ -23,93 +23,8 @@ parse_nested_keys = _parse_nested_keys
 # not every column: this is the identity//balance core needed for the row to be
 # a valid FK parent and to render, not a full copy. The submit path still owns
 # the authoritative field-by-field copy (ending.py:1418).
-_DRAFT_MIRROR_FIELDS = (
-    "transaction_date",
-    "next_transaction_date",
-    "opening_balance",
-    "cash_addition",
-    "adjusted_opening_balance",
-    "cash_sales",
-    "shop_sales",
-    "delivery_sales",
-    "total_sales",
-    "expenses",
-    "bank_deposit",
-    "closing_balance",
-    "uploaded_by",
-    "company",
-    "status",
-    "current_section",
-    "completed_sections",
-    "withdrawal_type",
-    "withdrawal_bank_account",
-)
-
-
-def ensure_report_row_for_draft(draft, commit=False):
-    """Create the paired ``report`` row for ``draft`` if it does not exist yet.
-
-    A draft and its report share one id (ending.py:387 joins on exactly that),
-    so this is an existence check on the primary key, not a search.
-
-    Why this exists: report_sale_detail and report_expense_detail rows are
-    written all through data entry, keyed on the draft id, but until now a
-    ``report`` row only appeared at submit (ending.py:1418). That left every
-    in-progress draft's detail rows pointing at an id with no parent — which is
-    why Stage 2a had to drop those FKs, and why Stage 3 cannot put them back
-    until a report row exists from creation onward. This closes that gap.
-
-    The row is created with ``status='draft'``. It is NOT a submitted report and
-    nothing should treat it as one: every reader that means "submitted" filters
-    on status, and the ones that do not are being migrated in a later substage.
-    ``expenses`` and ``closing_balance`` are copied as-is, NULL included, which
-    r3a03 made possible by relaxing those two NOT NULLs.
-
-    Idempotent and non-fatal: returns the existing row if there is one, and
-    never raises into the caller's request — a failure here must not block the
-    draft write that prompted it.
-    """
-    if draft is None or not getattr(draft, "id", None):
-        return None
-    try:
-        existing = Report.query.get(draft.id)
-        if existing is not None:
-            return existing
-
-        values = {f: getattr(draft, f, None) for f in _DRAFT_MIRROR_FIELDS}
-        # `company` and `transaction_date` stay NOT NULL on report (they are
-        # always known at draft creation); bail rather than raise if a caller
-        # somehow has neither.
-        if not values.get("company") or not values.get("transaction_date"):
-            logger.warning(
-                f"ensure_report_row_for_draft: draft {draft.id} lacks company/"
-                "transaction_date; skipping report row"
-            )
-            return None
-        # opening_balance is NOT NULL on report but nullable on the draft.
-        if values.get("opening_balance") is None:
-            values["opening_balance"] = 0.0
-        values.setdefault("status", "draft")
-        if not values.get("status"):
-            values["status"] = "draft"
-
-        report = Report(id=draft.id, **values)
-        db.session.add(report)
-        if commit:
-            db.session.commit()
-        else:
-            db.session.flush()
-        logger.info(
-            f"Created draft-shaped report row {report.id} "
-            f"(status={values['status']}) alongside its draft"
-        )
-        return report
-    except Exception as exc:
-        logger.error(
-            f"ensure_report_row_for_draft failed for draft "
-            f"{getattr(draft, 'id', '?')}: {exc}"
-        )
-        return None
+# ensure_report_row_for_draft / _DRAFT_MIRROR_FIELDS went with C4: the row IS the draft since
+# Stage 4a, nothing called the mirror any more, and it spoke the pre-redesign column names.
 
 
 def header_publishing_status_for(
@@ -457,13 +372,13 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
             opening_balance=amount,
             cash_addition=0.0,
             adjusted_opening_balance=adjusted,
-            cash_sales=0.0, shop_sales=0.0,
-            delivery_sales=0.0, total_sales=0.0, expenses=0.0, bank_deposit=0.0,
+            cashsale_total=0.0, nocashsale_total=0.0, total_sales=0.0,
+            expense_total=0.0, bank_deposit=0.0,
             closing_balance=adjusted,
             current_section="opening",  # start the first report at opening
             completed_sections=[],
-            uploaded_by=username,
-            company=entity_id,
+            uploaded_by=username,  # resolved to created_by by the model
+            entity_id=entity_id,
             status="draft",
         )
         db.session.add(draft)
@@ -657,8 +572,9 @@ def update_report_draft_sales_from_detail(report_draft):
     logger.info(
         f"Updating sales for draft {report_draft.id} from report_sale_detail")
     sales_data = calculate_sales_from_report_sale_detail(report_draft.id)
-    report_draft.shop_sales = sales_data["shop_sales"]
-    report_draft.delivery_sales = sales_data["delivery_sales"]
+    # the stored aggregates: cash, everything-but-cash, and their sum
+    report_draft.cashsale_total = sales_data["cash_sales"]
+    report_draft.nocashsale_total = sales_data["total_sales"] - sales_data["cash_sales"]
     report_draft.total_sales = sales_data["total_sales"]
 
 
@@ -674,18 +590,18 @@ def sum_sales_by_type(report_id):
     its amount (the catalogue row is never deleted, only the company's link is disabled).
     """
     rows = (
-        db.session.query(ReportSaleDetail.amount, ReportSaleDetail.type, SaleInfo.type, SaleInfo.value_name)
+        db.session.query(ReportSaleDetail.amount, SaleInfo.type, SaleInfo.value_name)
         .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
 
     totals = {"electronic": 0.0, "delivery": 0.0, "cash": 0.0}
-    for amount, detail_type, method_type, value_name in rows:
+    for amount, method_type, value_name in rows:
         if value_name == SaleInfo.CASH_VALUE_NAME:
             totals["cash"] += amount or 0.0
             continue
-        sale_type = SaleType.normalize(method_type.value if method_type is not None else detail_type)
+        sale_type = SaleType.normalize(method_type.value if method_type is not None else None)
         if sale_type == SaleType.DELIVERY:
             totals["delivery"] += amount or 0.0
         elif sale_type is not None:
@@ -736,16 +652,7 @@ def write_sales_detail_rows(
                     entity_id, short_name, value,
                 )
                 continue
-            db.session.add(
-                ReportSaleDetail(
-                    sale_id=sale_row.sale_id,
-                    report_id=report_id,
-                    sale_info_id=sale_row.sale_id,
-                    type=(sale_row.type or sale_type).value,
-                    amount=value,
-                    create_at=datetime.now(tz),
-                )
-            )
+            db.session.add(ReportSale(sale_id=sale_row.sale_id, report_id=report_id, amount=value))
             written += 1
 
     logger.info(
@@ -830,13 +737,11 @@ def recalculate_report(report_to_update, *, commit=True):
 
         # Cash is a separate concept with its own column; it is included in
         # shop_sales here exactly as the previous hardcoded sum did.
-        cash_component = totals["cash"] or (report_to_update.cash_sales or 0.0)
+        cash_component = totals["cash"] or (report_to_update.cashsale_total or 0.0)
 
-        report_to_update.shop_sales = totals["electronic"] + cash_component
-        report_to_update.delivery_sales = totals["delivery"]
-        report_to_update.total_sales = (
-            report_to_update.shop_sales + report_to_update.delivery_sales
-        )
+        report_to_update.cashsale_total = cash_component
+        report_to_update.nocashsale_total = totals["electronic"] + totals["delivery"]
+        report_to_update.total_sales = cash_component + report_to_update.nocashsale_total
 
         opening_balance = report_to_update.opening_balance or 0.0
         cash_addition = report_to_update.cash_addition or 0.0
@@ -928,3 +833,18 @@ def update_report_after_deposit_change(report_to_update, new_bank_deposit):
     propagate_opening_balance_to_next_day_draft(report_to_update)
     db.session.commit()
     return recalculated_report
+
+
+def mark_diverged_from_xero(report):
+    """An edit after a Xero publish: the report's figures no longer match what Xero holds.
+
+    The report goes back to ``submitted`` (the word the history page and the badge show)
+    with ``xero_integrated`` off, so it can be published afresh. ``publishing_status`` and
+    ``published_at`` are kept: they are what lets the publish flow warn that Xero already
+    holds a copy and would duplicate every transaction.
+    """
+    from blueprints.shared.enums import ReportStatus
+
+    report.xero_integrated = False
+    if report.status == ReportStatus.PUBLISHED:
+        report.status = ReportStatus.SUBMITTED

@@ -274,8 +274,9 @@ def report_dashboard(id):
     org.has_existing_draft = current_draft is not None
     org.draft_id = current_draft.id if current_draft else None
     org.draft_current_section = current_draft.current_section if current_draft else None
+    # NULL on legacy drafts (6 of 25 in production): the template iterates it
     org.draft_completed_sections = (
-        current_draft.completed_sections if current_draft else []
+        (current_draft.completed_sections or []) if current_draft else []
     )
     org.draft_progress_completed = (
         len(current_draft.completed_sections)
@@ -295,10 +296,12 @@ def report_dashboard(id):
     org.draft_date = earliest_draft_date or (
         current_draft.transaction_date if current_draft else None
     )
+    # "last edited" is updated_at (timestamptz since C4; SQLite hands it back naive)
+    last_edit = current_draft.updated_at or current_draft.created_at if current_draft else None
+    if last_edit is not None and last_edit.tzinfo is None:
+        last_edit = last_edit.replace(tzinfo=timezone.utc)
     org.draft_last_edit_seconds = (
-        int((datetime.now() - current_draft.date).total_seconds())
-        if current_draft
-        else 0
+        int((datetime.now(timezone.utc) - last_edit).total_seconds()) if last_edit is not None else 0
     )
     org.is_new_user = latest_report is None
 

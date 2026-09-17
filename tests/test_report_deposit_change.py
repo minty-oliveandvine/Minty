@@ -54,6 +54,10 @@ def _build_report(**overrides):
         "openrice_sales": 0.0,
         "shop_sales": 0.0,
         "delivery_sales": 0.0,
+        # the schema's stored aggregates (C4); the old names above are the model's synonyms
+        "cashsale_total": 0.0,
+        "nocashsale_total": 0.0,
+        "expense_total": 0.0,
         "total_sales": 0.0,
         "expenses": 0.0,
         "bank_deposit": 5000.0,

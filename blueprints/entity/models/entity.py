@@ -88,6 +88,6 @@ class Entity(db.Model):
     sale_info = db.relationship(
         "EntitySaleSetting", cascade="all, delete-orphan", backref="entity", lazy=True
     )
-    entity_cash_detail_v2 = db.relationship(
-        "EntityCashDetailV2", cascade="all, delete-orphan", backref="entity", lazy=True
+    entity_cash_detail = db.relationship(
+        "EntityCashDetail", cascade="all, delete-orphan", backref="entity", lazy=True
     )

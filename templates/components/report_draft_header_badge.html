@@ -19,19 +19,19 @@
   {% endif %}
 {% endif %}
 
-{# Partial Xero publish — some transactions landed in Xero, some did not. #}
+{# A failed Xero publish (publish_status has no 'partial' word: some transactions may have landed, the history says which). #}
 {% set _partial = false %}
 {% if not _xo %}
-  {% if header_publishing_status is defined and header_publishing_status == 'partially_published' %}
+  {% if header_publishing_status is defined and header_publishing_status == 'failed' %}
     {% set _partial = true %}
-  {% elif current_draft is defined and current_draft and current_draft.publishing_status is defined and current_draft.publishing_status == 'partially_published' %}
+  {% elif current_draft is defined and current_draft and current_draft.publishing_status is defined and current_draft.publishing_status == 'failed' %}
     {% set _partial = true %}
   {% elif report is defined and report %}
     {% if report is mapping %}
-      {% if report.get('publishing_status') == 'partially_published' %}
+      {% if report.get('publishing_status') == 'failed' %}
         {% set _partial = true %}
       {% endif %}
-    {% elif report.publishing_status is defined and report.publishing_status == 'partially_published' %}
+    {% elif report.publishing_status is defined and report.publishing_status == 'failed' %}
       {% set _partial = true %}
     {% endif %}
   {% endif %}
@@ -47,14 +47,14 @@
    report was submitted. `status` is on both models now, so ask it directly. #}
 {% set _status = current_draft.status if (current_draft and current_draft.status is defined) else none %}
 {% set _show_submitted = (not _xo) and (not _is_draft) and (
-  _status == 'posted'
+  _status == 'submitted'
   or (draft_id is defined and draft_id)
 ) %}
 
 {% if _xo %}
 <span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#E6F2FF] text-[#007BFF]">Published</span>
 {% elif _partial %}
-<span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#E6F2FF] text-[#007BFF]">Partially Published</span>
+<span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#E6F2FF] text-[#007BFF]">Publish failed</span>
 {% elif _is_draft %}
 <span class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-[#EBEEF2] text-[#546881]">Draft</span>
 {% elif _show_submitted %}

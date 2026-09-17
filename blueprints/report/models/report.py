@@ -1,82 +1,201 @@
-﻿import uuid
-from datetime import datetime
+import uuid
 from typing import Any, cast
 
-from models.db import db, tz
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import synonym
+
+from blueprints.shared.column_types import MintyUuid, Money, cents, pg_enum
+from blueprints.shared.enums import DiscrepancyType, PublishStatus, ReportStatus
+from models.db import db
 
 
 class Report(db.Model):
+    """One day's petty-cash report for one company (``report`` in the rebased schema).
+
+    Since C4 the columns are the schema's. The names the code grew up with stay usable as
+    synonyms (they compile to the real column in queries too): ``company`` -> ``entity_id``,
+    ``cash_sales`` -> ``cashsale_total``, ``expenses`` -> ``expense_total``,
+    ``xero_integrated_yes`` -> ``xero_integrated``, ``withdrawal_type`` -> ``cash_addition_type``,
+    ``date`` -> ``created_at``. Two figures the old row stored are derived now: ``shop_sales``
+    (cash + electronic) and ``delivery_sales`` come from ``report_sale`` rows; the cash-count
+    total is the sum of the ``report_cash_count`` rows (``actual_cash_total``). Gone:
+    ``receipt_files`` (receipts hang off expense lines), ``withdrawal_bank_account`` (the
+    account is the one configured on ``entity_pettycash_settings``, schema item 13).
+
+    ``status`` is the ``report_status`` enum: ``draft`` -> ``submitted`` when the wizard
+    finishes, ``published`` when the Xero publish succeeds.
+    """
+
     __tablename__ = "report"
-    __table_args__ = {"schema": "pettycashv3"}
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    __table_args__ = (
+        db.UniqueConstraint("entity_id", "transaction_date", name="report_entity_date_key"),
+        {"schema": "pettycashv3"},
+    )
+
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    entity_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"), nullable=False)
     transaction_date = db.Column(db.Date, nullable=False)
     next_transaction_date = db.Column(db.Date, nullable=True)
-    date = db.Column(db.DateTime, default=lambda: datetime.now(tz))
-    opening_balance = db.Column(db.Float, nullable=False)
-    cash_addition = db.Column(db.Float, nullable=False, default=0.0)
-    adjusted_opening_balance = db.Column(db.Float, nullable=True, default=None)
-    cash_sales = db.Column(db.Float, nullable=False, default=0.0)
-    shop_sales = db.Column(db.Float, nullable=False, default=0.0)
-    delivery_sales = db.Column(db.Float, nullable=False, default=0.0)
-    total_sales = db.Column(db.Float, nullable=False, default=0.0)
-    # Nullable since r3a03: a report row now exists from draft creation, where
-    # expenses is not yet known. NULL means "not entered yet" — 0.0 would be
-    # indistinguishable from genuinely-zero expenses. Readers already coalesce.
-    expenses = db.Column(db.Float, nullable=True)
-    bank_deposit = db.Column(db.Float, nullable=False, default=0.0)
-    # Nullable since r3a03 — derived from expenses, so unknown for the same
-    # reason. See the note above.
-    closing_balance = db.Column(db.Float, nullable=True)
-    receipt_files = db.Column(db.Text)
-    uploaded_by = db.Column(
-        db.String(150), db.ForeignKey("pettycashv3.user.username"), nullable=True
+    status = db.Column(pg_enum(ReportStatus), nullable=False, default=ReportStatus.DRAFT)
+    publishing_status = db.Column(pg_enum(PublishStatus), nullable=False, default=PublishStatus.UNPUBLISHED)
+    opening_balance = db.Column(Money(), nullable=True)
+    cash_addition = db.Column(Money(), nullable=True, default=0.0)
+    adjusted_opening_balance = db.Column(Money(), nullable=True)
+    cashsale_total = db.Column(Money(), nullable=True, default=0.0)
+    nocashsale_total = db.Column(Money(), nullable=True, default=0.0)
+    total_sales = db.Column(Money(), nullable=True, default=0.0)
+    # NULL means "not entered yet" - 0.0 would be indistinguishable from genuinely-zero
+    # expenses. Readers coalesce.
+    expense_total = db.Column(Money(), nullable=True)
+    bank_deposit = db.Column(Money(), nullable=True, default=0.0)
+    closing_balance = db.Column(Money(), nullable=True)
+    safe_box_balance = db.Column(Money(), nullable=True)
+    discrepancy_amount = db.Column(Money(), nullable=True, default=0.0)
+    discrepancy_type = db.Column(pg_enum(DiscrepancyType), nullable=False, default=DiscrepancyType.NONE)
+    discrepancy_reason = db.Column(db.String(300), nullable=True)
+    current_section = db.Column(db.String(20), nullable=True)
+    completed_sections = db.Column(db.JSON().with_variant(JSONB(), "postgresql"), nullable=True)
+    xero_integrated = db.Column(db.Boolean, nullable=True, default=False)
+    # 'personal' | 'company': where the money ADDED to the float came from (schema item 13)
+    cash_addition_type = db.Column(db.String(20), nullable=True)
+    created_by = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"), nullable=True)
+    submitted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    published_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.current_timestamp())
+    updated_at = db.Column(
+        db.DateTime(timezone=True), server_default=db.func.current_timestamp(),
+        onupdate=db.func.current_timestamp(),
     )
-    company = db.Column(db.String(150), nullable=False)
-    shop_expenses = db.relationship("ShopExpense", backref="report", lazy=True)
+
+    # the pre-C4 names, usable in queries and as attributes
+    company = synonym("entity_id")
+    cash_sales = synonym("cashsale_total")
+    expenses = synonym("expense_total")
+    xero_integrated_yes = synonym("xero_integrated")
+    withdrawal_type = synonym("cash_addition_type")
+    date = synonym("created_at")
+
+    creator = db.relationship("User", foreign_keys=[created_by], lazy="joined")
+    shop_expenses = db.relationship("ReportExpense", backref="report", lazy=True)
     report_histories = db.relationship(
         "ReportHistory", back_populates="report", cascade="all, delete-orphan"
     )
-    xero_integrated_yes = db.Column(db.Boolean, default=False)
-    safe_box_balance = db.Column(db.Float, nullable=True)
-    discrepancy_amount = db.Column(db.Float, nullable=True, default=0.0)
-    discrepancy_reason = db.Column(db.String(300), nullable=True)
-    discrepancy_type = db.Column(db.String(20), nullable=True, default="none")
-    publishing_status = db.Column(db.String(20), nullable=True, default=None)
 
-    # --- consolidation stage 1 (r1a01) -------------------------------------
-    # Added ahead of the code that uses them, so this model can ship before the
-    # report_draft / report_v2 / report_detail collapse. Every one is nullable:
-    # a Report inserted without them must still commit (see s6a06).
-    #
-    # `status` mirrors report_draft.status ('draft' | 'posted'). ending.py:506
-    # already assigns report.status on a query Row — a no-op until now.
-    status = db.Column(db.String(20), nullable=True, default=None)
-    current_section = db.Column(db.String(20), nullable=True, default=None)
-    completed_sections = db.Column(db.JSON, nullable=True, default=None)
-    # download.py:350/:586 already getattr() these two; they returned None
-    # because the columns did not exist. Now they resolve for real.
-    withdrawal_type = db.Column(db.String(20), nullable=True, default=None)
-    withdrawal_bank_account = db.Column(db.String(36), nullable=True, default=None)
-    # Seeds the NEXT report's opening balance (create.py:288, opening.py:1044).
-    # Previously reachable only via report_cashcount_draft.
-    actual_cash_total = db.Column(db.Float, nullable=True, default=None)
+    # ---- who ---------------------------------------------------------------------------
+    @hybrid_property
+    def uploaded_by(self):
+        """The creator's username - what the old ``uploaded_by`` column held. Usable in
+        queries too (``Report.uploaded_by == name`` and in ``with_entities``): the
+        expression is the username looked up from ``user``."""
+        return self.creator.username if self.creator is not None else None
+
+    @uploaded_by.inplace.setter
+    def _uploaded_by_setter(self, username):
+        """Writers still hand over a username; it is resolved to the person's id."""
+        if not username:
+            self.created_by = None
+            return
+        from blueprints.auth.models.user import User
+
+        user = User.query.filter_by(username=username).first()
+        self.created_by = user.id if user is not None else None
+
+    @uploaded_by.inplace.expression
+    @classmethod
+    def _uploaded_by_expression(cls):
+        from blueprints.auth.models.user import User
+
+        # labelled, so a with_entities() Row carries the attribute's name on every database
+        return (
+            db.select(User.username).where(User.id == cls.created_by).correlate(cls).scalar_subquery()
+            .label("uploaded_by")
+        )
+
+    # ---- derived figures ---------------------------------------------------------------
+    # The old row stored these; now they are sums over the child tables. As hybrids they
+    # stay selectable (``with_entities(Report.shop_sales, ...)``) - the expression is the
+    # same sum as a correlated subquery.
+    def _sales_by_type(self):
+        from blueprints.report.services.shared import sum_sales_by_type
+
+        return sum_sales_by_type(self.id)
+
+    @hybrid_property
+    def delivery_sales(self):
+        """Sum of the delivery-platform lines (``report_sale`` rows of type ``delivery``)."""
+        return self._sales_by_type()["delivery"]
+
+    @delivery_sales.inplace.expression
+    @classmethod
+    def _delivery_sales_expression(cls):
+        from blueprints.entity.models.sale_info import SaleInfo
+        from blueprints.report.models.report_sale_detail import ReportSale
+        from blueprints.shared.enums import SaleType
+
+        return (
+            db.select(db.func.coalesce(db.func.sum(ReportSale.amount), 0.0))
+            .select_from(ReportSale)
+            .join(SaleInfo, ReportSale.sale_id == SaleInfo.id)
+            .where(ReportSale.report_id == cls.id, SaleInfo.type == SaleType.DELIVERY)
+            .correlate(cls)
+            .scalar_subquery()
+            .label("delivery_sales")
+        )
+
+    @hybrid_property
+    def shop_sales(self):
+        """Cash + electronic: everything that is not a delivery platform."""
+        return (self.total_sales or 0.0) - self.delivery_sales
+
+    @shop_sales.inplace.expression
+    @classmethod
+    def _shop_sales_expression(cls):
+        return (db.func.coalesce(cls.total_sales, 0.0) - cls.delivery_sales).label("shop_sales")
+
+    @hybrid_property
+    def actual_cash_total(self):
+        """What the cash count added up to: the sum of the counted denominations.
+
+        ``None`` means "never counted" - which the old column also said with NULL. A
+        denomination counted as zero stores no row, so an all-zero count has no rows;
+        the wizard marking ``cash_count`` complete is what tells it apart from no count.
+        """
+        from blueprints.report.models.report_cash_count import ReportCashCount
+
+        total = (
+            db.session.query(db.func.sum(ReportCashCount.quantity * ReportCashCount.cash_value))
+            .filter(ReportCashCount.report_id == self.id)
+            .scalar()
+        )
+        if total is not None:
+            return float(total)
+        if "cash_count" in (self.completed_sections or []):
+            return 0.0
+        return None
+
+    @actual_cash_total.inplace.expression
+    @classmethod
+    def _actual_cash_total_expression(cls):
+        from blueprints.report.models.report_cash_count import ReportCashCount
+
+        counted = (
+            db.select(db.func.sum(ReportCashCount.quantity * ReportCashCount.cash_value))
+            .where(ReportCashCount.report_id == cls.id)
+            .correlate(cls)
+            .scalar_subquery()
+        )
+        # completed_sections is JSON; its text form is the same on both databases
+        marked = db.cast(cls.completed_sections, db.Text).like('%"cash_count"%')
+        return db.func.coalesce(counted, db.case((marked, 0.0), else_=None)).label("actual_cash_total")
 
     @property
     def sales_by_method(self):
-        """Per-method amounts for this report, keyed by catalog code.
-
-        The template-facing replacement for reading ``report.visa_sales`` and
-        friends directly: a method added to the ``sales_method`` catalog shows
-        up here with no template or model change.
-
-        Falls back to the entity's sale_info row, then to the detail row's own
-        type, so amounts whose catalog link predates the migration (or whose
-        method has since been deleted) are still returned rather than dropped.
-        """
+        """Per-method amounts for this report, keyed by the method's form-field name."""
         from blueprints.report.services.shared import sales_by_method_for
 
         return sales_by_method_for(self.id)
 
     @property
     def total_expenses(self):
-        return sum(expense.amount for expense in cast(Any, self.shop_expenses))
+        return cents(sum(expense.amount or 0 for expense in cast(Any, self.shop_expenses)))

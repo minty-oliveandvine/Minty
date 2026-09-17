@@ -275,7 +275,7 @@ def report_submitted_publish_to_xero():
                 return jsonify({"error": "Report not found"}), 404
 
             # Check if already processing
-            if locked_report.publishing_status == "processing":
+            if locked_report.publishing_status == "publishing":
                 db.session.rollback()
                 logger.warning(
                     f"Report {posted_report.id} is already being processed. Rejecting duplicate request."
@@ -296,7 +296,7 @@ def report_submitted_publish_to_xero():
             prior_status = locked_report.publishing_status
 
             # Set status to processing atomically
-            locked_report.publishing_status = "processing"
+            locked_report.publishing_status = "publishing"
             db.session.commit()
             logger.info(f"Lock acquired for report {posted_report.id}")
 
@@ -352,7 +352,7 @@ def report_submitted_publish_to_xero():
             jsonify(
                 {
                     "category": "info",
-                    "status": "processing",
+                    "status": "publishing",
                     "message": "Xero integration started. Processing in background. This may take a few minutes.",
                 }
             ),
@@ -365,7 +365,7 @@ def report_submitted_publish_to_xero():
         # occurs after status was set.
         try:
             stuck_report = Report.query.get(report_id)
-            if stuck_report and stuck_report.publishing_status == "processing":
+            if stuck_report and stuck_report.publishing_status == "publishing":
                 stuck_report.publishing_status = "failed"
                 db.session.commit()
         except Exception as recover_error:
