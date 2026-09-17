@@ -96,7 +96,7 @@ def test_update_report_after_deposit_change_replaces_deposit_and_updates_next_da
         monkeypatch.setattr(
             shared,
             "sum_sales_by_type",
-            lambda _report_id: {"Cash": 0.0, "Electronic": 0.0, "Delivery": 0.0},
+            lambda _report_id: {"cash": 0.0, "electronic": 0.0, "delivery": 0.0},  # the sale_type buckets (C3)
         )
         # Patch Report, not ReportDraft: the write flip pointed the
         # propagation helper at `report`.

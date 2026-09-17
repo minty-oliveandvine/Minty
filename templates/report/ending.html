@@ -313,7 +313,7 @@ document.addEventListener('submit', function(e){
                    <div class="flex-1">
                      <div>
                        {% if sale_info %}
-                         {% set electronic_sales_list = sale_info | selectattr('type', 'equalto', 'Electronic') | list %}
+                         {% set electronic_sales_list = sale_info | selectattr('type', 'equalto', 'electronic') | list %}
                          {% for sale in electronic_sales_list %}
                            {% if sale.value_name and sale.value_name != 'deliveroo_sales' %}
                              {% set sale_amount = sales_amounts.get(sale.value_name, 0) if sales_amounts else 0 %}
@@ -363,7 +363,7 @@ document.addEventListener('submit', function(e){
                      <div>
                        <div>
                          {% if sale_info %}
-                           {% set delivery_sales_list = sale_info | selectattr('type', 'equalto', 'Delivery') | list %}
+                           {% set delivery_sales_list = sale_info | selectattr('type', 'equalto', 'delivery') | list %}
                            {% if delivery_sales_list %}
                              {% for sale in delivery_sales_list %}
                                {% if sale.value_name and sale.value_name != 'deliveroo_sales' %}

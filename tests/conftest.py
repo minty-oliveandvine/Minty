@@ -105,9 +105,13 @@ def pytest_configure(config):
 # docs/modernisation_plan.md, Part 1 C0 rule 4.
 PG_PENDING = {
     "test_char_report_lifecycle.py",   # C3 + C4
-    "test_char_sales_methods.py",      # C3
     "test_char_access.py",             # C6 (C1 done)
-    "test_char_entities.py",           # C3: creating a company seeds sale_info (entity_id column)
+    # single cases (C1/C2/C3 tables are green; these touch the next units' tables)
+    "test_char_sales_methods.py::test_methods_switched_on_are_the_ones_the_sales_form_offers",       # C4 report.date
+    "test_char_sales_methods.py::test_the_sales_page_offers_one_input_per_enabled_method_plus_cash",  # C4 report.date
+    "test_char_sales_methods.py::test_switching_a_method_off_keeps_the_amount_an_old_report_recorded",  # C4
+    "test_char_entities.py::test_onboarding_create_starts_the_company_in_onboarding_and_the_wizard_can_read_it_back",  # C4 (/state reads report)
+    "test_char_entities.py::test_the_settings_pages_render_for_an_admin",  # C6 roles (the Xero settings page)
     # one case, not the module: the Xero settings page it renders after the disconnect
     # loads the roles table (C6)
     "test_char_xero_tokens.py::test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect",

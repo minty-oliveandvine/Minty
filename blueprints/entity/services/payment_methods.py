@@ -1,25 +1,36 @@
-"""Payment method service helpers for entity payment method APIs."""
+"""Payment method service helpers for entity payment method APIs.
+
+Since C3 (docs/modernisation_plan.md) a company's methods are links (``EntitySaleSetting``:
+entity, catalogue row, on/off, order) into one global catalogue (``SaleInfo``: name, type,
+form-field name). Adding a method a company invents adds a catalogue row for everyone; the
+company's own state is only the link. Types are the ``sale_type`` enum -
+``electronic`` / ``delivery`` / ``other``; the capitalised words older clients send are
+accepted on input (``SaleType.normalize``) and the enum's words are what comes back.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from loguru import logger
 
+from blueprints.shared.enums import SaleType
 from models.db import EntitySaleSetting, SaleInfo, UserEntity, db
 from services.permission_policy import Permission, has_permission_by_user_id
 
+# What the settings page and the wizard may add or list. Cash is a method (it is on every
+# company's list) but is managed on the report's own cash section, not here.
+LISTABLE_TYPES = (SaleType.ELECTRONIC, SaleType.DELIVERY)
 
-def _build_method_payload(method):
+
+def _build_method_payload(method: EntitySaleSetting):
+    info = method.sale_info
     return {
         "id": method.sale_id,
         "entity_id": method.entity_id,
-        "name": method.sale_name,
-        "type": method.type,
-        "enabled": method.enabled,
+        "name": info.sale_name if info else None,
+        "type": info.type.value if info and info.type is not None else None,
+        "value_name": info.value_name if info else None,
+        "enabled": method.is_active,
         "display_order": method.display_order,
-        "created_at": method.create_date.isoformat() if method.create_date else None,
-        "updated_at": method.updated_at.isoformat() if method.updated_at else None,
     }
 
 
@@ -27,233 +38,166 @@ def _ensure_access(user_id, entity_id):
     return UserEntity.query.filter_by(user_id=user_id, entity_id=entity_id).first()
 
 
+def _links(entity_id, *, enabled_only=False, types=None):
+    """The company's links joined to their catalogue rows, in list order."""
+    q = (
+        EntitySaleSetting.query.join(SaleInfo, SaleInfo.id == EntitySaleSetting.sale_id)
+        .filter(EntitySaleSetting.entity_id == entity_id)
+    )
+    if enabled_only:
+        q = q.filter(EntitySaleSetting.is_active.is_(True))
+    if types is not None:
+        q = q.filter(SaleInfo.type.in_(list(types)))
+    return q.order_by(EntitySaleSetting.display_order.asc(), SaleInfo.sale_name.asc()).all()
+
+
+def _link_for(entity_id, sale_id):
+    return EntitySaleSetting.query.filter_by(entity_id=entity_id, sale_id=sale_id).first()
+
+
+def _next_order(entity_id) -> int:
+    current = (
+        db.session.query(db.func.max(EntitySaleSetting.display_order))
+        .filter_by(entity_id=entity_id)
+        .scalar()
+    )
+    return int(current or 0) + 1
+
+
 def list_payment_methods(user_id, entity_id):
-    """
-    List all enabled payment methods for an entity.
-    Returns unique methods (no duplicates) ordered by display_order, matching Settings page.
-    """
+    """List the company's enabled methods, ordered as the Settings page shows them."""
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_VIEW, entity_id):
         return {"error": "Access denied"}, 403
 
-    # Get unique payment methods by value_name (prevents duplicates)
-    # Keep the most recently created one if duplicates exist
-    payment_methods_subquery = (
-        db.session.query(
-            EntitySaleSetting.value_name,
-            db.func.max(EntitySaleSetting.sale_id).label('max_sale_id')
-        )
-        .filter(
-            EntitySaleSetting.entity_id == entity_id,
-            EntitySaleSetting.value_name != "deliveroo_sales",
-            EntitySaleSetting.enabled == True
-        )
-        .group_by(EntitySaleSetting.value_name)
-        .subquery()
-    )
-    
-    payment_methods = (
-        db.session.query(EntitySaleSetting)
-        .join(
-            payment_methods_subquery,
-            EntitySaleSetting.sale_id == payment_methods_subquery.c.max_sale_id
-        )
-        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
-        .all()
-    )
-
-    logger.info(
-        f"list_payment_methods: entity={entity_id}, "
-        f"found {len(payment_methods)} unique payment methods"
-    )
-
-    methods_data = [_build_method_payload(method) for method in payment_methods]
-    return {"payment_methods": methods_data}, 200
+    methods = _links(entity_id, enabled_only=True)
+    logger.info(f"list_payment_methods: entity={entity_id}, found {len(methods)} payment methods")
+    return {"payment_methods": [_build_method_payload(m) for m in methods]}, 200
 
 
 def add_payment_method(user_id, entity_id, data):
-    """
-    Add a new payment method or re-enable an existing one.
-    Prevents duplicates by checking for existing enabled methods.
+    """Add a method to the company, or switch an existing link back on.
+
+    The catalogue row is found by the caller's ``sale_info_id``, else by ``value_name``, else
+    by ``name``; a name nobody has used before becomes a new catalogue row.
     """
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_CREATE, entity_id):
         return {"error": "Access denied"}, 403
     if not data:
         return {"error": "No data provided"}, 400
 
-    required_fields = ["name", "type", "value_name"]
-    for field in required_fields:
+    for field in ("name", "type"):
         if field not in data:
             return {"error": f"Missing required field: {field}"}, 400
 
-    method_type = data.get("type")
-    if method_type not in ["Cash", "Electronic", "Delivery"]:
-        return {"error": "Invalid type. Must be Cash, Electronic, or Delivery"}, 400
+    method_type = SaleType.normalize(data.get("type"))
+    if method_type is None:
+        return {"error": "Invalid type. Must be electronic, delivery or other"}, 400
 
+    name = str(data.get("name") or "").strip()
     logger.info(
-        f"add_payment_method: entity={entity_id}, "
-        f"value_name={data['value_name']}, name={data['name']}, type={method_type}"
+        f"add_payment_method: entity={entity_id}, value_name={data.get('value_name')}, "
+        f"name={name}, type={method_type.value}"
     )
 
-    # Check if there's already an enabled payment method with same value_name
-    existing_enabled = EntitySaleSetting.query.filter_by(
-        entity_id=entity_id,
-        value_name=data["value_name"],
-        enabled=True
-    ).first()
-    
-    if existing_enabled:
-        # Update existing instead of creating duplicate
-        logger.info(
-            f"add_payment_method: Found existing enabled method, updating "
-            f"(sale_id={existing_enabled.sale_id})"
-        )
-        existing_enabled.sale_name = data["name"]
-        existing_enabled.type = method_type
-        existing_enabled.display_order = data.get("display_order", existing_enabled.display_order)
-        existing_enabled.updated_at = datetime.now()
-        db.session.commit()
-        
-        return {
-            "message": "Payment method updated successfully",
-            "payment_method": _build_method_payload(existing_enabled),
-        }, 200
-
-    # Check for disabled record to re-enable
-    existing_disabled = EntitySaleSetting.query.filter_by(
-        entity_id=entity_id,
-        value_name=data["value_name"],
-        enabled=False
-    ).first()
-
-    if existing_disabled:
-        logger.info(
-            f"add_payment_method: Found existing disabled method, re-enabling "
-            f"(sale_id={existing_disabled.sale_id})"
-        )
-        existing_disabled.enabled = True
-        existing_disabled.sale_name = data["name"]
-        existing_disabled.type = method_type
-        existing_disabled.display_order = data.get("display_order", existing_disabled.display_order)
-        existing_disabled.updated_at = datetime.now()
-        db.session.commit()
-
-        return {
-            "message": "Payment method re-enabled successfully",
-            "payment_method": _build_method_payload(existing_disabled),
-        }, 200
-
-    # Create new method only if no existing record found
-    current_max_order = (
-        db.session.query(db.func.max(EntitySaleSetting.display_order))
-        .filter_by(entity_id=entity_id)
-        .scalar()
-    )
-
-    max_order = int(current_max_order or 0)
-    
-    # Resolve the catalog row: by the caller's explicit sale_info_id, else
-    # by the legacy value_name, else mint a per-entity row for a user-invented
-    # method. Without this the new row would carry a NULL catalog link.
     catalog_row = None
     if data.get("sale_info_id"):
         catalog_row = SaleInfo.query.filter_by(id=data["sale_info_id"]).first()
+    if catalog_row is None and data.get("value_name"):
+        catalog_row = SaleInfo.by_value_name(data["value_name"])
     if catalog_row is None:
-        catalog_row = SaleInfo.resolve(
-            entity_id, legacy_column=data["value_name"]
-        )
+        catalog_row = SaleInfo.by_name(name)
     if catalog_row is None:
-        catalog_row = SaleInfo.ensure_custom(
-            entity_id, data["name"], method_type
-        )
+        catalog_row = SaleInfo.ensure(name, method_type, value_name=data.get("value_name") or None)
 
-    new_method = EntitySaleSetting(
+    link = _link_for(entity_id, catalog_row.id)
+    if link is not None:
+        was_enabled = link.is_active
+        link.is_active = bool(data.get("enabled", True))
+        if data.get("display_order") is not None:
+            link.display_order = data["display_order"]
+        db.session.commit()
+        message = "Payment method updated successfully" if was_enabled else "Payment method re-enabled successfully"
+        logger.info(f"add_payment_method: existing link for sale_id={link.sale_id} ({message})")
+        return {"message": message, "payment_method": _build_method_payload(link)}, 200
+
+    link = EntitySaleSetting(
         entity_id=entity_id,
-        sale_name=data["name"],
-        value_name=data["value_name"],
-        type=method_type,
-        sale_info_id=catalog_row.id if catalog_row else None,
-        enabled=data.get("enabled", True),
-        display_order=data.get("display_order", max_order + 1),
-        create_date=datetime.now(),
-        updated_at=datetime.now(),
+        sale_id=catalog_row.id,
+        is_active=bool(data.get("enabled", True)),
+        display_order=data.get("display_order", _next_order(entity_id)),
     )
-
-    db.session.add(new_method)
+    db.session.add(link)
     db.session.commit()
-
-    logger.info(
-        f"add_payment_method: Created new method (sale_id={new_method.sale_id})"
-    )
-
-    return {
-        "message": "Payment method added successfully",
-        "payment_method": _build_method_payload(new_method),
-    }, 201
+    logger.info(f"add_payment_method: linked sale_id={link.sale_id} to entity={entity_id}")
+    return {"message": "Payment method added successfully", "payment_method": _build_method_payload(link)}, 201
 
 
 def update_payment_method(user_id, entity_id, method_id, data):
+    """Change a method's on/off or order for this company.
+
+    ``name`` and ``type`` describe the catalogue row every company shares; a rename here
+    renames it for everyone, so only a name nobody else uses may be edited in place - otherwise
+    the request is refused rather than silently changing other companies' lists.
+    """
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_UPDATE, entity_id):
         return {"error": "Access denied"}, 403
     if not data:
         return {"error": "No data provided"}, 400
 
-    payment_method = EntitySaleSetting.query.filter_by(
-        sale_id=method_id, entity_id=entity_id
-    ).first()
-    if not payment_method:
+    link = _link_for(entity_id, method_id)
+    if not link:
         return {"error": "Payment method not found"}, 404
+    info = link.sale_info
 
-    if "name" in data:
-        payment_method.sale_name = data["name"]
-    if "type" in data:
-        if data["type"] not in ["Cash", "Electronic", "Delivery"]:
+    if "type" in data and SaleType.normalize(data["type"]) is None:
+        return {"error": "Invalid type. Must be electronic, delivery or other"}, 400
+
+    touches_catalogue = ("name" in data and (data["name"] or "").strip() != info.sale_name) or (
+        "type" in data and SaleType.normalize(data["type"]) != info.type
+    )
+    if touches_catalogue:
+        others = EntitySaleSetting.query.filter(
+            EntitySaleSetting.sale_id == info.id, EntitySaleSetting.entity_id != entity_id
+        ).count()
+        if others:
             return {
-                "error": "Invalid type. Must be Cash, Electronic, or Delivery"
-            }, 400
-        payment_method.type = data["type"]
+                "error": "This method is shared with other companies; add a new method instead of renaming it."
+            }, 409
+        if "name" in data:
+            clash = SaleInfo.by_name(data["name"])
+            if clash is not None and clash.id != info.id:
+                return {"error": "A method with that name already exists."}, 409
+            info.sale_name = (data["name"] or "").strip()
+        if "type" in data:
+            info.type = SaleType.normalize(data["type"])
+
     if "enabled" in data:
-        payment_method.enabled = data["enabled"]
+        link.is_active = bool(data["enabled"])
     if "display_order" in data:
-        payment_method.display_order = data["display_order"]
+        link.display_order = data["display_order"]
 
-    payment_method.updated_at = datetime.now()
     db.session.commit()
-
-    return {
-        "message": "Payment method updated successfully",
-        "payment_method": _build_method_payload(payment_method),
-    }, 200
+    return {"message": "Payment method updated successfully", "payment_method": _build_method_payload(link)}, 200
 
 
 def delete_payment_method(user_id, entity_id, method_id):
-    """Disable a payment method (soft delete)."""
+    """Switch a method off for this company (the link stays; old reports keep their rows)."""
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_DELETE, entity_id):
         return {"error": "Access denied"}, 403
 
-    payment_method = EntitySaleSetting.query.filter_by(
-        sale_id=method_id, entity_id=entity_id
-    ).first()
-    if not payment_method:
-        logger.warning(
-            f"delete_payment_method: Method not found "
-            f"(method_id={method_id}, entity={entity_id})"
-        )
+    link = _link_for(entity_id, method_id)
+    if not link:
+        logger.warning(f"delete_payment_method: Method not found (method_id={method_id}, entity={entity_id})")
         return {"error": "Payment method not found"}, 404
 
-    logger.info(
-        f"delete_payment_method: Disabling method "
-        f"(sale_id={method_id}, value_name={payment_method.value_name})"
-    )
-    
-    payment_method.enabled = False
-    payment_method.updated_at = datetime.now()
+    logger.info(f"delete_payment_method: Disabling method (sale_id={method_id}, value_name={link.value_name})")
+    link.is_active = False
     db.session.commit()
-
     return {"message": "Payment method disabled successfully"}, 200
 
 
 def list_sales_methods_grouped(user_id, entity_id):
-    """Return enabled Electronic/Delivery method names grouped by type.
+    """Enabled electronic / delivery method names grouped by type, in list order.
 
     Used by the onboarding Sales Setting step (Step 4), which works with plain
     display-name lists rather than the full method payloads the Settings page uses.
@@ -261,34 +205,21 @@ def list_sales_methods_grouped(user_id, entity_id):
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_VIEW, entity_id):
         return {"error": "Access denied"}, 403
 
-    methods = (
-        EntitySaleSetting.query.filter(
-            EntitySaleSetting.entity_id == entity_id,
-            EntitySaleSetting.enabled.is_(True),
-            EntitySaleSetting.type.in_(["Electronic", "Delivery"]),
-        )
-        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
-        .all()
-    )
-
+    methods = _links(entity_id, enabled_only=True, types=LISTABLE_TYPES)
     return {
-        "electronic": [m.sale_name for m in methods if m.type == "Electronic"],
-        "delivery": [m.sale_name for m in methods if m.type == "Delivery"],
+        "electronic": [m.sale_name for m in methods if m.type == SaleType.ELECTRONIC],
+        "delivery": [m.sale_name for m in methods if m.type == SaleType.DELIVERY],
     }, 200
 
 
 def replace_sales_methods(user_id, entity_id, electronic, delivery):
-    """Reconcile an entity's Electronic/Delivery methods to the given name lists.
+    """Reconcile the company's electronic / delivery methods to the given name lists.
 
-    Matches existing rows by (type, sale_name) so renames keep their value_name
-    and report-column mapping. Names present in the list are enabled and ordered
-    1..n within their type; previously-enabled methods absent from the list are
-    soft-disabled (enabled=False), mirroring the Settings page behaviour. New
-    names are inserted with a derived value_name.
+    Names in the lists are linked (catalogue row found by name, created if nobody has it),
+    switched on and ordered 1..n within their type; previously-enabled methods absent from
+    the lists are switched off (never deleted - old reports reference them).
     """
-    if not has_permission_by_user_id(
-        user_id, Permission.SALES_METHOD_CREATE, entity_id
-    ):
+    if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_CREATE, entity_id):
         return {"error": "Access denied"}, 403
     if not isinstance(electronic, list) or not isinstance(delivery, list):
         return {"error": "electronic and delivery must be arrays"}, 400
@@ -303,68 +234,34 @@ def replace_sales_methods(user_id, entity_id, electronic, delivery):
                 out.append(s)
         return out
 
-    desired = {"Electronic": _clean(electronic), "Delivery": _clean(delivery)}
+    desired = {SaleType.ELECTRONIC: _clean(electronic), SaleType.DELIVERY: _clean(delivery)}
 
-    existing = EntitySaleSetting.query.filter(
-        EntitySaleSetting.entity_id == entity_id,
-        EntitySaleSetting.type.in_(["Electronic", "Delivery"]),
-    ).all()
-    by_type_name = {
-        (m.type, (m.sale_name or "").strip().lower()): m for m in existing
-    }
+    existing = _links(entity_id, types=LISTABLE_TYPES)
+    by_sale_id = {m.sale_id: m for m in existing}
 
-    now = datetime.now()
-    desired_keys = set()
+    wanted_ids = set()
     for mtype, names in desired.items():
         for i, name in enumerate(names):
-            key = (mtype, name.lower())
-            desired_keys.add(key)
-            method = by_type_name.get(key)
-            if method:
-                method.enabled = True
-                method.sale_name = name
-                method.display_order = i + 1
-                method.updated_at = now
-            else:
-                # Resolve the catalog row by display name, falling back to a
-                # per-entity custom row. Note the derived value_name below
-                # points at a column that does NOT exist for custom methods
-                # (e.g. "Tap & Go" -> 'tap_&_go_sales') — the catalog link is
-                # what makes such a method storable at all, via
-                # report_sale_detail rather than a physical column.
-                catalog_row = SaleInfo.resolve(entity_id, name=name)
-                if catalog_row is None:
-                    catalog_row = SaleInfo.ensure_custom(entity_id, name, mtype)
+            row = SaleInfo.ensure(name, mtype)
+            wanted_ids.add(row.id)
+            link = by_sale_id.get(row.id)
+            if link is None:
+                link = EntitySaleSetting(entity_id=entity_id, sale_id=row.id)
+                db.session.add(link)
+                by_sale_id[row.id] = link
+            link.is_active = True
+            link.display_order = i + 1
 
-                db.session.add(
-                    EntitySaleSetting(
-                        entity_id=entity_id,
-                        sale_name=name,
-                        value_name=(
-                            catalog_row.legacy_column
-                            if catalog_row is not None and catalog_row.legacy_column
-                            else name.lower().replace(" ", "_") + "_sales"
-                        ),
-                        type=mtype,
-                        sale_info_id=catalog_row.id if catalog_row else None,
-                        enabled=True,
-                        display_order=i + 1,
-                        create_date=now,
-                        updated_at=now,
-                    )
-                )
-
-    for key, method in by_type_name.items():
-        if key not in desired_keys and method.enabled:
-            method.enabled = False
-            method.updated_at = now
+    for sale_id, link in by_sale_id.items():
+        if sale_id not in wanted_ids and link.is_active:
+            link.is_active = False
 
     db.session.commit()
     logger.info(
         "replace_sales_methods: entity=%s electronic=%s delivery=%s",
-        entity_id, len(desired["Electronic"]), len(desired["Delivery"]),
+        entity_id, len(desired[SaleType.ELECTRONIC]), len(desired[SaleType.DELIVERY]),
     )
-    return desired, 200
+    return {"electronic": desired[SaleType.ELECTRONIC], "delivery": desired[SaleType.DELIVERY]}, 200
 
 
 def reorder_payment_methods(user_id, entity_id, method_ids):
@@ -374,65 +271,42 @@ def reorder_payment_methods(user_id, entity_id, method_ids):
         return {"error": "method_ids array is required"}, 400
 
     for index, method_id in enumerate(method_ids):
-        payment_method = EntitySaleSetting.query.filter_by(
-            sale_id=method_id, entity_id=entity_id
-        ).first()
-        if payment_method:
-            payment_method.display_order = index + 1
-            payment_method.updated_at = datetime.now()
+        link = _link_for(entity_id, method_id)
+        if link:
+            link.display_order = index + 1
 
     db.session.commit()
     return {"message": "Payment methods reordered successfully"}, 200
 
 
 def list_available_methods(user_id, entity_id):
-    """Catalog methods this entity has NOT added yet, grouped by type.
+    """Catalogue methods this company has NOT switched on, grouped by type.
 
-    Backs the "add a payment method" dropdowns in Entity Settings, which
-    previously offered only a free-text box — so a user typing "Viza" minted a
-    second catalog row instead of linking to the existing VISA one.
+    Backs the "add a payment method" dropdowns in Entity Settings, so a user picks "VISA"
+    rather than typing "Viza" and minting a second catalogue row. Offered rows are the
+    enabled catalogue entries minus whatever the company already has on; a method the
+    company switched off is offered again, and re-adding it re-enables the same link.
 
-    Offered rows are the active catalog entries (global, plus this entity's own
-    custom ones) minus whatever the entity already has enabled. Disabled rows
-    are deliberately NOT filtered out: re-adding a method the entity turned off
-    should re-enable the existing row, and replace_sales_methods/
-    add_payment_method already handle that by matching on name.
-
-    Returns {"electronic": [...], "delivery": [...]} where each item carries
-    the catalog id, code and name — the id lets the caller pass
-    ``sales_method_id`` so the new row links to the right catalog entry rather
-    than guessing from the display name.
+    Each item carries the catalogue id and name; ``id`` is what the caller passes back as
+    ``sale_info_id`` so the new link points at the right row.
     """
     if not has_permission_by_user_id(user_id, Permission.SALES_METHOD_VIEW, entity_id):
         return {"error": "Access denied"}, 403
 
-    taken = {
-        (row.sale_name or "").strip().lower()
-        for row in EntitySaleSetting.query.filter_by(
-            entity_id=entity_id, enabled=True
-        ).all()
-    }
+    taken = {m.sale_id for m in _links(entity_id, enabled_only=True)}
 
     catalog = (
-        SaleInfo.query.filter(
-            db.or_(SaleInfo.entity_id == entity_id, SaleInfo.entity_id.is_(None)),
-            SaleInfo.is_active.is_(True),
-        )
-        .order_by(SaleInfo.display_order.asc(), SaleInfo.name.asc())
+        SaleInfo.query.filter(SaleInfo.enabled.is_(True), SaleInfo.type.in_(list(LISTABLE_TYPES)))
+        .order_by(SaleInfo.display_order.asc().nulls_last(), SaleInfo.sale_name.asc())
         .all()
     )
 
     grouped = {"electronic": [], "delivery": []}
     for row in catalog:
-        # Cash is managed on its own section of the report, not as an
-        # add-able payment method here.
-        bucket = (row.type or "").strip().lower()
-        if bucket not in grouped:
+        if row.id in taken:
             continue
-        if (row.name or "").strip().lower() in taken:
-            continue
-        grouped[bucket].append(
-            {"id": row.id, "code": row.code, "name": row.name, "type": row.type}
+        grouped[row.type.value].append(
+            {"id": row.id, "name": row.sale_name, "type": row.type.value, "value_name": row.value_name}
         )
 
     logger.info(

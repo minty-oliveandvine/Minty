@@ -80,7 +80,7 @@ def post_sales(client, entity, day, *, cash="0", by_method=None):
             "sales[shop_sales][cash]": cash}
     for value_name, amount in (by_method or {}).items():
         mtype, _ = methods[value_name]
-        bucket = "delivery_sales" if mtype == "Delivery" else "shop_sales"
+        bucket = "delivery_sales" if str(mtype) == "delivery" else "shop_sales"  # sale_type enum word
         # the form names the method without its "_sales" suffix (templates/report/sales.html)
         form[f"sales[{bucket}][{value_name.replace('_sales', '')}]"] = amount
     return _post(client, "/report/sale", **form)

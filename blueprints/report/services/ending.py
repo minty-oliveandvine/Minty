@@ -19,7 +19,8 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, UserEntity, db, tz)
+from blueprints.shared.enums import SaleType
+from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission, is_superuser)
@@ -497,9 +498,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
         # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
+        # joined to the CATALOGUE (never deleted, only switched off per company), so a
+        # method the company later removed still names its amount
         report_sale_details = (
-            db.session.query(ReportSaleDetail, EntitySaleSetting)
-            .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+            db.session.query(ReportSaleDetail, SaleInfo)
+            .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
             .filter(ReportSaleDetail.report_id == id)
             .all()
         )
@@ -619,18 +622,16 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         for sale_detail, sale_info_item in report_sale_details:
             amount = sale_detail.amount or 0
-            sale_type = (
-                sale_info_item.type
-                if sale_info_item and sale_info_item.type
-                else sale_detail.type
+            sale_type = SaleType.normalize(
+                sale_info_item.type if sale_info_item and sale_info_item.type else sale_detail.type
             )
 
-            if sale_type == "Electronic":
-                electronic_sales += amount
-            elif sale_type == "Delivery":
-                delivery_sales += amount
-            elif sale_type == "Cash":
+            if sale_info_item is not None and sale_info_item.is_cash:
                 cash_sales += amount
+            elif sale_type == SaleType.DELIVERY:
+                delivery_sales += amount
+            elif sale_type is not None:  # electronic, and any other non-cash method
+                electronic_sales += amount
 
         # Fallback to report.cash_sales if no cash sales found in ReportSaleDetail
         if cash_sales == 0:
@@ -972,8 +973,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
     # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
     report_sale_details = (
-        db.session.query(ReportSaleDetail, EntitySaleSetting)
-        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        db.session.query(ReportSaleDetail, SaleInfo)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == current_draft.id)
         .all()
     )
@@ -1067,18 +1068,16 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     for sale_detail, sale_info_item in report_sale_details:
         amount = sale_detail.amount or 0
-        sale_type = (
-            sale_info_item.type
-            if sale_info_item and sale_info_item.type
-            else sale_detail.type
+        sale_type = SaleType.normalize(
+            sale_info_item.type if sale_info_item and sale_info_item.type else sale_detail.type
         )
 
-        if sale_type == "Electronic":
-            electronic_sales += amount
-        elif sale_type == "Delivery":
-            delivery_sales += amount
-        elif sale_type == "Cash":
+        if sale_info_item is not None and sale_info_item.is_cash:
             cash_sales += amount
+        elif sale_type == SaleType.DELIVERY:
+            delivery_sales += amount
+        elif sale_type is not None:  # electronic, and any other non-cash method
+            electronic_sales += amount
 
     # Fallback to current_draft.cash_sales if no cash sales found in ReportSaleDetail
     if cash_sales == 0:

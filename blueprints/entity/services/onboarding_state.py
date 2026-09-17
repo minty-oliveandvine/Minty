@@ -26,7 +26,8 @@ from loguru import logger
 from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
-from models.db import (Entity, EntityPettycashSettings, Report, EntitySaleSetting, UserEntity, db)
+from blueprints.shared.enums import SaleType
+from models.db import (Entity, EntityPettycashSettings, Report, EntitySaleSetting, SaleInfo, UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
@@ -160,17 +161,18 @@ def _sales_methods_state(entity_id: str) -> dict:
     translation. Empty lists when nothing has been saved yet.
     """
     methods = (
-        EntitySaleSetting.query.filter(
+        EntitySaleSetting.query.join(SaleInfo, SaleInfo.id == EntitySaleSetting.sale_id)
+        .filter(
             EntitySaleSetting.entity_id == entity_id,
-            EntitySaleSetting.enabled.is_(True),
-            EntitySaleSetting.type.in_(["Electronic", "Delivery"]),
+            EntitySaleSetting.is_active.is_(True),
+            SaleInfo.type.in_([SaleType.ELECTRONIC, SaleType.DELIVERY]),
         )
-        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), SaleInfo.sale_name.asc())
         .all()
     )
     return {
-        "electronic": [m.sale_name for m in methods if m.type == "Electronic"],
-        "delivery": [m.sale_name for m in methods if m.type == "Delivery"],
+        "electronic": [m.sale_name for m in methods if m.type == SaleType.ELECTRONIC],
+        "delivery": [m.sale_name for m in methods if m.type == SaleType.DELIVERY],
     }
 
 

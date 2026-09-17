@@ -15,7 +15,7 @@ from blueprints.report.services.shared import (
     safe_float, sum_sales_by_type, update_draft_progress,
     update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, db, tz
+from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, db, tz
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -46,35 +46,21 @@ def resolve_posted_sale_amount(field, shop_sales_data, delivery_sales_data):
 
 
 def get_unique_sale_info_for_entity(entity_id):
+    """The company's enabled sales methods, in Settings-page order.
+
+    Returns the ``EntitySaleSetting`` links (each with its catalogue row joined, so
+    ``.sale_name`` / ``.value_name`` / ``.type`` read through). One link per catalogue row is
+    the table's key since C3, so there is nothing to de-duplicate any more.
     """
-    Get unique payment methods for an entity, preventing duplicates.
-    Returns: list of EntitySaleSetting objects ordered by display_order (matches Settings page).
-    """
-    payment_methods_subquery = (
-        db.session.query(
-            EntitySaleSetting.value_name,
-            db.func.max(EntitySaleSetting.sale_id).label('max_sale_id')
-        )
+    return (
+        EntitySaleSetting.query.join(SaleInfo, SaleInfo.id == EntitySaleSetting.sale_id)
         .filter(
             EntitySaleSetting.entity_id == entity_id,
-            EntitySaleSetting.value_name != "deliveroo_sales",
-            EntitySaleSetting.enabled == True
+            EntitySaleSetting.is_active.is_(True),
         )
-        .group_by(EntitySaleSetting.value_name)
-        .subquery()
-    )
-    
-    payment_methods = (
-        db.session.query(EntitySaleSetting)
-        .join(
-            payment_methods_subquery,
-            EntitySaleSetting.sale_id == payment_methods_subquery.c.max_sale_id
-        )
-        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), SaleInfo.sale_name.asc())
         .all()
     )
-    
-    return payment_methods
 
 
 @report_bp.route("/report/sale", methods=["GET", "POST"])
@@ -427,8 +413,8 @@ def report_sale(id=None):
                             report_id=report_draft.id,
                             # Catalog link, so the row stays self-describing
                             # even if this sale_info row is later removed.
-                            sale_info_id=sale.sale_info_id,
-                            type=sale.type,
+                            sale_info_id=sale.sale_id,
+                            type=sale.type.value if sale.type is not None else None,
                             amount=amount,
                             create_at=datetime.now(),
                         )
@@ -583,8 +569,8 @@ def report_sale(id=None):
                                 report_id=report_draft.id,
                                 # Catalog link, so the row stays self-describing
                                 # even if this sale_info row is later removed.
-                                sale_info_id=sale.sale_info_id,
-                                type=sale.type,
+                                sale_info_id=sale.sale_id,
+                                type=sale.type.value if sale.type is not None else None,
                                 amount=amount,
                                 create_at=datetime.now(),
                             )
@@ -711,8 +697,8 @@ def report_sale(id=None):
                             report_id=report_draft.id,
                             # Catalog link, so the row stays self-describing
                             # even if this sale_info row is later removed.
-                            sale_info_id=sale.sale_info_id,
-                            type=sale.type,
+                            sale_info_id=sale.sale_id,
+                            type=sale.type.value if sale.type is not None else None,
                             amount=amount,
                             create_at=datetime.now(),
                         )
@@ -890,12 +876,10 @@ def report_sale(id=None):
                     ReportSaleDetail.sale_id,
                     ReportSaleDetail.amount,
                     ReportSaleDetail.type,
-                    EntitySaleSetting.sale_name,
-                    EntitySaleSetting.value_name,
+                    SaleInfo.sale_name,
+                    SaleInfo.value_name,
                 )
-                .join(
-                    EntitySaleSetting, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id, isouter=True
-                )
+                .join(SaleInfo, SaleInfo.id == ReportSaleDetail.sale_id, isouter=True)
                 .filter(ReportSaleDetail.report_id == existing_draft.id)
                 .order_by(ReportSaleDetail.create_at.desc())
                 .all()

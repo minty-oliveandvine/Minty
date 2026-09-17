@@ -214,7 +214,7 @@
              </div>
             
             <div class="grid grid-cols-2 gap-4 mb-4">
-              {% set electronic_sales = sale_info | selectattr('type', 'equalto', 'Electronic') | list %}
+              {% set electronic_sales = sale_info | selectattr('type', 'equalto', 'electronic') | list %}
               {% if electronic_sales %}
                 {% for sale in electronic_sales %}
                   {% set display_name = (sale.sale_name or '').replace('_sales', '').replace('_', ' ').title() if sale.sale_name else '' %}
@@ -285,7 +285,7 @@
              </div>
             
             <div class="grid grid-cols-2 gap-4 mb-4">
-              {% set delivery_sales = sale_info | selectattr('type', 'equalto', 'Delivery') | list %}
+              {% set delivery_sales = sale_info | selectattr('type', 'equalto', 'delivery') | list %}
               {% if delivery_sales %}
                 {% for sale in delivery_sales %}
                   {% if sale.value_name != 'deliveroo_sales' %}
@@ -340,7 +340,7 @@
                <h3 class="text-lg sm:text-xl font-semibold text-gray-700">Cash Sales</h3>
              </div>
              
-             {% set cash_sales = sale_info | selectattr('type', 'equalto', 'Cash') | list %}
+             {% set cash_sales = sale_info | selectattr('value_name', 'equalto', 'cash_sales') | list %}
              {% if cash_sales %}
                {% for sale in cash_sales %}
                  <div class="mb-3">
