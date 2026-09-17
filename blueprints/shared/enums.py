@@ -87,3 +87,31 @@ class ModuleCode(_DbEnum):
 
     PETTY_CASH = "PETTY_CASH"
     PAYMENT_REQUEST = "PAYMENT_REQUEST"
+
+
+class SaleType(_DbEnum):
+    """``sale_type`` — the bucket a sales method belongs to (``sale_info.type``).
+
+    ``other`` replaces the old ``Cash`` word; the Cash method itself is the catalogue row
+    whose ``value_name`` is ``cash_sales`` (``SaleInfo.CASH_VALUE_NAME``). The report totals
+    key on the bucket, the wizard's sales step lists ``electronic`` and ``delivery``.
+    """
+
+    pg_name = nonmember("sale_type")
+
+    ELECTRONIC = "electronic"
+    DELIVERY = "delivery"
+    OTHER = "other"
+
+    @classmethod
+    def normalize(cls, word) -> "SaleType | None":
+        """The member for a caller's spelling - the enum's own, or the pre-C3 capitalised
+        ``Electronic`` / ``Delivery`` / ``Cash`` the settings page and old JSON still send.
+        None for anything else."""
+        key = str(word or "").strip().lower()
+        if key == "cash":
+            return cls.OTHER
+        try:
+            return cls(key)
+        except ValueError:
+            return None

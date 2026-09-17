@@ -1,115 +1,93 @@
+"""The sales-method catalogue: ``sale_info`` in docs/schema/01_schema_rebased.sql.
+
+One GLOBAL row per method name (``sale_name`` is UNIQUE): Visa, Alipay, Foodpanda, Cash - and
+every name a company ever typed for itself (the loader folded the per-entity ``CUSTOM_*``
+rows onto one catalogue row per name). Which company uses which method is
+``entity_sale_setting`` (``EntitySaleSetting``), a link with its own on/off and order.
+
+``value_name`` is the form-field convention the sales page keeps (``visa_sales``); the Cash
+method is the row whose ``value_name`` is ``cash_sales`` - its ``type`` is ``other``.
+"""
 from uuid import uuid4
 
+from sqlalchemy.orm import synonym
+
+from blueprints.shared.column_types import MintyUuid
+from blueprints.shared.enums import SaleType
 from models.db import db
 
 
 class SaleInfo(db.Model):
-    """Catalog of sales/payment methods — the sales analogue of EntityFunction.
-
-    Row scoping mirrors the global-vs-per-entity split used elsewhere:
-      * ``entity_id IS NULL`` → global catalog row (Visa, Octopus, ...),
-        available to every entity;
-      * ``entity_id`` set     → custom method owned by that one entity, created
-        when a user types a name that matches no global row.
-
-    ``sale_info`` rows point here (the EntityFunctionMap analogue), and
-    ``report_sale_detail`` rows carry the id directly so a historical report
-    stays self-describing even after an entity removes the method.
-
-    ``legacy_column`` is the transition bridge back to the physical ``*_sales``
-    columns on report / report_draft. It exists only to drive the backfill and
-    is dropped once those columns go — a NEW method must never need one, or
-    adding a method would again require a schema change.
-
-    Cash IS in the catalog (code 'CASH', type 'Cash'), seeded by s7a07 — it is
-    a payment method like any other and belongs in the list users see. What
-    stays special is everything downstream: ``cash_sales`` keeps its physical
-    column when the other 11 are dropped, it is the only sales figure in the
-    closing-balance formula, and it publishes to Xero against
-    ``cash_sale_account_id``. Its ``legacy_column`` therefore survives Step 5,
-    unlike every other row's.
-    """
-
     __tablename__ = "sale_info"
     __table_args__ = {"schema": "pettycashv2"}
 
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
-    entity_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
-        nullable=True,
+    CASH_VALUE_NAME = "cash_sales"
+
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
+    type = db.Column(
+        db.Enum(SaleType, name="sale_type", schema="pettycashv2", native_enum=True,
+                create_type=False, values_callable=lambda e: [m.value for m in e]),
+        nullable=False, default=SaleType.OTHER,
     )
-    code = db.Column(db.String(50), nullable=False)
-    name = db.Column(db.String(80), nullable=False)
-    # 'Electronic' | 'Delivery' — matches sale_info.type values.
-    type = db.Column(db.String(20), nullable=False)
-    legacy_column = db.Column(db.String(50), nullable=True)
-    is_active = db.Column(db.Boolean, nullable=False, default=True)
-    display_order = db.Column(db.Integer, nullable=False, default=0)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
+    sale_name = db.Column(db.String(80), nullable=False, unique=True)
+    value_name = db.Column(db.String(80), nullable=True)
+    display_order = db.Column(db.Integer, nullable=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.current_timestamp())
     updated_at = db.Column(
-        db.TIMESTAMP,
-        server_default=db.func.current_timestamp(),
+        db.DateTime(timezone=True), server_default=db.func.current_timestamp(),
         onupdate=db.func.current_timestamp(),
     )
 
-    @classmethod
-    def resolve(cls, entity_id, *, code=None, legacy_column=None, name=None):
-        """Find the catalog row an entity should use for a method.
+    # the names the code used before C3, so readers keep compiling and filtering
+    name = synonym("sale_name")
+    is_active = synonym("enabled")
+    # readers that joined the per-company link by ``sale_id`` now join the catalogue by the
+    # same value; the alias lets them keep reading ``.sale_id`` off either object
+    sale_id = synonym("id")
 
-        Prefers the entity's own custom row over the global one so a custom
-        method can shadow a global code. Lookup is by whichever key the caller
-        has: ``code``, ``legacy_column`` (the old ``value_name``), or ``name``.
-
-        Returns None when nothing matches — callers creating a user-named
-        method should fall back to ``ensure_custom``.
-        """
-        query = cls.query.filter(
-            db.or_(cls.entity_id == entity_id, cls.entity_id.is_(None))
-        )
-        if code is not None:
-            query = query.filter(cls.code == code)
-        elif legacy_column is not None:
-            query = query.filter(cls.legacy_column == legacy_column)
-        elif name is not None:
-            query = query.filter(db.func.lower(cls.name) == (name or "").strip().lower())
-        else:
-            return None
-        # entity-owned row first: NULLS LAST puts the global fallback second.
-        return query.order_by(cls.entity_id.isnot(None).desc()).first()
+    @property
+    def is_cash(self) -> bool:
+        return self.value_name == self.CASH_VALUE_NAME
 
     @staticmethod
-    def custom_code(name):
-        """Derive the catalog code for an entity-invented method name.
-
-        Mirrors the expression the SQL backfill used, so a method minted here
-        collides (and therefore dedupes) with its backfilled counterpart
-        instead of creating a second row for the same thing.
-        """
-        base = "".join(ch if ch.isalnum() else "_" for ch in (name or "").strip())
-        return ("CUSTOM_" + base.upper())[:49]
+    def value_name_for(name: str) -> str:
+        """The form-field name a NEW method gets: ``"Tap & Go"`` -> ``tap_&_go_sales``, the
+        derivation the code has always used (what an old report's detail rows were keyed by)."""
+        return (name or "").strip().lower().replace(" ", "_") + "_sales"
 
     @classmethod
-    def ensure_custom(cls, entity_id, name, method_type):
-        """Get-or-create the per-entity catalog row for a user-typed method.
+    def by_name(cls, name):
+        """The catalogue row for a display name, matched case-insensitively; None if absent."""
+        key = (name or "").strip().lower()
+        if not key:
+            return None
+        return cls.query.filter(db.func.lower(cls.sale_name) == key).first()
 
-        Does NOT commit — the caller owns the transaction, so the new catalog
-        row and the sale_info row that references it land together or not at
-        all. Flushes so the generated id is available to the caller.
+    @classmethod
+    def by_value_name(cls, value_name):
+        if not value_name:
+            return None
+        return cls.query.filter(cls.value_name == value_name).first()
+
+    @classmethod
+    def ensure(cls, name, sale_type, *, value_name=None, display_order=None):
+        """Get-or-create the catalogue row for ``name``.
+
+        Global by design (schema: UNIQUE sale_name) - two companies that both type "Payme"
+        share one row. Does NOT commit: the caller owns the transaction so the catalogue row
+        and the link that references it land together. Flushes so the id is available.
         """
-        code = cls.custom_code(name)
-        existing = cls.query.filter_by(entity_id=entity_id, code=code).first()
-        if existing is not None:
-            return existing
-
+        row = cls.by_name(name)
+        if row is not None:
+            return row
+        clean = (name or "").strip() or "Custom"
         row = cls(
-            entity_id=entity_id,
-            code=code,
-            name=(name or "").strip() or "Custom",
-            type=method_type or "Electronic",
-            legacy_column=None,  # custom methods have no physical column
-            is_active=True,
-            display_order=0,
+            sale_name=clean,
+            type=SaleType.normalize(sale_type) or SaleType.OTHER,
+            value_name=value_name or cls.value_name_for(clean),
+            display_order=display_order,
+            enabled=True,
         )
         db.session.add(row)
         db.session.flush()

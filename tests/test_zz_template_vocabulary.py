@@ -24,7 +24,9 @@ RETIRED: dict[str, tuple[str, ...]] = {
            "token_created_at", "current_entity_id", "xero_token"),
     "C2": ("minimum_qty", "deposit_frequency", "deposit_day", "xero_short_code",
            "period_lock_date", "end_of_year_lock_date"),
-    # "C3": ("value_name", "sale_info_id", "legacy_column"),
+    # C3 retires the per-company copies of the catalogue's columns and the old type words.
+    # ``value_name`` itself STAYS (it is the form-field convention, now on sale_info).
+    "C3": ("sale_info_id", "legacy_column", "create_date"),
     # "C4": ("cash_sales", "shop_sales", "delivery_sales", "receipt_files", "uploaded_by",
     #        "xero_integrated_yes", "withdrawal_type", "withdrawal_bank_account",
     #        "actual_cash_total", "shop_expense", "report_sale_detail"),
