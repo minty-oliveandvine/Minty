@@ -20,7 +20,7 @@ Each run:
   can start from an empty history on every run.
 
 Goes through the app's own models, so it works on whichever schema the code currently
-matches - it is re-run at the end of every phase C unit (docs/modernisation_plan.md).
+matches - it is re-run at the end of every phase C unit (docs/modernisation/modernisation_plan.md).
 """
 
 from __future__ import annotations

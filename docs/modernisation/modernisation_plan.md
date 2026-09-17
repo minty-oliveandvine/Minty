@@ -1,0 +1,1534 @@
+<!-- Source of truth for the plan. Originally authored as a Claude Code plan file; edit HERE from now on. -->
+
+# Minty modernisation — two plans, in order
+
+**Part 1 — Database cleansing on the current code** (do first): the production database moves
+to the redesigned schema in `docs/schema/01_schema_rebased.sql`, and the three apps that exist
+today — Minty (Flask), `billing-backend`, `onboarding-backend` — run on it unchanged in
+architecture. Tests first, then code. **Status 2026-09-17: A closed, B done, D steps 1–3 done,
+`minty_cleanse` built, C0.9/C0.95/C1–C9 and the `pettycashv3` qualifier rename done — the audit is 0 in all three repos and every suite is green on Postgres; next is C10 (close-out). Decided 2026-09-16: the production schema is named `pettycashv3` permanently (no rename-swap into `pettycashv2`).**
+
+**Part 2 — Multi-repo structure for the Flask → Django + Next.js migration**: everything after
+that. Its step 2 shrinks to "`minty-db` adopts the schema Part 1 already put in production".
+
+Both parts are in this file; copy it to `Minty/docs/` as the first act outside plan mode.
+
+---
+
+# Part 1 — Database cleansing: tests first, then code to the new schema
+
+## Context
+
+Three codebases read and write one PostgreSQL schema, `pettycashv2` (67 tables, hand-written
+Alembic, cannot be built from empty). A redesign already exists and is finished as SQL:
+`docs/schema/01_schema_rebased.sql` — 58 tables + the `tracker` view, 21 enums, `uuid` PKs,
+`numeric` money, `timestamptz`, `user`/`user_token` split, 9 renames, draft/v2 report tables
+collapsed, sales channels normalised, dead columns and the 8 `auth_*`/`django_*` tables gone.
+With it: generated loaders (`02`, `03`, `04`), `00_enum_coverage_check.sql`, `audit_models.py`,
+and `APPLICATION_CHANGES.md` listing the 217 code findings the redesign causes (9 renamed
+tables, 64 model columns the schema no longer has — each of which breaks every `SELECT` on its
+model — and 144 type mismatches, of which the `Float`-on-money ones are real bugs).
+
+What is missing is the application side and the production cutover. This plan does both, in
+that order, with a test net built first — because the current suite cannot see the change:
+Minty's 100 test files run on **SQLite via `db.create_all()`**, which builds the *old* shape
+from the current models and knows nothing of enums, `uuid` or `numeric`. A green run on it
+after the model edits would prove nothing about the database the code will actually meet.
+
+**Out of scope here:** service extraction, repo renames, `minty-db`, CI/Terraform — all Part 2.
+Part 2 step 1 (CI + housekeeping) can run in parallel with this and would make phase B's runs
+automatic; it is not a prerequisite.
+
+## One schema, one hop
+
+**`01_schema_rebased.sql` is the only target.** `01_schema 2.sql` is the draft it was rebased
+from — nine Alembic revisions behind — and is kept as the record of the original design, nothing
+more. Today it is still on the critical path as a *staging shape*: the pipeline is two hops,
+`pettycashv2 → pettycash_s2` (the original ` 1.sql` loaders, where the redesign transformation
+actually happens) → `pettycash_test` (the `_rebased` loaders, a column-for-column copy). D1 and
+D2, the three known build defects, and the "rebuild `pettycash_s2` first" step all live in that
+first hop.
+
+**Decision: the pipeline becomes one hop, `pettycashv2 → 01_schema_rebased`.** The
+transformation logic (uuid minting for the two non-uuid user ids, the `report`/`report_draft`
+merge with `DISTINCT ON (old_id)` by priority, the `sale_info` split, the three-way
+`report_history` merge, the enum mappings) is ported from the ` 1.sql` files into
+`docs/schema/generators` (`gen.py` already takes `GEN_SRC`/`GEN_DST` from the environment) so
+`02`/`03` are generated against the rebased schema directly. D1–D5 disappear — there is no lossy
+intermediate (see phase A). The row checks become "expected count" for the merged tables and stay "equal" for
+the copied ones. `01_schema 2.sql` and its loaders move to `docs/schema/archive/`.
+
+**And commit `docs/schema/` first.** None of it is in git — the most current schema exists
+only on this machine. `git add docs/schema && git commit` is the first act of phase B.
+
+### Where the rebased schema already is (local Postgres, checked 2026-09-15)
+
+| Database | Schema | Tables | State |
+|---|---|---|---|
+| **`minty_cleanse`** — what `.env` points both URIs at now | `pettycashv2` (new, loaded) + `pettycash_legacy` | 59 | **The phase C database**; see Phase C |
+| `minty_pettycashv3` | `pettycashv3` (new, loaded from the 09-16 dump) + `pettycashv2` (old, at v1a01) | 59 | The build under the permanent name (2026-09-16; rebuilt 2026-09-17 on items 21/22, ALL GREEN, attachments loaded); its dump `backups/minty_pettycashv3_<date>.dump` is what Supabase receives — the 09-16 one was restored there on 09-16; the 09-17 one replaces it (`DROP SCHEMA pettycashv3 CASCADE` then `pg_restore`). Becomes the phase C database once the qualifier rename lands. |
+| `postgres` — the former app database | `pettycashv2` | 68 | **Old shape**: `roles`/`permissions`/`invitations`/`report_sale_detail`/`shop_expense`/`audit`/`bill_line_item` present, `report.status` varchar, 4 enums, Alembic `v1a01_billing_account` |
+| `pcschema_test` | `pettycash_test` | 58 | Rebased, empty — the structural reference `audit_models.py` hardcodes |
+| `pcbak_win` | `pettycash_test` (+ `pettycash_s2`, 43) | 57 | Rebased and **loaded** via the two-hop pipeline: 119 users, 3,749 reports, 82 entities |
+| `pcbak_test` | `pettycash_test` + `pettycashv2` | 57 + 67 | Rebased, empty, beside an old-shape copy |
+| `pcorig_test` | `pettycash_test` | 43 | Schema-2 draft shape, misnamed |
+| `production-backup`, `prestaging-new`, `supa_rehearsal` | `pettycashv2` | 60 / 64 / 68 | Old shape, Supabase snapshots |
+
+So: the redesign has been **built and loaded locally, but no application has ever run against
+it** — every `pettycash_test` is in a database nothing connects to. And every one of them is
+**one build behind the file**: none has `user.system_role` (D6) or `billing_account_payment_method`
+(the 2026-09-10 change). The file is the truth; the databases are stale. Two consequences:
+phase B's harness builds from `01_schema_rebased.sql` on every run and never reuses a database,
+and `pcbak_win.pettycash_test` is the ready-made dataset for the first characterisation-test runs
+(regenerate it once the one-hop pipeline exists).
+
+## The rule: the schema is authoritative, the code follows it
+
+This is `01_schema_rebased.sql`'s own Decision 10 — *"the database is authoritative; the
+application follows it"* — and Part 1 applies it without exception. Where code and schema
+disagree, the code changes. The only edits to `01` are the ones its own decision register
+already calls its faults (D6) and the enum-narrowing pass it already schedules.
+
+## Phase A — decisions (closed 2026-09-15)
+
+All six review decisions and §4 are closed; the register is item 18 of `01_schema_rebased.sql`'s
+header and it wins over anything below if they ever disagree.
+
+| | Resolution |
+|---|---|
+| **D1–D5** | The one-hop pipeline showed they were artefacts of the schema-2 hop. The user then chose the **redesign's vocabulary**: the enums are `01_schema 2.sql`'s, production data is **mapped** on the way in (`gen.py ENUM_MAP` generates `02`, `03`, the count assertions and `00`), and the application changes to write those words in phase C. |
+| **D6** | `user.system_role` uncommented; enum `normal / admin / superadmin`. The one `superuser` loads as `superadmin`. |
+| **§4** | `entity_function_map.created_by` is a UUID FK to `user`; `_write_pairs` gains a `user_id`; no `actor` column. |
+| **Enum narrowing** | Superseded — nothing left to narrow. Two members schema 2 lacked were kept as live workflow states: `bill_status.returned`, `publish_state.failed`. |
+| **Module code** (2026-09-16) | `entity_function.function_code` `BILL` → **`PAYMENT_REQUEST`** (01 item 20): mapped by the loader in `entity_function` and `entity_module_subscription`, the `tracker` view filters on it. `billing_plan.code` keeps `BILL` / `BILL+PETTY_CASH` by decision, so the plan-key rule (sorted join of module codes) needs a mapping in phase C. Code that follows: `MODULE_BILL` ×2 + ~50 refs in Minty, billing-backend `core/entitlements.py`, onboarding-backend `plans.py`/`shared_models`, onboarding `lib/api.ts` `ModuleCode`, billing-frontend module claims. |
+
+The vocabulary the code must now write (item 18), in one place because phase C keys on it:
+
+| Enum | Old word(s) in code | New |
+|---|---|---|
+| `system_role` | `superuser` (JWT claim — Minty, billing-backend, onboarding-backend together) | `superadmin` |
+| `report_status` | `posted` | **`submitted`** — `posted` has always meant "the wizard finished" (`ending.py:1568`, rendered "Submitted" at `report_history.html:513`); Xero publishing lives in `publishing_status`/`xero_integrated`. `published` stays declared, unused by the load (corrected 2026-09-16). `partially_published` gone |
+| `publish_status` | `processing`, `not_published`/NULL | `publishing`, `unpublished` |
+| `discrepancy_type` | `shortage`, `surplus` | `short`, `over` |
+| `sale_type` | `Electronic`, `Delivery`, `Cash` | `electronic`, `delivery`, `other` |
+| `invitation_status` | `cancelled` | `revoked` |
+| `entity_status` | `active`, `cancelled`, `deleted` | `onboarding` / `connected` / `disconnected` only — see C2 |
+| `bill_status` (billing-backend) | `voided`; dead `authorised`/`cancelled`/`sync_failed` | `void`; dead members removed |
+| `publish_state` (billing-backend) | `not_published` (model default at `bills/models.py:45`, `BillActionBar.tsx:18`) | `draft` |
+| `sync_direction` | `outbound` | `push` |
+| `entity_role` | `'shop manager'` (one row) | `shop_manager` |
+
+## Phase B — the test net (done; what it left behind)
+
+Committed as `a32a136` ("Baseline test"). In place:
+
+- **B1** `tests/pg_harness.py` + `tests/conftest.py` Postgres mode (`MINTY_TEST_PG_URI`), building
+  a throwaway database from `01` and rename-swapping to `pettycashv2`, `create_all` a no-op.
+  Three suite-level fixes that make real-database route tests possible in a full run at all
+  (per-connection SQLite schema attach, per-process files, rebinding stale model references —
+  the "not registered with this SQLAlchemy instance" trap). **The SQLite path is still the default.**
+- **B2** `tests/_baseline/`: SQLite at HEAD = 62 failed / 29 errors / 1508 passed; `compare.py`.
+  After B: 66 failed / 29 errors / 1558 passed, no pre-existing test moved.
+- **B3** 57 characterisation tests (`tests/test_char_report_lifecycle.py`, `test_char_sales_methods.py`,
+  `test_char_access.py`), factories in `tests/char_factories.py` with FakeS3 and FakeMail at the
+  library boundary, `tests/test_zz_route_coverage.py` against `tests/_baseline/route_inventory.json`
+  (132 in-scope endpoints; last measured 117 exercised). **Groups not yet written:** money exactness,
+  Xero tokens, entities/settings, subscription, billing-backend, onboarding-backend — each is
+  written at the start of the phase C unit that touches it (see C0).
+- **B4** both Django repos: `settings_test.py` Postgres mode + root `conftest.py` using the harness.
+- **B5** became `scripts/schema_migration/rehearse.py` (one hop) — see phase D.
+- **B6** `audit_models.py` covers all three repos, target from env; `AUDIT_STRICT=1`.
+- **Findings recorded as strict xfails:** F1 revert-to-draft deletes expenses (`services/ending.py`);
+  F2 delete-report leaves expense receipts in S3; F3 `superuser` vs the enum (now decided: `superadmin`).
+- One order-dependence to clear: `test_history_csv_lists_the_days_movements` passes alone, 500s in the full run.
+
+## Phase C — the application follows the schema  ← NEXT
+
+**The database:** `minty_cleanse` (local), built 2026-09-15 by
+`rehearse.py --dump backups/production-backup_20260915.dump --db minty_cleanse --attachments`
+against the updated `01` (59 tables + 2 views, 21 enums, `user.system_role` present) and
+rename-swapped: `pettycashv2` is the new shape with production data (119 users, 82 entities,
+3,749 reports, 10,172 expenses / 10,201 attachments, 482 bills); the old schema sits beside it as
+`pettycash_legacy`. Minty's `.env` points at it (`.env.bak_before_minty_cleanse` has the old URIs).
+**Rebuild it the same way whenever `01` changes** — never patch it by hand. Automated tests keep
+using the harness (a fresh build from `01` per run); `minty_cleanse` is for running the apps and
+for the manual checks.
+
+**The list, measured against `minty_cleanse`** (`AUDIT_URI=<minty_cleanse> AUDIT_SCHEMA=pettycashv2
+python docs/schema/generators/audit_models.py`): **287 findings** — Minty 154 (7 tables, 48
+columns, 99 types), billing-backend 63 (2 / 14 / 47), onboarding-backend 70 (1 / 29 / 40).
+`APPLICATION_CHANGES.md` is stale (217, two repos, older build); regenerate it from the audit
+at the end of each unit rather than maintaining it by hand.
+
+### C0 — ground rules for every unit
+
+1. **Tests first, per unit.** If B3 has no characterisation tests for the area, write them on
+   the current code (SQLite) before touching a model; run them in Postgres mode afterwards.
+2. **One vocabulary module.** New `blueprints/shared/enums.py`: a Python `Enum` per Postgres enum
+   (`ReportStatus`, `EntityStatus`, `SystemRole`, `SaleType`, `InvitationStatus`, `DiscrepancyType`,
+   `PublishStatus`, `PublishState`, `SyncDirection`, …) with the members from `01`. Every string
+   literal in item 18's list becomes a member reference; templates get them via a context
+   processor. billing-backend and onboarding-backend get the same values as Django `TextChoices`
+   in `shared_models/enums.py`. The three copies are checked equal by a test that reads `01`.
+3. **Column types follow the schema.** SQLAlchemy: `db.Enum(<PyEnum>, name="report_status",
+   schema="pettycashv2", native_enum=True, create_type=False, values_callable=…)`,
+   `sqlalchemy.Uuid(as_uuid=False)` for ids, `Numeric(14, 2)` for money, `DateTime(timezone=True)`.
+   Django: `UUIDField`, `DecimalField(max_digits=14, decimal_places=2)`, `TextChoices` fields.
+4. **Graduation.** `tests/conftest.py` turns every `char` test into an xfail in Postgres mode.
+   Replace that with a `PG_PENDING = {"test_char_report_lifecycle.py", …}` set in conftest; a
+   unit removes its module from the set when it is green on Postgres, and from then on a
+   regression there is a hard failure.
+5. **Gate per unit:** `audit_models.py` shows **0 findings for the unit's tables** across all
+   three repos; the unit's tests green on SQLite *and* Postgres; the full Minty suite (Postgres)
+   has no newly failing test outside the unit (`compare.py`); the app boots against
+   `minty_cleanse` and the unit's pages render for one real entity.
+6. **Alembic is frozen from now.** No new revision. A schema change is an edit to `01` + `gen.py`,
+   then `minty_cleanse` is rebuilt. (`Minty/migrations/` is deleted at the cutover, phase E.)
+7. **Commit per unit**, on a branch (`part1-phase-c`), never mixing a rename with a behaviour fix.
+8. **One database for the stack:** at the start of C1, `billing-backend/.env` and
+   `onboarding-backend/.env` get `POSTGRES_DB=minty_cleanse` (decided 2026-09-15), so the three
+   apps and `onboarding/e2e` run against the same data throughout phase C.
+
+### C0.9 — the browser sees it: Minty E2E smoke (before C1)
+
+Why: the route tests render Jinja but run no JavaScript, and Minty's report wizard is
+large inline JS that reads the names the redesign changes (`sales.html` `calculateTotals()`,
+the 3,500-line `expense.html` script, `cash_count.html`; 15 templates + 1 static JS file
+reference renamed columns). A renamed JSON key there fails silently in every test we have.
+`billing-frontend` has no tests at all and C8 changes its types.
+
+- **`Minty/e2e/` — Playwright, TypeScript**, same layout and conventions as `onboarding/e2e`
+  (`playwright.config.ts`, `helpers.ts`, credentials from env, skips with a reason when unset).
+  Runs against the local stack on `minty_cleanse` (Flask :5001; Django :8000/:8001 and the Next
+  apps only where a journey crosses into them). Test identity: a superadmin and one real entity
+  from the loaded data (ids via env `E2E_MINTY_USER`, `E2E_MINTY_ENTITY`), logging in through the
+  real OTP form with the mail transport stubbed (`MAIL_*` pointed at a local sink) or a
+  test-only login route guarded by `TESTING` — decide in the unit; never a hardcoded password.
+- **Journeys (~10):** login → entity list → open a company; the full report wizard in a real
+  browser — opening, sales with per-method inputs and live totals, expenses with a receipt
+  upload, deposit, cash count with denominations, ending → submitted page; report detail and
+  history (figures match what the wizard showed); CSV download; entity settings: sales methods
+  add/reorder/disable, users list and role change; Xero connect page renders (no real OAuth);
+  the terms modal on first login.
+- **`billing-frontend/e2e/` — Playwright, TypeScript**, same shape. It has no tests of any kind
+  today and C8 changes what it renders (`bill_status`, `publish_state`, the bill payload). Runs
+  against the stack on `minty_cleanse` with the JWT handoff from Minty (`billing_token` cookie
+  minted the way `lib/auth.ts` expects) and Xero/Stripe stubbed at the Django boundary.
+  Journeys (~8): module selection → payment-request list with status filters; bill detail with
+  lines and totals; the action bar through submit → approve → pay → void (every status word the
+  UI shows); attachment upload and preview; publish to Xero (stubbed) and the publish-state badge;
+  payer portal — profile, billing/cards, invoices, subscriptions (these call Minty's `/api/me/*`);
+  the maintenance page. Baseline green on the current code before C8 starts.
+- **`billing-backend`** needs no browser suite: its 457 pytest tests plus the B4 Postgres mode
+  cover it, and C8 adds API-level characterisation (`bills/tests/test_char_schema.py`). Its
+  django-ninja OpenAPI (`/api/openapi.json`) is snapshotted before C8 so payload changes are a
+  visible diff, not a surprise in the browser.
+- **`onboarding`** already has `onboarding/e2e` (13 Playwright tests); it runs at the end of
+  C1, C2, C3 and C9 since those units change what its API returns.
+- **Frontend gates added to the units that touch a frontend:** C8 — `tsc --noEmit`,
+  `npm run build` and the new e2e suite in `billing-frontend`, plus a vitest for the status maps
+  (`billStatusDisplay.ts`, `billStatusRollback.ts`, `BillActionBar`); C3/C4 — the Minty wizard
+  journeys must stay green after each template/JS change.
+- **Old-name grep as a test** (`tests/test_zz_template_vocabulary.py`): once a unit lands, no
+  file under `templates/**` or `static/js/**` may reference a column that unit removed
+  (`cash_sales`, `shop_sales`, `delivery_sales`, `uploaded_by`, `xero_integrated_yes`,
+  `actual_cash_total`, `withdrawal_*`, `sync_statuc`, `value_name` …); the list grows per unit.
+- Fix `tests/test_zz_route_coverage.py`'s misses file (it currently writes one line per miss but
+  the header count and the body disagree — 117/125 vs one row): write endpoint, methods, rule
+  and reason as tab-separated fields so the to-do list is readable and complete.
+- **Gate for C0.9:** both new suites green against the *current* code on `postgres` (old schema),
+  so they are a known-good baseline before C1 changes anything; then they run against
+  `minty_cleanse` at the end of every unit from C1 on (Minty's after every unit, billing-frontend's
+  after C1, C7 and C8).
+
+**Status 2026-09-16 — C0.9 done.** `Minty/e2e/` (Playwright, 19 tests: login + terms modal,
+the whole report wizard in a browser, settings/users/Xero page/module page/CSV) and
+`billing-frontend/e2e/` (13 tests: handoff + status tabs, draft lifecycle + confirm validation,
+payer portal) are green against the current code on the old-schema `postgres` database.
+`Minty/scripts/e2e_seed.py` seeds the identity both suites use (`e2e@minty.test`,
+`E2E Petty Cash Shop`, both modules on, synced accounts/contacts, bill account codes), and is safe
+to re-run against `minty_cleanse`. Also landed: `tests/test_zz_template_vocabulary.py` (retired
+names grep, empty until C1), `PG_PENDING` in `tests/conftest.py`, the route-coverage alias fix,
+`billing-backend/bills/tests/test_openapi_snapshot.py` (43 paths, 58 schemas pinned),
+`billing-frontend` `npm run typecheck`. Two more findings, recorded as `test.fail()`:
+**F4** `cash_count.html` `applyCalculatorTotal()` strips only `$` so the Actual Cash Balance field
+shows `HKD0.00` after Apply (display only; fix in C4); **F5** `/api/me/subscriptions` answers 500
+for a payer with no subscriptions (`paid_through` referenced outside its loop in
+`subscription/services/portal.py`; fix in C7). Next: **C1**.
+
+**Done 2026-09-16 (C0.95):** `minty_cleanse` rebuilt from `backups/production-backup_20260916.dump`
+(the 0915 dump no longer matches `gen.py`'s re-measured `EXPECT_SKIP` — 65 → 40 `sale_info`;
+always pair the dump with the generator's counts). ALL GREEN in 206 s (7-minute window), swapped:
+130 users, 88 entities, 4,861 reports (`submitted` 790 / `published` 4,046 / `draft` 25),
+930 bills; `entity_function` = `PETTY_CASH`, `PAYMENT_REQUEST`; `module_code` on the three
+`function_code` columns. Audit against it: **Minty 157, billing-backend 65, onboarding-backend 71**
+(the +3/+2/+1 are the `module_code` type findings). `rehearse.py`'s app-database guard now warns
+instead of failing when `RDS_DATABASE_URI` is unreachable (it points at Supabase in `.env` again —
+note `FLASK_ENV` defaults to `production`, which selects **RDS**, so run Flask for phase C with
+`FLASK_ENV=development` or point RDS at `minty_cleanse`).
+
+### C1 — identity: `user`, `user_token`, `system_role`  (unblocks ~480 test errors across the repos)
+
+- Tests first: B3 group **Xero tokens** (`tests/test_char_xero_tokens.py`): connect callback
+  stores a token; expired → `services/auth/token_service.py` refreshes (transport stubbed at
+  `requests`) and updates obtained-at; refresh failure → 409 "reconnect required" with nothing
+  overwritten; disconnect clears; `/api/internal/xero/token` for a member; two users of one
+  entity hold separate rows.
+- `blueprints/auth/models/user.py`: drop `xero_entity_id`, `xero_token`, `access_token`,
+  `refresh_token`, `id_token`, `expires_in`, `token_created_at`, `current_entity_id`;
+  `system_role` → enum. `UserToken` (`user_token.py`, already exists) becomes the only token
+  store: `access_token`, `access_token_obtained_at`, `access_token_expires_in`, `refresh_token`,
+  `refresh_token_last_used_at`, `id_token`.
+- Rewire the readers (from the reference count): `services/auth/token_service.py` (39),
+  `blueprints/xero/routes/routes.py` (27), `entity/services/onboarding_xero.py` (12),
+  `entity/routes/settings.py` (12), `xero/services/publish.py` (7), `user_management/routes/roles.py` (4),
+  `entity/services/onboarding_account_codes.py` (4), `xero/services/settings.py` (3),
+  `user_management/routes/create_user.py` (`xero_entity_id`), `deactivate_my_account`.
+- `superuser → superadmin`: `blueprints/auth/system_roles.py:6`, `services/permission_policy.py:26`,
+  `user_management/routes/admin_list.py:97`, two templates; **and in the same change**
+  billing-backend `core/auth.py:61,132,226`, `core/views.py:34`; onboarding-backend `core/policy.py:42`
+  — it rides in the JWT claim. `LEGACY_SUPERUSER_ROLES` keeps accepting `admin`/`super_admin` on read.
+- `user_entity.create_at → created_at`; `entity_function.description`/`created_at` NOT NULL
+  (the factories and the seed CLI set them).
+- Mirrors: billing-backend `shared_models/models.py` (`user` 6, `entities` 3), onboarding-backend
+  (`user` 1, `user_entity` 1).
+
+**Done 2026-09-16 (C1).** Minty: `blueprints/shared/enums.py` (`SystemRole`, `EntityRole`; every
+`_DbEnum` names its Postgres type via `pg_name`), `User` on `Uuid`/`system_role` enum/timestamptz
+with the six token columns, `xero_entity_id` and `current_entity_id` gone; the token attributes
+are properties over the one `user_token` row (`clear_tokens()` replaces the six-way clears);
+`entities.connected_by_user_id` is the only "who connected" fact; `user_entity.created_at`;
+`superuser → superadmin` everywhere (`SYSTEM_ROLE_SUPERUSER` keeps its name, `normalize_system_role`
+still accepts the old spelling from pre-rename JWTs; `LEGACY_SUPERUSER_ROLES` stays
+`admin`/`super_admin` — entity roles, never `superuser`). Presence follows item 14 (per person,
+aware timestamps). billing-backend: `UserToken` mirror, `Entity.connected_by_user_id`,
+`xero_token_service` is read-only over `user_token` (the dead refresh path deleted), raw SQL over
+`user`/`user_entity` replaced by ORM, `str(request.auth_user.id)` where a uuid meets a text column
+(until C8); onboarding-backend: `core/policy.py` on the enum, `find_resumable_entity` materialised
+(the SQLite uuid-vs-text `__in` trap). Both Django repos: `shared_models/enums.py`
+(`TextChoices`), `PgEnumField`, `db_default=Now()` for the schema's `NOT NULL DEFAULT now()`
+stamps. Tests: `tests/test_char_xero_tokens.py` (10), `tests/test_enums_match_schema.py` (parses
+`01`, checks all three copies), `RETIRED["C1"]` on, `test_user_presence` rewritten to item 14,
+all test user ids are uuids now (SQLite rejects `"u1"`). **Gate:** audit = 0 on
+`user`/`user_token`/`user_entity`/`email_otp` in all three repos (totals Minty 157→139,
+billing 65→56, onboarding 71→64); SQLite suites: onboarding 369/369, billing 444 passed with the
+same 14 pre-existing failures as HEAD, Minty no newly failing test vs the Phase B baseline; real
+login form on `minty_cleanse` signs a superadmin in and routes to `/admin`. **Left to C2:** every
+page and Postgres-mode test that reads `entities` (`minimum_qty` …, `entity_status` `'deleted'`,
+`module_code` `'BILL'`) — `test_char_xero_tokens.py` is in `PG_PENDING` for that reason only.
+**Decided 2026-09-16 (user): the lock dates are not stored — billing fetches them from Xero's
+Organisation when publishing.** Context: billing-backend already GETs
+`api.xro/2.0/Organisation` for `PeriodLockDate`/`EndOfYearLockDate` (`bills/api.py`
+`_backfill_lock_dates`, triggered from the bills list) and caches the pair on `entities`;
+`xero_publish_service._build_xero_invoice_payload` reads the cache to send a bill dated on/before
+a lock as DRAFT instead of AUTHORISED. The schema dropped both columns, so in **C2, in the same
+change as the `Entity` mirror**: `_backfill_lock_dates` and its list-time hook go;
+`xero_publish_service` gains `fetch_lock_dates(access_token, xero_org_id) -> (period, eoy)` (the
+same GET, moved, tolerant — a failed lookup logs and publishes as AUTHORISED, today's behaviour
+when the cache is empty) called once per publish before the payload is built; tests stub the
+Organisation GET at `requests` and pin DRAFT-on/before-lock and AUTHORISED-after. Minty's
+`entity/routes/settings.py` lock-date form fields go with the columns (already in C2's list).
+Cost: one extra Xero GET per publish; benefit: a lock moved in Xero takes effect immediately
+instead of after the next bills-list visit.
+
+### C2 — entities and modules
+
+- Tests first: B3 group **entities** (`tests/test_char_entities.py`): create → creator is admin
+  and the module map rows carry the creator; module toggle via settings vs CLI (`created_by` user
+  vs NULL); settings page renders without the six dropped columns; status transitions; country /
+  currency resolution against the real `fk_country_currency`.
+- `entity.py`: drop `minimum_qty`, `deposit_frequency`, `deposit_day`, `xero_short_code`,
+  `period_lock_date`, `end_of_year_lock_date` (write sites at `entity/routes/settings.py` — the
+  lock-date form fields go with them; billing-backend stops caching the lock dates and asks
+  Xero at publish — see the C1 close-out note above); `status` → `EntityStatus`.
+- **Decided 2026-09-15:** `entity_status` is `onboarding / connected / disconnected` and means the
+  Xero connection state once onboarding is done. The finalize step (`create.py:1219`) writes
+  `active` today; it will write `connected` when the entity has a Xero org linked, else `disconnected`; Xero connect/disconnect
+  (`xero/routes.py:1067`) move between the two; `cancelled`/`deleted` writers (`list.py:486`,
+  `entity.py:33`) are removed — a cancelled subscription is a subscription state, not an entity
+  state (that is what the loader's mapping already says of the nine historical rows). The wizard
+  resumes on `onboarding` only; the access gate treats both other states as live.
+- `entity_function_map`: no `id` (composite PK `entity_id, entity_function_id`), `created_by`
+  uuid FK, `settings_json`, `enabled_at`/`disabled_at`; §4 `_write_pairs(user_id)` and its four
+  callers (`create.py:1169`, `modules.py:393`, `settings.py:1921`, the CLI).
+- Mirrors in both Django repos (`entities` 6+5 findings in onboarding-backend, `entity_function_map` in both).
+
+**Done 2026-09-16 (C2).** Minty: `Entity` on the schema (uuid id, `entity_status` enum with
+default `onboarding`, six columns gone, `financial_year_end_*`, tz stamps); `EntityFunction`
+(`module_code` enum, `display_order`) and `EntityFunctionMap` (composite key, no `id`,
+`created_by` uuid FK NULL-able, JSONB); `MODULE_BILL = "PAYMENT_REQUEST"` with the plan-word
+mapping in one place (`subscription/services/billing.plan_code` / `plan_modules`; the catalogue,
+notify and the onboarding plans endpoint speak module codes, `billing_plan.code` keeps `BILL`);
+`_write_pairs(..., actor, user_id)` — `created_by` is the person or NULL, `actor` keeps only
+the paid-subscription guard; finalize writes `connected`/`disconnected`, the legacy create form
+`disconnected`, the Xero-consent-declined branch no longer writes `cancelled`, the soft-delete
+route and every `deleted` filter are gone (no link pointed at it; `ENTITY_DELETE` stays in the
+matrix); Minty's lock-date backfill removed. **`blueprints/shared/column_types.MintyUuid`**
+is now the uuid column type everywhere (C1's columns retrofitted): native `uuid` on Postgres,
+CHAR(36) hyphenated text on SQLite, so a converted column joined to a not-yet-converted
+`String(36)` one still matches during phase C (`sqlalchemy.Uuid` stored 32-hex and the C1
+entity-list join silently returned nothing on SQLite); junk ids pass through to the database
+rather than raising inside SQLAlchemy. billing-backend: `Entity` mirror on the schema, `UserToken`
+stamps, `CountryInfo` mirror, `CharNField` (`char(n)`), `bills.EntityFunction/Map` on the
+schema (composite key; the map CRUD is addressed by `function_id`, OpenAPI snapshot updated),
+`core/entitlements.MODULE_BILL = PAYMENT_REQUEST`, **lock dates fetched from Xero's
+Organisation at publish time** (`xero_publish_service.fetch_lock_dates`; `_backfill_lock_dates`
+and the bills-list hook deleted; DRAFT on/before a lock, AUTHORISED otherwise or when the lookup
+fails); `get_entity_role` treats an empty/malformed entity id as no access. onboarding-backend:
+mirrors on the schema (`Entity`, `CountryInfo`, `CurrencyInfo`, `EntityFunction/Map`,
+`BillingPolicy.updated_at`), `_seed_module_defaults(user_id=)`, `plans.plan_modules`;
+`onboarding` wizard: `ModuleCode = 'PETTY_CASH' | 'PAYMENT_REQUEST'` (`lib/api.ts`,
+`lib/modules.ts`, `e2e/xeroFake.ts`; tsc clean, 289 vitest). Tests: `tests/test_char_entities.py`
+(14; the four decided behaviours were strict xfails on the old code), `RETIRED["C2"]` on,
+`PG_PENDING` accepts single cases (`test_char_xero_tokens.py::…disconnect…` waits on C6's
+`roles`; `test_char_entities.py` on C3's `sale_info`), `truncate_all` is `TRUNCATE … CASCADE`
+on Postgres, ~330 `"BILL"` module-code literals in Minty tests renamed (plan-word uses kept),
+test entity ids are uuids in all three repos. **Gate:** audit 0 on `entities`,
+`entity_function`, `entity_function_map`, `country_info`, `currency_info` in all three repos
+(totals Minty 139→121, billing 56→43, onboarding 64→43); SQLite: Minty 0 newly failing vs C1
+(1580 passed), billing 444 + the same 14 pre-existing, onboarding 369/369; Postgres: Minty 0
+newly failing / 10 newly passing (1362 passed), token char tests 9/10 green, onboarding-backend
+266 passed (was 153), billing-backend blocked only by `bill` (C8); on `minty_cleanse` the
+entity list renders all 88 companies with module icons, module/users settings and the admin
+dashboard render; `/entity/<id>` reaches `report.date` (C4), Xero settings reaches `roles`
+(C6). **Notes for later units:** billing-backend's `bills/models.py` module models changed
+without a Django migration on purpose (C8 deletes `bills/migrations`; do not run `migrate`
+against the new schema before that); `scripts/e2e_seed.py` cannot run on `minty_cleanse` until
+C3 (`sale_info`); `minty_cleanse` holds 19 enabled module grants of 176 (matches legacy — the
+m1a01 revocation; decided: revoke as rehearsed, see Phase D).
+
+### C3 — sales catalogue
+
+- Tests: `test_char_sales_methods.py` exists; add the sales-page rendering and the `other` (Cash) bucket.
+- `sale_info` becomes a **global catalogue** (`id, type, sale_name, value_name, display_order,
+  enabled`); `entity_sale_setting` a link (`entity_id, sale_id, is_active, display_order`). The
+  per-entity `CUSTOM_*` rows are gone (collapsed by the loader). `SaleInfo.resolve`/`ensure_custom`
+  and `replace_sales_methods` (`entity/services/payment_methods.py:280`) change shape;
+  `get_unique_sale_info_for_entity` (`report/routes/sales.py:48`) joins instead of grouping.
+- `sale_type` lowercase + `other`: the 46 sites plus five `electronic_delivery_*` templates
+  (`onboarding_state.py:166`, `payment_methods.py:89/209/268`, `sale_info.py:109`, …); the
+  `value_name` → form-field convention in `sales.html` stays.
+
+**Done 2026-09-16 (C3).** Minty: `SaleInfo` is the global catalogue (`sale_name` unique,
+`type` = `SaleType` enum `electronic/delivery/other`, `value_name` = the form-field
+convention, `enabled`), `EntitySaleSetting` the link `(entity_id, sale_id, is_active,
+display_order)` with read-through properties so `method.sale_name/.type/.value_name` keep
+working; `SaleInfo.ensure(name, type)` get-or-creates by name (a name any company typed is one
+row for all), `create_default_entity_settings` links the 11 defaults, `payment_methods.py`
+rewritten (JSON `type` carries the enum word; capitalised input still accepted via
+`SaleType.normalize`; a shared catalogue row cannot be renamed from one company — 409);
+`ReportSaleDetail.sale_id` points at the catalogue (both ids equal until C4 drops
+`sale_info_id`); the report-side readers join `SaleInfo`, `sum_sales_by_type` returns
+`electronic/delivery/cash` (Cash found by `value_name == cash_sales`, its type is `other`);
+templates/JS speak the enum words. onboarding-backend: mirrors on the schema, `sales_methods`
+service and the entity-create seed rewritten the same way (369/369). Tests: 4 new cases in
+`test_char_sales_methods.py` (sales page inputs, Cash in `other`, one catalogue row for two
+companies, a switched-off method keeps an old report's amount); `RETIRED["C3"]`; the char
+modules for sales, entities and tokens are OUT of `PG_PENDING` (only single cases remain,
+each tagged with the unit whose table they touch). **Two defects found and fixed:** (1)
+`gen.py` loaded `sale_info.value_name` as NULL for every row (the source kept the key as
+`legacy_column` / `entity_sale_setting.value_name`) — the sales form would have rendered no
+inputs on the new schema; mapped, loaders regenerated from `minty_pettycashv3` (the only build
+on the current `01`; `pcreh_20260916b` predates the `module_code` enum), `minty_cleanse`
+rebuilt ALL GREEN in 195 s; (2) **`01` item 21**: `country_info` sat in the `updated_at`
+trigger list without the column — every UPDATE on it failed. Fixed as the user decided
+(2026-09-17): `country_info` is seeded once and only read, so it gets NO stamps; its name comes
+out of the trigger array (33 → 32 triggers), `supabase/pettycashv3.sql` regenerated,
+`minty_cleanse` rebuilt. **Standing rule from this:** no edit to `01` / `pettycashv3` without
+asking first (memory `ask-before-schema-changes`). **Gate:** audit 0 on `sale_info` /
+`entity_sale_setting` (totals Minty 121→105, onboarding 43→27); SQLite: Minty 0 newly failing
+(1585 passed), onboarding 369/369; Postgres: Minty 0 newly failing, 1390 passed (+28),
+onboarding-backend blocked only by `report`/`invitations` (C4/C6). **Seen in passing, not
+C3's:** `docs/modernisation/modernisation_plan.md` and `docs/schema/README.md` were edited outside this
+session on 2026-09-16 — the production schema is named **`pettycashv3` permanently, no
+rename-swap**, and "the schema qualifier rename across the three apps is a Phase C item, not
+yet done". It is not scheduled in any unit below; it is mechanical (`schema="pettycashv2"` in
+~60 Minty models and `db.Enum(schema=)`, raw `pettycashv2.` SQL, `SESSION_SQLALCHEMY_SCHEMA`,
+`tests/pg_harness.py`, the Django `search_path` settings, onboarding `lib/refData.ts`) and
+best done as its own commit right after C3, before C4 touches the most files. Until then the
+apps run on `minty_cleanse` under the `pettycashv2` name.
+
+### C4 — the report core (largest)
+
+- Tests: group 1 exists; add **money exactness** (`tests/test_char_money.py`, Decimal assertions per
+  money column) and the expense-attachment listing/download before touching the models.
+- `report.py`: `date → transaction_date` semantics, `cash_sales → cashsale_total`,
+  `shop_sales`+`delivery_sales → nocashsale_total` (readers sum `report_sale`; 20+20 references),
+  `expenses → expense_total` (113), `uploaded_by → created_by` uuid (42), `xero_integrated_yes →
+  xero_integrated` boolean (35), drop `receipt_files`, `company`, `withdrawal_type`,
+  `withdrawal_bank_account`, `actual_cash_total` (the cash-count total is the sum of the count
+  rows — `cash_denominations.get_cash_count_total` already computes it); every `Float → Numeric`.
+  `status` → `ReportStatus` (`posted → submitted` at `ending.py:483,1568`, `history_query.py:90`,
+  `submitted.py:301 processing → publishing`, `publish.py:2514` `partially_published` gone);
+  `discrepancy_type` → `short`/`over` (`cash_count.py:322`).
+- Renames: `ReportSaleDetail → ReportSale` (`report_sale`), `ShopExpense → ReportExpense`
+  (`report_expense`), `EntityCashDetailV2 → EntityCashDetail` (`entity_cash_detail`);
+  `report_history` loses `company`/`timestamp` (→ `created_at`).
+- **Expense files become rows**: `ShopExpense.files`/`s3_key` (comma-separated keys) →
+  `attachment` + `report_expense_attachment` (the loader already made 10,201 of them). Upload
+  (`api.py:536 report_expense_add`, `expense.py`), listing, download (`download.py`), delete
+  (`report_detail.py:368` — closes F2 by construction) and `04_data_attachments.py`'s naming
+  convention all move to the `attachment` model. F1 (revert deletes expenses) is fixed here too.
+- `cash_info`: drop `cash_id` (→ uuid `id`), `country_code`, `desc`.
+- Mirrors: onboarding-backend `report` (8 + 10), `entity_pettycash_settings` (10 in Minty, 7 there).
+
+**Done 2026-09-17 (C4).** Minty: `Report` on the schema (`entity_id`, `cashsale_total` /
+`nocashsale_total` / `expense_total`, `created_by` uuid FK, `xero_integrated`,
+`cash_addition_type`, `submitted_at` / `published_at`, `Money()` = `numeric(14,2)`, the
+`report_status` / `publish_status` / `discrepancy_type` enums, JSONB `completed_sections`). The
+pre-C4 names stay usable everywhere the code reads them: `company` / `cash_sales` / `expenses` /
+`xero_integrated_yes` / `withdrawal_type` / `date` are **synonyms** (they compile to the real
+column in queries), and `uploaded_by` / `shop_sales` / `delivery_sales` / `actual_cash_total` are
+**hybrids** — the username looked up from `user`, the sums over `report_sale`, the sum of the
+`report_cash_count` rows — with labelled SQL expressions so `with_entities(...)` Rows and
+`Report.uploaded_by == name` filters keep working on both databases. `actual_cash_total` reads
+NULL only when never counted (an all-zero count has no rows; `"cash_count" in completed_sections`
+tells it apart). Gone for real: `receipt_files` (receipts hang off the expense lines),
+`withdrawal_bank_account` (the account is the settings' main bank account — item 13; the form
+field, the `/edit/withdrawal` write and the ending validation went with it). `ReportSale`
+(`report_sale`: `sale_id` → catalogue, `amount`), `ReportExpense` (`report_expense`:
+`account_id` / `contact_id` are FKs to the company's `account_info` / `xero_contact_sync` rows —
+the attributes stay the Xero ids the dropdowns and the publish payload use, resolved on assign;
+`account_code` / `contact_name` read through; `item_code` reads `""` and is dropped on write),
+`Attachment` + `ReportExpenseAttachment` (receipts as rows: `files` / `s3_key` are properties
+over them, `add_receipt` / `set_receipts` record the uploaded name and type, `receipt` is the
+first row — the JSON-meta-in-`files` convention of `upload_files` is gone), `ReportHistory`
+(no `company`, `timestamp` synonym of `created_at`), `ReportCashCount`, `ShareLink`,
+`CashInfo` (uuid `id`, `cash_id` synonym, `CashType`), `EntityCashDetail`,
+`EntityCashSetting`, `EntityPettycashSettings` on uuids. Old class names stay importable
+(`ShopExpense`, `ReportSaleDetail`, `EntityCashDetailV2`). Vocabulary: `posted → submitted`
+(+ `submitted_at`), a successful publish sets `status = published` + `published_at`,
+`processing → publishing`, `partially_published` is `failed` with the history's reasons (the
+publish-status endpoint already served them; the history page and the header badge show
+"Publish failed" with the reasons on hover, and the poller treats `failed` + reasons as the
+partial case), `shortage / surplus → short / over`. **Findings closed:** F1 (revert no longer
+deletes the expense lines — drafts and reports are one row, there was nothing to rebuild them
+from), F2 (`delete_expense_with_receipts` in `s3_storage.py`: report delete, single-line
+delete and the edit-report rewrite all remove the S3 objects and the orphaned `attachment`
+rows; the rewrite keeps the keys the form re-posts, which it used to delete first), F6
+(`expense.report_draft` → `expense.report`). Money: `cents()` (`blueprints/shared/column_types`)
+rounds every figure the code *computes* to whole cents (`Report.total_expenses`,
+`get_draft_totals`' closing balance, the cash-count discrepancy) — the columns are exact now
+but the code still adds floats; the three money char tests pass on both databases with no
+xfail. Seen on `minty_cleanse` and fixed: the dashboard subtracted a naive `now()` from the
+timestamptz stamp; 6 of 25 production drafts have NULL `completed_sections` (guarded in the
+dashboard, the wizard pages and the stepper); the ending page's `COALESCE(completed_sections,
+'[]'::json)` failed against jsonb; the PDF export joined `entities.id::varchar` to the uuid.
+onboarding-backend: `Report` and `EntityPettycashSettings` mirrors on the schema (+
+`ReportStatus` / `PublishStatus` / `DiscrepancyType` TextChoices), the opening-draft writer
+writes `entity_id` / `created_by` / the stored aggregates and no `date` (the stamps have
+database defaults now — the NULL-`date` dashboard trap is structurally gone), `/state` returns
+numbers for the numeric columns. Tests: `test_char_money.py` (5) and
+`test_char_expense_attachments.py` (4) new; F1/F2/F6 markers removed;
+`test_char_report_lifecycle.py` and the C4 single cases OUT of `PG_PENDING`; four unit tests
+whose fakes carried the old shape updated (`test_report_deposit_change`,
+`test_delete_report_cleanup`, `test_report_consolidation_step4`, `test_xero_report_republish`);
+`RETIRED["C4"]` = `receipt_files`, `withdrawal_bank_account`, `shop_expense`,
+`report_sale_detail`, `report_draft`, `partially_published` (`cash_sales` etc. stay as synonyms
+and as the form-field convention; `item_code` is still posted by `expense.html` and dropped by
+the model — JS leftover, not a column); the conftest now imports pandas before two route-unit
+modules stub it (`test_history_csv_lists_the_days_movements`' order-dependence, closed);
+`audit_models.py` reads an explicit `Column("db_name", ...)`. `install_fake_s3` also patches
+the names route modules imported (`from ...s3_storage import get_s3_client`). **Gate:** audit 0
+on `report`, `report_sale`, `report_expense`, `report_expense_attachment`, `attachment`,
+`report_history`, `report_cash_count`, `share_link`, `cash_info`, `entity_cash_detail`,
+`entity_cash_setting`, `entity_pettycash_settings` (totals Minty 105→50, onboarding 27→2 —
+`invitations` and `billing_plan.currency`, C6/C7); SQLite: onboarding 369/369, Minty see below;
+Postgres: onboarding-backend 278 passed (blocked only by `invitations`, C6), Minty see below;
+on `minty_cleanse`, as the report's creator: the dashboard, report detail, history, CSV,
+XLSX, PDF, publishing status, submitted page and all six wizard pages render for Vine
+Consulting (247 reports, 8 receipts on the latest). **Note:** the harness database is named
+`minty_test` in every repo — never run two repos' Postgres suites at once (they drop each
+other's database; seen as deadlocks / "relation does not exist").
+
+Run totals: Minty SQLite **69 failed / 1600 passed / 22 errors** — 0 newly failing vs the
+post-rename baseline, 1 newly passing (the CSV order-dependence); Minty Postgres **197 failed /
+1425 passed / 18 xpassed / 40 errors** — 0 newly failing (1390 → 1425 passed; the xpasses are
+`PG_PENDING` cases C6 will graduate); onboarding-backend SQLite 369/369, Postgres 318 passed
+(was 266) with every failure on `invitations` (C6) except two fixtures that write FK-less ids
+(`pettycash_account_id` → `account_info`, a ghost `entity_id`) — C9's, when its mirrors get real
+fixtures.
+
+### C5 — Xero sync tables
+
+- Tests first: republish/publish already have 12 tests (`test_xero_report_republish.py` etc.);
+  add the bank-transaction listing and the sync-status page.
+- `xero_report_sync`: `sync_statuc → sync_status` (enum), `xero_reponse_text → xero_response_text`,
+  `sync_direction outbound → push`; `xero_bank_transaction` (`create_at`, 7 money/uuid types),
+  `xero_bank_transfer` (4), `entity_account_xero`, `account_info`.
+
+**Done 2026-09-17 (C5).** Tests first: `tests/test_char_xero_sync.py` (5; Xero stubbed at
+`integration.get_accounts_from_xero` / `get_contacts_from_xero`): a chart-of-accounts sync
+records each active account once and drops what Xero no longer lists; a contact sync inserts
+and updates but never removes (`resolve_contact_name` still answers for the vanished one);
+an expense line shows the synced account code and contact name; a publish leaves ONE
+`xero_report_sync` row per report that `publish_record` reads back (and ignores after an org
+switch); deleting the report deletes the row. Two of them were strict xfails on the old code,
+both closed. Minty models on the schema: `AccountInfo` (uuid, the constraint the schema
+names — `uq_account_entity_xero` — and `updated_at`), `EntityAccountXero` (`id` alone is the
+key; the model used to declare `account_id` as a second PK column), `XeroContactSync` (uuid,
+stamps), `XeroReportSync` (`sync_status` / `xero_response_text` — the typos are gone, no
+synonyms; `report_id` NOT NULL + UNIQUE + **CASCADE**: the record goes with the report, which
+reverses r9a09's SET NULL "the audit trail survives the report" — nothing is left to protect
+once the report is gone; stamps per item 22), `XeroBankTransaction` (uuid FK, `numeric`,
+`created_at`), `XeroBankTransfer` (NOT NULL uuid FK, `numeric`, timestamptz, stamps). Neither
+bank table is written by today's publish flow (the publish record is what the republish
+reads); the loader carried production's rows and the dev route `/insert_xero_transaction`
+still inserts its fixture row. `sync_status` is `varchar(20)` in the schema — the
+`sync_status` / `sync_direction` enums belong to `xero_bill_sync` (C8), so no new Minty enum.
+**Two defects found by the Postgres run and fixed:** `_upsert_account_info` was
+`INSERT … ON CONFLICT ON CONSTRAINT uq_account_info_entity_xero_account` — a name the schema
+does not have, so every chart-of-accounts sync would have failed on the new database (now
+the schema's name, with a get-or-update on SQLite); and `sync_xero_coa_bill` wrote
+`created_by = ''` into a uuid column (`entity_bill_account_xero`) and swallowed the error
+without rolling back, leaving the session's transaction aborted for everything after it
+(`NULL` now, and both guarded syncs roll back on failure). `_delete_report_children` deletes
+the three sync tables' rows explicitly so SQLite matches the cascade; `datetime.now()` on the
+sync stamps is UTC-aware. billing-backend: `AccountInfo` / `XeroContactSync` mirrors on uuids
+with stamps, `contact_service` hands `entity_id` back as text, ~26 test rows given uuid ids
+(`_uid(label)`). `test_xero_report_republish.py` seeds a real company + report (the sync row's
+FK is NOT NULL) and cleans with `truncate_all`. `RETIRED["C5"]` = `sync_statuc`,
+`xero_reponse_text`, `create_at`. **Gate:** audit 0 on `account_info`, `entity_account_xero`,
+`xero_contact_sync`, `xero_report_sync`, `xero_bank_transaction`, `xero_bank_transfer` in
+Minty and billing-backend (totals Minty 50→26 — all C6/C7 now; billing 43→39); billing-backend
+SQLite 444 + the same 14 pre-existing; the republish, contact-sync and expense-attachment
+modules green on both databases; on `minty_cleanse` the sync-status API answers and the
+report pages still render — the Xero settings page itself stops at `roles` (C6), as before.
+
+Run totals: Minty SQLite **71 failed / 1605 passed / 22 errors** and Postgres **192 failed /
+1442 passed / 18 xpassed / 35 errors** — the only two tests that moved against the post-C4
+runs were r9a09's own pins on the SET NULL ("the audit trail survives the report"), rewritten
+to the schema's cascade in `test_report_consolidation_step4.py`; Postgres gained 12
+(`test_xero_report_republish.py` green there for the first time, 1425 → 1442 passed).
+
+### C6 — access tables
+
+- Tests: `test_char_access.py` exists (22).
+- `roles/permissions/role_permissions → role/permission/role_permission` (`user_management/models/*`);
+  `invitations → invitation`, `cancelled → revoked` (`invite.py:421`); `terms_consent` types.
+
+**Done 2026-09-17 (C6).** Tests: `tests/test_char_access.py` (22) already covered the
+area; one assertion added (a cancelled invite is `revoked`). Minty: `Roles` → table `role`
+(uuid, `role_name_key`, stamps), `Permissions` → `permission` (the schema's new NOT NULL
+unique `code`, filled from `name` on insert as the loader did), `RolePermissions` →
+`role_permission` (composite key `(role_id, permission_id)`, no `id`, no stamps),
+`Invitation` → `invitation` (`status` = `InvitationStatus` enum with `cancelled → revoked`
+at `invite.py:421`; `role` = `entity_role` enum; uuid FKs; timestamptz), `TermsConsent`
+on `MintyUuid`; the classes keep their names (`Role` / `Permission` / `RolePermission`
+aliases added). onboarding-backend: `Invitation` mirror on the schema (+ `InvitationStatus`
+TextChoices), its cancel writes `revoked`. **`PG_PENDING` is empty** — every characterisation
+module is a hard failure on Postgres from here. Three stale unit-test fixtures fixed in
+passing (`currency_code=` / `create_at=` kwargs from before C1/C2 in `test_invitation.py`,
+`test_find_user_membership_lookup.py`, `test_user_profile_contract.py`); `test_invitation.py`
+keeps ~10 pre-existing failures of its own (message wording, detached instances, a module
+gate) that predate phase C. `RETIRED["C6"]` = `role_permissions` (`invitations` is also the
+JSON key and the English plural). **Gate:** audit 0 on `role`, `permission`,
+`role_permission`, `invitation`, `terms_consent` in all three repos (totals Minty 26→21 — all
+C7 now; onboarding 2→1 — `billing_plan.currency`, C7); SQLite: onboarding 369/369, billing
+444 + 14 pre-existing, Minty see below; Postgres: the 46 tests of the access / entities /
+tokens char modules green with nothing pending, onboarding-backend 366 passed + 1 skipped
+(only the two C9 fixture FKs left), Minty see below; on `minty_cleanse` the Xero settings,
+users, module and entity settings pages and the pending-invitations API all render for Vine
+Consulting — the Xero settings page was the last `roles` blocker.
+
+Run totals: Minty SQLite **56 failed / 1621 passed / 22 errors** (0 newly failing vs C5, 15
+newly passing — mostly `test_invitation.py` after its fixture fix); Postgres **154 failed /
+1506 passed / 39 errors** (0 newly failing, 33 newly passing: the module-access gate,
+onboarding plans / payment-method and subscription-notification modules that had been stuck on
+`invitations` or `roles`; 1390 at the start of C4 → 1506).
+
+### C7 — subscription and billing tables (Minty side)
+
+- Tests first: the 14 existing subscription files are unit-level; add one route-level walk
+  (trial → invoice → dunning notice → restart) in `tests/test_char_subscription.py`.
+- Types only (no missing columns): `subscription_audit_log` (5), `subscription_transfer` (3),
+  `entity_module_subscription`, `billing_*`; `Float → Numeric` on invoice lines; enums
+  `subscription_phase`, `extension_state`, `transfer_status`.
+
+**Done 2026-09-17 (C7).** Tests first: `tests/test_char_subscription.py` (5, real database,
+Stripe faked at `stripe_client.get_stripe`, the plan a real `billing_plan` row): the module
+card starts a trial that switches the module on (once per module); a trial that ends with
+no card expires, revokes access and reads as a lapsed trial the payer can restart; a trial
+that ends with a card + consent converts to ONE in-house invoice with one line for the
+company in exact cents, anchors the payer's cycle and leaves the module `active`; a
+cancellation leaves the audit row (module, both phases, outcome, reason); the payer portal
+answers for a payer with nothing yet and lists the converted company. Minty types: the 13
+subscription models' `String(36)` FKs to `entities` / `user` → `uuid_column()`, which is
+`MintyUuid` now (one uuid type across the application; the postgresql `UUID` it wrapped
+stored 32-hex on SQLite); `function_code` → the `module_code` enum on
+`entity_module_subscription` and `subscription_audit_log`; every `DateTime(timezone=True)`
+→ **`AwareDateTime`** (`blueprints/shared/column_types`), a `timestamptz` that re-attaches
+UTC to the naive stamp SQLite hands back — the per-caller `_aware()` repairs and the
+tests' `_naive_clock` workaround existed for that driver artefact; the four subscription
+enums (`SubscriptionPhase`, `ExtensionState`, `TransferStatus`, `AuditOutcome`) live in
+`blueprints/shared/enums.py`, the subscription `column_types` builds its ENUMs from the
+constants and asserts them equal to the vocabulary at import. onboarding-backend:
+`billing_plan.currency` → `CharNField(3)`. **F5 closed:** `/api/me/subscriptions` answered
+500 for a payer with no companies — the summary block read the LAST company's per-card
+`paid_through` from the loop (undefined when it never ran); it now reads the account-level
+`paid_through_for_user`. Test fixtures brought to the schema: `test_subscription_transfer.py`
+(a uuid entity id, the company and both payers seeded as real rows — 58 of its 62 tests were
+red on Postgres for the text id; green there now), `test_subscription_trials.py` (the cards
+live in `subscription/services/cards.py`, the shim patch never reached them; the no-customer
+tests now stub the Stripe customer search), the closed two-module vocabulary means the
+"third fictional module" case is parametrised over phases instead. **Parallel test runs:**
+`pytest-xdist` added to the venv (`uv pip install`, not yet in `pyproject.toml`);
+`tests/pg_harness.py` builds one database per worker (`minty_test_<worker>`) and
+`tests/conftest.py` one SQLite file per worker, so `-n auto` on the 16 cores runs the Minty
+suite in **1 min 18 s (SQLite) / 1 min 53 s (Postgres)** instead of 4:31 / 5:04 with an
+identical result set — and two repos' suites can no longer drop each other's database.
+**Gate:** `audit_models.py` = **0 for Minty** (105 at the start of C4) and 0 for
+onboarding-backend; the 39 left are all billing-backend's (C8); SQLite: Minty **36 failed /
+1642 passed / 22 errors** — 0 newly failing vs C6, 20 newly passing; Postgres: Minty **51
+failed / 1610 passed / 39 errors** — 0 newly failing, +62 (1390 at the start of C4 → 1610);
+onboarding-backend 369/369 SQLite, 366 Postgres (the two C9 fixture FKs); billing-backend 444 +
+14 pre-existing; on `minty_cleanse` the module settings page (the cards), the payer portal
+(`/api/me/subscriptions|invoices|billing/payment-methods` with the billing JWT the module
+page mints) and the subscription-notice API all answer for a real member.
+
+### C8 — billing-backend
+
+- Tests first: B3 group 7 (`bills/tests/test_char_schema.py`): bill with lines → total; status
+  change → audit trail; payment moves status; attachments on bill and payment; detail renders
+  creator/contact through FKs; Xero sync row on publish (stubbed).
+- `bills/models.py`: `Audit → BillAudit` (`bill_audit`), `BillLineItem → BillLine` (`bill_line`);
+  `bill` drops `xero_contact_id`, `currency_code`, `uploaded_by` (→ `created_by`, `currency_id`
+  FK); `payment.currency_code` → `currency_id`; `TextChoices`: `voided → void`, `not_published →
+  draft` (model default `:45`), dead members removed; **frontend** `billing-frontend/…/BillActionBar.tsx:18`
+  union type updated in the same change.
+- **Stop shipping DDL**: delete `bills/migrations/` (19 migrations targeting tables that no longer
+  exist), every model `managed = False`, `SHARED_MODELS_MANAGED_FOR_TESTING` flip only in SQLite mode;
+  the cutover script removes the `bills` rows from `django_migrations`.
+- `shared_models/models.py` mirror: `user`, `entities`, `entity_function_map`.
+
+**Done 2026-09-17 (C8).** Tests first: `bills/tests/test_char_schema.py` (5, through the
+API): a bill with lines and its detail (contact, creator, lines); submit → return → two
+payments moving it `partially_paid` → `paid` with the audit trail; attachments on the bill
+and on the payment (S3 stubbed at `_get_s3_client`); void frees the reference; publish
+(Xero stubbed at `requests`) leaves a `xero_bill_sync` push row and `published = published`.
+All five were green on the old models and stayed green through the change. Models on the
+schema (`bills/models.py`, every one `managed = False`): `Bill` — `bill_status` enum with
+**`void`** (was `voided`; `authorised` / `cancelled` / `sync_failed` never written, gone),
+`publish_state` with **`draft`** (was `not_published`), `contact_name` / `contact_id` /
+`currency_id` / `created_by` with the old names (`contact`, `xero_contact_id`,
+`currency_code`, `uploaded_by`) as properties that still speak the old values — the API
+contract and the Xero payload use the contact's Xero id and the currency's code, resolved
+through `xero_contact_sync` / `currency_info` (a Xero id with no synced row gets one, named
+after the bill's contact, rather than losing the contact the person chose); `amount_paid`
+and `bill_number` declared; `BillLine` (`bill_line`; `BillLineItem` alias, `line_items`
+kept), `BillAudit` (`bill_audit`; `Audit` alias, `created_at` with a `date` property,
+nullable `user_id`), `Payment` (`currency_id`, `payment_status` enum with `partial`;
+`cancelled` / `refunded` gone), the attachment family (roles as enums, `proof` added),
+`EntityBillAccountXero`, `EntityBillCurrency` (`currency_info` FK on the schema's
+`currency_id` column), `XeroBillSync` (`sync_direction` **`push` / `pull`** with the old
+names as aliases, `sync_status` with `processing`; `partial` gone), `XeroBillSyncLine`
+(`bill_line` FK), payload and response lines — uuids throughout. **`bills/migrations/` is
+deleted** (19 migrations targeting tables that no longer exist); this service ships no DDL,
+`INSTALLED_APPS` has no contrib app, so the only thing `migrate` would ever create is an
+empty `django_migrations` — the pipeline does not load that table and the cutover needs no
+`django_migrations` step at all. Test mode flips `managed` on for every model of both apps
+(`shared_models/apps.py`). API: ids leave as text (`IdStr` — pydantic will not coerce
+`uuid.UUID` to `str`), the actor fields (`created_by` / `uploaded_by` / `user_id` /
+`requested_by`) are nullable on the wire (an unattended write), a malformed id is 404 not
+500, the list's `contact` filter/sort address `contact_name`; **OpenAPI snapshot updated**
+(the only contract change: those four fields `string | null`). `shared_models`:
+`EntityModuleSubscription` on uuids + enums (`SubscriptionPhase` TextChoices added).
+billing-frontend: `"voided" → "void"` in the status comparisons and maps (the audit *verb*
+`voided` stays), `"not_published" → "draft"` in the publish-state union / toolbar / filter,
+`uploaded_by` / `created_by` typed `string | null`; `tsc` clean; eslint's 42 errors are
+pre-existing react-hooks findings. **Audit gate: 0 findings in all three repos (287 → 0)**
+— and `audit_models.py` now checks Django relation columns (`ForeignKey` → `<name>_id` /
+`db_column`), which is how it caught `entity_bill_currency.currency_info_id` after the boot
+check did. Fixture sweep: `Bill.Status.AUTHORISED → SUBMITTED`, `voided → void`, uuid ids,
+the contact rows the publish fixtures need, S3 stubs that return a URL, `DENIED_ROLE =
+entity_base`, dead statuses out of the parametrised void tests, `TestRoleNormalization`
+("shop manager" with a space) removed — the enum cannot hold it. **Decided 2026-09-17 (user): `BILL_SETTINGS_ACCOUNT_TYPES` (five types) is right** — the 9
+tests that expected eight (`CURRLIAB`, `DEPRECIATN` …) were aligned to it, and
+billing-backend is **441/441 on both databases** for the first time. **Run times:**
+billing-backend SQLite **0:33** and **Postgres 0:40 — 441/441 each; the first time this suite
+has run against the new schema** (blocked on `bill` since C1); billing-backend's API boot-checked against `minty_cleanse` (930 bills; list, detail,
+attachments, payments, audit, accounts, contacts, currencies all 200); `scripts/e2e_seed.py`
+runs on `minty_cleanse` again (blocked since C2); **Minty e2e 19/19 in 1:25** (one spec
+still filtered on the pre-C3 `Electronic` word — fixed; re-seed before every run, the
+wizard spec needs an empty history); **billing-frontend e2e 13/13 in 0:55** — the F5
+`test.fail` marker flipped (it passes now); an earlier run had one red spec (draft detail
+page) from a Turbopack "Jest worker" crash on a `next dev` that had been running since
+2026-09-16 and reported itself *stale*; restarting it with `.next/dev` cleared (the Tailwind
+memory's trap) made it green. `pytest-xdist` is not needed here (the
+Django suites finish in seconds).
+
+### C9 — onboarding-backend
+
+- Tests first: B3 group 8 (`tests/test_char_schema.py`): `/create` writes entity + membership +
+  module map with `created_by`; `/state` per step; `/finalize` (proxy stubbed) → `connected`/
+  `disconnected` per C2; `entity_for_member`; reference endpoints.
+- `shared_models/models.py`: the 70 findings (`report` 18, `entity_sale_setting` 7, `entities` 11,
+  `sale_info` 5, `invitation` rename, `user_entity`, `entity_function_map`); `core/policy.py:42`.
+- `onboarding/e2e` (Playwright) against the stack on `minty_cleanse` is the unit's gate.
+
+**Done 2026-09-17 (C9).** The mirrors were already on the schema (C1–C8 carried each
+table as it changed); what was left was the last two Postgres fixtures and the gate.
+`tests/test_char_schema.py` (1 walk, through the API): `/create` leaves the company
+(`onboarding`), the creator's `admin` membership, one disabled `entity_function_map` row per
+module with `created_by` = the person, the eleven default sale links; the module grant, the
+Xero org and the account-code settings (an `entity_pettycash_settings` row pointing at a real
+`account_info` row — a read-only `AccountInfo` mirror added for that FK) move `/state`
+through steps 2 → 4 → 5 → 3; `/sales-methods` rewrites the links; `/opening-balance` leaves
+ONE draft `report` row (`entity_id`, `created_by`, zero aggregates, database stamps) and
+re-saving moves it; a pending `invitation` is listed; a finished company reports step 9.
+Fixtures: the "member of a missing entity" test creates the company, grants membership,
+deletes the company — on Postgres the FK cascades the membership away and the person is a
+stranger (403, deliberately no enumeration), on SQLite the membership survives and the 404
+is reached; both are pinned. **Gate:** audit 0; onboarding-backend SQLite **0:05 — 370/370**,
+Postgres **0:11 — 369 + 1 skipped (green there for the first time)**; the wizard's `tsc`
+clean and **vitest 289/289 (0:38)**; **`onboarding/e2e` 23/23 in 0:52** against the stack on
+`minty_cleanse` (Minty :5001, onboarding-backend :8001, the wizard :3001) with a disposable
+`onboarding` company for the walk spec ("E2E Onboarding Walk", owned by the e2e user) — the
+walk's finalize assertion said `active` and now says `connected` / `disconnected` (C2).
+
+### C10 — close-out
+
+- `audit_models.py` = 0 for all three repos against the harness build **and** `minty_cleanse`.
+- Full Minty suite on Postgres: no failure absent from the baseline; `PG_PENDING` empty.
+- Regenerate `APPLICATION_CHANGES.md` (`mkdoc.py`, three repos) — it should be empty of findings
+  and stay as the record of what was done.
+- Retire the SQLite path: `MINTY_TEST_PG_URI` becomes required, the ATTACH shims and per-file
+  `create_all` go, `tmp_test*.sqlite` handling removed from conftest. (Separate commit; only
+  once every unit is green on Postgres.)
+- Update `docs/schema/README.md`, `docs/modernisation/modernisation_plan.md` and the memory notes.
+
+**Sequencing:** C0.9 → C1 → C2 → C3 → C4 → C5 → C6 → C7 → C8 → C9 → C10. C0.9 first so the wizard's
+JavaScript has a green browser baseline before any rename; C1 next because `user` blocks
+almost every Postgres-mode test in all three repos; C4 is the largest and sits after the
+catalogue it depends on; the Django repos last because their mirrors follow Minty's models.
+Each unit gets its own short plan (files, tests, gate) when it starts; C1's is the next thing to write.
+
+## Phase D — rehearse the data pipeline (steps 1–3 done)
+
+- **Done 2026-09-15:** one-hop `rehearse.py` (restore → `flask db upgrade` in a subprocess → build
+  `01` → `00 → 02 → 03 → 04` → manifest), everything non-mechanical as dictionaries in `gen.py`;
+  **all green twice on the production dataset** (`pcreh_full`, `pcreh_full2`; 137–159 s ⇒ a 5-minute
+  window) and a third time as `minty_cleanse`. The eight data traps the real dataset held are handled
+  and asserted (see memory `minty-one-hop-pipeline`).
+- **Step 4 waits on phase C:** point the three apps at the rehearsed database and run the full
+  Postgres suite, both Django suites, `onboarding/e2e`, and the manual checklist (login as
+  superadmin, open a company, compare the last 3 months of report totals to `pettycash_legacy`).
+- **Step 5 done 2026-09-16 on a fresh dump of the old host** (`PROD09162026.backup`, 4,959
+  reports, still Alembic `f3a1c2b4d6e8`): `00` caught the two values five weeks had added
+  (`partially_published` on 3 Test_1 reports → `failed`; one `Admin` role → normalised, both
+  role columns now lower/snake-cased as `normalize_role` does), one non-uuid
+  `report_sale_detail` id got the md5 treatment, four expectations moved and were re-measured
+  (sale_info 25 collapsed, restored 238 contacts / 10 accounts, zero-count 277 + 7 without a
+  denomination — one of them `BIB GROUP`, an entity with **no currency set**). Same 55
+  orphan reports and 43 duplicate-day drafts as August. ALL GREEN, ~4 min ⇒ **an 8-minute
+  window**; recorded in 01 item 19. Repeat on the dump taken for the real cutover.
+- **Decided 2026-09-16 (user): module access is revoked as rehearsed.** `m1a01` runs in the
+  pipeline as it does today. Measured on the 0916 dump: production has **zero**
+  `entity_module_subscription` rows, so after the upgrade only 19 grants remain enabled - all
+  on test / mid-onboarding companies (the onboarding exemption) - and **47 real companies with a
+  report in the last 90 days have Petty Cash switched off**. From cutover day every customer
+  must start a trial or subscription from the module card ("Module not active" until then); the
+  gate, the card and the database then agree, which is the state `m1a01` exists to reach. This
+  is a support event, not a defect: Phase E step 1's announcement should say so, and the
+  cutover runbook needs the 47 names (query: enabled = false on PETTY_CASH and a report in the
+  last 90 days) so support can reach them first. No grandfathering step, no re-enable.
+- Still open before the window: whether both hosts share the B2 bucket (`04` writes the old keys
+  verbatim); Supabase's current data is discarded at cutover (decision 2).
+
+## Phase E — production cutover
+
+Dress rehearsal on **staging** first, exactly as below, at least two days before production.
+
+1. Announce; set `SCHEDULED_MAINTENANCE_*` (the env flags already exist) → maintenance page.
+2. Pause: `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty instance; disable the Stripe webhook
+   endpoint in the Stripe dashboard (events queue and replay on re-enable); note the time.
+3. `pg_dump` Supabase (custom format) to two places. Verify it restores.
+4. Run the pipeline on the staging Postgres from a fresh dump of the old production host
+   (`rehearse.py --dump … --db <name> --attachments`, then `ALTER SCHEMA pettycash_test RENAME
+   TO pettycashv3`). All checks OK or **stop and reopen on the old schema** — nothing has
+   changed yet. Supabase's own `pettycashv2` is not the source (decision 2: its test entities
+   are discarded).
+5. `pg_dump -n pettycashv3 -Fc --no-owner --no-acl` of that result; `pg_restore -d <Supabase>
+   --no-owner --no-acl` (no `-n`) — it creates `pettycashv3` beside the existing `pettycashv2`.
+   **No rename-swap** (decided 2026-09-16: `pettycashv3` is the permanent name). The phase-C
+   builds already carry the `pettycashv3` qualifier, so no config changes anywhere. Drop
+   `pettycashv2.alembic_version`; delete `bills` rows from `django_migrations`.
+6. Deploy the phase-C builds of Minty, `billing-backend`, `onboarding-backend` (Render, from the
+   branch that has been green on Postgres since phase C).
+7. Smoke: `onboarding/e2e` against production URLs with the E2E entity; the manual checklist;
+   `audit_models.py` against production = 0.
+8. Re-enable the Stripe webhook, `SUBSCRIPTION_SCHEDULER_ENABLED=1`, clear maintenance.
+   Watch logs for one full scheduler cycle.
+9. **Rollback** (only inside the window, before step 8): redeploy the previous images — they
+   still read `pettycashv2`, which was never touched; `DROP SCHEMA pettycashv3 CASCADE`. After
+   step 8, forward-fix only — `pettycashv2` is read-only reference.
+10. The old `pettycashv2` schema stays **6 weeks**, then is dropped. Regenerate
+    `docs/schema/pettycashv2_schema.sql` from the new production (as `pettycashv3`) and update
+    its README.
+
+## Verification (Part 1 as a whole)
+
+- `audit_models.py` reports 0 findings for Minty, billing-backend **and** onboarding-backend
+  against local, staging and production (today: 217 for two of them; the third unmeasured).
+- Full Minty suite on Postgres-from-`01`: no failure absent from `BASELINE.txt`; the SQLite
+  fixture path is gone. Both Django suites green on the same schema build.
+- `rehearse.py` exits 0 on a fresh production dump; production cutover checks match the
+  rehearsal's numbers row for row.
+- The measuring query in `01`'s "HOW TO BUILD IT" gives identical counts for production and a
+  fresh build: 0 `double precision`, 0 naive `timestamp`.
+- `Minty/migrations/` does not exist; `billing-backend/bills/migrations/` does not exist;
+  `SELECT 1 FROM pettycashv2.alembic_version` errors.
+- A report's totals, a bill's audit trail and a payer's invoices read the same before and after
+  for three hand-picked entities, recorded in the cutover log.
+
+---
+
+# Part 2 — Multi-repo structure for the Flask → Django + Next.js migration
+
+## Context
+
+Minty (`C:\dev\Minty`, Flask, ~56k lines across 9 blueprints) is being carved into Django +
+django-ninja services with Next.js frontends. Onboarding is already out (`onboarding-backend`
+on 8001, `onboarding` on 3001), but not finished: its Django service proxies ~two-thirds of its
+paths back to Flask, and the wizard still calls Flask directly for auth, legal and Xero connect.
+On 2026-09-10 you laid out the target as **one repo per service** in the GitHub org; the
+monorepo counter-proposal was declined. This plan is the multi-repo version: which repos exist,
+what each takes from Minty, how they share what must agree, how the database moves from Alembic
+to Django migrations, how E2E tests gate each cutover, where onboarding's remaining Flask
+dependencies land, and in what order. It is a structure plan — no code moves under it until a
+per-service extraction plan is written (the onboarding one is the template).
+
+## Naming convention
+
+`minty-<domain>-<api|web>`, all lowercase. `minty-` because the names also live in `C:\dev`,
+Render and Vercel where nothing else says whose repo it is, and it separates these from the
+`OliveAndVineHK` copies for good. `-api`/`-web` over `-backend`/`-frontend`/`-service`: shorter,
+and `-service` says nothing. The domain word matches the subdomain where one exists
+(`pettycash.`, `payment.`, `onboarding.dailyminty.com`).
+
+Two names are taken by recommendation, not decision — say so if you want the alternative:
+**`billing`** for the Stripe/subscription service (it is the real billing domain; the alternative
+`subscriptions` avoids a short overlap with today's misnamed `billing-backend`), and
+**`accounts`** for auth + users + companies (alternative `identity`).
+
+## Languages and toolchain — one stack per side, no exceptions
+
+| Side | Language | Stack | Pinned to what already runs |
+|---|---|---|---|
+| every `-api` repo, `minty-shared-py`, `minty-db` | **Python 3.13** | **Django 5.2 LTS** + django-ninja 1.x + `psycopg[binary]` 3.x, pytest | 3.13 is the newest Python Django 5.2 LTS supports (supported to Apr 2028); Django 6.x supports 3.14 but has no LTS until 6.2 in Apr 2027 — bump to 3.14 then. `billing-backend`/`onboarding-backend` already pin `django <6.0`, so they move to 3.13 with a one-line Dockerfile change and no pin change. New services use `psycopg` 3 (Django's preferred driver, 3.13/3.14 wheels); the two existing ones keep `psycopg2-binary`. |
+| `minty-legacy` (Flask) | **Python 3.11** — stays | Flask 2.3 / SQLAlchemy 2.0 as today | It is being emptied, not upgraded. Nothing in it *needs* 3.11 (no removed-stdlib imports; all compiled deps have 3.12 wheels), but 3.13 would need `greenlet`/`pandas` bumps and `spire-doc 13.8.0` ([services/helpers/docx.py:17](services/helpers/docx.py#L17)) is a closed native lib with unverified 3.13 support. Not worth a test run on a repo with a shrinking lifespan. |
+| every `-web` repo, `minty-shared-ts` | **TypeScript 5, strict** | Next.js 16 App Router, React 19, Tailwind v4, Vitest + Playwright | `onboarding` (Next 16.2.6, 58 TS files, zero `.js/.jsx` app code) and `billing-frontend` (16.1.6, 112 TS files) |
+
+Flask never imports `minty-db` or `minty-shared-py` (Minty keeps its own SQLAlchemy models until
+it is archived), so both shared packages declare `requires-python = ">=3.13"` and are free to use
+3.12+ syntax (PEP 695 `type` aliases, `class Foo[T]:`). Mixed Python versions across repos is
+the normal multi-repo condition; the only rule is that a shared package's floor is the lowest
+version of any *consumer*, and Flask is not one.
+
+Rules that follow from it:
+
+- **No JavaScript in application code.** `.ts`/`.tsx` only under `app/`, `components/`, `lib/`,
+  `e2e/`, `test/`. The only `.mjs` allowed are the tool configs Next itself expects
+  (`eslint.config.mjs`, `postcss.config.mjs`); `next.config` is `.ts`. `allowJs: false` in every
+  `tsconfig.json` — onboarding earned that setting the hard way (13% of its code was type-checked
+  until the conversion) and it must be on from day one in `minty-web` and `minty-pettycash-web`.
+- **Shared TS package ships types, not `.d.ts` stubs**: `minty-shared-ts` is published as source
+  (`"exports"` pointing at `.ts`, consumed via Next's `transpilePackages`) so every consumer
+  type-checks against the real contract. Its `lib/api.ts` types are the backend contract; a
+  django-ninja schema change and the matching TS type land in the same tag pair.
+- **Shared Python packages ship typed code**: `minty-shared-py` runs `pyright` in CI on
+  `strict` for `auth`, `permissions`, `minty_client`; `minty-db`'s models run at `basic` (they
+  describe a schema, not logic) and rely on `django-stubs` for the ORM types.
+- **Nothing else on the server side.** No Node services, no Next API routes doing business
+  logic (`app/api/*` may proxy or set cookies, nothing more), no scripts in Bash where a Python
+  or TS one would do — `scripts/*.mjs` in onboarding become `scripts/*.ts` run with `tsx`.
+- `minty-www` is on Next 14 / React 18 — it is marketing, out of scope; it gets the TS rule but
+  not the version alignment until someone has a reason to touch it.
+
+## Decisions taken (overrule any of these)
+
+| Question | Decision | Why |
+|---|---|---|
+| Shared code | **Two library repos**, `minty-shared-py` and `minty-shared-ts`, installed from a pinned git tag | `billing-backend` and `onboarding-backend` each hand-copy `core/auth.py` + `shared_models/models.py`; the `billing_frontend` twin drifted on ~25 same-named files. Multi-repo without a shared package repeats that six times. |
+| Minty's leftover core (entity 10.8k, user_management, invitation, legal) | **`minty-accounts-api` owns identity + membership + companies** | Your tree has no company slot. Users, roles, permissions, invitations, T&C consent and the entity record are one access-control domain; splitting it makes every other service call two places. |
+| Schema owner | **One Django owner, `minty-db`**, born from the redesign in `docs/schema/01_schema_rebased.sql` (58 tables, 21 enums, uuid/numeric/timestamptz). It alone runs `migrate`; every service imports the same models with `managed = settings.MINTY_DB_OWNER` (False). The redesign is applied to production once, at step 2; Alembic is deleted in the same step. | One shared schema with FKs across every service line; a single owner keeps them real and makes model drift structurally impossible (one file, a switch). Building on today's shape and redesigning later would port every new service twice. Per-service ownership was considered and rejected: it needs `db_constraint=False` everywhere and keeps Alembic alive until step 7. See "Schema ownership" below. |
+| Renames | **Map now, rename at each service's cutover** | Renaming touches Render, Vercel, `docker/stack` defaults and CLAUDE.md for no gain until that repo is being redeployed anyway. GitHub redirects old URLs. |
+| Xero tokens | **`minty-xero-api` is the only refresher**, extracted early | Both Django services already call Flask over `XERO_TOKEN_SERVICE_URL`; repointing that env var is the whole cutover for consumers. |
+
+## Target tree (GitHub org `minty-oliveandvine`)
+
+```
+minty-oliveandvine/
+│
+├── minty-legacy          ← Minty. Flask monolith; shrinks to zero; Alembic shrinks with it  :5001
+│
+├── minty-accounts-api    Django. Login/OTP, JWT mint, users, roles+permissions, invitations, :8000
+│                         legal consent, entities (companies) + settings
+├── minty-xero-api        Django. OAuth, the ONE token refresher, org switch, account codes,  :8004
+│                         contacts, bank txn/transfer publish
+├── minty-billing-api     Django. Plans, billing groups, Stripe, invoices, dunning,           :8005
+│                         scheduler, access gate, subscription emails
+├── minty-pettycash-api   Django. Reports, cash count, sales, expenses (+AI), deposits,       :8002
+│                         history, share links, exports
+├── minty-payments-api    ← billing-backend. Bills, payments, attachments, Xero bill sync     :8003 (was 8000)
+├── minty-onboarding-api  ← onboarding-backend. Wizard API; proxies shrink as services land  :8001
+│
+├── minty-web             Next.js. Login, dashboard/entity list, module selection, profile,   :3000
+│                         settings, subscription/payer portal, user admin
+├── minty-pettycash-web   Next.js. Report list/create/edit/detail/history/download            :3002
+├── minty-payments-web    ← billing-frontend minus app/{profile,settings,module-selection}    :3003 (was 3000)
+├── minty-onboarding-web  ← onboarding. The nine-step wizard                                  :3001
+├── minty-www             ← daily-minty-landing-page. Marketing, unchanged                     :3009
+│
+├── minty-shared-py       pip: BearerAuth, permissions/policy, minty_client, log formatters,
+│                         exception handlers — code only; models come from minty-db
+├── minty-shared-ts       npm: api client + ApiError, auth cookies + middleware,
+│                         mintyEnv/mintyUrls, moduleClaims, design tokens, MintySelect/Toast/Icon
+├── minty-db              THE schema owner. Django project + pip package born from
+│                         docs/schema/01_schema_rebased.sql: every table as a model, 0001 = that
+│                         file, the only `migrate` runner (deploy job / stack init container).
+│                         Also: write-ownership map, audit_models.py, enum check, seed loaders
+├── minty-e2e             Playwright (TS). Cross-service journeys against the full docker stack;
+│                         the gate every cutover step must pass.
+├── minty-infra           Terraform. Every Render service, Vercel project, Supabase project, B2
+│                         bucket, and every repo's branch protection / environments / secrets.
+└── .github               The org's reusable CI workflows (python-api, next-web, py-package,
+                          e2e-stack, deploy-gate). Every repo's CI is a 10-line call into here.
+```
+
+### The same tree as a diagram
+
+Blue = TypeScript, green = Django, dashed red = the Flask monolith being emptied. Solid arrows
+are runtime calls; the thick arrow is the only thing that ever changes the schema; dashed arrows
+are dependencies (packages, CI, infra). The onboarding-api's dashed proxies disappear at steps
+3, 5 and 7.
+
+```mermaid
+flowchart TB
+  classDef web fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
+  classDef api fill:#dcfce7,stroke:#15803d,color:#14532d
+  classDef legacy fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d,stroke-dasharray:5 3
+  classDef pkg fill:#fef9c3,stroke:#a16207,color:#713f12
+  classDef data fill:#f3e8ff,stroke:#7e22ce,color:#581c87
+  classDef ops fill:#f1f5f9,stroke:#475569,color:#0f172a
+
+  subgraph WEB["Frontends — Next.js 16 · TypeScript 5 strict"]
+    direction LR
+    W0["minty-web :3000<br/>login · dashboard · profile · settings · subscription"]
+    W1["minty-pettycash-web :3002"]
+    W2["minty-payments-web :3003<br/>← billing-frontend"]
+    W3["minty-onboarding-web :3001<br/>← onboarding"]
+    W4["minty-www :3009<br/>← landing page"]
+  end
+
+  subgraph API["Services — Django 5.2 LTS · django-ninja · Python 3.13"]
+    direction LR
+    A0["minty-accounts-api :8000<br/>JWT minter · users · roles · companies"]
+    A1["minty-xero-api :8004<br/>sole Xero token refresher"]
+    A2["minty-billing-api :8005<br/>Stripe · plans · dunning · scheduler"]
+    A3["minty-pettycash-api :8002"]
+    A4["minty-payments-api :8003<br/>← billing-backend"]
+    A5["minty-onboarding-api :8001<br/>← onboarding-backend"]
+  end
+
+  L["minty-legacy :5001 — Flask · Python 3.11<br/>← Minty · shrinks to zero"]
+
+  subgraph PKG["Shared packages — pinned git tags"]
+    direction LR
+    P0["minty-db<br/>ALL models + migrations<br/>sole migrate runner"]
+    P1["minty-shared-py<br/>BearerAuth · permissions · clients"]
+    P2["minty-shared-ts<br/>api client · auth · env · UI tokens"]
+  end
+
+  subgraph DATA["Data"]
+    direction LR
+    DB[("PostgreSQL · pettycashv2<br/>Supabase")]
+    S3[("Backblaze B2")]
+  end
+
+  subgraph OPS["DevOps"]
+    direction LR
+    O0["minty-e2e<br/>Playwright · stack gate"]
+    O1["minty-infra<br/>Terraform: Render · Vercel · Supabase · B2 · GitHub"]
+    O2[".github<br/>reusable Actions workflows"]
+  end
+
+  W0 --> A0 & A2
+  W1 --> A3
+  W2 --> A4
+  W3 --> A5
+  A5 -. "proxies until steps 3/5/7" .-> A1 & A0 & A2
+  A4 & A3 & A5 -- "token" --> A1
+  A0 -- "access gate" --> A2
+
+  P0 == "migrate (only writer of DDL)" ==> DB
+  API -- "managed = False, via minty-db models" --> DB
+  L -- "SQLAlchemy, read/write, no more Alembic" --> DB
+  A3 & A4 --> S3
+
+  P2 -.-> WEB
+  P0 & P1 -.-> API
+
+  O0 -. "gates every cutover" .-> API & WEB
+  O1 -. "deploys / protects" .-> API & WEB & PKG
+  O2 -. "CI for" .-> API & WEB & PKG
+
+  class W0,W1,W2,W3,W4 web
+  class A0,A1,A2,A3,A4,A5 api
+  class L legacy
+  class P0,P1,P2 pkg
+  class DB,S3 data
+  class O0,O1,O2 ops
+```
+
+Archive, not part of the tree: the four `OliveAndVineHK` `LIVE07072026` snapshots
+(`billing_backend`, `billing_frontend`, `onboarding_old`, `daily-minty-landing`) and `Minty-old`.
+Tag, archive on GitHub, delete locally. Both `billing-backend` and `billing_backend` have
+untracked `.env` files with real secrets — check before anything is pushed.
+
+## What each new repo takes from Minty
+
+Paths are under `C:\dev\Minty\blueprints\` unless stated.
+
+**minty-accounts-api** ← `auth/` (routes: login, email_auth, register, password_reset, tokens,
+permissions, leave_entity, dashboard; models: user, user_token, email_otp), `user_management/`
+(roles, permissions, approve/reject, find_user), `invitation/`, `legal/`, `entity/` (create, list,
+settings, modules — **not** `payment.py`/`billing_sync.py`, those go to billing), `services/authz.py`,
+`services/permission_policy.py`, `services/user_presence.py`. Mints the JWT the other services
+verify — the single-issuer rule from `onboarding-backend/core/auth.py:1-42` becomes the org rule.
+
+**minty-xero-api** ← `xero/` (routes.py, settings.py; models: account_info, entity_account_xero,
+xero_bank_transaction, xero_bank_transfer, xero_contact_sync, xero_report_sync), `services/xero/`.
+Exposes `/api/internal/xero/token` first, then the publish endpoints.
+
+**minty-billing-api** ← `subscription/` (13 models, portal.py, `services/` incl. cards/panel/
+notices/access_sweep), `entity/routes/payment.py`, `entity/routes/billing_sync.py`, the
+in-process scheduler (`SUBSCRIPTION_SCHEDULER_*`), subscription emails. **Last** — the
+`entity ↔ subscription` import coupling (3 files one way, 10 back, some module-level) is the
+hardest cut; it only becomes clean once `entity` has already moved into accounts.
+
+**minty-pettycash-api** ← `report/` (16 route modules incl. expense_ai, export_screenshot;
+6 models), `services/report/`, `entity/models/{entity_pettycash_settings,entity_cash_setting,
+entity_sale_setting,cash_info,sale_info}.py`.
+
+**minty-web** ← `billing-frontend/app/{profile,settings,module-selection,landing}` plus the
+Jinja pages `templates/{login,register,index,admin*,find_user,user,entity,invitation,legal}`.
+**minty-pettycash-web** ← `templates/{report*,edit_report,report_detail,report_history,
+download_statements,components}`.
+
+## Onboarding — what is still owed, and to whom
+
+`onboarding/lib/apiRoutes.ts` is the cutover map; its `DJANGO_PATHS` comments already say
+which paths are real and which are proxies. Every proxy and every direct-to-Flask call has a
+destination in the tree above. Nothing changes in the wizard's code shape — each row is a
+base-URL change in `apiRoutes.ts` / `flaskBase.ts` or a target change in
+`onboarding-backend/core/minty_client.py`.
+
+| Today | Onboarding path(s) | Moves to | When |
+|---|---|---|---|
+| Django → Flask proxy | `account-codes`, `contacts`, `contacts/create`, `bill-codes`, `xero/disconnect` | `minty-xero-api` | step 3 |
+| Django → Flask proxy | `payment-method*`, `billing/payment-methods*`, `billing/accounts`, `billing/authorize`, `finalize` (trial open), `modules` | `minty-billing-api` | step 7 |
+| Django → Flask proxy | `POST /invite` (email links into a Flask route + template) | `minty-accounts-api` | step 5 |
+| Wizard → Flask direct (`flaskBase.ts`; `app/auth/*`, `TermsModal.tsx`) | `/auth/email/*`, `/logout`, `/legal/*`, `/entity` | `minty-accounts-api` (pages: `minty-web`) | step 5 |
+| Wizard → Flask direct | `/xero_auth`, `/xero_connect` (OAuth redirect) | `minty-xero-api` | step 3 |
+| Both Django services | `core/`, `shared_models/` copies | `minty-shared-py` | step 2 |
+| Wizard | own `lib/{api,flaskBase,errorCopy}.ts`, `globals.css` (1,997 lines) | `minty-shared-ts` — **after** its `{ok,error}` typing pass settles (see `i-plan-to-move-mossy-donut.md`) | step 4, opt-in |
+| Repo names | `onboarding-backend` / `onboarding` | `minty-onboarding-api` / `minty-onboarding-web` | first time its Render/Vercel projects are touched |
+
+`minty-onboarding-api` keeps its two deliberate absences — no `migrations/`, no direct Stripe or
+Xero — and `core/minty_client.py` stays the only outbound path; it just grows a base URL per
+downstream service instead of one for Flask. When the last proxy row above lands, the wizard no
+longer knows Flask exists.
+
+The `onboarding/e2e` suite (cold resume, nine-step walk, CORS-credentials and NULL-`date`
+regressions) is the acceptance test for *every* row: it exercises accounts, xero and billing
+through the wizard, so it runs after each of steps 3, 5 and 7.
+
+## Schema ownership — `minty-db` owns the database, everyone else is `managed = False`
+
+One PostgreSQL database, one `pettycashv2` schema, ~42 tables. Today the DDL has two owners:
+Alembic in `Minty/migrations` (67 revision files, hand-written, cannot build from empty) and
+`billing-backend/bills/migrations` (19 Django migrations, `managed = True` for 15 tables — so
+the README's "Django ships no DDL" is already untrue, and `entity_function` /
+`entity_function_map` have two owners). End state: **one Django owner, `minty-db`; Alembic gone;
+no other repo has a `migrations/` directory.**
+
+**What `minty-db` is.** A Django project with one app, `minty_db`, holding every table as a
+model, plus the migrations. It has no HTTP, no port, no business logic. It runs as a **job**:
+`manage.py migrate` on deploy (Render pre-deploy command) and as the init step of
+`docker/stack`. It is the only thing in the org that ever runs `migrate` against `pettycashv2`.
+
+**One model file, not one per service.** `minty-db` is also a pip package. Every `-api` repo
+installs it and imports `minty_db.models`; `managed` is a settings switch:
+
+```python
+class Entity(models.Model):
+    ...
+    class Meta:
+        db_table = "entities"
+        managed = settings.MINTY_DB_OWNER   # True inside minty-db and under test; False in services
+```
+
+This is the pattern `onboarding-backend/shared_models/apps.py` already uses to flip `managed`
+on for SQLite tests — generalised. It removes the mirror problem outright: there is nothing to
+regenerate and nothing to drift. Because each service's `settings_test.py` sets the switch to
+`True`, every service's pytest run builds its test DB from the real migrations, which means the
+migrations are proven to build from empty on every CI run of every service.
+
+**Ownership still exists — for writes, not DDL.** The map below says who may INSERT/UPDATE/
+DELETE; everyone may SELECT. It lives in `minty-db`'s README and, once settled, in one Postgres
+role per service so the database refuses a write from the wrong service. Onboarding writes
+`entities` at `/create` — that is an explicit exception recorded in the map, not a violation.
+
+Table names below are the **redesigned** ones (`role`, `permission`, `bill_line`, `bill_audit`,
+`report_sale`, `report_expense` …), since that is the shape `minty-db` ships.
+
+| Writer | Tables |
+|---|---|
+| `minty-accounts-api` | `user`, `user_token`, `email_otp`, `entities`, `user_entity`, `role`, `permission`, `role_permission`, `invitation`, `terms_consent`, `country_info`, `currency_info`, `entity_function`, `entity_function_map` (+ onboarding on `entities`, `user_entity`, `entity_function_map`) |
+| `minty-xero-api` | `account_info`, `entity_account_xero`, `xero_bank_transaction`, `xero_bank_transfer`, `xero_contact_sync`, `xero_report_sync` |
+| `minty-pettycash-api` | `report`, `report_cash_count`, `report_history`, `report_sale`, `report_expense`, `report_expense_attachment`, `share_link`, `entity_pettycash_settings`, `entity_cash_detail`, `entity_cash_setting`, `entity_sale_setting`, `cash_info`, `sale_info` |
+| `minty-billing-api` | the 14 billing tables (`billing_plan`, `billing_policy`, `payer_billing_group`, `billing_account_payment_method`, `entity_billing_group`, `entity_billing_consent`, `entity_module_subscription`, `user_stripe_customer`, `subscription_invoice`, `subscription_invoice_line`, `subscription_transfer`, `subscription_audit_log`, `subscription_email_log`) |
+| `minty-payments-api` | `bill`, `bill_line`, `payment`, `attachment`, `bill_attachment`, `payment_attachment`, `bill_audit`, `entity_bill_account_xero`, `entity_bill_currency`, `xero_bill_sync`, `xero_bill_sync_line`, `xero_bill_sync_payload`, `xero_bill_response_line` |
+| `minty-legacy` | everything its blueprints still serve, shrinking per step. `sessions` (Flask-Session) is Flask's own, outside the redesign, and dies with it |
+
+### The baseline is the redesign, not today's schema
+
+`docs/schema/01_schema_rebased.sql` is a finished redesign of the database — 58 tables + the
+`tracker` view, 21 Postgres enums, `uuid` PKs everywhere, `numeric` money, `timestamptz`
+throughout, `user` split from `user_token`, nine tables renamed, the draft/v2 report tables
+collapsed into `report` + a status enum, sales channels normalised into `sale_info` +
+`report_sale`, 32 `updated_at` triggers, and the eight dead `auth_*`/`django_*` tables gone. It
+builds clean from empty. Its decision register (three eras, ~17 items) is in the file header and
+is not repeated here. Beside it: generated, repeatable loaders (`02`, `03`, `04`, ending in
+`ROLLBACK` with row-count and id-survival checks), `00_enum_coverage_check.sql`, and
+`APPLICATION_CHANGES.md` — the 217 code-side findings (9 renames, 64 missing columns, 144 type
+mismatches) with an order to fix them in.
+
+**`minty-db` is born from this file.** If new services were built on today's `pettycashv2`
+shape, every one of them would be ported to the redesign later. So the redesign is applied
+*once*, at step 2, and every extraction after it starts on the clean schema. Flask has to run on
+the new schema for the transition — that is the cost, and `APPLICATION_CHANGES.md` is already
+the work list for it.
+
+**How `0001_initial` is built.** Django cannot express Postgres enum types, triggers or
+`COMMENT ON`, and `01_schema_rebased.sql` carries 21 enums, 32 triggers and ~150 comments. So the
+SQL file *is* the first migration:
+
+- `0001_initial` = `migrations.SeparateDatabaseAndState(database_operations=[RunSQL(<01 file>)],
+  state_operations=[CreateModel(...) for every table])`. The DDL comes from the reviewed file
+  verbatim; Django's model state matches it. From `0002` onward migrations are ordinary Django
+  operations, plus `RunSQL` for `ALTER TYPE … ADD VALUE` when an enum grows.
+- Enum columns are a small custom `EnumField(models.Field)` whose `db_type()` returns the enum
+  name, so a later `AddField` emits `ADD COLUMN x pettycashv2.report_status`, not `varchar`.
+- `audit_models.py` (already compares Minty's SQLAlchemy and billing-backend's Django models
+  against what `01` builds) gains `minty_db.models` as a third input and must report **zero**
+  findings against it — that is the proof state and DDL agree. It moves to `minty-db`.
+- `00_enum_coverage_check.sql` runs in `minty-db`'s CI: an enum must cover every value the code
+  can *produce*, not just the values the data holds (ERA 3 items 5–10).
+
+**The redesign itself is Part 1** — decisions, the 217 application changes, the one-hop
+pipeline rehearsal, the production cutover with the schema rename-swap, billing-backend's
+`bills/migrations` removed, Alembic deleted. Part 2 step 2 starts from a production database
+that is already `01_schema_rebased`, and does only this:
+
+1. `minty_db.models` written from `01_schema_rebased.sql`; `0001_initial` as above;
+   `audit_models.py` = 0 for `minty_db.models`.
+2. `migrate --fake-initial` on local, staging, production (the tables exist).
+3. Both existing Django services drop `shared_models/` and import `minty_db.models`.
+4. From here a new column starts as a `minty-db` PR and is added to Flask's SQLAlchemy model
+   only if Flask still needs it; the `docs/schema/changes/` stop-gap from Part 1 is retired.
+
+**Why this is worth doing first rather than last:** the redesign work is already done and
+tested as SQL; what remains is applying it. Doing it at step 2 means it happens once, in Flask,
+where the 217 findings already point at exact lines. Doing it later means doing it in six Django
+services *and* Flask, against models that were `inspectdb`'d from the shape being abandoned.
+
+**Flow for a schema change afterwards:** PR to `minty-db` (models + migration) → tag → deploy
+runs `migrate` → the service that needs the column bumps its pin. Additive-first (expand, then
+contract in a later tag) so a service on an older tag keeps working through the deploy. A
+feature that needs a column is therefore two PRs — that is the point; it is the discipline that
+stops a Django write Flask cannot read.
+
+**Cold start** works from step 2, not step 5: `docker/stack` gains a `minty-db` init container
+that runs `migrate` then the seed, and `RUN_MIGRATIONS=true` becomes the default again instead
+of the dump-restore in `docker/stack/README.md §3b`. `pettycash_test` loaders and
+`00_enum_coverage_check.sql` move to `minty-db` alongside.
+
+## The shared repos — the one thing that makes multi-repo hold
+
+`minty-db` (package `minty_db`) — covered above. Models and migrations; pinned by tag.
+
+`minty-shared-py` (package `minty_shared`): code, not schema. Lift what already exists twice —
+`onboarding-backend/core/{auth,permissions,policy,minty_client,log_formatters,exceptions}.py` and
+the matching `billing-backend/core/*`. Version by git tag; each service pins
+`minty-shared @ git+https://github.com/minty-oliveandvine/minty-shared-py@v0.x` in
+`requirements.txt`. It depends on `minty-db` for the models `permissions` and `policy` query.
+
+`minty-shared-ts` (package `@minty/shared`): lift `billing-frontend/lib/{api,apiBase,auth,
+mintyEnv,mintyUrls,moduleClaims}.ts`, `middleware.ts`, `components/ModuleGate.tsx`, the shared
+components (`MintySelect`, `Toast`, `Icon`) and the design tokens from `app/globals.css`.
+Install as `"@minty/shared": "github:minty-oliveandvine/minty-shared-ts#v0.x"`.
+
+## End-to-end testing — the gate for every cutover
+
+Unit tests exist in the Python repos and (since the onboarding cleanse) in `onboarding`; nothing
+tests the seams. Both onboarding defects that reached production were a Django write that Flask
+could not read (NULL `date`) and a CORS-credentials failure that silently fell back to the browser
+clock — invisible to any single repo's tests. Every step below moves a seam, so the seam test is
+the gate, and **there is no CI in any repo today** — that changes here, because a gate nobody
+runs is not a gate.
+
+**Three layers, cheapest first:**
+
+1. **Contract tests — per service, in CI on every push.** django-ninja emits OpenAPI for free;
+   `minty-shared-ts` generates its request/response types from each service's
+   `/api/openapi.json` (`openapi-typescript`) instead of hand-writing them. A schema change that
+   breaks a frontend then fails `tsc`, not a browser session. On the Python side, each service's
+   pytest suite stubs *other services* at the `requests` boundary, never its own functions —
+   the onboarding lesson (`core/minty_client.forward` was monkeypatched away in every test, so its
+   error branches had never run).
+2. **App-local E2E — per `-web` repo, in that repo's `e2e/`.** Playwright against that app plus
+   whatever services it needs. `onboarding/e2e` (cold resume, nine-step walk, the two regression
+   specs) is the model; `minty-web` and `minty-pettycash-web` get the same on day one, not after.
+   Runs before a merge, not per commit — it needs the stack.
+3. **Cross-service journeys — `minty-e2e`, against the full `docker/stack`.** The flows that
+   cross three or more repos and that no app owns:
+   - sign up → wizard → finalize → land on the dashboard with the trial open (accounts + onboarding + billing)
+   - connect Xero → create a report → publish → bank transaction appears (accounts + pettycash + xero)
+   - raise a payment request → attach → publish bill to Xero (payments + xero + accounts)
+   - trial lapses → restart screen → card captured → access restored (billing + web + accounts)
+   - invite a user → accept → role visible in settings → leave entity (accounts + web + onboarding)
+   - `SECRET_KEY` and schema-pin guards: a request with a token minted by the stack's accounts
+     service must be accepted by *every* other service; every service reports the same
+     `minty-db` tag, and a `SELECT *` through every `minty_db` model succeeds against the
+     freshly migrated DB.
+
+**The stack is the fixture.** `minty-e2e`'s CI workflow (GitHub Actions) checks out every repo
+at a pinned ref, runs `docker/stack` with `RUN_MIGRATIONS=true` from an **empty** database, seeds
+via `minty-db`, then runs Playwright. That only works once Django owns cold start (step 3+) —
+until then it restores the dump that `docker/stack/README.md §3b` describes. Nightly, on demand,
+and via `repository_dispatch` from each service's own CI on merge to its main branch. Test
+identities (`E2E_JWT_SECRET`, `E2E_USER_ID`, `E2E_ENTITY_ID`, the disposable `ee72f706…` entity)
+move from onboarding's local convention into `minty-db`'s seed so every suite shares them.
+
+**Rules:** a cutover step is not done until (a) the app-local suite of every affected `-web`
+repo is green and (b) `minty-e2e` is green from a cold-started database. A Django-writes /
+Flask-reads bug found in production gets a regression spec in `minty-e2e` in the same fix PR,
+as `onboarding/e2e` already does. Never fix a flaky E2E by retrying it — the flakes so far have
+been real (server-time fallback, `saved_step` restore).
+
+## CI/CD — there is none today, and multi-repo needs it more than monorepo did
+
+**Today:** zero test/lint/type-check workflows in any repo. Three workflow files exist
+(`Minty/.github/workflows/teams-notification.yml`, `billing-frontend/.github/workflows/
+{clickup-notif,vercel-deploy}.yml`) and all three trigger on branches that do not exist
+(`PRESTAGING-PETTYCASH`, `prestaging`) — they have never run. Two of them are byte-identical
+copies, which is the multi-repo drift problem in miniature. Deploys are Render and Vercel
+auto-deploying from a branch chosen in their dashboards; no repo records which. Each repo's
+trunk has a different name (`Minty-PettyCash`, `Minty-BillingBackend`, `Minty-BillingFrontend`,
+`Minty-Onboarding`, `main`).
+
+**Design — write the workflow once, call it from every repo.** GitHub lets the org's special
+`.github` repo hold *reusable workflows*; each service's own workflow is then ~10 lines:
+
+```
+minty-oliveandvine/.github/.github/workflows/
+├── python-api.yml      ruff · pyright · pytest against a Postgres service container
+│                       (MINTY_DB_OWNER=True builds the test DB from minty-db's migrations —
+│                       Postgres, not SQLite: the uuid/enum traps don't reproduce on SQLite)
+├── next-web.yml        tsc --noEmit · eslint · vitest · next build · openapi type drift check
+├── py-package.yml      minty-db / minty-shared-py: tests + tag on release
+├── e2e-stack.yml       checkout every repo at pinned refs → docker/stack from empty → seed →
+│                       Playwright (called by minty-e2e; nightly + repository_dispatch on merge)
+└── deploy-gate.yml     fires the Render deploy hook / Vercel deploy only after the above pass
+```
+
+A service repo's `.github/workflows/ci.yml` is `uses: minty-oliveandvine/.github/.github/workflows/python-api.yml@v1`
+plus its inputs. Fixing CI for every repo is then one PR in one place.
+
+**Branches and environments.** One convention across all repos: `main` = production,
+`staging` = staging, everything else a PR branch. Render's four Minty environments (dev,
+pre-staging, staging, prod) collapse to two plus **preview deploys** per PR (Vercel does this
+natively; Render has preview environments) — a PR preview is what dev/pre-staging were for.
+Branch protection on `main` and `staging`: required checks = the reusable CI, one review,
+no direct pushes. The rename of each repo's trunk to `main` happens at its cutover step, when
+its Render/Vercel project is being reconfigured anyway (same moment as the repo rename).
+
+**CD.** Keep platform auto-deploy, but from protected branches only — the gate is "you cannot
+merge red", not "CI deploys". Two exceptions that need an explicit step:
+- **`minty-db` deploys first.** Its deploy is `manage.py migrate` as a Render pre-deploy
+  command (or a job); services pin a `minty-db` tag and migrations are additive-first, so a
+  service deploying minutes before or after the schema is safe.
+- **Shared packages** (`minty-db`, `minty-shared-py`, `minty-shared-ts`) release by git tag from
+  `main`; a service bumps its pin in a PR, which runs that service's CI against the new tag.
+  No floating `@main` pins anywhere — that is how a shared change silently deploys to five
+  services at once.
+
+**Secrets.** One GitHub *Environment* per stage (`production`, `staging`) in each repo holding
+that repo's secrets; `SECRET_KEY` is the one value that must be identical across every `-api`
+repo's environment, so it is set via the org-level secret and inherited, not pasted per repo —
+the onboarding 401 incident was a paste. Rotate the production `SECRET_KEY` and the Stripe/Xero/
+mail/S3 values as the first CI task, since the current ones have been pasted into chat.
+
+**Cleanup.** Delete the three dead workflows in step 1 alongside the duplicate repos.
+
+**CI engine: GitHub Actions, decided.** Jenkins was considered and rejected: it is a controller
+to host, patch and back up, it reproduces the reusable-workflow layer as a shared library with
+worse tooling, and nothing here (no on-prem targets, no special runners, no existing Jenkins
+estate) needs it. If Actions minutes run out on private repos, a self-hosted Actions *runner*
+is the escape hatch, not a different CI.
+
+## Infrastructure as code — `minty-infra` (Terraform)
+
+Everything the plan deploys to has an official provider: Render (`render-oss/render`), Vercel
+(`vercel/vercel`), Supabase (`supabase/supabase`), Backblaze B2 (`Backblaze/b2`), GitHub
+(`integrations/github`). The target tree is ~11 deployables × 2 environments plus 15 repos of
+protection rules — past what a dashboard keeps consistent, and the dashboard is where today's
+undocumented facts live ("which branch deploys where is configured in Render, not in the repo").
+
+**What it owns:**
+
+| Resource | Replaces |
+|---|---|
+| `render_web_service` per `-api` × {staging, production}, `render_cron_job`/pre-deploy for `minty-db` `migrate` | Render dashboard config, the unknown branch→environment map |
+| `env_vars` on each Render service, with one `variable "secret_key"` referenced by every `-api` | hand-pasted `SECRET_KEY` (the onboarding 401 incident); `XERO_TOKEN_SERVICE_URL`, `FLASK_APP_URL` etc. become outputs of one resource fed into another |
+| `vercel_project` + env vars per `-web` × environment, root directory, preview settings | Vercel dashboard |
+| `supabase_project` settings (not the schema — that is `minty-db`) | Supabase dashboard |
+| `b2_bucket`, `b2_application_key` | B2 console |
+| `github_repository`, `github_branch_protection` (required checks = the reusable CI), `github_repository_environment`, `github_actions_environment_secret`, `github_actions_organization_secret` for `SECRET_KEY` | the CI/CD section's rules, now enforced across all 15 repos from one file |
+
+**Layout:** `envs/{staging,production}/` each composing modules `render-api`, `vercel-web`,
+`github-repo`; one `services.tf` list that both environments iterate, so adding a service is one
+entry. State in **HCP Terraform** (free tier covers this resource count); `plan` posted to the PR,
+`apply` on merge to `main`, both from Actions.
+
+**Rules:**
+- **Import, never recreate.** Every existing Render service and Vercel project is
+  `terraform import`ed; a recreated resource gets a new URL and takes production down. First
+  `plan` after import must be a no-op before anything else is added.
+- Terraform owns *wiring*, not application config: it sets `NEXT_PUBLIC_ONBOARDING_API_URL`
+  because that is the address of another resource; it does not own `EXPENSE_AI_CONF_HIGH`.
+  Feature-flag-style values stay in the service's `.env.example` and are set as plain env vars
+  Terraform passes through from a per-environment `tfvars`.
+- Secrets enter as sensitive `tfvars` held in HCP Terraform, never in the repo. The rotation the
+  CI/CD section calls for happens *through* Terraform — change the variable, apply, every
+  service gets it in one run.
+- DNS for `dailyminty.com` joins when its registrar/host is identified; not blocking.
+
+**Sequencing:** `minty-infra` is created in step 1 with the GitHub resources only (branch
+protection, environments, secrets — where the CI rules bite). Render and Vercel imports follow
+service by service at each cutover step, since that is when each project is being reconfigured
+anyway; by step 7 nothing deployable exists outside Terraform.
+
+**Kubernetes: not needed, decided.** ~11 small HTTP services on one managed Postgres do not need
+independent elastic scaling, custom networking or self-run stateful workloads — the things k8s
+is for. Render already provides build/deploy/rollback, TLS, health checks, secrets, logs and
+`preDeployCommand`; on k8s every one of those becomes something the team runs (registry,
+ingress, cert-manager, secrets tooling, observability stack, cluster upgrades). Revisit if two of
+these become true: a service needs elastic scaling Render prices badly, Render's bill exceeds a
+managed cluster plus the time to run it, a workload Render cannot host (GPU, custom networking,
+self-run DB), or a compliance-driven region/cloud requirement. The plan already keeps the door
+open at no cost: every service has a `Dockerfile`, config is env vars, state lives in Postgres
+and B2, `docker/stack` is the deployment description. Two things to do now that keep it true:
+a `/healthz` endpoint on every `-api` (Render's health checks want it anyway) and no local
+filesystem state (already the case — attachments go to B2). If the day comes, `minty-infra`
+gains a `k8s-api` module beside `render-api` and the services do not change.
+
+## Cross-cutting rules (write into each repo's README)
+
+1. `SECRET_KEY` identical across every Python service; `minty-accounts-api` is the only minter (Flask until step 5).
+2. `minty-db` is the only repo with a `migrations/` directory and the only process that runs `migrate`. Every service imports `minty_db.models` with `MINTY_DB_OWNER = False`; no service declares its own model for a `pettycashv2` table. Writes follow the ownership map in `minty-db`'s README.
+3. Outbound calls to another service go through one client module per service (`core/minty_client.py` pattern), never scattered `requests` calls.
+4. `pettycashv2` via `search_path`; raw SQL schema-qualified.
+5. Only `minty-xero-api` holds `XERO_CLIENT_ID/SECRET` (Flask until step 3).
+6. **Ports: one digit per domain, shared by its API and its frontend** — `800d` for the `-api`, `300d` for the `-web`, digits in the order a user meets the products:
+
+   | d | domain | `-api` | `-web` |
+   |---|---|---|---|
+   | 0 | accounts / the hub | `minty-accounts-api` 8000 | `minty-web` 3000 |
+   | 1 | onboarding | 8001 (unchanged) | 3001 (unchanged) |
+   | 2 | petty cash | 8002 | 3002 |
+   | 3 | payments | 8003 **(billing-backend moves off 8000)** | 3003 **(billing-frontend moves off 3000)** |
+   | 4 | xero | 8004 | — |
+   | 5 | billing | 8005 | — (pages live in `minty-web`) |
+   | 6–8 | reserved | | |
+   | 9 | marketing | — | `minty-www` 3009 |
+   | — | `minty-legacy` | 5001 | |
+   | — | PostgreSQL (stack) | host **5433** → container 5432 | |
+
+   Local dev only — Render and Vercel inject `$PORT`. The payments pair moves at **step 4**, the same change that splits `billing-frontend` and renames both repos: `docker/stack/docker-compose.yml` + `.env.example` defaults, `billing-frontend/lib/apiBase.ts:8`, `billing-backend/config/settings.py:38` (CORS), `Minty/blueprints/shared/bearer_api.py:34` and `blueprints/entity/routes/modules.py:162` (redirect fallbacks), READMEs. Until then payments stays on 8000/3000 and `minty-web` does not exist, so nothing collides. `docker/stack/docker-compose.yml` is the one place the whole system is wired; every new service adds itself there with `${<NAME>_PATH:-../../../<repo>}` and `${<NAME>_HOST_PORT:-800d}`, and every hardcoded `localhost:<port>` fallback in code must agree with it. **The stack's Postgres moves to host port 5433** (container stays 5432): this machine already has a native Postgres on 5432 (`production-backup` lives there), and the compose default colliding with it is the first item in `docker/stack/README.md §8` — flip the default so a fresh checkout works beside a local Postgres, and invert the `.env.example` comment (override to 5432 only if you have none).
+7. Frontends route through one cutover map per app (`apiRoutes.ts`), never inline base URLs.
+
+## Sequencing
+
+### The phases at a glance
+
+| Step | Phase | New repos | Done when |
+|---|---|---|---|
+| 1 | Housekeeping + CI + infra | `.github`, `minty-infra` | every trunk protected with a green CI run; `terraform plan` no-op |
+| 2 | **`minty-db` adopts Part 1's schema** + shared-py + e2e scaffold (requires Part 1 shipped) | `minty-db`, `minty-shared-py`, `minty-e2e` | `--fake-initial` on every environment; both Django services on `minty_db.models`; cold start from empty works; first two E2E journeys green |
+| 3 | `minty-xero-api` | `minty-xero-api` | `XERO_TOKEN_SERVICE_URL` repointed; Xero E2E journey + `onboarding/e2e/xero.spec.ts` green |
+| 4 | `minty-web` split + `minty-shared-ts` + renames + port move | `minty-web`, `minty-shared-ts` | both frontends build on `@minty/shared`; payments on 8003/3003; app-local E2E green |
+| 5 | `minty-accounts-api` (single JWT minter) | `minty-accounts-api` | every E2E journey green from a cold-started DB |
+| 6 | Petty cash API + web | `minty-pettycash-api`, `minty-pettycash-web` | Xero → report → publish journey green |
+| 7 | `minty-billing-api` | `minty-billing-api` | trial-lapse → restart journey green; onboarding has no Flask dependency left |
+| 8 | Retire Flask | — | nothing routes to :5001 |
+
+Steps 3–7 are independent cutovers, each with its own plan file. Order is by blast radius and
+dependency: xero is smallest and already behind one env var; accounts must precede petty cash
+(entities) and billing (the `entity ↔ subscription` coupling); billing is last.
+
+### Access for step 1
+
+- **GitHub (`minty-oliveandvine`):** the owner runs `gh auth login` on this machine (browser
+  flow) before step 1 starts and `gh auth logout` after. Repo creation, org secrets and branch
+  protection go through `gh`/Terraform under that session. **No credential is ever pasted into
+  chat or written to a file** — the transcript is on disk, and the 2026-09-14 `.env` paste is
+  why production secrets are being rotated at all. First org-level actions run as a dry run
+  (`gh api` reads, `terraform plan`) and stop for an explicit OK before anything is created.
+- **`OliveAndVineHK`** (the four `LIVE07072026` copies): ownership unconfirmed. Step 1 lists the
+  four `gh repo archive` commands for whoever owns it and proceeds without them; the local
+  clones are deleted regardless.
+- **Render / Vercel / Supabase / B2 API keys:** set as sensitive HCP Terraform workspace
+  variables by the owner; they never touch this machine.
+- **Rotated secrets** (`SECRET_KEY`, Stripe, Xero, mail, S3): generated by the owner, applied
+  via Terraform variables. Verified by behaviour (a token minted by Flask accepted by both Django
+  services), not by reading the values.
+
+### The steps in detail
+
+1. **Archive the duplicates** (`OliveAndVineHK` ×4, `Minty-old`) and **stand up CI + infra**: the org `.github` repo with `python-api.yml` and `next-web.yml`, called from the five live repos; `minty-infra` with the GitHub resources (branch protection on each trunk, environments, org-level `SECRET_KEY`); the three dead workflows deleted; production secrets rotated through Terraform. Zero product-code risk, and every later step is gated by it.
+2. **Foundations, before any new service** — the biggest step, and the one that removes the most risk from every later one:
+   - `minty-db` adopts the schema **Part 1 already put in production**: `0001_initial` = `01_schema_rebased.sql` via `SeparateDatabaseAndState`, `migrate --fake-initial` on every environment, both Django services import `minty_db.models`, `docker/stack` cold start switches to the `minty-db` init container. (The redesign itself, the 217 application changes, the pipeline rehearsal, the cutover and the Alembic deletion are Part 1 — if Part 1 has not shipped, this step cannot start.)
+   - `minty-shared-py` from onboarding-backend's `core/`; both existing Django services repoint at it and at `minty-db`; their `shared_models/` directories go.
+   - `minty-e2e`: Playwright scaffold + the stack CI workflow (cold-started from empty, since that now works) + the first two journeys (sign-up→finalize, connect Xero→publish report), which are the ones steps 3 and 5 will break if they go wrong. Contract-type generation into `minty-shared-ts` starts here too.
+3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_TOKEN_SERVICE_URL`, then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: `minty-e2e` Xero journey + `onboarding/e2e/xero.spec.ts`.
+4. **`minty-shared-ts` + split `minty-web` out of `billing-frontend`** — together; the split is what forces the shared package into existence. `minty-web/e2e` created with it. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway, and **move the payments pair to 8003/3003** so `minty-web` takes 3000 (rule 6 lists the six places).
+5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. Gate: every `minty-e2e` journey, from a cold-started DB.
+6. **`minty-pettycash-api` + `minty-pettycash-web`** — largest (15.5k) but self-contained once entities live in accounts.
+7. **`minty-billing-api`** — last; needs 5 done. Scheduler moves with it (two-worker lock). Onboarding's payment-method/billing/finalize/modules proxies repoint here — after this the wizard has no Flask dependency left.
+8. **Retire Flask**: `minty-legacy` archived once its last template is served by a `-web` repo and its last route by an `-api`. Its SQLAlchemy models go with it; `minty_db.models` is already the only schema definition.
+
+Each of steps 3–7 gets its own plan file before it starts, in the shape of the onboarding one:
+route groups, a cutover map on the frontend, models from `minty-db`, and "verifies, never mints".
+
+## Verification (for this structure plan)
+
+- `docker compose up --build` from `Minty/docker/stack` brings up every repo in the tree with the ports above; `docker compose config` shows one `*_PATH` default per service.
+- From step 2 on: `docker compose down -v && docker compose up` produces a working system from an **empty** volume — the thing the README's §3b says is impossible today. The measuring query at the end of `01_schema_rebased.sql`'s "HOW TO BUILD IT" reports the same counts against the migrated production schema as against a fresh build (tables, columns, enums, FKs, indexes, triggers; 0 `double precision`, 0 naive `timestamp`). `pettycashv2.alembic_version` no longer exists; `django_migrations` lists only the `minty_db` app; `pettycash_legacy` exists until its agreed drop date.
+- `audit_models.py` reports **zero** findings for `minty_db.models`, Minty's SQLAlchemy models and `billing-backend`'s Django models against the live schema of local **and** Supabase (today: 217).
+- Every `02`/`03` B-check reads OK on the production run; row counts match the `pettycash_legacy` source for every table; `04` reports no attachment left behind.
+- `find C:\dev -name migrations -path "*api*"` finds nothing outside `minty-db`; `grep -rn "managed = " <every -api repo>` finds nothing (the switch lives in `minty_db`, not in services).
+- `minty-e2e` is green from a cold-started database after each of steps 3, 5, 6, 7, and its CI workflow has a run history — not just a file.
+- Every repo's Actions tab shows green runs of the reusable workflows on its trunk; `main` and `staging` are protected with those checks required; no `.github/workflows/*.yml` in any repo is longer than ~15 lines or triggers on a branch that does not exist.
+- `terraform plan` in `minty-infra` is a no-op against production after the imports; every Render service and Vercel project in the dashboards appears in state (`terraform state list`), and a `SECRET_KEY` rotation is one variable change + one apply, verified by a token minted by accounts being accepted by every other service.
+- `pip show minty-db minty-shared` in every Django container reports the same tags; `billing-backend/shared_models`, `billing-backend/bills/migrations` and `onboarding-backend/shared_models` no longer exist.
+- `onboarding/lib/apiRoutes.ts` ends with an empty "proxied to Flask" block and `flaskBase.ts` is deleted; `onboarding/e2e` passes against the full stack after each of steps 3, 5, 7.
+- Each service's README states the seven cross-cutting rules; `grep -rn XERO_CLIENT_SECRET` across the org hits only `minty-xero-api` (and `minty-legacy` until step 3).
+
+---
+
+## Appendix — the target tree as a draw.io diagram
+
+The editable diagram is [minty-target-tree.drawio](minty-target-tree.drawio) beside this file.

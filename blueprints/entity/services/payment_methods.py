@@ -1,6 +1,6 @@
 """Payment method service helpers for entity payment method APIs.
 
-Since C3 (docs/modernisation_plan.md) a company's methods are links (``EntitySaleSetting``:
+Since C3 (docs/modernisation/modernisation_plan.md) a company's methods are links (``EntitySaleSetting``:
 entity, catalogue row, on/off, order) into one global catalogue (``SaleInfo``: name, type,
 form-field name). Adding a method a company invents adds a catalogue row for everyone; the
 company's own state is only the link. Types are the ``sale_type`` enum -

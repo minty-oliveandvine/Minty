@@ -1,6 +1,6 @@
 """Characterisation: companies and their modules - creation, status, settings, the module map.
 
-Written before C2 of docs/modernisation_plan.md (entities / entity_function /
+Written before C2 of docs/modernisation/modernisation_plan.md (entities / entity_function /
 entity_function_map follow the rebased schema). Everything is observed through endpoints
 and the CLI; the two places a column is read directly (``created_by``, the country /
 currency FKs) are the facts the redesign changes and nothing renders.

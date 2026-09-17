@@ -14,7 +14,7 @@ the seeded identity is not configured, so an unconfigured run reads as *not run 
 
 The pytest suite renders Jinja but runs no JavaScript. The report wizard is thousands of lines
 of inline JS that reads the field names and JSON keys the schema redesign renames
-(`docs/modernisation_plan.md`, Part 1 phase C0.9). These specs are the only thing that runs it.
+(`docs/modernisation/modernisation_plan.md`, Part 1 phase C0.9). These specs are the only thing that runs it.
 
 ## What has to be up
 

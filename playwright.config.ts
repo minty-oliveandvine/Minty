@@ -4,7 +4,7 @@
 //
 //   npm run test:e2e
 //
-// docs/modernisation_plan.md, Part 1 phase C0.9: this suite is the only thing that runs the
+// docs/modernisation/modernisation_plan.md, Part 1 phase C0.9: this suite is the only thing that runs the
 // wizard's JavaScript, which reads the field names and JSON keys the schema redesign renames.
 // See e2e/README.md for the environment the authenticated specs need.
 

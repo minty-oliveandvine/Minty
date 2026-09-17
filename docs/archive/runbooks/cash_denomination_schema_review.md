@@ -182,7 +182,7 @@ Still useful regardless of which schema wins:
   detail rows, fall back to legacy columns) does not.
 * The `ending.py` / `cash_count.py` edits removing **four** duplicated
   hardcoded multiplier blocks.
-* `docs/cash_denomination_migration_runbook.md` — the sequencing, the
+* `docs/archive/runbooks/cash_denomination_migration_runbook.md` — the sequencing, the
   verification gates, and the two bugs documented below.
 
 ---

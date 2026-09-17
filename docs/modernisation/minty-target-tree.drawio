@@ -1,0 +1,128 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Minty target tree" id="minty-target-tree">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ===== Frontends ===== -->
+        <mxCell id="WEB" value="Frontends — Next.js 16 · TypeScript 5 strict · Vercel" style="swimlane;html=1;startSize=30;fillColor=#eff6ff;strokeColor=#1d4ed8;fontColor=#1e3a8a;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="1360" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="W0" value="&lt;b&gt;minty-web&lt;/b&gt; :3000&lt;br&gt;login · dashboard · profile · settings · subscription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+          <mxGeometry x="20" y="45" width="260" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="W1" value="&lt;b&gt;minty-pettycash-web&lt;/b&gt; :3002&lt;br&gt;reports · cash count · history · exports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+          <mxGeometry x="300" y="45" width="250" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="W2" value="&lt;b&gt;minty-payments-web&lt;/b&gt; :3003&lt;br&gt;← billing-frontend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+          <mxGeometry x="570" y="45" width="250" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="W3" value="&lt;b&gt;minty-onboarding-web&lt;/b&gt; :3001&lt;br&gt;← onboarding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+          <mxGeometry x="840" y="45" width="250" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="W4" value="&lt;b&gt;minty-www&lt;/b&gt; :3009&lt;br&gt;← daily-minty-landing-page" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+          <mxGeometry x="1110" y="45" width="230" height="65" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Services ===== -->
+        <mxCell id="API" value="Services — Django 5.2 LTS · django-ninja · Python 3.13 · Render" style="swimlane;html=1;startSize=30;fillColor=#f0fdf4;strokeColor=#15803d;fontColor=#14532d;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="200" width="1360" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="A0" value="&lt;b&gt;minty-accounts-api&lt;/b&gt; :8000&lt;br&gt;JWT minter · users · roles · invitations · legal · companies" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+          <mxGeometry x="20" y="45" width="210" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="A1" value="&lt;b&gt;minty-xero-api&lt;/b&gt; :8004&lt;br&gt;sole Xero token refresher · publish" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+          <mxGeometry x="245" y="45" width="210" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="A2" value="&lt;b&gt;minty-billing-api&lt;/b&gt; :8005&lt;br&gt;Stripe · plans · invoices · dunning · scheduler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+          <mxGeometry x="470" y="45" width="210" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="A3" value="&lt;b&gt;minty-pettycash-api&lt;/b&gt; :8002&lt;br&gt;reports · expenses (+AI) · deposits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+          <mxGeometry x="695" y="45" width="210" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="A4" value="&lt;b&gt;minty-payments-api&lt;/b&gt; :8003&lt;br&gt;← billing-backend · bills · payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+          <mxGeometry x="920" y="45" width="210" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="A5" value="&lt;b&gt;minty-onboarding-api&lt;/b&gt; :8001&lt;br&gt;← onboarding-backend · proxies shrink" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+          <mxGeometry x="1145" y="45" width="210" height="75" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Legacy ===== -->
+        <mxCell id="L" value="&lt;b&gt;minty-legacy&lt;/b&gt; :5001&lt;br&gt;Flask · Python 3.11 · ← Minty&lt;br&gt;shrinks to zero · Alembic deleted at step 2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#b91c1c;fontColor=#7f1d1d;dashed=1;dashPattern=6 3;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="390" width="380" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Shared packages ===== -->
+        <mxCell id="PKG" value="Shared packages — pinned git tags" style="swimlane;html=1;startSize=30;fillColor=#fefce8;strokeColor=#a16207;fontColor=#713f12;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="390" width="950" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="P0" value="&lt;b&gt;minty-db&lt;/b&gt;&lt;br&gt;ALL models + migrations · sole migrate runner&lt;br&gt;managed = settings.MINTY_DB_OWNER" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#a16207;fontColor=#713f12;strokeWidth=2;" vertex="1" parent="PKG">
+          <mxGeometry x="20" y="40" width="290" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="P1" value="&lt;b&gt;minty-shared-py&lt;/b&gt;&lt;br&gt;BearerAuth · permissions · service clients" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#a16207;fontColor=#713f12;" vertex="1" parent="PKG">
+          <mxGeometry x="330" y="40" width="290" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="P2" value="&lt;b&gt;minty-shared-ts&lt;/b&gt;&lt;br&gt;api client · auth cookies · env · UI tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#a16207;fontColor=#713f12;" vertex="1" parent="PKG">
+          <mxGeometry x="640" y="40" width="290" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Data ===== -->
+        <mxCell id="DATA" value="Data" style="swimlane;html=1;startSize=30;fillColor=#faf5ff;strokeColor=#7e22ce;fontColor=#581c87;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="570" width="1360" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="DB" value="PostgreSQL · schema pettycashv2&lt;br&gt;Supabase" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
+          <mxGeometry x="380" y="35" width="280" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="B2" value="Backblaze B2&lt;br&gt;attachments · exports" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
+          <mxGeometry x="760" y="35" width="220" height="85" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== DevOps ===== -->
+        <mxCell id="OPS" value="DevOps" style="swimlane;html=1;startSize=30;fillColor=#f8fafc;strokeColor=#475569;fontColor=#0f172a;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="750" width="1360" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="O0" value="&lt;b&gt;minty-e2e&lt;/b&gt;&lt;br&gt;Playwright · cross-service journeys · gates every cutover" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
+          <mxGeometry x="20" y="40" width="400" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="O1" value="&lt;b&gt;minty-infra&lt;/b&gt;&lt;br&gt;Terraform: Render · Vercel · Supabase · B2 · GitHub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
+          <mxGeometry x="480" y="40" width="400" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="O2" value="&lt;b&gt;.github&lt;/b&gt;&lt;br&gt;reusable Actions workflows: python-api · next-web · e2e-stack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
+          <mxGeometry x="940" y="40" width="400" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== Runtime calls: web -> api ===== -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1d4ed8;" edge="1" parent="1" source="W0" target="A0"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1d4ed8;" edge="1" parent="1" source="W0" target="A2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1d4ed8;" edge="1" parent="1" source="W1" target="A3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1d4ed8;" edge="1" parent="1" source="W2" target="A4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1d4ed8;" edge="1" parent="1" source="W3" target="A5"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- ===== Service-to-service ===== -->
+        <mxCell id="e6" value="token" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#15803d;fontColor=#14532d;fontSize=10;" edge="1" parent="1" source="A4" target="A1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="token" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#15803d;fontColor=#14532d;fontSize=10;" edge="1" parent="1" source="A3" target="A1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="access gate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#15803d;fontColor=#14532d;fontSize=10;" edge="1" parent="1" source="A0" target="A2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="proxies until steps 3 / 5 / 7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#15803d;fontColor=#14532d;fontSize=10;" edge="1" parent="1" source="A5" target="A2"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- ===== Schema and data ===== -->
+        <mxCell id="e10" value="migrate — the ONLY writer of DDL" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=4;strokeColor=#a16207;fontColor=#713f12;fontStyle=1;fontSize=10;" edge="1" parent="1" source="P0" target="DB"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="managed = False, via minty-db models" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#15803d;fontColor=#14532d;fontSize=10;exitX=0.15;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="API" target="DB"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="SQLAlchemy read/write · no more Alembic" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#b91c1c;fontColor=#7f1d1d;fontSize=10;dashed=1;" edge="1" parent="1" source="L" target="DB"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#7e22ce;exitX=0.75;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="API" target="B2"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- ===== Package dependencies ===== -->
+        <mxCell id="e14" value="imports" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#a16207;fontColor=#713f12;fontSize=10;" edge="1" parent="1" source="PKG" target="API"><mxGeometry relative="1" as="geometry"><mxPoint x="1000" y="340" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="e15" value="@minty/shared" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#a16207;fontColor=#713f12;fontSize=10;" edge="1" parent="1" source="P2" target="WEB"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1395" y="465"/><mxPoint x="1395" y="85"/></Array></mxGeometry></mxCell>
+
+        <!-- ===== DevOps relationships ===== -->
+        <mxCell id="e16" value="gates · deploys · CI for everything above" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#475569;fontColor=#0f172a;fontSize=10;" edge="1" parent="1" source="OPS" target="DATA"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- ===== Legend ===== -->
+        <mxCell id="LEG" value="Solid = runtime call · Thick = only DDL path · Dashed = dependency / proxy · Red dashed box = being emptied" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontColor=#475569;" vertex="1" parent="1">
+          <mxGeometry x="20" y="880" width="900" height="20" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

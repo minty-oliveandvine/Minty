@@ -8,7 +8,7 @@ catalogue (``entity_id``, ``sale_id``, ``is_active``, ``display_order``), and
 
 What is pinned: the JSON the settings page and the onboarding wizard receive, the order,
 the enable/disable semantics, and that a method used by an old report survives being
-switched off. See docs/modernisation_plan.md, Part 1 B3 group 3.
+switched off. See docs/modernisation/modernisation_plan.md, Part 1 B3 group 3.
 """
 
 from __future__ import annotations

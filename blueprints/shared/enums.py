@@ -7,7 +7,7 @@ because the column rejects it. billing-backend and onboarding-backend carry the 
 as ``TextChoices``; ``tests/test_enums_match_schema.py`` reads the schema file and fails when
 any of the three copies drifts.
 
-Added per phase C unit (docs/modernisation_plan.md): C1 ``SystemRole``, ``EntityRole``; C2 ``EntityStatus``,
+Added per phase C unit (docs/modernisation/modernisation_plan.md): C1 ``SystemRole``, ``EntityRole``; C2 ``EntityStatus``,
 ``ModuleCode``; C3 ``SaleType``; C4 ``ReportStatus``, ``PublishStatus``, ``DiscrepancyType``,
 ``CashType``; C5 ``SyncStatus``, ``SyncDirection``; C6 ``InvitationStatus``;
 C7 ``SubscriptionPhase``, ``ExtensionState``, ``TransferStatus``, ``AuditOutcome``.

@@ -7,7 +7,7 @@ becomes ``numeric``) can be applied underneath without changing any of it.
 
 Nothing here reads a model attribute. Totals are read back through
 ``/api/get_draft_totals``, the history page and the report detail page.
-See docs/modernisation_plan.md, Part 1 B3 group 1.
+See docs/modernisation/modernisation_plan.md, Part 1 B3 group 1.
 """
 
 from __future__ import annotations
