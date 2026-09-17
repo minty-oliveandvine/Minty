@@ -140,7 +140,6 @@ def _make_user(user_id: str, username: str) -> SimpleNamespace:
     return SimpleNamespace(
         id=user_id,
         username=username,
-        xero_entity_id=None,
     )
 
 
@@ -154,6 +153,13 @@ def _patch_all(monkeypatch, *, user, by_id: dict, latest, session, from_onboardi
 
     monkeypatch.setattr(xero_routes, "User", fake_user_class)
     monkeypatch.setattr(xero_routes, "Entity", fake_entity_class)
+    # the callback resolves the Xero login through identity.resolve_user_by_email (a real
+    # User query); this suite has no database, so the stubbed user is the answer
+    monkeypatch.setattr(xero_routes, "resolve_user_by_email", lambda _email: user)
+    # the one-org-one-entity guard and the org-switch cache invalidation query Entity for
+    # real; neither is what this suite pins (test_xero_org_claim*.py / test_xero_org_switch_*.py)
+    monkeypatch.setattr(xero_routes, "_live_org_claimant", lambda *_a, **_kw: None)
+    monkeypatch.setattr(xero_routes, "invalidate_entity_xero_cache", lambda *_a, **_kw: None)
     monkeypatch.setattr(xero_routes, "current_user", SimpleNamespace(username=user.username))
     monkeypatch.setattr(
         xero_routes,
@@ -225,7 +231,6 @@ def test_entity_resolved_by_id_in_state(monkeypatch):
     assert entity_a.xero_tenant_name == "Acme Ltd"
     assert entity_b.xero_org_id is None
     assert entity_b.status is None
-    assert user_a.xero_entity_id == "xero-tenant-abc"
     assert session.commit_calls == 1
 
 
@@ -329,8 +334,6 @@ def test_both_users_get_correct_entity_under_concurrent_onboarding(monkeypatch):
         "entity_b must be linked to Bob's Xero org"
     )
     assert entity_b.xero_tenant_name == "Bob Ltd"
-    assert user_a.xero_entity_id == "xero-tenant-A"
-    assert user_b.xero_entity_id == "xero-tenant-B"
 
 
 def test_old_code_would_have_corrupted_data_regression_proof(monkeypatch):
@@ -397,7 +400,6 @@ def test_onboarding_state_variant(monkeypatch):
     assert entity.xero_org_id == "xero-tenant-abc"
     # Mid-onboarding: Xero connects but status is preserved for resume.
     assert entity.status == "onboarding"
-    assert user.xero_entity_id == "xero-tenant-abc"
 
 
 def test_legacy_fallback_no_entity_id_in_state(monkeypatch):

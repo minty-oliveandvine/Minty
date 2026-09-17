@@ -14,52 +14,15 @@ import pytest
 
 from legal import registry
 
-_schema_attached = False
-
 
 @pytest.fixture
-def db_session(app, tmp_path_factory):
-    """SQLite stand-in for the `pettycashv3` schema.
-
-    The house pattern elsewhere attaches ``':memory:'`` on a single borrowed
-    connection. That is unreliable here: an in-memory attachment belongs to the
-    connection that made it, so a second connection from the pool sees a
-    *different*, empty `pettycashv3` — and whether a test passes then depends on
-    which connection the pool happens to hand out.
-
-    Two changes make it deterministic: attach a real file (so every connection
-    sees the same tables), and do it from a ``connect`` event (so every
-    connection the pool opens from now on gets it).
-    """
-    global _schema_attached
-    from sqlalchemy import event
+def db_session(app):
+    """The harness's Postgres build of the schema; every table emptied afterwards."""
 
     from models.db import db
 
     with app.app_context():
-        engine = db.engine
-        if not _schema_attached:
-            schema_path = str(
-                tmp_path_factory.mktemp("schema") / "pettycashv3.sqlite"
-            ).replace("\\", "/")
-
-            @event.listens_for(engine, "connect")
-            def _attach_schema(dbapi_connection, _record):  # noqa: ANN001
-                try:
-                    dbapi_connection.execute(
-                        f"ATTACH DATABASE '{schema_path}' AS pettycashv3"
-                    )
-                except Exception:
-                    # Already attached on this connection — harmless.
-                    pass
-
-            # Drop connections opened before the listener existed, so nothing
-            # in the pool is missing the schema.
-            engine.dispose()
-            _schema_attached = True
-
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -159,16 +122,6 @@ def test_record_consent_does_not_commit(app, db_session, user):
             session.rollback()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "pysqlite does not honour SAVEPOINT rollback: a row written inside "
-        "begin_nested() survives session.rollback(). Reproducible with bare "
-        "SQLAlchemy and no application code, and documented by SQLAlchemy as a "
-        "pysqlite driver limitation. PostgreSQL — what production runs — "
-        "behaves correctly, so this test passes there and is kept to prove it."
-    ),
-    strict=False,
-)
 def test_rolling_back_the_caller_transaction_discards_the_consent(
     app, db_session, user
 ):

@@ -37,25 +37,12 @@ ENTITY = "0a7d0e6e-0000-4000-8000-0000000000e1"
 # read with a bare AttributeError. Postgres does not care; the test database does.
 OFFER = "7a17ffe4-0000-4000-8000-00000000000a"
 
-_attached = False
-
-
 @pytest.fixture
 def db_session(app):
-    global _attached
     from models.db import db
 
     with app.app_context():
-        if not _attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _attached = True
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         import char_factories
 
@@ -323,7 +310,6 @@ def test_the_handover_instant_is_read_at_accept_not_quoted_at_offer(db_session, 
     from blueprints.subscription.services import store
 
     monkeypatch.setattr(store, "paid_through_for_user", lambda uid: moved)
-
 
     # Same value per company: these cases describe an account with one card.
 

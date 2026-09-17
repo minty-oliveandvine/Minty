@@ -11,26 +11,14 @@ def _login(client, user_id: str) -> None:
         sess["_user_id"] = user_id
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -62,9 +50,15 @@ def _make_user(db):
 def test_normal_user_can_create_entity_and_becomes_entity_admin(app, client, db_session):
     from models.db import Entity, EntitySaleSetting, User, UserEntity
 
+    from blueprints.legal.services.consent import record_consent
+
     with app.app_context():
         creator = _make_user(db_session)
         creator_id = creator.id
+        # a signed-in person has agreed to the Terms; otherwise the acceptance gate answers
+        # the POST itself with a redirect to the entity list and the view never runs
+        record_consent(creator_id, source="gate")
+        db_session.session.commit()
 
     _login(client, creator_id)
 
@@ -82,7 +76,7 @@ def test_normal_user_can_create_entity_and_becomes_entity_admin(app, client, db_
 
     assert response.status_code == 302
     assert response.location is not None
-    assert response.location.endswith("/entity/success")
+    assert "/entity/success?entity_id=" in response.location  # the success page names the company
 
     with app.app_context():
         created_entity = Entity.query.filter_by(name="Creator Admin Entity").one()

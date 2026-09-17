@@ -14,49 +14,19 @@ import pytest
 
 from legal import registry
 
-_schema_attached = False
-
 
 @pytest.fixture
-def db_session(app, tmp_path_factory):
-    """See tests/test_terms_consent.py for why this attaches a file, and
-    tests/test_terms_accept_screen.py for why it yields outside a context."""
-    global _schema_attached
-    from sqlalchemy import event
+def db_session(app):
+    """Yields outside a context (see tests/test_terms_accept_screen.py for why)."""
 
     from models.db import db
 
-    with app.app_context():
-        engine = db.engine
-        if not _schema_attached:
-            schema_path = str(
-                tmp_path_factory.mktemp("schema") / "pettycashv3.sqlite"
-            ).replace("\\", "/")
-
-            @event.listens_for(engine, "connect")
-            def _attach_schema(dbapi_connection, _record):  # noqa: ANN001
-                try:
-                    dbapi_connection.execute(
-                        f"ATTACH DATABASE '{schema_path}' AS pettycashv3"
-                    )
-                except Exception:
-                    pass
-
-            engine.dispose()
-            _schema_attached = True
-
-        db.create_all()
-
     yield db
 
+    import char_factories
+
     with app.app_context():
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
 
 
 @pytest.fixture
@@ -434,7 +404,7 @@ def test_a_blocked_user_can_read_the_document_json(blocked, db_session):
 # Invite terms-status: don't ask someone who already agreed
 # --------------------------------------------------------------------------
 
-def test_invite_terms_status_defaults_to_required(client, db_session):
+def test_invite_terms_status_defaults_to_required(app, client, db_session):
     """No token, unknown token, no such user — all answer 'still required'.
 
     Fails safe on purpose. Asking someone to accept twice is an annoyance;
@@ -451,7 +421,7 @@ def test_invite_terms_status_defaults_to_required(client, db_session):
     # sign-in screen or wave someone through unasked.
     from unittest.mock import patch
 
-    with patch(
+    with app.app_context(), patch(  # reading ``Model.query`` to patch it needs a context
         "blueprints.invitation.models.invitation.Invitation.query",
         new_callable=lambda: property(lambda self: (_ for _ in ()).throw(RuntimeError("db down"))),
     ):
@@ -461,7 +431,7 @@ def test_invite_terms_status_defaults_to_required(client, db_session):
 
 
 def test_invite_terms_status_is_false_once_that_user_has_agreed(
-    app, client, db_session, user_id
+    app, db_session, user_id
 ):
     """The bug this fixes: an existing user, invited to another entity, was
     shown the tick box again for Terms they had already accepted."""
@@ -471,15 +441,24 @@ def test_invite_terms_status_is_false_once_that_user_has_agreed(
     from blueprints.legal.services.consent import record_consent
     from models.db import User
 
+    # a plain test client: the fixture's ``with app.test_client()`` keeps the request context
+    # of a request made INSIDE the app context below alive past it, and the two contexts then
+    # unwind out of order at teardown ("Working outside of application context")
+    client = app.test_client()
     with app.app_context():
         email = User.query.get(user_id).email
+        from models.db import Entity
+
+        company = Entity(id=str(_uuid.uuid4()), name="Invite Co", status="disconnected")
+        db_session.session.add(company)
+        db_session.session.flush()  # invitation.entity_id is a real FK
         db_session.session.add(
             Invitation(
                 id=str(_uuid.uuid4()),
                 email=email,
                 token="tok-" + _uuid.uuid4().hex,
                 status="pending",
-                entity_id=str(_uuid.uuid4()),
+                entity_id=company.id,
                 role="cashier",
             )
         )
@@ -494,7 +473,7 @@ def test_invite_terms_status_is_false_once_that_user_has_agreed(
         record_consent(user_id, source="gate")
         db_session.session.commit()
 
-    # After agreeing: not required — no second tick box.
-    assert client.get(
-        f"/legal/invite-terms-status?invite={token}"
-    ).get_json()["terms_required"] is False
+        # After agreeing: not required — no second tick box.
+        assert client.get(
+            f"/legal/invite-terms-status?invite={token}"
+        ).get_json()["terms_required"] is False

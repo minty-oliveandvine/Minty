@@ -67,6 +67,7 @@ default-groups = ["dev"]
 dev = [
   "ruff==0.6.9",
   "pytest==8.3.2",
+  "pytest-xdist>=3.8.0",  # tests/: -n auto, one Postgres build per worker (tests/pg_harness.py)
   "black>=26.1.0",
   "isort>=8.0.1",
   "autopep8>=2.3.2",

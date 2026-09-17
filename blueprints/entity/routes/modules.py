@@ -36,6 +36,7 @@ from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity, db)
 from services.permission_policy import Role, is_superuser
 from services.user_presence import resume_presence
+from blueprints.shared.enums import ModuleCode
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -328,6 +329,14 @@ def _is_module_enabled(entity_id: str, function_code: str) -> bool:
     a module to every entity that had never subscribed to it, and left the "Start
     free trial" button showing on a module the user was already inside.
     """
+    # function_code is the closed module_code enum: a word outside it is not a module, and
+    # asking the database would be an error, not a miss
+    if function_code not in ModuleCode.values():
+        current_app.logger.warning(
+            f"Function {function_code} not found - denying access"
+        )
+        return False
+
     entity_function = EntityFunction.query.filter(
         EntityFunction.function_code == function_code
     ).first()

@@ -15,8 +15,8 @@ Two rules, because the models are what the redesign changes:
 * Factories return plain snapshots (``SimpleNamespace`` of ids and names), never ORM
   rows - see ``snapshot``.
 
-Runs on both fixtures: SQLite (tables from the models) and the PostgreSQL build of
-``docs/schema/01_schema_rebased.sql`` (``MINTY_TEST_PG_URI``; see tests/pg_harness.py).
+Runs on the PostgreSQL build of ``docs/schema/01_schema_rebased.sql`` (tests/pg_harness.py;
+the only fixture since C10 - the SQLite path built the models' shape, not the schema's).
 """
 
 from __future__ import annotations
@@ -38,58 +38,30 @@ def snapshot(row, *fields):
     """
     return SimpleNamespace(**{f: getattr(row, f) for f in fields})
 
-_schema_attached = False
-
 
 def reset_database(app):
-    """Attach the SQLite schema alias once, then empty every table.
+    """Session settings for a characterisation module (call inside an app context).
 
     Mirrors the per-file ``db_session`` fixtures the suite already has, so a new
     characterisation file needs one fixture line, not thirty.
     """
-    global _schema_attached
     from models.db import db
 
-    if not _schema_attached:
-        with db.engine.connect() as conn:
-            try:
-                conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                conn.commit()
-            except Exception:  # Postgres: the schema is real
-                pass
-        _schema_attached = True
     db.session.expire_on_commit = False
-    db.create_all()  # no-op on Postgres (tests/conftest.py)
 
 
 def truncate_all(app):
-    """Empty every table the models know.
+    """Empty every table the models know: one ``TRUNCATE ... CASCADE``.
 
-    Postgres: one ``TRUNCATE ... CASCADE`` - the schema's real foreign keys (many of which
-    the models do not declare) make per-table DELETEs fail in the wrong order, and a
-    swallowed failure left ``currency_info`` rows behind for the next test to trip on.
-    SQLite: per-table deletes, dependents first.
+    The schema's real foreign keys (many of which the models do not declare) make
+    per-table DELETEs fail in the wrong order, and a swallowed failure left
+    ``currency_info`` rows behind for the next test to trip on.
     """
     from models.db import db
 
     db.session.rollback()
-    if db.engine.dialect.name == "postgresql":
-        # only the tables that exist: until phase C is over some models still name tables
-        # the rebased schema renamed (roles/permissions -> role/permission, C6 ...)
-        present = {
-            r[0] for r in db.session.execute(db.text(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'pettycashv3'"
-            ))
-        }
-        names = ", ".join(t.fullname for t in db.metadata.sorted_tables if t.name in present)
-        db.session.execute(db.text(f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE"))
-        db.session.commit()
-        return
-    for table in reversed(db.metadata.sorted_tables):
-        try:
-            db.session.execute(table.delete())
-        except Exception:
-            db.session.rollback()
+    names = ", ".join(t.fullname for t in db.metadata.sorted_tables)
+    db.session.execute(db.text(f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE"))
     db.session.commit()
 
 

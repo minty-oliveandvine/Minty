@@ -113,6 +113,36 @@ def test_the_expense_page_and_the_draft_endpoint_list_the_same_receipt(day, clie
     assert d["original_filename"].startswith("Milk")
 
 
+def test_patching_a_draft_line_moves_its_amount_exactly(app, day, client, s3):
+    """PATCH /report/expense/draft/<id>: the detail fields of one line, only the keys sent.
+
+    The one schema-touching route nothing else requests (tests/_baseline/route_inventory.json).
+    The amount lands as exact money in the database (``Money()`` reads it back as a float by
+    the C4 decision, so the exactness check is on the stored text).
+    """
+    from models.db import ReportExpense, db
+
+    owner, entity = day
+    expense_id = add_expense(client, entity, DAY, "Stamps", "3.10")["expense"]["id"]
+
+    resp = client.patch(
+        f"/report/expense/draft/{expense_id}",
+        json={"amount": "1,234.56", "item": "Postage", "remarks": ""},
+    )
+
+    assert resp.status_code == 200, resp.data[:300]
+    with app.app_context():
+        row = ReportExpense.query.get(expense_id)
+        assert row.item == "Postage" and row.remarks is None  # an empty remark is cleared
+        stored = db.session.execute(
+            db.text("SELECT CAST(amount AS TEXT) FROM pettycashv3.report_expense WHERE id = :id"),
+            {"id": expense_id},
+        ).scalar()
+        assert stored == "1234.56", stored  # numeric(14,2): exactly, no float residue
+    # a line that is not there is "no draft", not a 500
+    assert client.patch(f"/report/expense/draft/{F.new_id()}", json={"item": "x"}).status_code == 404
+
+
 def test_a_receipt_downloads_from_the_store(day, client, s3):
     owner, entity = day
     key = add_expense(client, entity, DAY, "Taxi", "80.00")["expense"]["files"][0]["s3_key"]

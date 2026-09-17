@@ -9,7 +9,7 @@
 | `03_data_reports_rebased.sql` | Generated. 33 report / xero / billing / subscription tables. Checks R1–R8. Ends in `ROLLBACK`. |
 | `../../scripts/schema_migration/04_data_attachments.py` | Expense receipts: `shop_expense.files` → `attachment` + `report_expense_attachment`, through the app's own parser. |
 | `../../scripts/schema_migration/rehearse.py` | **Runs the whole thing** and is the only supported way to: restore → alembic upgrade → build → 00 → 02 → 03 → 04 → manifest, timed, non-zero on the first check that is not green. |
-| `generators/audit_models.py`, `mkdoc.py` | Diff every model in the three repos against the built schema; `APPLICATION_CHANGES.md` is its output. |
+| `generators/audit_models.py`, `mkdoc.py` | Diff every model in the three repos against the built schema; `APPLICATION_CHANGES.md` is its output. **0 findings since 2026-09-17** (phase C closed; it was 287) — `tests/test_zz_schema_audit.py` runs it against the harness build on every test run, and `mkdoc.py` now renders the close-out record. |
 | `pettycashv2_schema.sql` | DDL snapshot of the **current** production schema (see below). |
 | `supabase/` | Comment-free copies from `generators/strip_comments.py`: `pettycashv3.sql` (= `01` with the schema named `pettycashv3`), `00`, `02`, `03`. Its README says which may be pasted into a SQL editor (`pettycashv3.sql` and `00`) and why `02`/`03` are psql-only. |
 | `archive/` | The schema-2 era. Record only. |
@@ -45,10 +45,23 @@ python scripts/schema_migration/rehearse.py --dump backups/production-backup_202
 `backups/<db>_rehearsal.log` has every check line; `backups/<db>_not_carried.md` lists
 every source row that has no target row, by reason, with ids.
 
+## The applications run on it
+
+Part 1 phase C of `../modernisation/modernisation_plan.md` (C1–C10, 2026-09-16/17) moved
+Minty, billing-backend and onboarding-backend onto this schema with the schema as the
+authority: every model follows `01`, the enum vocabulary lives in one module per repo
+(`blueprints/shared/enums.py`, the two `shared_models/enums.py`, checked against `01` by
+`tests/test_enums_match_schema.py`), Alembic is frozen and `billing-backend/bills/migrations/`
+is gone. The apps run against `minty_cleanse` locally (production data on this schema, built by
+`rehearse.py`); Minty's tests build their own database from `01` per run (`tests/pg_harness.py`,
+Postgres only, one database per xdist worker) — 1677 tests, ~2 min on all cores.
+
 ## Changing the schema
 
-Edit `01_schema_rebased.sql` (and its decision register), rebuild it into the scratch
-database, run `gen.py`, run `rehearse.py --skip-restore --db <same db>`. The header's
+**Ask first** — the schema is the contract all three applications now follow. Then edit
+`01_schema_rebased.sql` (and its decision register), rebuild it into the scratch
+database, run `gen.py`, run `rehearse.py --skip-restore --db <same db>`, rebuild
+`minty_cleanse`, and let `tests/test_zz_schema_audit.py` name every model that has to follow. The header's
 WHAT WAS ADDED counts are re-measured with the query under HOW TO BUILD IT, never
 adjusted by hand.
 

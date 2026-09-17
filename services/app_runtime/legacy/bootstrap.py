@@ -324,6 +324,7 @@ def create_app():
                                                   onboarding_finalize,
                                                   onboarding_invite,
                                                   onboarding_invite_cancel,
+                                                  onboarding_billing_accounts,
                                                   onboarding_billing_authorize,
                                                   onboarding_billing_confirm,
                                                   onboarding_billing_set_default,
@@ -363,6 +364,9 @@ def create_app():
     csrf.exempt(onboarding_billing_confirm)
     csrf.exempt(onboarding_billing_set_default)
     csrf.exempt(onboarding_billing_authorize)
+    # opening a billing account: the same bearer-only call, and the payment method it names
+    # must belong to the token's payer (``payment_methods._owned``)
+    csrf.exempt(onboarding_billing_accounts)
     # Onboarding /auth and /auth/confirm call these from a different origin
     # (port 3001) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_check,

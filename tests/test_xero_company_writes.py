@@ -65,7 +65,6 @@ def test_xero_entity_connect_callback_does_not_assign_user_company(monkeypatch):
     fake_user = SimpleNamespace(
         id="user-1",
         username="member@test.com",
-        xero_entity_id=None,
     )
 
     class FakeUser:
@@ -86,6 +85,11 @@ def test_xero_entity_connect_callback_does_not_assign_user_company(monkeypatch):
 
     monkeypatch.setattr(xero_routes, "User", FakeUser)
     monkeypatch.setattr(xero_routes, "Entity", FakeEntity)
+    # the login is resolved through identity.resolve_user_by_email (a real query); the org
+    # guard and the cache invalidation also query Entity for real - none of them is pinned here
+    monkeypatch.setattr(xero_routes, "resolve_user_by_email", lambda _email: fake_user)
+    monkeypatch.setattr(xero_routes, "_live_org_claimant", lambda *_a, **_kw: None)
+    monkeypatch.setattr(xero_routes, "invalidate_entity_xero_cache", lambda *_a, **_kw: None)
     monkeypatch.setattr(xero_routes, "current_user", SimpleNamespace(username="member@test.com"))
     monkeypatch.setattr(
         xero_routes,
@@ -124,5 +128,4 @@ def test_xero_entity_connect_callback_does_not_assign_user_company(monkeypatch):
     assert response.location == "/entity.entity_list"
     assert fake_entity.xero_org_id == "tenant-1"
     assert fake_entity.status == "connected"
-    assert fake_user.xero_entity_id == "tenant-1"
     assert session.commit_calls == 1

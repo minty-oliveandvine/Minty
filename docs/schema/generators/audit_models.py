@@ -7,12 +7,14 @@ Reports, with file:line:
   * a declared type that no longer matches the column
 
 Which database it reads is taken from the environment, so the same script audits the
-structural reference (pcschema_test, the default), the test harness's build
-(tests/pg_harness.py -> minty_test, schema pettycashv2) or production:
+phase C database (minty_cleanse, the default - production data on the new schema), the
+test harness's build (tests/pg_harness.py -> minty_test_<worker>, schema pettycashv3) or
+production. Since phase C closed (2026-09-17) it reports 0 findings for all three repos;
+tests/test_char_schema_audit.py keeps it that way.
 
     AUDIT_URI      full postgres URI            default: localhost/AUDIT_DB as the .env user
-    AUDIT_DB       database name                default pcschema_test   (ignored if AUDIT_URI)
-    AUDIT_SCHEMA   schema to read               default pettycash_test
+    AUDIT_DB       database name                default minty_cleanse   (ignored if AUDIT_URI)
+    AUDIT_SCHEMA   schema to read               default pettycashv3
     AUDIT_REPOS    comma list of repo names     default Minty,billing-backend,onboarding-backend
     AUDIT_STRICT=1 exit 1 when there is any finding (for use as a test)
     PG_BIN         directory holding psql       default: PATH
@@ -22,8 +24,8 @@ same tables and drift the same way. Do not remove it from the default list.
 """
 import ast, glob, io, os, re, shutil, subprocess, sys
 
-DB = os.environ.get("AUDIT_DB", "pcschema_test")
-SCHEMA = os.environ.get("AUDIT_SCHEMA", "pettycash_test")
+DB = os.environ.get("AUDIT_DB", "minty_cleanse")
+SCHEMA = os.environ.get("AUDIT_SCHEMA", "pettycashv3")
 ALL_REPOS = {"Minty": r"c:\dev\Minty", "billing-backend": r"c:\dev\billing-backend",
              "onboarding-backend": r"c:\dev\onboarding-backend"}
 REPOS = {k: ALL_REPOS[k] for k in
