@@ -2,16 +2,19 @@
 
 WHY THIS EXISTS
 
-The suite runs on SQLite by default, and every DB-backed test file builds its tables
-with ``db.create_all()``. That builds whatever the *models* say — the shape the code
-has today — and SQLite has no enums, no uuid type and no ``numeric`` money. So a green
-SQLite run says nothing about the schema the code is being moved to. This module
-builds the real thing, from the file that is the source of truth, every time.
+Until phase C the suite ran on SQLite, and every DB-backed test file built its tables
+with ``db.create_all()``. That built whatever the *models* said — the shape the code had
+that day — and SQLite has no enums, no uuid type and no ``numeric`` money, so a green run
+said nothing about the schema the code was being moved to. This module builds the real
+thing, from the file that is the source of truth, every time; since C10 (2026-09-17) it
+is the only mode.
 
-Opt in with ``MINTY_TEST_PG_URI`` (a superuser/owner URI to a Postgres *server*; its
-database part is only used as the maintenance connection)::
+The server is ``MINTY_TEST_PG_URI`` (a superuser/owner URI to a Postgres *server*; its
+database part is only used as the maintenance connection), or, when that is unset, the
+server of ``LOCAL_DATABASE_URI`` in ``.env`` with the database swapped for ``postgres``::
 
     MINTY_TEST_PG_URI=postgresql://postgres:***@localhost:5432/postgres pytest
+    pytest                                   # the .env server
 
 Knobs:
 
@@ -48,8 +51,25 @@ BUILT_SCHEMA = "pettycash_test"  # what 01_schema_rebased.sql creates
 APP_SCHEMA = "pettycashv3"       # what every model's __table_args__ says
 
 
+def admin_uri() -> str:
+    """The maintenance URI: MINTY_TEST_PG_URI, else .env's LOCAL_DATABASE_URI on ``postgres``."""
+    uri = os.environ.get("MINTY_TEST_PG_URI")
+    if uri:
+        return uri
+    env_file = REPO_ROOT / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.startswith("LOCAL_DATABASE_URI=") and line.split("=", 1)[1].startswith("postgres"):
+                return _with_database(line.split("=", 1)[1].strip(), "postgres")
+    raise RuntimeError(
+        "no Postgres server for the test harness: set MINTY_TEST_PG_URI, or put a "
+        "postgresql:// LOCAL_DATABASE_URI in .env (the tests build their own database on it)"
+    )
+
+
 def enabled() -> bool:
-    return bool(os.environ.get("MINTY_TEST_PG_URI"))
+    """Kept for callers; the harness is the only mode now."""
+    return True
 
 
 def _with_database(uri: str, dbname: str) -> str:
@@ -162,7 +182,7 @@ def build() -> BuiltDatabase:
     """Create the database, run the schema file, rename the schema. Returns its URI."""
     import psycopg2
 
-    admin_uri = os.environ["MINTY_TEST_PG_URI"]
+    admin = admin_uri()
     dbname = os.environ.get("MINTY_TEST_PG_DBNAME", "minty_test")
     # one database per pytest-xdist worker (``-n auto``): workers build and drop their own
     worker = os.environ.get("PYTEST_XDIST_WORKER")
@@ -171,8 +191,8 @@ def build() -> BuiltDatabase:
     keep = os.environ.get("MINTY_TEST_PG_KEEP") == "1"
     schema_sql = Path(os.environ.get("MINTY_TEST_SCHEMA_SQL", DEFAULT_SCHEMA_SQL))
 
-    _drop_database(admin_uri, dbname)
-    conn = psycopg2.connect(admin_uri)
+    _drop_database(admin, dbname)
+    conn = psycopg2.connect(admin)
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
@@ -180,11 +200,11 @@ def build() -> BuiltDatabase:
     finally:
         conn.close()
 
-    db_uri = _with_database(admin_uri, dbname)
+    db_uri = _with_database(admin, dbname)
     try:
         build_schema(db_uri, schema_sql, rename_to=APP_SCHEMA)
     except Exception:
-        _drop_database(admin_uri, dbname)
+        _drop_database(admin, dbname)
         raise
 
-    return BuiltDatabase(uri=db_uri, dbname=dbname, admin_uri=admin_uri, keep=keep)
+    return BuiltDatabase(uri=db_uri, dbname=dbname, admin_uri=admin, keep=keep)

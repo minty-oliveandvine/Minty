@@ -45,8 +45,7 @@ def _make_entity(db, Entity, name="Test Corp"):
     entity = Entity(
         id=eid,
         name=name,
-        country_code="HK",
-        currency_code="HKD",
+        # no country / currency: both are FKs to reference rows this test does not seed
         status="disconnected",
     )
     db.session.add(entity)
@@ -56,34 +55,18 @@ def _make_entity(db, Entity, name="Test Corp"):
     return entity
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+        import char_factories
+
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
 
 
 @pytest.fixture

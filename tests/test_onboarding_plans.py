@@ -21,8 +21,6 @@ import uuid
 import jwt
 import pytest
 
-_schema_attached = False
-
 
 @pytest.fixture()
 def db_session(app):
@@ -31,21 +29,11 @@ def db_session(app):
     Mirrors tests/test_entity_create.py: the models live in the ``pettycashv3``
     schema, so attach it in memory before create_all.
     """
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):

@@ -25,11 +25,11 @@ import pytest
 # user.id is a uuid (C1); SQLite refuses a non-hex literal outright. Named so the tests
 # still read as "user 1 / user 2 / a stranger".
 U1 = "0a7d0e6e-0000-4000-8000-000000000001"
+E1 = "0a7d0e6e-0000-4000-8000-00000000e001"  # entity ids are uuid columns
+NOT_MINE = "0a7d0e6e-0000-4000-8000-00000000e002"  # an entity the user is no member of
 U2 = "0a7d0e6e-0000-4000-8000-000000000002"
 U9 = "0a7d0e6e-0000-4000-8000-000000000009"
 
-
-_schema_attached = False
 
 
 @pytest.fixture()
@@ -37,21 +37,11 @@ def db_session(app):
     """A live schema for the membership lookup the routes do. Mirrors the fixture in
     tests/test_entity_create.py — the models live in the ``pettycashv3`` schema, so
     attach it in memory before create_all."""
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -63,7 +53,7 @@ def db_session(app):
 
 
 class _FakeEntity:
-    id = "e1"
+    id = E1
     name = "Acme"
 
 
@@ -197,7 +187,7 @@ def test_setup_session_creates_no_customer_for_a_new_payer(monkeypatch):
     assert captured["customer_id"] is None
     # The payer still has to be recoverable at completion.
     assert captured["metadata"]["user_id"] == U1
-    assert captured["metadata"]["entity_id"] == "e1"
+    assert captured["metadata"]["entity_id"] == E1
 
 
 def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(monkeypatch):
@@ -215,6 +205,8 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
     nominations: list = []
 
     monkeypatch.setattr(store, "customer_id_for_user", lambda uid: None)
+    # no mapping row -> _resolve_customer_id searches Stripe for the payer; nothing there
+    monkeypatch.setattr(checkout, "find_customer_by_user", lambda uid: None)
     monkeypatch.setattr(
         store, "record_billing_consent",
         lambda eid, uid, source: consents.append((eid, uid, source)),
@@ -234,7 +226,7 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
             "customer": "cus_1",
             "setup_intent": {"payment_method": "pm_new"},
             "metadata": {
-                "purpose": "payment_method", "entity_id": "e1", "user_id": U1,
+                "purpose": "payment_method", "entity_id": E1, "user_id": U1,
             },
         },
     )
@@ -275,11 +267,11 @@ def test_complete_payment_method_setup_saves_card_and_creates_no_subscription(mo
     assert mapped == [(U1, "cus_1")]
     # Entering a card in THIS entity's Checkout is consent to bill it — otherwise the
     # payer would be asked to confirm again straight after typing their card.
-    assert consents == [("e1", U1, "card")]
+    assert consents == [(E1, U1, "card")]
     # ...and it is the choice of card for it. Two records, one step. Without the second,
     # the company would be authorised to be billed and billed to nothing — its renewal
     # skipped and its trial expiring at term end having been told it would convert.
-    assert nominations == [("e1", U1, "pm_new", "capture")]
+    assert nominations == [(E1, U1, "pm_new", "capture")]
 
 
 def test_complete_adopts_the_payers_existing_customer_over_a_duplicate(monkeypatch):
@@ -303,7 +295,7 @@ def test_complete_adopts_the_payers_existing_customer_over_a_duplicate(monkeypat
         lambda sid: {
             "customer": "cus_DUPLICATE",
             "setup_intent": {"payment_method": "pm_new"},
-            "metadata": {"entity_id": "e1", "user_id": U1},
+            "metadata": {"entity_id": E1, "user_id": U1},
         },
     )
     monkeypatch.setattr(
@@ -460,7 +452,7 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
     # live Stripe subscription view; a trial has no Stripe object at all, which is why
     # the two sources had to be merged and could disagree.
     class _Row:
-        entity_id = "e1"
+        entity_id = E1
         function_code = "PAYMENT_REQUEST"
         payer_user_id = U1
         phase = "trial"
@@ -480,7 +472,7 @@ def test_trialing_module_nudges_unless_the_trial_will_actually_convert(
         lambda cid: card,
     )
 
-    cards = {c["code"]: c for c in modules.get_module_cards("e1")}
+    cards = {c["code"]: c for c in modules.get_module_cards(E1)}
 
     assert cards["PAYMENT_REQUEST"]["subscription_status"] == "trialing"
     assert cards["PAYMENT_REQUEST"]["needs_card"] is expected_nudge
@@ -523,7 +515,7 @@ def test_payment_method_status_endpoint_requires_membership(app, db_session):
     """A token for a user who isn't a member of the entity gets 403, not the answer."""
     client = app.test_client()
     res = client.get(
-        "/api/onboarding/payment-method?entity_id=not-mine",
+        f"/api/onboarding/payment-method?entity_id={NOT_MINE}",
         headers={"Authorization": f"Bearer {_token(app)}"},
     )
     assert res.status_code == 403
@@ -829,7 +821,7 @@ def test_authorize_requires_membership(app, db_session):
     client = app.test_client()
     res = client.post(
         "/api/onboarding/billing/authorize",
-        json={"entity_id": "not-mine"},
+        json={"entity_id": NOT_MINE},
         headers={"Authorization": f"Bearer {_token(app)}"},
     )
     assert res.status_code == 403

@@ -21,34 +21,39 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+
+        import char_factories
+
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
+
+
+@pytest.fixture
+def client(app):
+    """A client whose requests each start with a fresh Flask-Login cache.
+
+    The ``db_session`` fixture above holds ONE app context open for the whole test, so
+    every request shares its ``g`` - and Flask-Login caches the loaded user there. In
+    production each request has its own ``g``; here the user cached by the login request
+    would be read again by the next one after teardown detached it (DetachedInstanceError).
+    """
+    from flask import g
+    from flask.testing import FlaskClient
+
+    class FreshLoginCacheClient(FlaskClient):
+        def open(self, *args, **kwargs):
+            g.pop("_login_user", None)
+            return super().open(*args, **kwargs)
+
+    return FreshLoginCacheClient(app, app.response_class)
 
 
 def _make_user(db_session, username="presence.user"):
@@ -426,7 +431,13 @@ def test_leaving_a_company_keeps_the_session_but_drops_presence(app, client, db_
     route must NOT log the user out — but it must take them off the company's
     signed-in list, because they are no longer there.
     """
+    from blueprints.legal.services.consent import record_consent
+
     user_id = _make_user(db_session, username="leaver.user").id
+    # someone inside a company has agreed to the Terms; without this the acceptance gate
+    # answers /leave-entity itself (a redirect to the entity list) and the view never runs
+    record_consent(user_id, source="gate")
+    db_session.session.commit()
     client.post(
         "/login",
         data={"username": "leaver.user", "password": "password123"},

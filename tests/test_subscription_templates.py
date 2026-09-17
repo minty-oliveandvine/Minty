@@ -281,7 +281,7 @@ def test_an_untried_module_says_its_free_trial_is_available(app):
     section, _ = _render_trial(app, module_cards=[untried])
 
     assert "not active" in section
-    assert "free trial available" in section
+    assert "Free trial available" in section
     # The offer is a STATEMENT, not a control: taking the module up is a tick in the
     # decision modal, which is the only place the subscription's shape is chosen.
     assert "Start free trial" not in section
@@ -297,7 +297,7 @@ def test_a_used_up_trial_is_not_offered_one(app):
     section, _ = _render_trial(app, module_cards=[spent])
 
     assert "free trial expired" in section
-    assert "free trial available" not in section
+    assert "Free trial available" not in section
 
 
 def test_the_cancellation_charge_on_the_card_is_dev_only(app):

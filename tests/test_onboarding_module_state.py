@@ -18,26 +18,14 @@ import uuid
 
 import pytest
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -71,8 +59,11 @@ def _catalog(db):
 
 
 def _grant(db, entity_id, function_row, *, enabled: bool):
-    from models.db import EntityFunctionMap
+    from models.db import Entity, EntityFunctionMap
 
+    if db.session.get(Entity, entity_id) is None:  # the map's entity_id is a real FK
+        db.session.add(Entity(id=entity_id, name="Module State Co", status="onboarding"))
+        db.session.flush()
     db.session.add(
         EntityFunctionMap(
             entity_id=entity_id,

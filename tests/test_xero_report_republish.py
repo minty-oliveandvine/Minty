@@ -16,8 +16,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_schema_attached = False
-
 # uuids since C5: the ids are uuid columns, and xero_report_sync.report_id is a NOT NULL FK
 ENTITY_ID = "0e9b1a2c-0000-4000-8000-00000000e001"
 REPORT_ID = "0e9b1a2c-0000-4000-8000-00000000f001"
@@ -28,21 +26,11 @@ TOKEN = "fake-token"
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv3"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         _seed_report(db)
         yield db
         # TRUNCATE ... CASCADE on Postgres, per-table deletes on SQLite: the swallowed

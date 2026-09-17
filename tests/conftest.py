@@ -95,21 +95,21 @@ def _rebind_stale_model_references() -> None:
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "char: characterisation test (docs/modernisation_plan.md Part 1 B3). Pins behaviour "
+        "char: characterisation test (docs/modernisation/modernisation_plan.md Part 1 B3). Pins behaviour "
         "through routes/services; in Postgres mode it is expected to fail until the models "
         "match the redesigned schema (phase C), so failures there are reported as xfail.",
     )
     config.addinivalue_line(
         "markers",
-        "pipeline: the migration rehearsal (scripts/pettycash_test/rehearse.py) as a test. "
+        "pipeline: the migration rehearsal (scripts/schema_migration/rehearse.py) as a test. "
         "Opt-in via MINTY_REHEARSAL_DUMP; needs the real dataset and a Postgres server.",
     )
 
 
-# Characterisation modules still waiting for their phase C unit. In Postgres mode their tests
+# Characterisation modules still waiting for their phase C unit. Their tests
 # are reported as xfail (the models do not match the redesigned schema yet). A unit REMOVES its
 # module here when it is green on Postgres; from then on a regression there is a hard failure.
-# docs/modernisation_plan.md, Part 1 C0 rule 4.
+# docs/modernisation/modernisation_plan.md, Part 1 C0 rule 4.
 PG_PENDING = {
     # empty since C6: every characterisation module is green on Postgres; a regression
     # there is a hard failure. (C7-C9 add their own modules and graduate them the same way.)
@@ -117,28 +117,57 @@ PG_PENDING = {
 
 
 def pytest_collection_modifyitems(config, items):
-    if not pg_harness.enabled():
-        return
     for item in items:
         pending = item.path.name in PG_PENDING or f"{item.path.name}::{item.originalname}" in PG_PENDING
         if item.get_closest_marker("char") and pending:
             item.add_marker(pytest.mark.xfail(
                 strict=False,
                 reason=f"{item.path.name} is in PG_PENDING: its phase C unit has not landed "
-                       "(docs/modernisation_plan.md). Remove it from the set when the unit is green.",
+                       "(docs/modernisation/modernisation_plan.md). Remove it from the set when the unit is green.",
             ))
 
 
-@pytest.fixture(scope="session")
-def built_database() -> Iterator[pg_harness.BuiltDatabase | None]:
-    """The PostgreSQL database built from docs/schema/01_schema_rebased.sql, or None.
+# Every endpoint a request reached in this process (tests/test_zz_route_coverage.py). One
+# set per process: under pytest-xdist each worker sends its set to the controller at the
+# end, and the controller - which sees every worker - runs the coverage check once.
+_HIT_ENDPOINTS: set[str] = set()
+_MERGED_HITS: set[str] = set()  # controller only
 
-    Only when MINTY_TEST_PG_URI is set. Built once per session, dropped at the end
-    unless MINTY_TEST_PG_KEEP=1. See tests/pg_harness.py for why.
-    """
-    if not pg_harness.enabled():
-        yield None
+
+def pytest_sessionfinish(session, exitstatus):
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        workeroutput = getattr(session.config, "workeroutput", None)
+        if workeroutput is not None:
+            workeroutput["hit_endpoints"] = sorted(_HIT_ENDPOINTS)
         return
+    if not _MERGED_HITS:  # not an xdist controller: the zz test itself did the check
+        return
+    from test_zz_route_coverage import MISSES, route_coverage_misses
+
+    misses, total = route_coverage_misses(_MERGED_HITS)
+    if misses:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_sep("=", "route coverage", red=True)
+            reporter.write_line(
+                f"{len(misses)} of {total} schema-touching endpoints were never requested "
+                f"(see {MISSES}); merged across every xdist worker", red=True,
+            )
+        session.exitstatus = 1
+
+
+def pytest_testnodedown(node, error):  # xdist controller: a worker finished
+    _MERGED_HITS.update(getattr(node, "workeroutput", {}).get("hit_endpoints", []))
+
+
+@pytest.fixture(scope="session")
+def built_database() -> Iterator[pg_harness.BuiltDatabase]:
+    """The PostgreSQL database built from docs/schema/01_schema_rebased.sql.
+
+    Built once per session (per xdist worker), dropped at the end unless
+    MINTY_TEST_PG_KEEP=1. The server comes from MINTY_TEST_PG_URI, or failing that from
+    .env's LOCAL_DATABASE_URI. See tests/pg_harness.py for why there is no SQLite mode.
+    """
     built = pg_harness.build()
     try:
         yield built
@@ -148,13 +177,7 @@ def built_database() -> Iterator[pg_harness.BuiltDatabase | None]:
 
 @pytest.fixture(scope="session")
 def app(built_database) -> Iterator:
-    if built_database is not None:
-        db_uri = built_database.uri
-    else:
-        # one file per pytest-xdist worker; the plain name when running serially
-        worker = os.environ.get("PYTEST_XDIST_WORKER")
-        db_path = os.path.abspath(f"tmp_test{'_' + worker if worker else ''}.sqlite")
-        db_uri = "sqlite:///" + db_path.replace("\\", "/")
+    db_uri = built_database.uri
 
     env = {
         "FLASK_ENV": "development",
@@ -195,65 +218,22 @@ def app(built_database) -> Iterator:
         # a column the schema redesign changes) and names the ones no test reached.
         from flask import request as _request
 
-        flask_app.extensions["hit_endpoints"] = set()
+        flask_app.extensions["hit_endpoints"] = _HIT_ENDPOINTS
 
         @flask_app.before_request
         def _record_endpoint():  # pragma: no cover - bookkeeping
             if _request.endpoint:
                 flask_app.extensions["hit_endpoints"].add(_request.endpoint)
 
-        if built_database is None:
-            # SQLite: the models say schema "pettycashv3", which SQLite only knows as an
-            # ATTACHed database. The per-file fixtures ATTACH ':memory:' on ONE pooled
-            # connection, so a second connection sees no schema at all and create_all
-            # fails with "unknown database pettycashv3" whenever the pool hands out a
-            # different connection. Attach a shared FILE on every new connection
-            # instead; the fixtures' own ATTACH then fails harmlessly (name in use).
-            from sqlalchemy import event
+        # The schema came from the file, not from the models: a create_all here would add
+        # whatever shape the models say beside the real tables and hide exactly the
+        # mismatches the harness exists to find.
+        from models.db import db
 
-            from models.db import db
-
-            # Per process, so two pytest runs at once (a full run in the background
-            # while one file is iterated on) do not fight over the same file.
-            schema_path = os.path.abspath(f"tmp_test_pettycashv3_{os.getpid()}.sqlite")
-            if os.path.exists(schema_path):
-                os.remove(schema_path)
-            posix = schema_path.replace("\\", "/")
-
-            def _attach_schema(dbapi_conn, _record):
-                dbapi_conn.execute(f"ATTACH DATABASE '{posix}' AS pettycashv3")
-                # Postgres-only functions the code calls in raw SQL. Advisory locks are a
-                # no-op on SQLite (one process, one connection at a time); hashtext is
-                # any stable int. Without these, every path through the Xero refresh lock
-                # (services/auth/token_service.py) dies on SQLite before it is tested.
-                dbapi_conn.create_function("pg_try_advisory_lock", 2, lambda ns, key: 1)
-                dbapi_conn.create_function("pg_advisory_unlock", 2, lambda ns, key: 1)
-                dbapi_conn.create_function("hashtext", 1, lambda text: hash(text) & 0x7FFFFFFF)
-
-            with flask_app.app_context():
-                event.listen(db.engine, "connect", _attach_schema)
-                db.engine.dispose()  # so the listener applies to every connection from here on
-
-        if built_database is not None:
-            # The schema came from the file, not from the models. Every DB-backed test
-            # file calls db.create_all() in its own fixture; on Postgres that would
-            # add old-shape tables (roles, shop_expense, ...) beside the redesigned
-            # ones and hide exactly the mismatches this mode exists to find.
-            from models.db import db
-
-            db.create_all = lambda *args, **kwargs: None  # type: ignore[method-assign]
+        db.create_all = lambda *args, **kwargs: None  # type: ignore[method-assign]
 
         yield flask_app
     finally:
-        if built_database is None:
-            try:
-                from models.db import db
-
-                with flask_app.app_context():
-                    db.engine.dispose()
-                os.remove(os.path.abspath(f"tmp_test_pettycashv3_{os.getpid()}.sqlite"))
-            except Exception:
-                pass
         for key, value in old_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -263,5 +243,8 @@ def app(built_database) -> Iterator:
 
 @pytest.fixture
 def client(app):
-    with app.test_client() as test_client:
-        yield test_client
+    # NOT ``with app.test_client()``: that keeps the last request's context alive until the
+    # fixture ends, and a request made inside a test's own ``with app.app_context()`` then
+    # unwinds out of order at teardown ("Working outside of application context"). Tests
+    # that need the session use ``client.session_transaction()``.
+    return app.test_client()
