@@ -155,19 +155,31 @@ def _upsert_account_info(values: dict):
     xero_account_id) conflict.
 
     Idempotent under concurrent background syncs: the unique constraint
-    uq_account_info_entity_xero_account turns what used to be a duplicate-
-    producing race into a no-op update. Falls back to a plain insert when
-    xero_account_id is missing (NULLs don't participate in the constraint).
+    ``uq_account_entity_xero`` (the schema's name; C5) turns what used to be a
+    duplicate-producing race into a no-op update. Falls back to a plain insert when
+    xero_account_id is missing (NULLs don't participate in the constraint). On any
+    other database (the SQLite test path) it is a get-or-update, which has the same
+    result without the race protection.
     """
     if not values.get("xero_account_id"):
         db.session.add(AccountInfo(**values))
         return
     set_ = {c: values[c] for c in _ACCOUNT_INFO_UPSERT_COLS if c in values}
+    if db.engine.dialect.name != "postgresql":
+        row = AccountInfo.query.filter_by(
+            entity_id=values["entity_id"], xero_account_id=values["xero_account_id"]
+        ).first()
+        if row is None:
+            db.session.add(AccountInfo(**values))
+        else:
+            for column, value in set_.items():
+                setattr(row, column, value)
+        return
     stmt = (
         pg_insert(AccountInfo.__table__)
         .values(**values)
         .on_conflict_do_update(
-            constraint="uq_account_info_entity_xero_account",
+            constraint="uq_account_entity_xero",
             set_=set_,
         )
     )
@@ -468,6 +480,7 @@ def sync_xero_accounts_to_db(entity_id, access_token, xero_org_id):
     try:
         sync_xero_coa_pettycash(entity_id, xero_org_id)
     except Exception as eax_exc:
+        db.session.rollback()  # a failed statement leaves the transaction aborted
         logger.warning(
             "sync_xero_accounts_to_db: entity_account_xero sync skipped "
             "entity=%s: %s",
@@ -481,6 +494,7 @@ def sync_xero_accounts_to_db(entity_id, access_token, xero_org_id):
     try:
         sync_xero_coa_bill(entity_id)
     except Exception as bill_exc:
+        db.session.rollback()
         logger.warning(
             "sync_xero_accounts_to_db: entity_bill_account_xero sync skipped "
             "entity=%s: %s",
@@ -639,9 +653,10 @@ def sync_xero_coa_bill(entity_id, user_id=""):
                     "        false, :active, false, :xero_id, 0, :uid, "
                     "        NOW(), NOW())"
                 ),
+                # created_by is a uuid column: the unattended sync has no person
                 {"id": str(uuid4()), "eid": entity_id, "code": code,
                  "name": name, "type": acc_type, "xero_id": xero_id,
-                 "uid": user_id, "active": (acc.status == "ACTIVE")},
+                 "uid": (str(user_id) or None), "active": (acc.status == "ACTIVE")},
             )
             ids_in_db.add(xero_id)
             inserted += 1

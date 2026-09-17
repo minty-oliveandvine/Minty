@@ -18,8 +18,9 @@ import pytest
 
 _schema_attached = False
 
-ENTITY_ID = "republish-entity-001"
-REPORT_ID = "republish-report-001"
+# uuids since C5: the ids are uuid columns, and xero_report_sync.report_id is a NOT NULL FK
+ENTITY_ID = "0e9b1a2c-0000-4000-8000-00000000e001"
+REPORT_ID = "0e9b1a2c-0000-4000-8000-00000000f001"
 ORG_A = "xero-org-OLD"
 ORG_B = "xero-org-NEW"
 TOKEN = "fake-token"
@@ -42,26 +43,34 @@ def db_session(app):
 
         db.session.expire_on_commit = False
         db.create_all()
+        _seed_report(db)
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+        # TRUNCATE ... CASCADE on Postgres, per-table deletes on SQLite: the swallowed
+        # per-table deletes left the sync row behind between tests on Postgres.
+        import char_factories
+
+        char_factories.truncate_all(app)
+
+
+def _seed_report(db):
+    """The company and the report the publish record hangs off (the sync row's FK is
+    NOT NULL since C5, so a record needs a real report)."""
+    from datetime import date
+
+    from models.db import Entity, Report
+
+    if db.session.get(Entity, ENTITY_ID) is None:
+        db.session.add(Entity(id=ENTITY_ID, name="Republish Co", xero_org_id=ORG_B, status="connected"))
+    if db.session.get(Report, REPORT_ID) is None:
+        db.session.add(Report(id=REPORT_ID, entity_id=ENTITY_ID, transaction_date=date(2026, 9, 1), status="submitted"))
+    db.session.commit()
 
 
 @pytest.fixture
 def entity(db_session):
     from models.db import Entity
 
-    row = Entity(
-        id=ENTITY_ID, name="Republish Co", xero_org_id=ORG_B, status="connected"
-    )
-    db_session.session.add(row)
-    db_session.session.commit()
-    return row
+    return db_session.session.get(Entity, ENTITY_ID)
 
 
 def _ok(payload):
@@ -124,7 +133,7 @@ class TestPublishRecord:
         from models.db import XeroReportSync
 
         db_session.session.add(
-            XeroReportSync(report_id=REPORT_ID, xero_reponse_text="not json")
+            XeroReportSync(report_id=REPORT_ID, xero_response_text="not json")
         )
         db_session.session.commit()
 

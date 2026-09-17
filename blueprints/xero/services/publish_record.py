@@ -5,7 +5,7 @@ without a record of what came back a republish creates a second copy of every
 transaction. This module is that record.
 
 It lives in ``pettycashv3.xero_report_sync``, which already exists and needed
-no migration: only ``id`` is NOT NULL, and ``xero_reponse_text`` (the typo is
+no migration: only ``id`` is NOT NULL, and ``xero_response_text`` (the typo is
 in the column name) is unbounded nullable text. Migration r9a09 describes that
 table as "the audit trail of what was pushed to Xero -- the record that detects
 a double-publish" and reshaped its keys so it survives report deletion. Nothing
@@ -29,7 +29,7 @@ modules hold a single object each.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -67,11 +67,11 @@ def load_record(report_id, current_org_id=None) -> dict:
         return _empty_record(current_org_id)
 
     row = _row_for(report_id)
-    if row is None or not row.xero_reponse_text:
+    if row is None or not row.xero_response_text:
         return _empty_record(current_org_id)
 
     try:
-        record = json.loads(row.xero_reponse_text)
+        record = json.loads(row.xero_response_text)
     except (ValueError, TypeError):
         # The column is free text and predates this format. Anything we cannot
         # parse is treated as "no record" rather than an error: the worst case
@@ -112,11 +112,11 @@ def _save(report_id, record) -> None:
         row = XeroReportSync(report_id=report_id)
         db.session.add(row)
 
-    row.xero_reponse_text = json.dumps(record)
-    row.sync_statuc = "completed"
-    row.completed_at = datetime.now()
+    row.xero_response_text = json.dumps(record)
+    row.sync_status = "completed"
+    row.completed_at = datetime.now(timezone.utc)
     if row.reported_at is None:
-        row.reported_at = datetime.now()
+        row.reported_at = datetime.now(timezone.utc)
 
     try:
         db.session.commit()

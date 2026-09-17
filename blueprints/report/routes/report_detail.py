@@ -389,15 +389,18 @@ def delete_report(id):
 
         The report_expense_detail delete went in Step 3.5.
 
-        The xero_report_sync / xero_bank_transfer deletes went too, and that is
-        deliberate: they are the audit trail of what was pushed to Xero — the
-        record that detects a double-publish — and erasing it on report delete
-        is what r9a09 (Step 4d) exists to stop. Removing them here is a no-op
-        until then, because both FKs still ON DELETE CASCADE off report.id;
-        once r9a09 flips those to ON DELETE SET NULL the trail survives.
-        Leaving these lines in would have defeated that migration entirely.
+        The Xero sync rows (xero_report_sync, xero_bank_transaction,
+        xero_bank_transfer) go WITH the report: the schema's FKs are ON DELETE
+        CASCADE (C5 reversed r9a09's SET NULL - a publish record for a report
+        that no longer exists has nothing to protect). Deleted here explicitly
+        so SQLite, which enforces no FK, behaves like Postgres.
         """
+        from models.db import XeroBankTransaction, XeroBankTransfer, XeroReportSync
+
         ReportSaleDetail.query.filter_by(report_id=report_id).delete()
+        XeroReportSync.query.filter_by(report_id=report_id).delete()
+        XeroBankTransfer.query.filter_by(sync_report_id=report_id).delete()
+        XeroBankTransaction.query.filter_by(sync_report_id=report_id).delete()
 
     def _delete_expenses_with_receipts(report_id):
         """Delete a report's expense lines and their receipts (F2)."""
