@@ -20,7 +20,10 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin, TimestampMixin
-from blueprints.subscription.models.column_types import uuid_column
+from blueprints.subscription.models.column_types import (
+    tz_datetime,
+    uuid_column,
+)
 
 
 class SubscriptionInvoice(TimestampMixin, db.Model):
@@ -41,7 +44,7 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # WHO owes it. No FK: an invoice is history and must survive the payer row.
-    payer_user_id = db.Column(db.String(36), nullable=False)
+    payer_user_id = db.Column(uuid_column(), nullable=False)
     # Denormalised from user_stripe_customer rather than joined, because that mapping can
     # be re-pointed (see checkout._resolve_customer_id) and this must keep saying which
     # customer was actually charged.
@@ -52,8 +55,8 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
 
     # The period this invoice COVERS, half-open [start, end) to match billing.Period —
     # not the date it was raised.
-    period_start = db.Column(db.DateTime(timezone=True), nullable=False)
-    period_end = db.Column(db.DateTime(timezone=True), nullable=False)
+    period_start = db.Column(tz_datetime(), nullable=False)
+    period_end = db.Column(tz_datetime(), nullable=False)
 
     currency = db.Column(
         db.CHAR(3),
@@ -96,8 +99,8 @@ class SubscriptionInvoice(TimestampMixin, db.Model):
     # is guarded by the user waiting for the response instead.
     idempotency_key = db.Column(db.String(255), nullable=True)
 
-    issued_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    issued_at = db.Column(tz_datetime(), nullable=True)
+    paid_at = db.Column(tz_datetime(), nullable=True)
 
     lines = db.relationship(
         "SubscriptionInvoiceLine",
@@ -130,7 +133,7 @@ class SubscriptionInvoiceLine(CreatedAtMixin, db.Model):
     # Every line is attributable to exactly ONE entity — the property that made these
     # invoices readable where the Stripe-subscription ones were not, because there every
     # line inherited the subscription's entity. No FK: history.
-    entity_id = db.Column(db.String(36), nullable=False)
+    entity_id = db.Column(uuid_column(), nullable=False)
     # SNAPSHOTS, not references. See the module docstring.
     entity_name = db.Column(db.String(255), nullable=False)
     product_name = db.Column(db.String(255), nullable=False)
@@ -140,7 +143,7 @@ class SubscriptionInvoiceLine(CreatedAtMixin, db.Model):
     # decides how the line describes itself to the customer.
     kind = db.Column(db.String(20), nullable=False, server_default="full")
     # The instant a proration was measured from. NULL for a whole-period line.
-    at = db.Column(db.DateTime(timezone=True), nullable=True)
+    at = db.Column(tz_datetime(), nullable=True)
 
     invoice = db.relationship("SubscriptionInvoice", back_populates="lines")
 

@@ -26,10 +26,9 @@ ANCHOR = datetime(2027, 9, 1, tzinfo=UTC)
 
 # user.id is a uuid (C1); SQLite refuses a non-hex literal outright.
 OLD, NEW = "0a7d0e6e-0000-4000-8000-00000000001d", "0a7d0e6e-0000-4000-8000-00000000002e"
-ENTITY = "entity-1"
-# subscription_transfer.id is uuid as of u1a01_subscription_types, so this one
-# cannot be a readable label the way the ids above still can - those columns
-# point at ``user`` / ``entities`` and are still String(36).
+# entities.id is a uuid too (C2), and since C7 every subscription-table FK to it as well
+ENTITY = "0a7d0e6e-0000-4000-8000-0000000000e1"
+# subscription_transfer.id is uuid as of u1a01_subscription_types.
 #
 # IT ALSO MUST CONTAIN HEX LETTERS. SQLAlchemy renders a uuid column on SQLite as
 # the declared type "UUID", which matches none of SQLite's affinity keywords and
@@ -58,13 +57,9 @@ def db_session(app):
         db.session.expire_on_commit = False
         db.create_all()
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+        import char_factories
+
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
 
 
 def _user(User, uid, email, approved):
@@ -142,7 +137,12 @@ def _wire(monkeypatch, db, *, rows=None, payer=OLD, dunning=(), admin=True,
 
     monkeypatch.setattr(checkout, "_bill_transfer_in_house", _charge)
 
-    # A real, approved admin membership for the nominee unless a test says otherwise.
+    # A real, approved admin membership for the nominee unless a test says otherwise -
+    # on a real company row: user_entity.entity_id is an FK.
+    from models.db import Entity
+
+    if db.session.get(Entity, ENTITY) is None:
+        db.session.add(Entity(id=ENTITY, name="Handover Co", status="disconnected"))
     db.session.add(_user(User, NEW, "new@test.com", approved))
     db.session.add(_user(User, OLD, "old@test.com", True))
     if admin:
@@ -704,16 +704,27 @@ def test_the_dead_row_still_moves_to_the_new_payer(db_session, monkeypatch):
 # being tested is the WHERE clause on its second UPDATE — a mocked store proves nothing.
 
 
-def _real_rows(db, specs):
-    """Insert genuine entity_module_subscription rows and return the model."""
-    from models.db import EntityModuleSubscription
+# The real-row tests below write genuine subscription rows, whose entity_id / payer_user_id
+# are uuid FKs to ``entities`` / ``user`` since C7 - so the parties must exist, as uuids.
+REAL_ENTITY = ENTITY
 
+
+def _real_rows(db, specs):
+    """Insert the company, both payers and genuine entity_module_subscription rows; return
+    the model."""
+    from models.db import Entity, EntityModuleSubscription, User
+
+    if db.session.get(Entity, REAL_ENTITY) is None:
+        db.session.add(Entity(id=REAL_ENTITY, name="Handover Co", status="disconnected"))
+    for uid, email in ((OLD, "old@test.com"), (NEW, "new@test.com")):
+        if db.session.get(User, uid) is None:
+            db.session.add(_user(User, uid, email, True))
+    db.session.flush()
     for code, phase in specs:
-        # No explicit id: it is a uuid column as of u1a01_subscription_types, and
-        # the model's own default supplies a valid one. Nothing here reads it -
-        # ``_claims`` keys by function_code.
+        # No explicit id: the model's own default supplies a valid uuid. Nothing here
+        # reads it - ``_claims`` keys by function_code.
         db.session.add(EntityModuleSubscription(
-            entity_id=ENTITY, function_code=code,
+            entity_id=REAL_ENTITY, function_code=code,
             payer_user_id=OLD, phase=phase,
         ))
     db.session.commit()
@@ -730,7 +741,7 @@ def _claims(model):
 
     return {
         r.function_code: (r.payer_user_id, aware(r.billed_through))
-        for r in model.query.filter_by(entity_id=ENTITY).all()
+        for r in model.query.filter_by(entity_id=REAL_ENTITY).all()
     }
 
 
@@ -739,7 +750,7 @@ def test_the_claim_skips_a_trial_row_but_the_payer_does_not(db_session, monkeypa
 
     model = _real_rows(db_session, [("PAYMENT_REQUEST", "active"), ("PETTY_CASH", "trial")])
 
-    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    store.transfer_entity_payer(REAL_ENTITY, NEW, billed_through=PERIOD_END)
     db_session.session.commit()
 
     claims = _claims(model)
@@ -750,23 +761,26 @@ def test_the_claim_skips_a_trial_row_but_the_payer_does_not(db_session, monkeypa
     )
 
 
-def test_the_claim_skips_expired_and_cancelled_rows_too(db_session, monkeypatch):
-    """Same rule, same reason: nothing was being billed, so nothing is covered."""
+@pytest.mark.parametrize("unbilled_phase", ["expired", "scheduled_cancel"])
+def test_the_claim_skips_expired_and_cancelled_rows_too(db_session, monkeypatch, unbilled_phase):
+    """Same rule, same reason: nothing was being billed, so nothing is covered.
+
+    One unbilled phase per run: ``function_code`` is the closed ``module_code`` enum (two
+    modules), so a third fictional module cannot stand in for the second phase any more.
+    """
     from blueprints.subscription.services import store
 
     model = _real_rows(db_session, [
         ("PAYMENT_REQUEST", "active"),
-        ("PETTY_CASH", "expired"),
-        ("PAYROLL", "scheduled_cancel"),  # a third, fictional module
+        ("PETTY_CASH", unbilled_phase),
     ])
 
-    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    store.transfer_entity_payer(REAL_ENTITY, NEW, billed_through=PERIOD_END)
     db_session.session.commit()
 
     claims = _claims(model)
     assert claims["PAYMENT_REQUEST"][1] == PERIOD_END
     assert claims["PETTY_CASH"][1] is None
-    assert claims["PAYROLL"][1] is None
     assert all(payer == NEW for payer, _ in claims.values())
 
 
@@ -777,7 +791,7 @@ def test_a_past_due_row_does_carry_the_claim(db_session, monkeypatch):
 
     model = _real_rows(db_session, [("PAYMENT_REQUEST", "past_due")])
 
-    store.transfer_entity_payer(ENTITY, NEW, billed_through=PERIOD_END)
+    store.transfer_entity_payer(REAL_ENTITY, NEW, billed_through=PERIOD_END)
     db_session.session.commit()
 
     assert _claims(model)["PAYMENT_REQUEST"] == (NEW, PERIOD_END)
@@ -1048,13 +1062,7 @@ def test_only_the_most_blocking_reason_reaches_the_screen(db_session, monkeypatc
     )
     assert len(all_reasons) > 1, "the service still knows about all of them"
 
-    # The read model starts from a real entity row, unlike the service tests above.
-    from models.db import Entity
-
-    db_session.session.add(
-        Entity(id=ENTITY, name="Handover Co", country_code="HK", status="disconnected")
-    )
-    db_session.session.commit()
+    # The read model starts from a real entity row - the one ``_wire`` seeds.
 
     monkeypatch.setattr(portal, "_admin_candidates",
                         lambda eid: [{"id": NEW, "name": "N", "email": "n@t.com"}])

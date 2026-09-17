@@ -164,6 +164,10 @@ def build() -> BuiltDatabase:
 
     admin_uri = os.environ["MINTY_TEST_PG_URI"]
     dbname = os.environ.get("MINTY_TEST_PG_DBNAME", "minty_test")
+    # one database per pytest-xdist worker (``-n auto``): workers build and drop their own
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker:
+        dbname = f"{dbname}_{worker}"
     keep = os.environ.get("MINTY_TEST_PG_KEEP") == "1"
     schema_sql = Path(os.environ.get("MINTY_TEST_SCHEMA_SQL", DEFAULT_SCHEMA_SQL))
 

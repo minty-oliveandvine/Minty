@@ -26,13 +26,14 @@ stamps them. That matters for the same reason ``services.clock`` exists: a wrong
 clock must not be able to write a wrong time into a billing row.
 """
 from models.db import db
+from blueprints.subscription.models.column_types import tz_datetime
 
 
 class CreatedAtMixin:
     """When the row was written. For records that are appended and never edited."""
 
     created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
+        tz_datetime(), server_default=db.func.now(), nullable=False
     )
 
 
@@ -48,10 +49,10 @@ class TimestampMixin:
     """
 
     created_at = db.Column(
-        db.DateTime(timezone=True), server_default=db.func.now(), nullable=False
+        tz_datetime(), server_default=db.func.now(), nullable=False
     )
     updated_at = db.Column(
-        db.DateTime(timezone=True),
+        tz_datetime(),
         server_default=db.func.now(),
         onupdate=db.func.now(),
         nullable=False,

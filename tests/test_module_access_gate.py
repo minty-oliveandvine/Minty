@@ -237,22 +237,8 @@ def test_sweep_exempts_entities_still_onboarding(app, db_session):
         assert _is_module_enabled(entity.id, "PETTY_CASH") is True
 
 
-def _naive_clock(monkeypatch):
-    """Make the sweep's clock naive for the duration of a test.
-
-    SQLite drops tzinfo on the way back out, so a stored ``app_access_until`` returns
-    naive while ``clock.now()`` is aware — and comparing them raises inside the sweep's
-    per-entity ``except``, which swallows it and reports "nothing lapsed". The date
-    branches are then untestable and, worse, quietly appear to pass. Production stores
-    timestamptz and has neither problem, so this aligns the harness rather than the code.
-    """
-    from datetime import datetime as _dt
-
-    from blueprints.subscription.services import clock as clock_mod
-
-    monkeypatch.setattr(clock_mod, "now", lambda: _dt.now())
-
-
+# ``_naive_clock`` went with C7: the subscription tables' timestamps are ``AwareDateTime``,
+# which hands back an aware stamp on SQLite too, so the sweep's clock can stay aware.
 def test_sweep_terminates_a_cancellation_whose_access_ran_out(app, db_session, monkeypatch):
     """The date that ends access also ends the SUBSCRIPTION.
 
@@ -265,7 +251,6 @@ def test_sweep_terminates_a_cancellation_whose_access_ran_out(app, db_session, m
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     with app.app_context():
-        _naive_clock(monkeypatch)
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
         _function(db_session, "PAYMENT_REQUEST", is_active=False)
@@ -295,7 +280,6 @@ def test_sweep_does_not_terminate_a_cancellation_still_running(app, db_session, 
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     with app.app_context():
-        _naive_clock(monkeypatch)
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
         _function(db_session, "PAYMENT_REQUEST", is_active=False)
@@ -322,7 +306,6 @@ def test_sweep_leaves_an_ended_trial_to_the_trial_job(app, db_session, monkeypat
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     with app.app_context():
-        _naive_clock(monkeypatch)
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
         _function(db_session, "PAYMENT_REQUEST", is_active=False)
