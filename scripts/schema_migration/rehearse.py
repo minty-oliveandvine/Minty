@@ -19,9 +19,9 @@ timed (the maintenance window is the total x 2):
                    - the files themselves end in ROLLBACK for hand use with psql;
                    this script flips the last statement, the file is untouched
     7. 04          attachments, --dry-run; then --commit when --attachments
-    8. manifest    <db>_not_carried.md (and .docx via manifest_docx.py) - every
-                   source row the load did not carry, by reason, with ids; plus
-                   the columns and tables not carried
+    8. manifest    <db>_not_carried.md - every source row the load did not
+                   carry, by reason, with ids; plus the columns and tables not
+                   carried (Markdown only since 2026-09-18; the .docx twin is gone)
 
 Nothing here reads .env for the database: the scratch URI is built from
 --admin-uri (default postgresql://postgres:***@localhost:5432/postgres, password
@@ -344,12 +344,6 @@ def step_manifest(args, db_uri, log, path: Path):
     out.write("\n## Columns\n" + DROPPED_COLUMNS)
     out.close()
     log.line(f"    manifest: {path}")
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import manifest_docx  # needs python-docx (the venv has it)
-        log.line(f"    manifest: {manifest_docx.render(path)}")
-    except ImportError as exc:
-        log.line(f"    manifest .docx skipped ({exc})")
 
 
 # ---------------------------------------------------------------------------

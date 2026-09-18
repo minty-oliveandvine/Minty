@@ -1,6 +1,6 @@
 # Terms of Use Acceptance — Technical Design Document
 
-**Source of the legal text:** `Minty Terms of Use Beta (2 Jul 2026).docx` (repo root)
+**Source of the legal text:** `legal/terms/beta-1.md` — the Markdown is the master since 2026-09-18 (the Word original was converted to it and retired; its wording was identical)
 **First version to ship:** `beta-1`
 **Status:** Phase 1 (per-user) BUILT. Phase 2 (per-entity) planned — see §6.
 
@@ -311,7 +311,7 @@ the entire point of having them.
 ```
 legal/
   terms/
-    beta-1.md          ← the wording, converted from the docx
+    beta-1.md          ← the wording (the master copy; pinned by hash)
     beta-1.pdf         ← optional download copy, built once at release
   privacy/
     beta-1.md
@@ -322,8 +322,8 @@ Rules:
 
 - A published file is **never** edited. Fix something → new version.
 - Old versions are **never** deleted, even when nobody is on them any more.
-- The `.docx` stays as the master copy for the legal wording. The `.md` is what
-  the website shows.
+- The `.md` is the master copy of the legal wording and what the website shows;
+  there is no Word original any more. A new version starts as a new `.md`.
 
 ---
 

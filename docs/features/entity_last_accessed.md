@@ -85,12 +85,12 @@ Six files. Read them in this order the first time.
 
 | # | File | What it does |
 |---|---|---|
-| 1 | [`blueprints/entity/models/entity.py`](../blueprints/entity/models/entity.py) | Declares the two new columns |
-| 2 | [`migrations/versions/e1a01_add_entity_last_accessed.py`](../migrations/versions/e1a01_add_entity_last_accessed.py) | Adds those columns to a real database |
-| 3 | [`migrations/e1a01_add_entity_last_accessed.sql`](../migrations/e1a01_add_entity_last_accessed.sql) | The same change as hand-written SQL — **this is the one you actually run**, see section 6 |
-| 4 | [`blueprints/entity/routes/modules.py`](../blueprints/entity/routes/modules.py) | `record_entity_access()` — the write side |
-| 5 | [`blueprints/entity/routes/list.py`](../blueprints/entity/routes/list.py) | `entity_list()` — the read side |
-| 6 | [`templates/entity/index.html`](../templates/entity/index.html) | Draws the badges |
+| 1 | [`blueprints/entity/models/entity.py`](../../blueprints/entity/models/entity.py) | Declares the two new columns |
+| 2 | [`migrations/versions/e1a01_add_entity_last_accessed.py`](../../migrations/versions/e1a01_add_entity_last_accessed.py) | Adds those columns to a real database |
+| 3 | [`migrations/e1a01_add_entity_last_accessed.sql`](../../migrations/e1a01_add_entity_last_accessed.sql) | The same change as hand-written SQL — **this is the one you actually run**, see section 6 |
+| 4 | [`blueprints/entity/routes/modules.py`](../../blueprints/entity/routes/modules.py) | `record_entity_access()` — the write side |
+| 5 | [`blueprints/entity/routes/list.py`](../../blueprints/entity/routes/list.py) | `entity_list()` — the read side |
+| 6 | [`templates/entity/index.html`](../../templates/entity/index.html) | Draws the badges |
 
 ---
 
@@ -154,7 +154,7 @@ when the child row is genuinely meaningless without the parent.
 
 ### 5a. The write side — `record_entity_access()`
 
-Lives in [`routes/modules.py`](../blueprints/entity/routes/modules.py). Called
+Lives in [`routes/modules.py`](../../blueprints/entity/routes/modules.py). Called
 from `module_selector()`, the route that runs when someone clicks a company.
 
 ```python
@@ -184,7 +184,7 @@ a warning, and returns quietly. If you ever add something *important* to this
 function, that reasoning stops holding.
 
 **`datetime.now(tz)`, not `datetime.now()`.** `tz` is `Asia/Hong_Kong`, defined
-in [`models/db.py`](../models/db.py). The column is a naive `TIMESTAMP` — it
+in [`models/db.py`](../../models/db.py). The column is a naive `TIMESTAMP` — it
 stores no timezone — and everything else in this app stores Hong Kong wall time.
 A plain `datetime.now()` returns the *server's* local time, which on a
 production host is usually UTC, so every card would read 8 hours behind.
@@ -220,7 +220,7 @@ bug if you don't know about it.
 
 ### 5b. The read side — `entity_list()`
 
-Lives in [`routes/list.py`](../blueprints/entity/routes/list.py). It builds one
+Lives in [`routes/list.py`](../../blueprints/entity/routes/list.py). It builds one
 query, runs it, then reshapes the result for the template.
 
 ```python
@@ -290,7 +290,7 @@ organizations = [
 
 **This changed the shape of `organizations`** — it used to be SQLAlchemy `Row`
 objects, it is now a list of plain dicts. Jinja doesn't care (`org.name` works on
-both), but Python code would. [`index.html`](../templates/entity/index.html) is
+both), but Python code would. [`index.html`](../../templates/entity/index.html) is
 the only consumer, so nothing else needed changing — worth re-checking if you add
 another.
 
@@ -348,7 +348,7 @@ record, and a `.sql` file that is what actually gets run.
 
 ### Steps
 
-1. Open [`migrations/e1a01_add_entity_last_accessed.sql`](../migrations/e1a01_add_entity_last_accessed.sql).
+1. Open [`migrations/e1a01_add_entity_last_accessed.sql`](../../migrations/e1a01_add_entity_last_accessed.sql).
 2. Run it as-is against the target database. **It ends in `ROLLBACK`**, so it
    changes nothing on this first run — it applies the change, prints
    verification output, then undoes it.
