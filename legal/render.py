@@ -1,8 +1,8 @@
 """Render the legal Markdown subset to HTML.
 
 Deliberately not a general Markdown library. The `.md` files under `terms/` and
-`privacy/` are generated from the source `.docx` by a converter we control, so
-they only ever contain four constructs:
+`privacy/` ARE the legal text (the Word originals were retired on 2026-09-18), written
+to a subset we control, so they only ever contain four constructs:
 
     # Title            -> <h1>
     ## 1. Section      -> <h2>

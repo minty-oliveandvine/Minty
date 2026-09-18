@@ -1,0 +1,70 @@
+# Onboarding and the hand-offs to the other apps
+
+Minty is the hub: it signs people in, and it launches two separate web apps with a
+short-lived token — the **onboarding wizard** (`../onboarding`, Next.js, backed by
+`../onboarding-backend`) and the **payment module** (`../billing-frontend`, backed by
+`../billing-backend`). This page is Minty's side; each app documents its own in its
+`docs/features/`. The token mechanics are in [authentication.md](authentication.md) §6.
+
+## Launching the wizard
+
+`onboarding_launch_url(user, entity_name=, entity_id=, fresh=)`
+(`blueprints/entity/routes/create.py`) builds `<ONBOARDING_APP_URL>/?token=<jwt>[&entity_id=…][&fresh=1]`:
+the token is the 60-minute `scope: "onboarding"` JWT; `entity_id` resumes an in-progress
+company; `fresh=1` starts a brand-new one (what `GET /entity/create` sends). Invitations
+land on the wizard's `/auth` page the same way (with the invite token instead).
+
+## `/api/onboarding/*` — served by two backends, same paths
+
+Every wizard call is under `/api/onboarding/`. **Both** Minty (`blueprints/entity/routes/create.py`)
+and `onboarding-backend` answer the same paths byte for byte; the wizard's
+`lib/apiRoutes.ts` lists which paths go to Django — a move is one line there. Today Django
+serves them all, and roughly two-thirds are thin proxies back to Flask for the things
+only one service may do (Stripe, Xero tokens, subscription writes). Auth on both sides is
+the onboarding JWT (Flask reads `entity_id` from the query or body; no `X-Entity-Id`
+header). The endpoints, in wizard order:
+
+| Step | Endpoints |
+|---|---|
+| reference | `server-time` (HK "today", server-authoritative), `currencies`, `countries` |
+| resume | `state` (everything saved so far, `subscriptions_enabled`, `saved_step`, `current_step`), `saved-step` (Save & Exit) |
+| 1 Basic | `create`, `entity/<id>` (edit an in-progress company) |
+| 2 Modules | `modules`, `plans` (empty while dark), the billing routes `payment-method*`, `billing/*`, `billing/authorize` (404 while dark) |
+| 3 Invite | `invite` (GET/POST), `invite/cancel` |
+| 4 Accounting | Xero connect is Minty's `/xero_connect` with the entity in the state; `xero/disconnect` |
+| 5–7 Petty cash | `sales-methods`, `opening-balance`, `account-codes`, `contacts`, `contacts/create` |
+| 8 Bills | `bill-codes` |
+| 9 All Set | `finalize` — flips the company live (`status`), enables the chosen modules; **starts trials only when subscriptions are on** (dark: `trial_end: null`) |
+
+**Arriving on step 9 finalizes** (the wizard calls it on arrival, the screen commits
+nothing) — a test must never navigate there directly (`onboarding-step9-finalizes-on-arrival`
+note, `onboarding/e2e/README.md`).
+
+## Launching the payment module
+
+From the dashboard's module cards: `GET /entity/<id>/modules` (the picker),
+`GET /entity/<id>/bills` (straight to the bills list). Both mint the 30-minute module JWT
+and redirect to `<billing-frontend>/landing?token=&entity_id=&entity_name=&next=&from=`.
+The payment app calls billing-backend with the token as a bearer; billing-backend verifies
+it with the shared secret, re-reads the person's role on the company and the module map,
+and asks Minty for a live Xero token when it publishes. Coming back:
+`GET /entity/<id>/enter?token=` (re-validates the token, re-establishes the session);
+`GET /entity/<id>/billing-relogin` is the legacy "token expired" return;
+`GET /api/entity/<id>/subscription-notice` feeds the payment app's landing-page notice
+(404 while dark). billing-backend triggers Minty's Xero syncs through
+`POST /api/entities/<id>/billing/sync-*` (JWT-authenticated).
+
+## Configuration
+
+`ONBOARDING_APP_URL` (the wizard's origin, also the CORS origin Minty stamps on the
+`/api/onboarding/*` answers — `blueprints/shared/bearer_api.py`), `FRONTEND_APP_URL` (the
+payment app), `PUBLIC_URL` (Minty's own absolute URL), `SECRET_KEY` shared with both
+backends. On the apps' side the `NEXT_PUBLIC_*` variables point back at Minty (see
+`minty-production-host-topology` for the apex/www trap).
+
+## Tests
+
+`tests/test_onboarding_*.py` (launch, CSRF exemption, module state, plans, payment
+method — the API through Flask, including the dark rules), `tests/test_billing_relogin_handback.py`,
+`tests/test_char_subscription_dark.py`; the two Next suites end to end
+(`onboarding/e2e`, `billing-frontend/e2e`) with the tokens minted from the shared secret.

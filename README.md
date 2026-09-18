@@ -121,12 +121,22 @@ app raises at startup if any is missing.
 ## Tests
 
 ```bash
-pytest
+pytest -n auto        # Postgres only; each worker builds docs/schema/01_schema_rebased.sql into its own database
+npm run test:e2e      # Playwright against a running Flask — e2e/README.md
 ```
 
-**The suite is not green at HEAD.** Compare a full run before your change against a full run
-after — never a single file — and grep for `ERROR` as well as `FAILED`, since collection errors
-do not show as failures.
+The suite is green (1,694 passed on 2026-09-18, about two minutes). Compare a full run
+before your change against a full run after — never a single file — and grep for `ERROR`
+as well as `FAILED`, since collection errors do not show as failures.
+
+## Documentation
+
+- [`docs/features/README.md`](docs/features/README.md) — one page per feature: authentication
+  across the five apps, companies and members, the report wizard, receipts, exports, Xero,
+  modules and subscriptions, the hand-offs, terms, expense AI, operations.
+- [`docs/schema/README.md`](docs/schema/README.md) — the redesigned database and the one-hop
+  migration; [`docs/modernisation/modernisation_plan.md`](docs/modernisation/modernisation_plan.md)
+  — the plan and the cutover runbook.
 
 ## Contributing
 

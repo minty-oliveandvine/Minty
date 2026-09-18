@@ -5,7 +5,6 @@ Generated, not hand-written. Regenerate after any schema or model change:
 ```
 python docs/schema/generators/audit_models.py     # the raw findings (AUDIT_DB=minty_cleanse, AUDIT_SCHEMA=pettycashv3 by default)
 python docs/schema/generators/mkdoc.py            # this document
-.venv/Scripts/python.exe docs/schema/generators/mkdocx.py   # the .docx beside it
 ```
 
 It compares every model in **Minty** (SQLAlchemy), **billing-backend** and
