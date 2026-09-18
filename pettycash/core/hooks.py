@@ -13,6 +13,7 @@ from werkzeug.exceptions import HTTPException
 from models.db import Entity
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token, token_expired)
+from blueprints.shared.feature_flags import subscriptions_enabled
 from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
                                     mark_signed_out, refresh_presence)
 
@@ -296,6 +297,9 @@ def init_app(app, db):
             "is_petty_cash_enabled": is_petty_cash_enabled,
             "is_readonly_for": is_readonly_for,
             "currency_symbol": _entity_currency_symbol(),
+            # the subscription feature switch (blueprints/shared/feature_flags.py): a template
+            # branches on it where a page would otherwise quote, charge or nag
+            "subscriptions_enabled": subscriptions_enabled(),
         }
 
     @app.teardown_appcontext

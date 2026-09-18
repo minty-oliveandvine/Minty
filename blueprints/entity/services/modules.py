@@ -196,6 +196,34 @@ def get_enabled_modules_for_entities(entity_ids: list[str]) -> dict[str, set[str
 
 
 
+def get_plain_module_cards(entity_id: str) -> list[dict]:
+    """The module page's list while subscriptions are dark: one card per catalogue
+    module with its name, description, illustration and whether it is on.
+
+    No subscription state, no Stripe read, no price - ``is_enabled`` is the whole answer,
+    as it was before the engine (blueprints/shared/feature_flags.py). Ordered by the
+    catalogue's ``display_order``.
+    """
+    state = _enabled_state(entity_id)
+    rows = EntityFunction.query.filter(EntityFunction.function_code.in_(MODULE_CODES)).all()
+    by_code = {fn.function_code: fn for fn in rows}
+    cards = []
+    for code in MODULE_CODES:
+        fn = by_code.get(code)
+        display = MODULE_DISPLAY.get(code, {})
+        cards.append({
+            "code": code,
+            "name": fn.function_name if fn and fn.function_name else code,
+            "description": fn.description if fn and fn.description else "",
+            "image": display.get("image", ""),
+            "learn_more": display.get("learn_more", "#"),
+            "enabled": bool(state.get(code)),
+            "display_order": getattr(fn, "display_order", None) or 0,
+        })
+    cards.sort(key=lambda c: (c["display_order"], c["code"]))
+    return cards
+
+
 def module_display_names(codes) -> dict[str, str]:
     """Human labels for module codes, from the catalog — ``{code: name}``.
 

@@ -23,6 +23,8 @@ from __future__ import annotations
 import requests
 from loguru import logger
 
+from blueprints.shared.feature_flags import subscriptions_enabled
+
 from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
@@ -296,6 +298,9 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
         # frontend can bind to either field.
         "opening_balance": opening_balance,
         "invites": invites,
+        # Whether subscriptions are live (blueprints/shared/feature_flags.py). False is the
+        # cutover state: the wizard shows no price, no billing sheet, no trial copy.
+        "subscriptions_enabled": subscriptions_enabled(),
     }
     return payload, 200
 

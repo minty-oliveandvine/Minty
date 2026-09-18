@@ -80,6 +80,8 @@ existed long before either neighbour, and no revision between them reads what it
 
 """
 
+import os
+
 from alembic import op
 from sqlalchemy import text
 
@@ -97,6 +99,19 @@ MODULE_CODES = ("PETTY_CASH", "BILL")
 
 
 def upgrade():
+    # SUBSCRIPTIONS DARK (2026-09-18, docs/modernisation/modernisation_plan.md Phase E):
+    # production cuts over to the redesigned schema with the subscription feature switched
+    # off, and this revocation is the one step of the upgrade that would change what a
+    # customer can do - 47 live companies would lose Petty Cash for a feature nobody can
+    # see. So it runs only when the feature is on. With it off the grants come through as
+    # they are, the revision is still recorded, and the same UPDATE is available on launch
+    # day as ``flask subscriptions revoke-ungranted`` - a deliberate command, not a side
+    # effect of a deploy. The switch's default is off (blueprints/shared/feature_flags.py).
+    if (os.environ.get("SUBSCRIPTION_ENABLED") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+        print("m1a01: skipped - subscriptions are dark (SUBSCRIPTION_ENABLED unset/0); "
+              "nothing revoked. Launch day: flask subscriptions revoke-ungranted.")
+        return
+
     bind = op.get_bind()
 
     result = bind.execute(

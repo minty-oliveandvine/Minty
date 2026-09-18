@@ -76,6 +76,8 @@ Fix failures rather than ignoring them.
 Re-run relevant tests after fixes.
 # Claude Code Behavior
 Inspect the project before making changes.
+Update docs as you go avoid making it stale.
+Fix/Clean up stale references.
 Understand the existing architecture before modifying it.
 Identify independent tasks and perform them concurrently when safe.
 Prefer efficient commands and existing tooling.

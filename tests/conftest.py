@@ -198,6 +198,9 @@ def app(built_database) -> Iterator:
         "MAIL_SERVER": "localhost",
         "MAIL_PORT": "587",
         "FLASK_DEBUG": "False",
+        # the subscription feature is ON for the suite (its default is off - production cut
+        # over dark); tests/test_char_subscription_dark.py flips it per test
+        "SUBSCRIPTION_ENABLED": "1",
     }
 
     old_env = {key: os.environ.get(key) for key in env}
