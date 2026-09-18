@@ -952,6 +952,27 @@ back; bill submit → pay is API-tested only (billing-backend), not walked in a 
 Terms `beta-1` is pinned and effective 18 September 2026; `terms_consent` starts empty, so
 every user meets the acceptance modal once on first sign-in — say so in the announcement.
 
+**Repeated the same day with Xero live (2026-09-18, afternoon):** the project restored again
+from `backups/minty_pettycashv3_20260918.dump` (rebuilt 14:52 with the fixed receipt-key
+loader: 1,186 receipt keys carry a comma, none split); the e2e shop linked by hand to Xero
+**Demo Company (Global)** and its mapping pointed at that organisation's rows; the apps
+redeployed from `57fe8f3`. Results, real browsers against the real hosts: **Minty e2e 22
+(2:25), onboarding e2e 23 (0:38 — the first run skipped 5 while the Render service was
+waking), billing-frontend e2e 10 + 5 dark-skipped (0:42)**; the report was published to Xero
+for real (bank transactions, transfer, receipt attached) and so was a payment request
+(ACCPAY invoice, PDF attached); the 5 dark-skipped payer-portal specs pass on a local stack
+with subscriptions on (13 passed). `cutover_checks.py --old-uri` afterwards differs from the
+source only by the e2e shop's own rows (1 entity-month, 4 bills, 8 audit lines); the 125 real
+entity-months, the bills per status, 0 subscription rows, 138/178 grants and 0 companies
+without Petty Cash are identical; `audit_models.py` 0. **What only a real publish showed** —
+four defects fixed in `57fe8f3`, each now pinned by a test: receipt filenames with a comma
+were split into two keys (broken images), a never-published report got the republish warning
+(`publishing_status` is NOT NULL since C4), the publish lock 500'd on Postgres (`FOR UPDATE`
+over the joined creator/token), and the publish never found its expense line (`contact_id` /
+`account_code` are property shims since C4, so the filters compiled to `WHERE false` and no
+receipt reached Xero). The bearer token that `bank_transfer_to_xero` logged at INFO is gone
+and `tests/test_zz_no_token_logging.py` keeps it gone.
+
 
 1. Announce. **The window is held by suspending the Render web services** (Minty,
    billing-backend, onboarding-backend; decided 2026-09-18) — there is no maintenance gate in
@@ -986,9 +1007,11 @@ every user meets the acceptance modal once on first sign-in — say so in the an
    switch off (step 2's values stay).
 7. Smoke: seed (`FLASK_ENV=production scripts/e2e_seed.py --print` + the disposable onboarding
    entity), then the three e2e suites against the production URLs with `E2E_SUBSCRIPTIONS=0`
-   (the 2026-09-18 run is the template: env names in each suite's helpers); the manual checklist
-   = `cutover_checks.py --uri <project> --old-uri <rehearsal db>`;
-   `audit_models.py` against production = 0.
+   (the 2026-09-18 runs are the template: env names in each suite's helpers; add `E2E_XERO=1`
+   only if the e2e shop has been linked to a Demo Company again — the restore drops the link);
+   the manual checklist = `cutover_checks.py --uri <project> --old-uri <rehearsal db>` (the
+   e2e shop's own rows are the only expected difference); `audit_models.py` against
+   production = 0.
 8. Reopen: end the maintenance hold. **Subscriptions stay dark** — `SUBSCRIPTION_ENABLED`
    and the scheduler flag stay 0 — so there is no scheduler cycle to watch and no webhook to
    re-enable. Watch the logs for one business day.

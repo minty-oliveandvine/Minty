@@ -167,16 +167,8 @@ def bank_transfer_to_xero(entity, token, payload):
         "Content-Type": "application/json",
     }
 
-    refresh_token_value = None
-    try:
-        if hasattr(current_user, 'refresh_token') and current_user.refresh_token:
-            refresh_token_value = current_user.refresh_token
-    except (RuntimeError, AttributeError):
-        pass
-
-    logger.info(
-        f"func bank_transfer_to_xero | token: {token} | refresh token: {refresh_token_value}"
-    )
+    # never log the bearer or refresh token - the log is shipped off the box
+    logger.info("func bank_transfer_to_xero | token present: %s", bool(token))
 
     response = requests.post(
         url=f"{current_app.config['XERO_API_BASE_URL']}/BankTransfers",

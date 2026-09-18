@@ -85,6 +85,7 @@ Avoid unnecessary file changes.
 Avoid unnecessary dependency installations.
 Avoid unnecessary rebuilds.
 Ask if there are changes in the schema.
+Optimize code for performance.
 Verify changes rather than assuming they work.
 # Resource Priority
 When performing a task, optimize for:
