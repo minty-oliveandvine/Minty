@@ -24,6 +24,7 @@ from blueprints.subscription.models.mixins import CreatedAtMixin
 from blueprints.subscription.models.column_types import (
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
@@ -36,13 +37,13 @@ class SubscriptionEmailLog(CreatedAtMixin, db.Model):
         # same job must collide here rather than both deciding they are first.
         db.UniqueConstraint("event", "dedupe_key", name="uq_sub_email_event_key"),
         db.Index("ix_sub_email_user_created", "user_id", "created_at"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # The payer. Nullable FK is wrong here — an email with no recipient is not a row.
     user_id = db.Column(
-        uuid_column(), db.ForeignKey("pettycashv3.user.id"), nullable=False
+        uuid_column(), db.ForeignKey(f"{SCHEMA}.user.id"), nullable=False
     )
     event = db.Column(db.String(40), nullable=False)
     # Whatever makes this send unique for this event: a renewal period key, a dunning

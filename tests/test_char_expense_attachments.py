@@ -28,6 +28,7 @@ from datetime import date
 import pytest
 
 import char_factories as F
+import pg_harness
 from test_char_report_lifecycle import add_expense, open_report, post_sales
 
 pytestmark = pytest.mark.char
@@ -135,7 +136,7 @@ def test_patching_a_draft_line_moves_its_amount_exactly(app, day, client, s3):
         row = ReportExpense.query.get(expense_id)
         assert row.item == "Postage" and row.remarks is None  # an empty remark is cleared
         stored = db.session.execute(
-            db.text("SELECT CAST(amount AS TEXT) FROM pettycashv3.report_expense WHERE id = :id"),
+            db.text(f"SELECT CAST(amount AS TEXT) FROM {pg_harness.APP_SCHEMA}.report_expense WHERE id = :id"),
             {"id": expense_id},
         ).scalar()
         assert stored == "1234.56", stored  # numeric(14,2): exactly, no float residue

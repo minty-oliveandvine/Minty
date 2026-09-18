@@ -12,6 +12,7 @@ from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
 from models.db import (AccountInfo, Entity, EntityAccountXero,
                        EntityPettycashSettings, XeroContactSync, db)
+from blueprints.shared.schema import SCHEMA
 
 # Columns on entity_pettycash_settings naming a row in account_info or
 # xero_contact_sync. Both parents are FK'd ON DELETE SET NULL, so the deletes
@@ -93,7 +94,7 @@ def invalidate_entity_xero_cache(entity_id, old_org_id):
     try:
         bill_accounts_removed = db.session.execute(
             text(
-                "DELETE FROM pettycashv3.entity_bill_account_xero "
+                f"DELETE FROM {SCHEMA}.entity_bill_account_xero "
                 "WHERE entity_id = :entity_id"
             ),
             {"entity_id": str(entity_id)},
@@ -603,7 +604,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
     run together with sync_xero_accounts_to_db on the settings page GET.
     Returns (inserted, refreshed).
     """
-    _TBL = "pettycashv3.entity_bill_account_xero"
+    _TBL = f"{SCHEMA}.entity_bill_account_xero"
 
     eligible_accounts = AccountInfo.query.filter(
         AccountInfo.entity_id == entity_id,
@@ -672,7 +673,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
                 f"DELETE FROM {_TBL} b "
                 "WHERE b.entity_id = :eid "
                 "AND NOT EXISTS ("
-                "  SELECT 1 FROM pettycashv3.account_info a "
+                f"  SELECT 1 FROM {SCHEMA}.account_info a "
                 "  WHERE a.entity_id = :eid "
                 "    AND a.xero_account_id = b.xero_account_id"
                 ")"
@@ -898,7 +899,7 @@ def _check_account_info_diff(entity_id, xero_by_id):
 
 def _check_bill_account_diff(entity_id, xero_by_id):
     """Compare Module 2 entity_bill_account_xero rows against Xero snapshot."""
-    _TBL = "pettycashv3.entity_bill_account_xero"
+    _TBL = f"{SCHEMA}.entity_bill_account_xero"
 
     rows = db.session.execute(
         text(

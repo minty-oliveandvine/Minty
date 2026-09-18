@@ -36,6 +36,7 @@ import uuid
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
 from blueprints.subscription.models.column_types import uuid_column
+from blueprints.shared.schema import SCHEMA
 
 
 class BillingAccountPaymentMethod(TimestampMixin, db.Model):
@@ -49,7 +50,7 @@ class BillingAccountPaymentMethod(TimestampMixin, db.Model):
             name="uq_billing_account_payment_method_card",
         ),
         db.Index("ix_billing_account_payment_method_group", "billing_group_id"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -59,7 +60,7 @@ class BillingAccountPaymentMethod(TimestampMixin, db.Model):
     # ARE facts in their own right, live elsewhere and carry no FK.
     billing_group_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv3.payer_billing_group.id", ondelete="CASCADE"),
+        db.ForeignKey(f"{SCHEMA}.payer_billing_group.id", ondelete="CASCADE"),
         nullable=False,
     )
     # ``pm_...``. Immutable on this row: replacing a card ADDS one and repoints the

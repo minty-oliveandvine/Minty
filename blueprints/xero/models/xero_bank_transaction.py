@@ -9,13 +9,14 @@ from uuid import uuid4
 
 from blueprints.shared.column_types import MintyUuid, Money
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class XeroBankTransaction(db.Model):
     __tablename__ = "xero_bank_transaction"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
-    sync_report_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"))
+    sync_report_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"))
     type = db.Column(db.String(10), nullable=False)
     xero_contact_id = db.Column(db.String(36), nullable=False)
     xero_contact_name = db.Column(db.String(100))

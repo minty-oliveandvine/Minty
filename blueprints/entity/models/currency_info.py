@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.dialects.postgresql import UUID
 
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class CurrencyInfo(db.Model):
@@ -13,7 +14,7 @@ class CurrencyInfo(db.Model):
     """
 
     __tablename__ = "currency_info"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )

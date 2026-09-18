@@ -16,8 +16,9 @@ from sqlalchemy import bindparam, text
 from blueprints.entity.services.settings import sync_xero_coa_bill
 from models.db import Entity, db
 from services.permission_policy import Permission, has_permission_by_user_id
+from blueprints.shared.schema import SCHEMA
 
-_TBL = "pettycashv3.entity_bill_account_xero"
+_TBL = f"{SCHEMA}.entity_bill_account_xero"
 
 
 def _code_sort_key(code):
