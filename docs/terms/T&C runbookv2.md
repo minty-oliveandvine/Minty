@@ -4,10 +4,11 @@
 **First version to ship:** `beta-1`
 **Status:** Phase 1 (per-user) BUILT. Phase 2 (per-entity) planned — see §6.
 
-**Not yet production-ready.** Two blockers remain, both content rather than
-code: `legal/privacy/beta-1.md` is a 20-line placeholder that says so in its own
-text, and neither document is pinned in `_PINNED_HASHES` (both are `None`, i.e.
-still drafts), so the acceptance screen shows a "Draft" banner. See Dependencies.
+**Not yet production-ready.** One blocker remains, content rather than code:
+`legal/privacy/beta-1.md` is a 20-line placeholder that says so in its own text
+and is unpinned in `_PINNED_HASHES`. `terms/beta-1` was completed and pinned on
+2026-09-18 (date, contact email and address filled; its acceptance screen no
+longer shows the "Draft" banner). See Dependencies.
 
 ---
 
@@ -68,7 +69,7 @@ Things this design deliberately does **not** cover:
 | Dependency | What it is | Risk |
 |---|---|---|
 | **Privacy Policy document** | Section 19 of the Terms points at "the Minty Privacy Policy". That document does not exist. | **Blocker.** The tick box is meant to link to it. Either write it, or reword section 19. Only the legal owner can decide. |
-| **Missing details in the Terms** | The header says `Last Updated: [DATE]`. Section 23 says `[INSERT EMAIL]` and `[INSERT ADDRESS]`. | **Blocker.** Cannot publish with blanks in it. |
+| **Missing details in the Terms** | The header said `Last Updated: [DATE]`; section 23 said `[INSERT EMAIL]` and `[INSERT ADDRESS]`. | **Resolved 2026-09-18.** Header now `18 September 2026`; §23 gives `hello@dailyminty.com` and `Level 5, K11 Atelier, 728 King's Road, Quarry Bay, HONG KONG`. Both the `.md` and the source `.docx` were updated and `terms/beta-1` pinned. |
 | **The onboarding app** | A separate Next.js app at `C:\Projects\New_Repo\onboarding`. It owns the sign-up and invite screens. | Two apps must be released together. Needs planning. |
 | **Xero login** | People can join Minty by logging in with Xero. That screen belongs to Xero, so we cannot put a tick box on it. | Handled by the blocking screen instead. Not a blocker. |
 | **Database** | PostgreSQL, schema `pettycashv2`. One new table. | Normal migration. Low risk. |
@@ -737,7 +738,7 @@ this up:
 | # | Decision | Who decides | Blocks |
 |---|---|---|---|
 | 1 | Write the Privacy Policy, or reword section 19? | Legal owner | The tick box wording; the whole release |
-| 2 | Contact email, address, and effective date for the blanks | Legal owner | Publishing `beta-1` |
+| 2 | ~~Contact email, address, and effective date for the blanks~~ Decided 2026-09-18: `hello@dailyminty.com`, `Level 5, K11 Atelier, 728 King's Road, Quarry Bay, HONG KONG`, `18 September 2026`. `terms/beta-1` pinned. | Legal owner | — |
 | 3 | Tell existing users by email first, or let them meet the screen? | Business | Nothing — timing only |
 | 4 | Section 4 "acting on behalf of a business" — its own tick box, or a line of text? | Business | Small piece of the sign-up screen |
 | 5 | **Phase 2:** who writes the company-level agreement, and when? | Legal owner | All of §6. Until this document exists there is nothing to build. |

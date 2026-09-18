@@ -63,6 +63,20 @@ def test_verify_pinned_hashes_reports_no_problems():
     assert registry.verify_pinned_hashes() == []
 
 
+def test_terms_beta_1_is_pinned_and_final():
+    """Pinned on 2026-09-18 once the header date and the §23 contact details
+    were filled in. From here a wording change is a new file, never an edit —
+    so the placeholders must be gone and the draft banner must stay off no
+    matter what LEGAL_SHOW_DRAFT_BANNER says."""
+    document = registry.get_document(registry.TERMS, "beta-1")
+    assert document.is_pinned
+    assert not document.show_draft_notice
+    assert document.effective_date == "18 September 2026"
+    for blank in ("[DATE]", "[INSERT EMAIL]", "[INSERT ADDRESS]"):
+        assert blank not in document.text
+    assert "hello@dailyminty.com" in document.text
+
+
 # --------------------------------------------------------------------------
 # The renderer
 # --------------------------------------------------------------------------
@@ -136,9 +150,9 @@ def test_current_endpoint_reports_the_live_version(client):
     body = client.get("/legal/current").get_json()
     assert body["terms_version"] == registry.current_version(registry.TERMS)
     assert body["terms_url"] == "/legal/terms"
-    # Null until the legal owner fills in `Last Updated: [DATE]`. Asserted so
-    # that resolving the blank is a deliberate change, not a silent one.
-    assert body["effective_date"] is None
+    # The header date, verbatim — the onboarding TermsModal prints this string
+    # as-is. Asserted so a change of the live version's date is deliberate.
+    assert body["effective_date"] == "18 September 2026"
 
 
 def test_terms_page_shows_the_fingerprint(client):

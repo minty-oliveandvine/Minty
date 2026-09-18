@@ -166,8 +166,9 @@ def current():
             "privacy_version": registry.current_version(registry.PRIVACY),
             "terms_url": url_for("legal.terms"),
             "privacy_url": url_for("legal.privacy"),
-            # Null until the legal owner resolves `Last Updated: [DATE]` in the
-            # source document. Reported honestly rather than defaulted.
+            # The header date as recorded in registry._EFFECTIVE_DATES; null for
+            # a version with no recorded date, reported honestly rather than
+            # defaulted.
             "effective_date": document.effective_date if document else None,
         }
     )

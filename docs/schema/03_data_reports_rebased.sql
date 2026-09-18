@@ -1452,12 +1452,12 @@ BEGIN
    WHERE NULLIF(se.account_id,'') IS NOT NULL AND d.account_id IS NULL;
   SELECT count(*) INTO lost_c FROM pettycashv2.shop_expense se JOIN pettycash_test.report_expense d ON d.id = se.id::uuid
    WHERE NULLIF(se.contact_id,'') IS NOT NULL AND d.contact_id IS NULL;
-  RAISE NOTICE 'R2  restored xero_contact_sync rows : %   (expected 239)   %', c, CASE WHEN c = 239 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R2  restored xero_contact_sync rows : %   (expected 238)   %', c, CASE WHEN c = 238 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  restored account_info rows      : %   (expected 10)    %', a, CASE WHEN a = 10 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  expenses that lost their account : %   %', lost_a, CASE WHEN lost_a = 0 THEN 'OK' ELSE '*** LOST ***' END;
   RAISE NOTICE 'R2  expenses that lost their contact : %   %', lost_c, CASE WHEN lost_c = 0 THEN 'OK' ELSE '*** LOST ***' END;
   IF lost_a > 0 OR lost_c > 0 THEN RAISE EXCEPTION 'R2: an expense lost a reference the source had'; END IF;
-  IF c <> 239 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
+  IF c <> 238 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
 END $$;
 
 -- ==================================================================

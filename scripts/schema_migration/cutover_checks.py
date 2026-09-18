@@ -16,7 +16,10 @@ database after ``ALTER SCHEMA pettycash_test RENAME TO pettycashv3``, or product
      09-16 data if it ran
 
 Counts only, by default. ``--names`` adds the company names to section 4 for support; they
-are printed, never written anywhere.
+are printed, never written anywhere. ``--old-uri`` reads the OLD schema from another database:
+on the Supabase project the ``pettycashv2`` beside the restored ``pettycashv3`` is the discarded
+test instance (decision 2), so the source to compare against is the rehearsal's scratch
+database, not the project's own old schema.
 
     python scripts/schema_migration/cutover_checks.py --uri postgresql://.../minty_e1 [--names]
     python scripts/schema_migration/cutover_checks.py --db minty_e1        # localhost, .env user
@@ -55,16 +58,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--uri", help="postgres URI of the database holding both schemas")
     ap.add_argument("--db", default="minty_e1", help="database on localhost, with .env's user (ignored with --uri)")
+    ap.add_argument("--old-uri", help="read the OLD schema from this database instead (the rehearsal's scratch database, "
+                                       "when the new schema sits in a Supabase project whose own pettycashv2 is the discarded test instance)")
     ap.add_argument("--old", default=OLD_DEFAULT)
     ap.add_argument("--new", default=NEW_DEFAULT)
     ap.add_argument("--names", action="store_true", help="print company names in section 4 (never stored)")
     args = ap.parse_args()
     OLD, NEW = args.old, args.new
 
-    conn = psycopg2.connect(_uri(args))
-    cur = conn.cursor()
+    new_cur = psycopg2.connect(_uri(args)).cursor()
+    old_cur = psycopg2.connect(args.old_uri).cursor() if args.old_uri else new_cur
 
     def q(sql, *params):
+        """Old-schema queries go to the old connection, new-schema ones to the new."""
+        cur = old_cur if f"{OLD}." in sql else new_cur
         cur.execute(sql, params)
         return cur.fetchall()
 

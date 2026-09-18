@@ -41,9 +41,9 @@
       {% endif %}
 
       <div class="tc-card">
-        {# Only rendered when the version actually has an effective date. beta-1's
-           is None because the source .docx still says [DATE] — better a missing
-           line than an invented date on a legal document. #}
+        {# Only rendered when the version actually has an effective date
+           (privacy/beta-1 has none yet) — better a missing line than an
+           invented date on a legal document. #}
         {% if document.effective_date %}
         <p class="tc-updated">Last updated: {{ document.effective_date }}</p>
         {% endif %}
