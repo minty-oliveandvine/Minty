@@ -201,7 +201,13 @@ def init_app(app, db):
                 return True
             try:
                 from blueprints.entity.routes.modules import _is_module_enabled
-                return _is_module_enabled(str(entity_id), "BILL")
+                from blueprints.entity.services.modules import MODULE_BILL
+
+                # MODULE_BILL is PAYMENT_REQUEST since C2; the literal "BILL" this read
+                # until 2026-09-18 was an unknown code, which the gate answers NO to, so
+                # the Payment Settings tab and the side panel's Payment Request group were
+                # never shown to anyone.
+                return _is_module_enabled(str(entity_id), MODULE_BILL)
             except Exception as e:
                 logger.error(f"Error checking billing enabled for entity {entity_id}: {e}")
                 return True
