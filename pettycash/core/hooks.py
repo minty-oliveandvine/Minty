@@ -13,6 +13,7 @@ from werkzeug.exceptions import HTTPException
 from models.db import Entity
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token, token_expired)
+from blueprints.shared.feature_flags import subscriptions_enabled
 from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
                                     mark_signed_out, refresh_presence)
 
@@ -201,7 +202,13 @@ def init_app(app, db):
                 return True
             try:
                 from blueprints.entity.routes.modules import _is_module_enabled
-                return _is_module_enabled(str(entity_id), "BILL")
+                from blueprints.entity.services.modules import MODULE_BILL
+
+                # MODULE_BILL is PAYMENT_REQUEST since C2; the literal "BILL" this read
+                # until 2026-09-18 was an unknown code, which the gate answers NO to, so
+                # the Payment Settings tab and the side panel's Payment Request group were
+                # never shown to anyone.
+                return _is_module_enabled(str(entity_id), MODULE_BILL)
             except Exception as e:
                 logger.error(f"Error checking billing enabled for entity {entity_id}: {e}")
                 return True
@@ -290,6 +297,9 @@ def init_app(app, db):
             "is_petty_cash_enabled": is_petty_cash_enabled,
             "is_readonly_for": is_readonly_for,
             "currency_symbol": _entity_currency_symbol(),
+            # the subscription feature switch (blueprints/shared/feature_flags.py): a template
+            # branches on it where a page would otherwise quote, charge or nag
+            "subscriptions_enabled": subscriptions_enabled(),
         }
 
     @app.teardown_appcontext

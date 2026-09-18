@@ -49,9 +49,10 @@
         {% if show_entity_navigation %}
         {# Petty Cash links only when the PETTY_CASH module is enabled for this
            entity — mirrors the BILL gate below and the server-side route guard. #}
-        {% if is_petty_cash_enabled(active_entity_id) %}
+        {# Always in the DOM, display:none when the module is off (an inline style: Tailwind's .flex outranks the hidden attribute): the module settings page shows
+           and hides these groups from its Save answer (data-module-nav), without a reload. #}
         <!-- PETTY CASH -->
-        <div class="flex flex-col gap-1" role="group" aria-label="Petty Cash">
+        <div class="flex flex-col gap-1" role="group" aria-label="Petty Cash" data-module-nav="PETTY_CASH" {% if not is_petty_cash_enabled(active_entity_id) %}style="display:none"{% endif %}>
           <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-[#656565]/70">Petty Cash</p>
           <ul class="flex flex-col gap-1">
             <li>
@@ -72,14 +73,12 @@
             </li>
           </ul>
         </div>
-        {% endif %}
 
-        {# Payment Request links bounce the user over to Module 2 — only show
-           them when this entity actually has the BILL module enabled. Petty
-           cash-only entities never see this section. #}
-        {% if is_billing_enabled(active_entity_id) %}
+        {# Payment Request links bounce the user over to Module 2 — only shown
+           when this entity actually has the module enabled. Petty cash-only
+           entities never see this section. #}
         <!-- PAYMENT REQUEST -->
-        <div class="flex flex-col mt-6 gap-3" role="group" aria-label="Payment Request">
+        <div class="flex flex-col mt-6 gap-3" role="group" aria-label="Payment Request" data-module-nav="PAYMENT_REQUEST" {% if not is_billing_enabled(active_entity_id) %}style="display:none"{% endif %}>
           <p class="px-3 text-[11px] font-semibold uppercase tracking-wider text-[#656565]/70">Payment Request</p>
           <ul class="flex flex-col gap-1">
             <li>
@@ -91,7 +90,6 @@
             </li>
           </ul>
         </div>
-        {% endif %}
         {% endif %}
       </div>
 

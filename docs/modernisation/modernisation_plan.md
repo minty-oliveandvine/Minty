@@ -886,15 +886,47 @@ Each unit gets its own short plan (files, tests, gate) when it starts; C1's is t
 
 ## Phase E — production cutover
 
+**Decided 2026-09-18 (user): the cutover happens with subscriptions DARK.** Production holds no
+subscription row (D4 confirmed: 0 `entity_module_subscription`, 0 invoices), so nothing is lost
+by switching the whole feature off and nothing about it is decided on cutover day. The switch
+is `SUBSCRIPTION_ENABLED` — **off unless set** — read by Minty
+(`blueprints/shared/feature_flags.py`), onboarding-backend (`config.settings`, same name) and
+billing-frontend (`NEXT_PUBLIC_SUBSCRIPTION_ENABLED`, on unless `0`; Minty is the real guard).
+Dark: module access is `entity_function_map.is_enabled` as it was before the engine; the
+module page is a plain on/off list with an admin switch (`entity_settings_module_toggle`, a
+dark-only route); every quote / charge / card / portal route answers 404 (the 19 module
+actions, `/api/me/*`, the onboarding billing routes, the notice API); the wizard's step 2 is a
+plain module pick (`/plans` empty, `/state` carries `subscriptions_enabled`), finalize enables
+the chosen modules and starts no trial, All Set states no trial; the scheduler does not start
+whatever `SUBSCRIPTION_SCHEDULER_ENABLED` says; **migration `m1a01` skips its revocation** (the
+47 live companies keep Petty Cash). **Switching it on writes nothing**: no grant, no trial, no
+revocation — taking access away from a module with no subscription behind it is the separate
+launch-day command `flask subscriptions revoke-ungranted --apply`, dry by default and refused
+while dark. Pinned by `tests/test_char_subscription_dark.py` (6),
+onboarding-backend `tests/test_subscriptions_dark.py` (3) and the three e2e suites run with
+`E2E_SUBSCRIPTIONS=0` against a stack started dark (Minty 20, onboarding 23, billing-frontend
+1 + 13 live). A rehearsal with the flag off (`minty_e0`, 2026-09-18) shows `m1a01: skipped`
+and every grant carried through.
+
 Dress rehearsal on **staging** first, exactly as below, at least two days before production.
 
-1. Announce; set `SCHEDULED_MAINTENANCE_*` (the env flags already exist) → maintenance page.
-2. Pause: `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty instance; disable the Stripe webhook
-   endpoint in the Stripe dashboard (events queue and replay on re-enable); note the time.
+1. Announce. **There is no maintenance gate in Minty** (`SCHEDULED_MAINTENANCE_*` never
+   existed; only billing-frontend has a static `/maintenance` page) — the window is held by
+   suspending the Render web services (or a redirect at the edge), decided before the dress
+   rehearsal.
+2. Pause: `SUBSCRIPTION_ENABLED=0` and `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty
+   instance (Render env; the change restarts the service, which is what applies it — the flag
+   is read at `create_app`), `SUBSCRIPTION_ENABLED=0` on onboarding-backend,
+   `NEXT_PUBLIC_SUBSCRIPTION_ENABLED=0` on billing-frontend; nobody runs
+   `flask subscriptions run-daily --issue` by hand. Note the time. **There is no Stripe
+   webhook to disable**: the receiver went with the in-house biller (Minty charges
+   synchronously and owns subscription state), and Stripe does not queue events for a disabled
+   endpoint anyway — a stale endpoint in the dashboard can be deleted, nothing depends on it.
 3. `pg_dump` Supabase (custom format) to two places. Verify it restores.
 4. Run the pipeline on the staging Postgres from a fresh dump of the old production host
-   (`rehearse.py --dump … --db <name> --attachments`, then `ALTER SCHEMA pettycash_test RENAME
-   TO pettycashv3`). All checks OK or **stop and reopen on the old schema** — nothing has
+   (**`SUBSCRIPTION_ENABLED=0 rehearse.py --dump … --db <name> --attachments`** — the flag is
+   what makes `m1a01` skip its revocation; the log must say `m1a01: skipped` — then
+   `ALTER SCHEMA pettycash_test RENAME TO pettycashv3`). All checks OK or **stop and reopen on the old schema** — nothing has
    changed yet. Supabase's own `pettycashv2` is not the source (decision 2: its test entities
    are discarded).
 5. `pg_dump -n pettycashv3 -Fc --no-owner --no-acl` of that result; `pg_restore -d <Supabase>
@@ -903,11 +935,19 @@ Dress rehearsal on **staging** first, exactly as below, at least two days before
    builds already carry the `pettycashv3` qualifier, so no config changes anywhere. Drop
    `pettycashv2.alembic_version`; delete `bills` rows from `django_migrations`.
 6. Deploy the phase-C builds of Minty, `billing-backend`, `onboarding-backend` (Render, from the
-   branch that has been green on Postgres since phase C).
+   branch that has been green on Postgres since phase C) and the frontends, all with the
+   switch off (step 2's values stay).
 7. Smoke: `onboarding/e2e` against production URLs with the E2E entity; the manual checklist;
    `audit_models.py` against production = 0.
-8. Re-enable the Stripe webhook, `SUBSCRIPTION_SCHEDULER_ENABLED=1`, clear maintenance.
-   Watch logs for one full scheduler cycle.
+8. Reopen: end the maintenance hold. **Subscriptions stay dark** — `SUBSCRIPTION_ENABLED`
+   and the scheduler flag stay 0 — so there is no scheduler cycle to watch and no webhook to
+   re-enable. Watch the logs for one business day.
+8b. **Launch day (later, its own decision):** `SUBSCRIPTION_ENABLED=1` on Minty,
+   onboarding-backend and billing-frontend (grants nothing, starts nothing); then
+   `flask subscriptions revoke-ungranted` (dry) → read the list → `--apply` (the modules no
+   subscription backs switch off; each company starts its own trial from the module card);
+   then `SUBSCRIPTION_SCHEDULER_ENABLED=1`; watch one full scheduler cycle. The support
+   announcement belongs to this day, not to the cutover.
 9. **Rollback** (only inside the window, before step 8): redeploy the previous images — they
    still read `pettycashv2`, which was never touched; `DROP SCHEMA pettycashv3 CASCADE`. After
    step 8, forward-fix only — `pettycashv2` is read-only reference.

@@ -23,7 +23,56 @@ from __future__ import annotations
 
 from loguru import logger
 
+from blueprints.shared.enums import ModuleCode
 from models.db import EntityFunction, EntityFunctionMap
+
+
+def revoke_ungranted_module_access(*, dry_run: bool = True) -> list[dict]:
+    """Switch off every module grant that no ``entity_module_subscription`` row backs.
+
+    The launch-day counterpart of migration ``m1a01``, which the cutover skipped because
+    subscriptions were dark (blueprints/shared/feature_flags.py): once the feature is on,
+    access is a projection of the subscription row, and a map row switched on with no row
+    behind it offers a module the card would then invite the company to start a trial
+    for. Same boundary as the migration - "has no row at all", never a date comparison
+    (that is the sweep's job) - and the same exemption for mid-wizard entities.
+
+    Returns the rows it would (dry run) or did switch off, ``{entity_id, code}`` each.
+    Nothing is ever granted here; the switch itself grants nothing either.
+    """
+    from models.db import db
+
+    codes = tuple(ModuleCode.values())
+    where = """
+          FROM pettycashv3.entity_function_map AS m
+          JOIN pettycashv3.entity_function AS f ON f.id = m.entity_function_id
+         WHERE f.function_code IN :codes
+           AND m.is_enabled
+           AND NOT EXISTS (
+               SELECT 1 FROM pettycashv3.entity_module_subscription AS s
+                WHERE s.entity_id = m.entity_id AND s.function_code = f.function_code)
+           AND NOT EXISTS (
+               SELECT 1 FROM pettycashv3.entities AS e
+                WHERE e.id = m.entity_id AND e.status = 'onboarding')
+    """
+    rows = db.session.execute(
+        db.text(f"SELECT m.entity_id, f.function_code {where}").bindparams(codes=codes)
+    ).all()
+    found = [{"entity_id": str(r[0]), "code": str(r[1])} for r in rows]
+    if dry_run or not found:
+        return found
+    db.session.execute(
+        db.text(f"""
+            UPDATE pettycashv3.entity_function_map AS target
+               SET is_enabled = FALSE, disabled_at = NOW(), updated_at = NOW()
+              FROM (SELECT m.entity_id, m.entity_function_id {where}) AS hit
+             WHERE target.entity_id = hit.entity_id
+               AND target.entity_function_id = hit.entity_function_id
+        """).bindparams(codes=codes)
+    )
+    db.session.commit()
+    logger.info("revoke-ungranted: switched off {} module grant(s) with no subscription row", len(found))
+    return found
 
 
 def sweep_expired_module_access(payer_user_id=None) -> dict:
