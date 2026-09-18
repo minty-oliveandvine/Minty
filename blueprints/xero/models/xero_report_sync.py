@@ -10,17 +10,18 @@ from uuid import uuid4
 
 from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class XeroReportSync(db.Model):
     __tablename__ = "xero_report_sync"
     __table_args__ = (
         db.UniqueConstraint("report_id", name="xero_report_sync_report_key"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
     report_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"), nullable=False,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"), nullable=False,
     )
     sync_status = db.Column(db.String(20))
     reported_at = db.Column(db.DateTime(timezone=True))

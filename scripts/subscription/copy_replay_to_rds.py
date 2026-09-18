@@ -71,7 +71,7 @@ sys.modules.setdefault("main", _stub)
 
 from replay_scenarios import RUNS, _clone_name  # noqa: E402
 
-SCHEMA = "pettycashv3"
+SCHEMA = os.environ.get("MINTY_DB_SCHEMA", "pettycashv3")  # blueprints/shared/schema.py, without importing the app
 
 # Insert order is FK order; deletes run in reverse. `carrier=True` means "insert if
 # absent, never delete" — see the module docstring on the payer row.

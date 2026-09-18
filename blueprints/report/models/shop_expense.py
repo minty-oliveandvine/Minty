@@ -29,6 +29,7 @@ from sqlalchemy.orm import synonym
 from blueprints.shared.column_types import MintyUuid, Money, pg_enum
 from blueprints.shared.enums import ExpenseAttachmentRole
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class Attachment(db.Model):
@@ -36,7 +37,7 @@ class Attachment(db.Model):
     its own Django model of the same table; Minty only ever creates rows for receipts."""
 
     __tablename__ = "attachment"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
     original_name = db.Column(db.String(255), nullable=False)
     stored_name = db.Column(db.String(255), nullable=False)
@@ -87,14 +88,14 @@ class ReportExpenseAttachment(db.Model):
     __tablename__ = "report_expense_attachment"
     __table_args__ = (
         db.UniqueConstraint("report_expense_id", "attachment_id", name="report_expense_attachment_key"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
     report_expense_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.report_expense.id", ondelete="CASCADE"), nullable=False,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.report_expense.id", ondelete="CASCADE"), nullable=False,
     )
     attachment_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.attachment.id", ondelete="CASCADE"), nullable=False,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.attachment.id", ondelete="CASCADE"), nullable=False,
     )
     attachment_role = db.Column(pg_enum(ExpenseAttachmentRole), nullable=False, default=ExpenseAttachmentRole.RECEIPT)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
@@ -106,15 +107,15 @@ class ReportExpenseAttachment(db.Model):
 
 class ReportExpense(db.Model):
     __tablename__ = "report_expense"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
-    report_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"), nullable=False)
+    report_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"), nullable=False)
     # the company's synced rows, not the Xero ids - see the module docstring
     account_row_id = db.Column(
-        "account_id", MintyUuid(), db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"), nullable=True,
+        "account_id", MintyUuid(), db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"), nullable=True,
     )
     contact_row_id = db.Column(
-        "contact_id", MintyUuid(), db.ForeignKey("pettycashv3.xero_contact_sync.id", ondelete="SET NULL"), nullable=True,
+        "contact_id", MintyUuid(), db.ForeignKey(f"{SCHEMA}.xero_contact_sync.id", ondelete="SET NULL"), nullable=True,
     )
     item = db.Column(db.String(150), nullable=True)
     amount = db.Column(Money(), nullable=False, default=0)

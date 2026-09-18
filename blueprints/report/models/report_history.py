@@ -9,16 +9,17 @@ from sqlalchemy.orm import synonym
 
 from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class ReportHistory(db.Model):
     __tablename__ = "report_history"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     report_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"), nullable=False,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"), nullable=False,
     )
-    user_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"))
+    user_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.user.id", ondelete="SET NULL"))
     action = db.Column(db.String(50), nullable=False)
     field_changed = db.Column(db.String(255), nullable=True)
     old_value = db.Column(db.Text, nullable=True)

@@ -5,15 +5,16 @@ from sqlalchemy.orm import synonym
 from blueprints.shared.column_types import MintyUuid, Money, pg_enum
 from blueprints.shared.enums import CashType
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityCashDetail(db.Model):
     __tablename__ = "entity_cash_detail"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     entity_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"), primary_key=True
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"), primary_key=True
     )
-    cash_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.cash_info.id"), primary_key=True)
+    cash_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.cash_info.id"), primary_key=True)
     cash_type = db.Column(pg_enum(CashType), nullable=True)
     cash_instock = db.Column(Money(), nullable=True)
     description = db.Column(db.Text)

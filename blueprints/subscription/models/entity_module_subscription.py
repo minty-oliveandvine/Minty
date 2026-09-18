@@ -24,6 +24,7 @@ from blueprints.subscription.models.column_types import (
     tz_datetime,
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityModuleSubscription(TimestampMixin, db.Model):
@@ -32,7 +33,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
         db.UniqueConstraint(
             "entity_id", "function_code", name="uq_ems_entity_function"
         ),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -40,14 +41,14 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     # --- identity ---
     entity_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv3.entities.id"),
+        db.ForeignKey(f"{SCHEMA}.entities.id"),
         nullable=False,
         index=True,
     )
     function_code = db.Column(pg_enum(ModuleCode), nullable=False, index=True)  # PETTY_CASH / PAYMENT_REQUEST
     payer_user_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv3.user.id"),
+        db.ForeignKey(f"{SCHEMA}.user.id"),
         nullable=False,
         index=True,
     )

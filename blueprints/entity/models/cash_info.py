@@ -12,13 +12,14 @@ from sqlalchemy.orm import synonym
 from blueprints.shared.column_types import MintyUuid, Money, pg_enum
 from blueprints.shared.enums import CashType
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class CashInfo(db.Model):
     __tablename__ = "cash_info"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
-    currency_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.currency_info.id"), nullable=False)
+    currency_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.currency_info.id"), nullable=False)
     type = db.Column(pg_enum(CashType), nullable=True)
     cash_value = db.Column(Money(12, 2), nullable=False)
     cash_name = db.Column(db.String(20))

@@ -41,8 +41,10 @@ from sqlalchemy.dialects.postgresql import ENUM
 from blueprints.shared import enums as vocabulary
 from blueprints.shared.column_types import AwareDateTime, MintyUuid
 from blueprints.subscription import constants
+from blueprints.shared.schema import SCHEMA
 
-SCHEMA = "pettycashv3"
+# re-exported: the subscription models import SCHEMA from here (blueprints/shared/schema.py owns it)
+SCHEMA = SCHEMA  # noqa: PLW0127
 
 
 def uuid_column():

@@ -3,11 +3,12 @@ from datetime import datetime, timezone
 
 from models.db import db
 from blueprints.shared.column_types import MintyUuid
+from blueprints.shared.schema import SCHEMA
 
 
 class EmailOtp(db.Model):
     __tablename__ = "email_otp"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(100), nullable=False, index=True)

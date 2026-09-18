@@ -31,7 +31,7 @@ for attempt in range(1, wait_seconds + 1):
         time.sleep(2)
 
 with engine.connect() as conn:
-    conn.execute(text("CREATE SCHEMA IF NOT EXISTS pettycashv3"))
+    conn.execute(text("CREATE SCHEMA IF NOT EXISTS " + os.environ.get("MINTY_DB_SCHEMA", "pettycashv3")))
     conn.commit()
 PY
 
