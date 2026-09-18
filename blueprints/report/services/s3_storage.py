@@ -16,6 +16,7 @@ from loguru import logger
 from werkzeug.utils import secure_filename
 
 from blueprints.report.services.file_downsize import downsize_bytes
+from blueprints.report.services.receipt_keys import safe_extension, safe_stem
 
 
 def get_s3_bucket():
@@ -54,38 +55,24 @@ def upload_file_to_s3(
     file_index=None,
     max_retries=2,
 ):
-    original_filename = secure_filename(file.filename)
-    _, ext = os.path.splitext(original_filename)
-    if not ext:
-        ext = ".jpg"
+    # The stored name is normalised to ``[A-Z0-9_]`` (receipt_keys.safe_stem): the item text
+    # used to go in almost verbatim, and a comma in "Meal, Transport etc" split the receipt in
+    # two on the way back out (the 2026-09-18 "Key not found" preview).
+    original_filename = secure_filename(file.filename or "")
+    ext = "." + safe_extension(original_filename)
 
     if transaction_date and description and amount is not None:
         if isinstance(transaction_date, str):
             transaction_date = parser.parse(transaction_date).date()
-        date_str = transaction_date.strftime(
-            "%d %b %Y").upper().replace(" ", "_")
-        clean_description = description.upper().strip()
-        clean_description = (
-            clean_description.replace("/", "_")
-            .replace("\\", "_")
-            .replace(":", "_")
-            .replace("?", "")
-            .replace("*", "")
-            .replace('"', "")
-            .replace("<", "")
-            .replace(">", "")
-            .replace("|", "")
-        )
-        clean_description = clean_description.replace(" ", "_")
-        clean_description = "_".join(
-            filter(None, clean_description.split("_")))
+        date_str = transaction_date.strftime("%d %b %Y").upper().replace(" ", "_")
+        clean_description = safe_stem(description) or "RECEIPT"
         amount_str = str(int(round(amount)))
         base_filename = f"{date_str}_{clean_description}_{amount_str}"
         if file_index is not None and file_index > 0:
             base_filename = f"{base_filename}_{file_index + 1}"
         filename = f"{base_filename}{ext}"
     else:
-        name, _ = os.path.splitext(original_filename)
+        name = safe_stem(os.path.splitext(original_filename)[0]) or "RECEIPT"
         filename = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
 
     s3_key = f"expenses/{report_id}/{filename}"

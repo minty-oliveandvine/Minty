@@ -217,8 +217,9 @@
                         <td>${{ expense.amount | default(0) | round(2) }}</td>
                         <td>{{ expense.remarks | default('N/A') }}</td>
                         <td>
-                            {% if expense.files %}
-                                {% for file in expense.files.split(',') %}
+                            {% if expense.receipt_keys %}
+                                {# one link per receipt row: a filename may itself contain a comma #}
+                                {% for file in expense.receipt_keys %}
                                     <a href="{{ url_for('report.download_file', filename=file) }}" target="_blank">{{ file.split('/')[-1] }}</a><br>
                                 {% endfor %}
                             {% else %}

@@ -545,7 +545,7 @@ class TestReceiptUpload:
         expense, entity = self._expense_and_entity()
         calls = self._wire(
             monkeypatch, publish,
-            associations=[{"FileId": "file-1", "Name": "fuel_receipt.png", "Size": 3}],
+            associations=[{"FileId": "file-1", "Name": "FUEL_RECEIPT.png", "Size": 3}],
             meta={},
         )
 
@@ -637,7 +637,7 @@ class TestReceiptUpload:
         expense, entity = self._expense_and_entity()
         calls = self._wire(
             monkeypatch, publish,
-            associations=[{"FileId": "file-1", "Name": "fuel_receipt.png", "Size": 3}],
+            associations=[{"FileId": "file-1", "Name": "FUEL_RECEIPT.png", "Size": 3}],
             meta={},
         )
 

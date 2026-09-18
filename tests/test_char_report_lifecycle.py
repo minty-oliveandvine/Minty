@@ -325,6 +325,101 @@ def test_ending_posts_the_report_and_lands_on_submitted(shop, client):
     assert resp.status_code == 404
 
 
+def test_submitted_page_offers_a_first_publish_until_the_report_has_been_to_xero(shop, client, app):
+    """publishing_status is NOT NULL since the redesign ('unpublished' is the never-published
+    state): a fresh report gets the plain Publish button; only a report that has been through
+    a publish (completed, or failed half-way) gets the republish warning."""
+    from models.db import Report, db
+
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity)
+
+    html = client.get(f"/report/{report_id}/submitted?entity_id={entity.id}").get_data(as_text=True)
+    assert 'id="publishButton"' in html and 'id="republishButton"' not in html
+
+    with app.app_context():
+        report = db.session.get(Report, report_id)
+        assert report.publishing_status == "unpublished"
+        report.publishing_status = "failed"
+        db.session.commit()
+    html = client.get(f"/report/{report_id}/submitted?entity_id={entity.id}").get_data(as_text=True)
+    assert 'id="republishButton"' in html and 'id="publishButton"' not in html
+
+
+def test_publish_locks_the_report_and_hands_it_to_the_background_worker(shop, client, app, monkeypatch):
+    """The publish route takes a SELECT ... FOR UPDATE NOWAIT on the report. Since C4 the
+    report eager-loads its creator (and the creator their token) through outer joins, and
+    Postgres refuses to lock the nullable side of an outer join - the lock has to name the
+    report table (``of=Report``). Xero itself is stubbed out; the DB is real."""
+    import sys
+    from types import SimpleNamespace
+
+    from models.db import Report, db
+
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity)
+
+    route = sys.modules["blueprints.report.routes.submitted"]  # the module the app registered
+    started = []
+    monkeypatch.setattr(route, "resolve_xero_token", lambda entity_id, user: SimpleNamespace(access_token="tok", username=user.username))
+    monkeypatch.setattr(route, "check_entity_xero_settings_complete", lambda entity_id: True)
+    monkeypatch.setattr(route, "sync_entity_xero_status", lambda entity_id, **kw: None)
+    monkeypatch.setattr(route, "validate_expenses_for_system_accounts", lambda *a, **kw: [])
+    monkeypatch.setattr(route, "process_xero_integration_background", lambda *args: started.append(args))
+
+    resp = client.post(f"/report/submitted/publish_to_xero?entity_id={entity.id}&report_id={report_id}")
+
+    assert resp.status_code == 202, resp.data[:400]
+    assert resp.get_json()["status"] == "publishing"
+    with app.app_context():
+        assert db.session.get(Report, report_id).publishing_status == "publishing"
+    deadline = __import__("time").time() + 5
+    while not started and __import__("time").time() < deadline:
+        __import__("time").sleep(0.05)
+    assert started and str(started[0][2]) == report_id, "the background worker was not handed the report"
+
+
+def test_the_publish_finds_its_expense_line_by_the_xero_ids(shop, client, app):
+    """A line links to the company's synced account and contact rows; the Xero ids the
+    publish holds (account code, ContactID) live on those rows, so the lookup joins them.
+    Filtering on the model's ``contact_id`` / ``account_code`` properties compiled to
+    WHERE false after the redesign: no line found, so no receipt reached Xero."""
+    import uuid
+    from decimal import Decimal
+
+    from blueprints.xero.services.publish import (expense_line_for_contact, expense_lines_for_contact,
+                                                  find_expense_line)
+    from models.db import AccountInfo, ShopExpense, XeroContactSync, db
+
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity, expenses=(("Light, Power, Heating", "25.10"),))
+    xero_contact = str(uuid.uuid4())
+    with app.app_context():
+        account = AccountInfo(entity_id=entity.id, type="EXPENSE", name="Light, Power, Heating",
+                              xero_account_id=str(uuid.uuid4()), xero_code="445", status="ACTIVE")
+        contact = XeroContactSync(entity_id=entity.id, xero_contact_id=xero_contact, name="ABC Furniture")
+        db.session.add_all([account, contact])
+        db.session.flush()
+        line = ShopExpense.query.filter_by(report_id=report_id).one()
+        line.account = account
+        line.contact = contact
+        db.session.commit()
+        line_id = line.id
+
+        found = find_expense_line(report_id, item="Light, Power, Heating", amount=Decimal("25.10"),
+                                  account_code="445", contact_id=xero_contact)
+        assert found is not None and found.id == line_id
+        assert find_expense_line(report_id, item="Light, Power, Heating", amount=Decimal("25.10"), account_code="445").id == line_id
+        assert find_expense_line(report_id, item="Light, Power, Heating", amount=Decimal("25.10"), account_code="429") is None
+        assert find_expense_line(report_id, item="Light, Power, Heating", amount=Decimal("25.10"),
+                                 account_code="445", contact_id=str(uuid.uuid4())) is None
+        assert expense_line_for_contact(report_id, xero_contact).id == line_id
+        assert [e.id for e in expense_lines_for_contact(xero_contact)] == [line_id]
+
+
 def test_posted_report_detail_shows_the_same_totals(shop, client):
     owner, entity = shop
     F.login(client, owner)
@@ -440,6 +535,47 @@ def test_delete_posted_report_removes_it_from_history(shop, client, s3):
     assert resp.status_code == 302, resp.data[:300]
     assert report_id not in history_rows(client, entity)
     assert client.get(f"/report/{report_id}").status_code == 404
+
+
+def test_every_receipt_the_detail_page_shows_is_an_object_the_bucket_holds(shop, client, s3, app):
+    """Receipts named before 2026-09-18 carry the expense item verbatim, commas included
+    ("Staff Welfare - Meal, Transport etc" -> ``..._MEAL,_TRANSPORT_ETC_25.jpg``; 1,195 such
+    keys in production). The comma-joined ``files`` value used to be split on every comma, so
+    the pages asked the bucket for two halves no object has: a broken image ("Key not found").
+    The key here is planted the way the loader stores such a row, whatever new uploads are
+    named."""
+    import zipfile
+    from html import unescape
+    from io import BytesIO
+    from urllib.parse import unquote
+
+    from models.db import ShopExpense, db
+
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity, expenses=(("Tape", "25.00"),))
+    legacy_key = f"expenses/{report_id}/01_SEP_2026_STAFF_WELFARE_-_MEAL,_TRANSPORT_ETC_25.jpg"
+    with app.app_context():
+        expense = ShopExpense.query.filter_by(report_id=report_id).one()
+        s3.objects[legacy_key] = s3.objects.pop(expense.receipt_keys[0])
+        expense.files = legacy_key  # the comma-joined shape the old column had
+        db.session.commit()
+        assert expense.receipt_keys == [legacy_key]
+
+    # the detail page links one download per receipt, and each download is a key the
+    # bucket holds (the link redirects to the object's presigned URL)
+    html = client.get(f"/report/{report_id}").get_data(as_text=True)
+    links = [unquote(unescape(h)) for h in re.findall(r'href="(/download/[^"]+)"', html)]
+    assert links == [f"/download/{legacy_key}"], f"receipt links {links}"
+    resp = client.get(links[0])
+    assert resp.status_code == 302 and resp.headers["Location"] == f"https://fake-s3.test/{legacy_key}", resp.headers.get("Location")
+
+    # the attachments download: the same receipt, whole, inside the zip
+    resp = client.post("/download_attachments", data={"start_date": F.iso(REPORT_DATE), "end_date": F.iso(REPORT_DATE),
+                                                       "company": entity.id})
+    assert resp.status_code == 200, resp.data[:300]
+    names = zipfile.ZipFile(BytesIO(resp.data)).namelist()
+    assert names == [f"{F.iso(REPORT_DATE)}/{legacy_key.rsplit('/', 1)[-1]}"], names
 
 
 def test_delete_posted_report_removes_its_receipts_from_storage(shop, client, s3):

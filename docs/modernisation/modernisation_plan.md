@@ -931,7 +931,27 @@ onboarding-backend `tests/test_subscriptions_dark.py` (3) and the three e2e suit
 1 + 13 live). A rehearsal with the flag off (`minty_e0`, 2026-09-18) shows `m1a01: skipped`
 and every grant carried through.
 
-Dress rehearsal on **staging** first, exactly as below, at least two days before production.
+**One project, not two (learned 2026-09-18):** the Supabase project at
+`db.cedoiprsnbjufvvgaodx.supabase.co` is "staging" today and *becomes* production at the
+cutover; the old host is the only other database. So the dress rehearsal is the same project
+prepared once, and cutover day repeats only steps 3–8 with the window's backup.
+
+**Dress rehearsal done 2026-09-18** on that project: `pettycashv3` restored from
+`backups/minty_pettycashv3_20260918.dump` (the 13:28 backup, built dark); verified against its
+source with `cutover_checks.py --old-uri <rehearsal db>` (the project's own `pettycashv2` is
+the discarded test instance, so the old side must come from the rehearsal database) — 125
+entity-months to the cent, 1,023 bills, 0 subscription rows, 138/178 grants, 0 companies
+lose Petty Cash — `audit_models.py` 0; the three apps deployed dark from the mains
+(`pettycash.dailyminty.com`, `payment-backend.dailyminty.com`,
+`onboarding-backend-0193.onrender.com`, `payment.dailyminty.com`, `onboarding.dailyminty.com`);
+`scripts/e2e_seed.py` run against the project (`FLASK_ENV=production` reads
+`RDS_DATABASE_URI`) plus the disposable onboarding entity; **Minty e2e 20, onboarding e2e 23,
+billing-frontend e2e 9 + 5 dark-skipped — all in dark mode, in real browsers against the
+real hosts.** A full report (receipt to B2 included) and two bill drafts were written and read
+back; bill submit → pay is API-tested only (billing-backend), not walked in a browser.
+Terms `beta-1` is pinned and effective 18 September 2026; `terms_consent` starts empty, so
+every user meets the acceptance modal once on first sign-in — say so in the announcement.
+
 
 1. Announce. **The window is held by suspending the Render web services** (Minty,
    billing-backend, onboarding-backend; decided 2026-09-18) — there is no maintenance gate in
@@ -964,7 +984,10 @@ Dress rehearsal on **staging** first, exactly as below, at least two days before
 6. Deploy the phase-C builds of Minty, `billing-backend`, `onboarding-backend` (Render, from the
    branch that has been green on Postgres since phase C) and the frontends, all with the
    switch off (step 2's values stay).
-7. Smoke: `onboarding/e2e` against production URLs with the E2E entity; the manual checklist;
+7. Smoke: seed (`FLASK_ENV=production scripts/e2e_seed.py --print` + the disposable onboarding
+   entity), then the three e2e suites against the production URLs with `E2E_SUBSCRIPTIONS=0`
+   (the 2026-09-18 run is the template: env names in each suite's helpers); the manual checklist
+   = `cutover_checks.py --uri <project> --old-uri <rehearsal db>`;
    `audit_models.py` against production = 0.
 8. Reopen: end the maintenance hold. **Subscriptions stay dark** — `SUBSCRIPTION_ENABLED`
    and the scheduler flag stay 0 — so there is no scheduler cycle to watch and no webhook to

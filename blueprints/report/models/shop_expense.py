@@ -17,6 +17,7 @@ Was ``ShopExpense`` / ``shop_expense``; the old class name stays importable. Wha
   ``normalize_expense_files(expense.files, expense.s3_key)`` sees what it used to; behind it
   the rows are the record, and they go with the line (CASCADE) - which is what closes F2.
 """
+
 from __future__ import annotations
 
 import mimetypes
@@ -27,6 +28,7 @@ from loguru import logger
 from sqlalchemy.orm import synonym
 
 from blueprints.shared.column_types import MintyUuid, Money, pg_enum
+from blueprints.report.services.receipt_keys import split_receipt_keys
 from blueprints.shared.enums import ExpenseAttachmentRole
 from models.db import db
 from blueprints.shared.schema import SCHEMA
@@ -241,7 +243,7 @@ class ReportExpense(db.Model):
     def files(self, value):
         """Replace the line's receipts with these S3 keys (a comma-joined string or a list)."""
         if isinstance(value, str):
-            keys = [k.strip() for k in value.split(",") if k.strip()]
+            keys = split_receipt_keys(value)  # commas inside a filename are not separators
         else:
             keys = [str(k).strip() for k in (value or []) if str(k).strip()]
         self.set_receipt_keys(keys)

@@ -14,6 +14,7 @@ from blueprints.shared.enums import SaleType
 from models.db import (Report, ReportSale, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
+from blueprints.report.services.receipt_keys import split_receipt_keys  # noqa: F401 - re-exported
 
 safe_float = _safe_float
 parse_nested_keys = _parse_nested_keys
@@ -162,8 +163,7 @@ def normalize_expense_files(
             logger.warning("normalize_expense_files: failed to parse JSON array, falling through")
 
     # --- Format A: comma-separated plain S3 keys ------------------------------
-    for key in trimmed.split(","):
-        key = key.strip()
+    for key in split_receipt_keys(trimmed):
         if key:
             results.append({
                 "s3_key": key,

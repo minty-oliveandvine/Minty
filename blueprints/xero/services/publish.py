@@ -15,7 +15,7 @@ from loguru import logger
 
 from blueprints.report.services.shared import update_report_after_deposit_change
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from blueprints.shared.enums import DiscrepancyType, ReportStatus
+from blueprints.shared.enums import DiscrepancyType, PublishStatus, ReportStatus
 from models.db import (AccountInfo, Report, ReportHistory, User, XeroReportSync, Entity, ShopExpense, XeroContactSync, db)
 from services.auth.token_service import ensure_valid_token, resolve_xero_token
 from services.helpers.xero_bridge import (get_entity_account_settings,
@@ -24,6 +24,7 @@ from blueprints.xero.services import publish_record
 from blueprints.xero.services.publish_errors import (
     PublishFailureReason, translate_xero_error)
 from blueprints.xero.services import publish_errors as _pub_err
+from blueprints.report.services.receipt_keys import safe_stem
 
 
 # Which Xero contact/account mappings each entity-level module depends on.
@@ -36,6 +37,45 @@ DEPS_WITHDRAWAL_PERSONAL = [
     ["contact", "director_contact"], ["account", "director"], ["account", "pettycash"]
 ]
 DEPS_WITHDRAWAL_COMPANY = [["account", "bank"], ["account", "pettycash"]]
+
+
+# ---- expense lines by their Xero ids ---------------------------------------------------
+# Since the redesign a line links to the company's synced rows (account_info,
+# xero_contact_sync); ``ShopExpense.contact_id`` / ``account_code`` are properties that
+# read through them, not columns. Filtering on a property compares a Python object and
+# compiles to WHERE false - the publish then never found its line, so the receipt never
+# reached Xero. These helpers match through the joins.
+
+
+def find_expense_line(report_id, *, item, amount, account_code, contact_id=None):
+    """The report's expense line a Xero bank transaction was built from."""
+    query = ShopExpense.query.join(ShopExpense.account).filter(
+        ShopExpense.report_id == report_id,
+        ShopExpense.amount == amount,
+        ShopExpense.item == item,
+        AccountInfo.xero_code == str(account_code),
+    )
+    if contact_id:
+        query = query.join(ShopExpense.contact).filter(XeroContactSync.xero_contact_id == str(contact_id))
+    return query.first()
+
+
+def expense_line_for_contact(report_id, xero_contact_id):
+    """The report's first line whose supplier is the Xero contact."""
+    return (
+        ShopExpense.query.join(ShopExpense.contact)
+        .filter(ShopExpense.report_id == report_id, XeroContactSync.xero_contact_id == str(xero_contact_id))
+        .first()
+    )
+
+
+def expense_lines_for_contact(xero_contact_id):
+    """Every line, in any report, whose supplier is the Xero contact."""
+    return (
+        ShopExpense.query.join(ShopExpense.contact)
+        .filter(XeroContactSync.xero_contact_id == str(xero_contact_id))
+        .all()
+    )
 
 
 def _record_module_error(pfr, module_label, reason, error_meta=None):
@@ -293,9 +333,7 @@ def ensure_contact_exists_in_xero(entity_id, contact_id, contact_name, access_to
                 )
                 if new_contact_id:
                     try:
-                        expenses = ShopExpense.query.filter_by(
-                            contact_id=contact_id
-                        ).all()
+                        expenses = expense_lines_for_contact(contact_id)
                         for expense in expenses:
                             expense.contact_id = new_contact_id
                         db.session.commit()
@@ -411,10 +449,7 @@ def create_bank_transaction(
         original_contact_id = contact_id
         if contact_id and report_id and type == "SPEND" and type_of_transaction == "expense":
             try:
-                expense_record = ShopExpense.query.filter_by(
-                    report_id=report_id,
-                    contact_id=contact_id
-                ).first()
+                expense_record = expense_line_for_contact(report_id, contact_id)
                 if expense_record:
                     # Try to get contact_name from expense record first
                     if expense_record.contact_name:
@@ -579,21 +614,12 @@ def create_bank_transaction(
                             return created_id or True  # Transaction was created
                         report_id = _report_row.id
 
-                    _filters = [
-                        ShopExpense.report_id == report_id,
-                        ShopExpense.amount == first_unit_amount,
-                        ShopExpense.item == item,
-                        ShopExpense.account_code == account_code,
-                    ]
-                    # contact_id narrowed the posted branch but not the draft
-                    # one. Applied only when truthy, so neither case changes:
-                    # the posted path keeps its narrower match, and a call
-                    # without a contact (the old draft path) is not newly
-                    # filtered into finding nothing.
-                    if contact_id:
-                        _filters.append(ShopExpense.contact_id == contact_id)
-
-                    expense = ShopExpense.query.filter(*_filters).first()
+                    # contact_id narrows the match only when given (the posted
+                    # branch); a call without one is not filtered into nothing.
+                    expense = find_expense_line(
+                        report_id, item=item, amount=first_unit_amount, account_code=account_code,
+                        contact_id=contact_id or None,
+                    )
                     if expense:
                         logger.info(
                             f"Found ShopExpense for {item} in report {report_id}"
@@ -1065,8 +1091,8 @@ def upload_each_file(expense, entity, bank_transction_id, access_token=None):
 
         file_url = expense.s3_key  # the first receipt's key
         file_format = file_url.split(".")[-1]
-        file_name = (expense.remarks or expense.item) + "." + file_format
-        file_name = file_name.replace(" ", "_")
+        # the name Xero shows: normalised like the stored key (receipt_keys.safe_stem)
+        file_name = (safe_stem(expense.remarks or expense.item) or "RECEIPT") + "." + file_format
 
         try:
             # Determine how to fetch the file (S3 key or full URL)
@@ -2566,9 +2592,9 @@ def process_xero_integration_background(
                     if not posted_report:
                         return
 
-                    if posted_report.publishing_status == "processing":
-                        # If processing leaked here, never block forever.
-                        posted_report.publishing_status = "failed"
+                    if posted_report.publishing_status == PublishStatus.PUBLISHING:
+                        # If the in-progress state leaked here, never block forever.
+                        posted_report.publishing_status = PublishStatus.FAILED
 
                     db.session.commit()
                 except Exception as exc:
@@ -2578,8 +2604,8 @@ def process_xero_integration_background(
                     db.session.rollback()
                     try:
                         posted_report = Report.query.get(report_id)
-                        if posted_report and posted_report.publishing_status == "processing":
-                            posted_report.publishing_status = "failed"
+                        if posted_report and posted_report.publishing_status == PublishStatus.PUBLISHING:
+                            posted_report.publishing_status = PublishStatus.FAILED
                             db.session.commit()
                     except Exception as fallback_error:
                         logger.error(

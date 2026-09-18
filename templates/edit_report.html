@@ -471,8 +471,8 @@
                       style="max-width: 100%; overflow: auto;"
                     ></div>
 
-                    <!-- Display existing files -->
-                    {% for file in expense.files.split(',') %}
+                    <!-- Display existing files: one per receipt row (a filename may contain a comma) -->
+                    {% for file in expense.receipt_keys %}
                       <a
                         href="{{ url_for('report.download_file', filename=file) }}"
                         target="_blank"

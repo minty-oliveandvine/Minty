@@ -9,6 +9,7 @@ from loguru import logger
 from sqlalchemy.exc import OperationalError
 
 from blueprints.report import report_bp
+from blueprints.shared.enums import PublishStatus
 from blueprints.xero.services.publish import (
     process_xero_integration_background, validate_expenses_for_system_accounts)
 from blueprints.xero.services.settings import (
@@ -52,7 +53,9 @@ def report_submitted(id=None):
         # keeps publishing_status, so it renders as a first-time publish. Xero
         # object IDs are never stored, so that second publish duplicates every
         # transaction rather than updating it -- warn on it like a republish.
-        was_previously_published = report.publishing_status is not None
+        # The column is NOT NULL since the schema redesign ('unpublished' is the
+        # never-published state), so "is not None" would warn on every report.
+        was_previously_published = report.publishing_status not in (None, PublishStatus.UNPUBLISHED)
         transaction_date = report.transaction_date
     if not entity_id:
         can_publish = False
@@ -262,11 +265,13 @@ def report_submitted_publish_to_xero():
         # publishing
         try:
             # Use SELECT FOR UPDATE with nowait to lock the row and fail fast
-            # if already locked
+            # if already locked. ``of=Report``: the creator and their token are
+            # eager-loaded through LEFT OUTER JOINs, and Postgres refuses to lock
+            # the nullable side of one - without it every publish 500s.
             locked_report = (
                 db.session.query(Report)
                 .filter(Report.id == posted_report.id)
-                .with_for_update(nowait=True)
+                .with_for_update(nowait=True, of=Report)
                 .first()
             )
 
@@ -296,7 +301,7 @@ def report_submitted_publish_to_xero():
             prior_status = locked_report.publishing_status
 
             # Set status to processing atomically
-            locked_report.publishing_status = "publishing"
+            locked_report.publishing_status = PublishStatus.PUBLISHING
             db.session.commit()
             logger.info(f"Lock acquired for report {posted_report.id}")
 
@@ -365,7 +370,7 @@ def report_submitted_publish_to_xero():
         # occurs after status was set.
         try:
             stuck_report = Report.query.get(report_id)
-            if stuck_report and stuck_report.publishing_status == "publishing":
+            if stuck_report and stuck_report.publishing_status == PublishStatus.PUBLISHING:
                 stuck_report.publishing_status = "failed"
                 db.session.commit()
         except Exception as recover_error:

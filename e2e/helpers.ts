@@ -105,3 +105,68 @@ export function subscriptionsDark(): boolean {
   const raw = (process.env.E2E_SUBSCRIPTIONS ?? '1').trim().toLowerCase();
   return raw === '0' || raw === 'false' || raw === 'off';
 }
+
+/**
+ * The e2e shop is connected to a real Xero organisation (a Demo Company, linked by hand) when
+ * ``E2E_XERO=1``: the publish spec runs, and the names below are the organisation's real rows
+ * rather than the seed's placeholders (scripts/e2e_seed.py leaves a connected shop's mapping
+ * alone). Override any name with its own variable.
+ */
+export function xeroLive(): boolean {
+  return (process.env.E2E_XERO ?? '').trim() === '1';
+}
+
+export function fixtures() {
+  const live = xeroLive();
+  const env = (name: string, dflt: string) => (process.env[name] ?? '').trim() || dflt;
+  return {
+    /** typed into the supplier search, and the suggestion clicked */
+    supplierQuery: env('E2E_SUPPLIER_QUERY', live ? 'ABC' : 'E2E Stationery'),
+    supplierName: env('E2E_SUPPLIER', live ? 'ABC Furniture' : 'E2E Stationery Supplier'),
+    /**
+     * typed into the account search; the suggestion shows the NAME (the code on its own line).
+     * The name carries commas on purpose: the receipt's key is minted from it, and a comma
+     * inside a key was once read as a separator - two broken halves, "Key not found" previews
+     * (fixed 2026-09-18). 445 is Light, Power, Heating in a Demo Company and in the seed.
+     */
+    accountQuery: env('E2E_EXPENSE_ACCOUNT_QUERY', 'Light'),
+    accountName: env('E2E_EXPENSE_ACCOUNT', live ? 'Light, Power, Heating' : 'E2E Light, Power, Heating 445'),
+    expenseCode: env('E2E_EXPENSE_ACCOUNT_CODE', '445'),
+    /** the code of the account mapped as petty cash: the deposit's movement is booked against it */
+    pettyCashCode: env('E2E_PETTY_CASH_CODE', live ? '091' : '090'),
+    /** the petty-cash mapping the settings page shows */
+    mappingAccounts: live
+      ? ['Business Savings Account', 'Business Bank Account', 'Sales', 'Revenue Received in Advance', 'Bank Fees']
+      : ['E2E Petty Cash 090', 'E2E Bank 091', 'E2E Cash Sales 200', 'E2E Director Loan 835', 'E2E Cash Discrepancy 499'],
+    mappingContacts: live ? ['24 Locks', 'Angelika Tardaguela', '7-Eleven'] : ['E2E Cash Customer', 'E2E Director', 'E2E Discrepancy'],
+  };
+}
+
+/** A real 1x1 PNG: the browser can decode it, so a receipt that loads has naturalWidth 1. */
+export const RECEIPT_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+/**
+ * The images under ``within`` that did not load (waited for, then ``naturalWidth`` 0): a
+ * receipt whose key the bucket lacks, a static asset that 404s. Data URIs are skipped.
+ */
+export async function brokenImages(page: Page, within = 'body'): Promise<string[]> {
+  return page.evaluate(async (selector) => {
+    const images = Array.from(document.querySelectorAll<HTMLImageElement>(`${selector} img`)).filter(
+      (img) => img.getAttribute('src') && !img.src.startsWith('data:'),
+    );
+    await Promise.all(
+      images.map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              img.addEventListener('load', () => resolve(), { once: true });
+              img.addEventListener('error', () => resolve(), { once: true });
+            }),
+      ),
+    );
+    return images.filter((img) => img.naturalWidth === 0).map((img) => img.src);
+  }, within);
+}
