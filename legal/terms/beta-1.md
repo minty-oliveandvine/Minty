@@ -1,6 +1,6 @@
 # Minty Beta Terms of Use
 
-**Last Updated:** [DATE]
+**Last Updated:** 18 September 2026
 
 These Terms of Use ("Terms") govern your access to and use of Minty ("Minty", the "Service").
 
@@ -335,6 +335,6 @@ The courts of Hong Kong shall have exclusive jurisdiction over disputes arising 
 
 **Olive and Vine Limited**
 
-Email: [INSERT EMAIL]
+Email: hello@dailyminty.com
 
-Address: [INSERT ADDRESS]
+Address: Level 5, K11 Atelier, 728 King's Road, Quarry Bay, HONG KONG

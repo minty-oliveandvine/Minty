@@ -61,9 +61,9 @@ CURRENT_PRIVACY_VERSION = os.environ.get("CURRENT_PRIVACY_VERSION", "beta-1")
 #
 # DEFAULTS TO ON, and should stay on anywhere real people are asked to agree.
 # The opt-out exists so a draft can be hidden for demos and screenshots without
-# PINNING the hash, which would assert the wording is final — a claim that is
-# untrue while beta-1 still contains [DATE], [INSERT EMAIL] and
-# [INSERT ADDRESS].
+# PINNING the hash, which would assert the wording is final. terms/beta-1 is
+# pinned since 2026-09-18 and no longer shows the banner; privacy/beta-1 is
+# still a placeholder draft and does.
 #
 # Because it defaults to on, an environment that simply does not set it — a
 # fresh production deploy, say — still warns. Hiding the banner has to be a
@@ -93,24 +93,28 @@ REQUIRE_TERMS_AT_SIGNUP = (
     os.environ.get("REQUIRE_TERMS_AT_SIGNUP", "true").strip().lower() == "true"
 )
 
-# Publication date per version, as printed in the document header.
-# `beta-1` carries `Last Updated: [DATE]` — an unresolved blank in the source
-# `.docx`. It stays None until the legal owner fills it in, and
-# `GET /legal/current` reports null rather than inventing one.
+# Publication date per version, exactly as printed in the document header (the
+# templates and the onboarding TermsModal render the string verbatim). A version
+# with None has no recorded date, and `GET /legal/current` reports null rather
+# than inventing one. privacy/beta-1 is still a placeholder with no date.
 _EFFECTIVE_DATES: dict[tuple[str, str], str | None] = {
-    (TERMS, "beta-1"): None,
+    (TERMS, "beta-1"): "18 September 2026",
     (PRIVACY, "beta-1"): None,
 }
 
 # Expected SHA-256 per published document. None == draft, not yet pinned.
 #
-# beta-1 is UNPINNED on purpose: the source .docx still contains [DATE],
-# [INSERT EMAIL] and [INSERT ADDRESS], so the wording will change at least
-# once more. Pin it in the same commit that fills those blanks, and before any
-# consent row is written in production — a record that fingerprints a draft is
-# worth less than no record at all.
+# terms/beta-1 was pinned on 2026-09-18, in the commit that filled the header
+# date and the §23 contact email and address. From here on its wording is
+# final: a change of any kind — even a typo — is a new file (`beta-2.md`), never
+# an edit of this one, or every consent row pointing at it looks tampered with.
+#
+# privacy/beta-1 is UNPINNED on purpose: it is a placeholder awaiting the
+# actual policy text (runbook open decision #1). Pin it when that is written,
+# and before any consent row is written in production — a record that
+# fingerprints a draft is worth less than no record at all.
 _PINNED_HASHES: dict[tuple[str, str], str | None] = {
-    (TERMS, "beta-1"): None,
+    (TERMS, "beta-1"): "c90a335ed1b5b8cf5d8f5dc6702117418878594053ef3c0720b7816182c7c438",
     (PRIVACY, "beta-1"): None,
 }
 

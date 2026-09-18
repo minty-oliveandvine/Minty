@@ -894,6 +894,13 @@ Each unit gets its own short plan (files, tests, gate) when it starts; C1's is t
   purpose is to re-measure, before anything is trusted.** The same day the schema name became
   a setting, `MINTY_DB_SCHEMA` (default `pettycashv3`; every suite green under `pettycash_alt`
   too), and the cutover-checks script joined the repo.
+- **Repeated again the same afternoon on a 13:28 backup** (`production-backup_20260918b.dump`,
+  built dark into `minty_v3_20260918`): R2 moved BACK to 238 — a Xero sync between the two
+  backups re-created the one contact the loader had been restoring — re-measured, ALL GREEN
+  (193 s ⇒ window 6 min), `m1a01: skipped`, grants 92→87 / 53→49 on (only the 5 deleted
+  entities' rows differ), checks OK, audit 0. **`backups/minty_pettycashv3_20260918.dump`**
+  (9.4 MB, 59 tables, `-n pettycashv3 --no-owner --no-acl`, dumped before any app touched the
+  build) is the file Phase E step 5 restores on staging.
 - **Resolved 2026-09-18:** both hosts **share the B2 bucket** (user), so `04` writing the old
   keys verbatim is correct and no copy step exists; the cutover dump comes from the user
   (`PROD09182026.backup` → `backups/production-backup_20260918.dump`, the 09-18 rehearsal below).
