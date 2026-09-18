@@ -8,14 +8,15 @@ from uuid import uuid4
 
 from blueprints.shared.column_types import MintyUuid, Money
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class XeroBankTransfer(db.Model):
     __tablename__ = "xero_bank_transfer"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
     sync_report_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"), nullable=False,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"), nullable=False,
     )
     from_bank_account_id = db.Column(db.String(36), nullable=False)
     to_bank_account_id = db.Column(db.String(36), nullable=False)

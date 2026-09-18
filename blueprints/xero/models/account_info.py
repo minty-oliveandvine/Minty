@@ -8,17 +8,18 @@ from uuid import uuid4
 
 from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class AccountInfo(db.Model):
     __tablename__ = "account_info"
     __table_args__ = (
         db.UniqueConstraint("entity_id", "xero_account_id", name="uq_account_entity_xero"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
     entity_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"), nullable=False,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"), nullable=False,
     )
     type = db.Column(db.String(50), nullable=False)
     name = db.Column(db.String(80), nullable=False)

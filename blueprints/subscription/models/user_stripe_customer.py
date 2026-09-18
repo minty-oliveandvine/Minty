@@ -17,16 +17,17 @@ from blueprints.subscription.models.column_types import (
     tz_datetime,
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 
 class UserStripeCustomer(TimestampMixin, db.Model):
     __tablename__ = "user_stripe_customer"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv3.user.id"),
+        db.ForeignKey(f"{SCHEMA}.user.id"),
         nullable=False,
         unique=True,
     )
@@ -47,7 +48,7 @@ class UserStripeCustomer(TimestampMixin, db.Model):
     # Billing currency, fixed at the first charge — a payer's invoices must not mix.
     currency = db.Column(
         db.CHAR(3),
-        db.ForeignKey("pettycashv3.currency_info.currency_code"),
+        db.ForeignKey(f"{SCHEMA}.currency_info.currency_code"),
         nullable=True,
     )
     # No ``paid_through``, ``dunning_started_at`` or ``dunning_attempts`` here any more,

@@ -8,17 +8,18 @@ from uuid import uuid4
 
 from blueprints.shared.column_types import MintyUuid, Money
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class ReportSale(db.Model):
     __tablename__ = "report_sale"
     __table_args__ = (
         db.UniqueConstraint("report_id", "sale_id", name="report_sale_report_sale_key"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
-    report_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.report.id", ondelete="CASCADE"), nullable=False)
-    sale_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.sale_info.id", ondelete="RESTRICT"), nullable=False)
+    report_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"), nullable=False)
+    sale_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.sale_info.id", ondelete="RESTRICT"), nullable=False)
     amount = db.Column(Money(), nullable=False, default=0)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.current_timestamp())
 

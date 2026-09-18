@@ -35,6 +35,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from blueprints.shared.schema import SCHEMA  # noqa: E402
+
+
 E2E_EMAIL = "e2e@minty.test"
 E2E_ENTITY_NAME = "E2E Petty Cash Shop"
 
@@ -180,11 +183,11 @@ def main() -> int:
 
         for code, name in (("429", "E2E Office Expenses"), ("408", "E2E Cleaning")):
             exists = db.session.execute(sql(
-                "SELECT 1 FROM pettycashv3.entity_bill_account_xero WHERE entity_id = :e AND account_code = :c"
+                f"SELECT 1 FROM {SCHEMA}.entity_bill_account_xero WHERE entity_id = :e AND account_code = :c"
             ), {"e": entity.id, "c": code}).first()
             if exists is None:
                 db.session.execute(sql(
-                    "INSERT INTO pettycashv3.entity_bill_account_xero "
+                    f"INSERT INTO {SCHEMA}.entity_bill_account_xero "
                     "(id, entity_id, account_code, account_name, account_type, is_default, is_active, is_deleted, "
                     " xero_account_id, sort_order, created_by, created_at, updated_at) "
                     "VALUES (:id, :e, :c, :n, 'EXPENSE', false, true, false, :x, 0, :u, now(), now())"

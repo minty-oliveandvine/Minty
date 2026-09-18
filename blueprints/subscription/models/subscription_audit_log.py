@@ -17,6 +17,7 @@ from blueprints.subscription.models.column_types import (
     tz_datetime,
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 
 class SubscriptionAuditLog(CreatedAtMixin, db.Model):
@@ -24,19 +25,19 @@ class SubscriptionAuditLog(CreatedAtMixin, db.Model):
     __table_args__ = (
         db.Index("ix_sub_audit_entity_created", "entity_id", "created_at"),
         db.Index("ix_sub_audit_payer_created", "payer_user_id", "created_at"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
-        uuid_column(), db.ForeignKey("pettycashv3.entities.id"), nullable=False
+        uuid_column(), db.ForeignKey(f"{SCHEMA}.entities.id"), nullable=False
     )
     function_code = db.Column(pg_enum(ModuleCode), nullable=False)
     payer_user_id = db.Column(
-        uuid_column(), db.ForeignKey("pettycashv3.user.id"), nullable=False
+        uuid_column(), db.ForeignKey(f"{SCHEMA}.user.id"), nullable=False
     )
     actor_user_id = db.Column(
-        uuid_column(), db.ForeignKey("pettycashv3.user.id"), nullable=True
+        uuid_column(), db.ForeignKey(f"{SCHEMA}.user.id"), nullable=True
     )
 
     action = db.Column(db.String(20), nullable=False)  # cancel / uncancel / transfer_*

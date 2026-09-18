@@ -9,16 +9,17 @@ from sqlalchemy.dialects.postgresql import JSONB
 from blueprints.shared.column_types import MintyUuid
 from blueprints.shared.enums import ModuleCode
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityFunction(db.Model):
     """The catalogue: one row per module Minty sells (``module_code``, item 20)."""
     __tablename__ = "entity_function"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     function_code = db.Column(
-        db.Enum(ModuleCode, name="module_code", schema="pettycashv3", native_enum=True,
+        db.Enum(ModuleCode, name="module_code", schema=SCHEMA, native_enum=True,
                 create_type=False, values_callable=lambda e: [m.value for m in e]),
         unique=True, nullable=False,
     )
@@ -46,21 +47,21 @@ class EntityFunctionMap(db.Model):
     because the paid-subscription guard keys on it.
     """
     __tablename__ = "entity_function_map"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
 
     entity_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         primary_key=True,
     )
     entity_function_id = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.entity_function.id"), primary_key=True,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.entity_function.id"), primary_key=True,
     )
     is_enabled = db.Column(db.Boolean, default=True, nullable=False)
     settings_json = db.Column(db.JSON().with_variant(JSONB(), "postgresql"), nullable=True)
     enabled_at = db.Column(db.DateTime(timezone=True), nullable=True)
     disabled_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_by = db.Column(
-        MintyUuid(), db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"), nullable=True,
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.user.id", ondelete="SET NULL"), nullable=True,
     )
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.current_timestamp())
     updated_at = db.Column(

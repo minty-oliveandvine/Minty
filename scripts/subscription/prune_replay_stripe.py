@@ -63,6 +63,9 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from blueprints.shared.schema import SCHEMA  # noqa: E402
+
+
 UTC = timezone.utc
 CLOCK_PREFIX = "replay-"
 PURPOSE = "scenario-replay"
@@ -91,7 +94,7 @@ def _in_use() -> set[str]:
         try:
             with create_engine(uri).connect() as conn:
                 rows = conn.execute(text(
-                    "SELECT stripe_customer_id FROM pettycashv3.user_stripe_customer "
+                    f"SELECT stripe_customer_id FROM {SCHEMA}.user_stripe_customer "
                     "WHERE stripe_customer_id IS NOT NULL"
                 ))
                 found = {r[0] for r in rows}
@@ -149,10 +152,10 @@ def prune_dangling_rows(delete: bool) -> None:
     no other, and why the payer scoping is load-bearing rather than tidy.
     """
     payers = _replay_payers()
-    where = """
+    where = f"""
         WHERE a.payer_user_id = ANY(:payers)
           AND NOT EXISTS (
-              SELECT 1 FROM pettycashv3.entities e WHERE e.id = a.entity_id
+              SELECT 1 FROM {SCHEMA}.entities e WHERE e.id = a.entity_id
           )
     """
     for name in ("LOCAL_DATABASE_URI", "RDS_DATABASE_URI"):
@@ -164,11 +167,11 @@ def prune_dangling_rows(delete: bool) -> None:
             engine = create_engine(uri)
             with engine.begin() as conn:
                 found = conn.execute(text(
-                    f"SELECT count(*) FROM pettycashv3.subscription_audit_log a {where}"
+                    f"SELECT count(*) FROM {SCHEMA}.subscription_audit_log a {where}"
                 ), {"payers": payers}).scalar()
                 if found and delete:
                     conn.execute(text(
-                        f"DELETE FROM pettycashv3.subscription_audit_log a {where}"
+                        f"DELETE FROM {SCHEMA}.subscription_audit_log a {where}"
                     ), {"payers": payers})
         except Exception as exc:
             # Warn, never raise: this is housekeeping, and the caller may be a replay

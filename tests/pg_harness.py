@@ -48,7 +48,11 @@ from urllib.parse import urlsplit, urlunsplit
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA_SQL = REPO_ROOT / "docs" / "schema" / "01_schema_rebased.sql"
 BUILT_SCHEMA = "pettycash_test"  # what 01_schema_rebased.sql creates
-APP_SCHEMA = "pettycashv3"       # what every model's __table_args__ says
+# What every model's __table_args__ says: blueprints/shared/schema.SCHEMA, read from the same
+# environment variable here (not imported: conftest evicts blueprints.* between app builds).
+# The build renames the schema to THIS, so the whole suite runs under whatever name the app
+# is configured for - `MINTY_DB_SCHEMA=pettycash_alt pytest` is the proof nothing is hardcoded.
+APP_SCHEMA = os.environ.get("MINTY_DB_SCHEMA", "pettycashv3")
 
 
 def admin_uri() -> str:

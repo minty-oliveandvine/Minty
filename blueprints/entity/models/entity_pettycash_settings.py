@@ -1,61 +1,62 @@
 from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityPettycashSettings(db.Model):
     __tablename__ = "entity_pettycash_settings"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
 
     entity_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
+        db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         primary_key=True,
     )
 
     pettycash_account_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"),
         nullable=True,
     )
     bank_account_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"),
         nullable=True,
     )
     cash_sale_account_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"),
         nullable=True,
     )
     discrepancy_bank_account_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"),
         nullable=True,
     )
     discrepancy_account_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"),
         nullable=True,
     )
     director_account_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.account_info.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.account_info.id", ondelete="SET NULL"),
         nullable=True,
     )
 
     cash_sale_contact_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.xero_contact_sync.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.xero_contact_sync.id", ondelete="SET NULL"),
         nullable=True,
     )
     director_contact_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.xero_contact_sync.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.xero_contact_sync.id", ondelete="SET NULL"),
         nullable=True,
     )
     discrepancy_contact_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.xero_contact_sync.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.xero_contact_sync.id", ondelete="SET NULL"),
         nullable=True,
     )
 
