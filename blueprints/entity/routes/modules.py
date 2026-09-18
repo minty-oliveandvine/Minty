@@ -37,6 +37,7 @@ from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
 from services.permission_policy import Role, is_superuser
 from services.user_presence import resume_presence
 from blueprints.shared.enums import ModuleCode
+from blueprints.shared.feature_flags import subscriptions_enabled
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -504,6 +505,8 @@ def subscription_notice_api(entity_id):
 
     if request.method == "OPTIONS":
         return _notice_cors(make_response("", 204))
+    if not subscriptions_enabled():  # dark: no notice exists; the caller treats non-200 as none
+        return _notice_cors(make_response(jsonify({"error": "not_found"}), 404))
 
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):

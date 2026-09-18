@@ -133,17 +133,15 @@
           <a href="{{ url_for('entity_settings', entity_id=org.id) }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
             Entity & Integration
           </a>
-          {% if is_petty_cash_enabled(org.id) %}
+          {# Both tabs stay in the DOM, hidden when their module is off, so the module
+             page's Save can show or hide them from its answer (data-module-tab). #}
           <!-- Petty Cash Settings Tab -->
-          <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
+          <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}" data-module-tab="PETTY_CASH" {% if not is_petty_cash_enabled(org.id) %}style="display:none"{% endif %} class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center" onclick="PageTransition.navigateWithFade(this.href); return false;">
             Petty Cash Settings
           </a>
-          {% endif %}
-          {% if is_billing_enabled(org.id) %}
-          <a href="{{ bill_settings_url }}" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center shrink-0" rel="noopener noreferrer">
+          <a href="{{ bill_settings_url }}" data-module-tab="PAYMENT_REQUEST" {% if not is_billing_enabled(org.id) %}style="display:none"{% endif %} class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors flex items-center justify-center text-center shrink-0" rel="noopener noreferrer">
             Payment Settings
           </a>
-          {% endif %}
           <!-- Module & Subscription Tab (Active) -->
           <button type="button" class="cursor-pointer px-4 py-2 rounded-full text-sm font-medium bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80 transition-colors flex items-center justify-center text-center">
             Module &amp; Subscription

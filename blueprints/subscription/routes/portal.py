@@ -27,6 +27,7 @@ from __future__ import annotations
 from flask import current_app, jsonify, make_response, request
 
 from blueprints.shared import bearer_api
+from blueprints.shared.feature_flags import subscriptions_enabled
 from blueprints.subscription import subscription_bp
 
 
@@ -51,12 +52,19 @@ def _unauthorized(reason: str, status: int = 401):
 def _preflight():
     """The CORS answer to a preflight, or None when this request is not one.
 
-    Every route on this blueprint opens with it. In one place so the preflight contract
+    Every route on this blueprint opens with it - which is why the feature switch is
+    answered here too. In one place so the preflight contract
     -- 204, and the same ``_cors`` headers a real answer carries -- cannot drift across
     the thirteen sites that used to spell it out.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
+    if not subscriptions_enabled():
+        # Subscriptions dark: the portal has nothing to show, on any route. 404 through
+        # _cors like every other refusal, so the browser reads "not there" rather than a
+        # CORS failure. Here rather than in _guard because the payment-method routes open
+        # with the preflight alone.
+        return _cors(make_response(jsonify({"error": "not_found"}), 404))
     return None
 
 

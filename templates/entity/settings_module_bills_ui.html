@@ -127,19 +127,17 @@
           Entity & Integration
         </a>
 
-        {% if is_petty_cash_enabled(org.id) %}
-        <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}?from=bills"
+        {# Both tabs stay in the DOM, hidden when their module is off, so the module page's
+           Save can show or hide them from its answer (data-module-tab). #}
+        <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}?from=bills" data-module-tab="PETTY_CASH" {% if not is_petty_cash_enabled(org.id) %}style="display:none"{% endif %}
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Petty Cash Settings
         </a>
-        {% endif %}
 
-        {% if is_billing_enabled(org.id) %}
-        <a href="{{ bill_settings_url }}"
+        <a href="{{ bill_settings_url }}" data-module-tab="PAYMENT_REQUEST" {% if not is_billing_enabled(org.id) %}style="display:none"{% endif %}
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Payment Settings
         </a>
-        {% endif %}
 
         <!-- Module & Subscription pill — ACTIVE -->
         <button type="button"

@@ -6,7 +6,7 @@ from typing import Protocol
 from urllib.parse import quote
 
 import requests
-from flask import (current_app, flash, g, jsonify, redirect, render_template,
+from flask import (abort, current_app, flash, g, jsonify, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
@@ -23,6 +23,8 @@ from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.entity.services.xero_account_mapping_post import (
     apply_country_currency_selection, process_xero_account_mapping_post)
 from blueprints.shared.entity_display import build_entity_acronym
+from blueprints.shared.feature_flags import (require_subscriptions_enabled,
+                                             subscriptions_enabled)
 from blueprints.xero.services.settings import sync_entity_xero_status
 from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
                        EntityAccountXero, EntityPettycashSettings, User,
@@ -1243,6 +1245,38 @@ def entity_settings_module(org_id):
 
     entity_acronym = build_entity_acronym(org.name) if org else ""
 
+    from_param = request.args.get("from")
+    template = (
+        "entity/settings_module_bills_ui.html"
+        if from_param == "bills"
+        else "entity/settings_module.html"
+    )
+
+    if not subscriptions_enabled():
+        # Subscriptions dark (blueprints/shared/feature_flags.py): the modules and their
+        # on/off state, and an admin's switch - no Stripe read, no panel, no notice. The
+        # template branches on ``subscriptions_enabled`` (context processor) and reads
+        # only ``plain_modules`` and ``can_manage_modules`` in that branch.
+        from blueprints.entity.services.modules import get_plain_module_cards
+
+        return render_template(
+            template,
+            org=org,
+            entity_acronym=entity_acronym,
+            plain_modules=get_plain_module_cards(org_id),
+            module_cards=[],
+            subscription_summary=None,
+            subscription_panel=None,
+            next_payment_date=None,
+            can_manage_modules=has_permission(current_user, Permission.MODULE_MANAGE, org_id),
+            consent_takeover=None,
+            subscription_payer=None,
+            dev_tools=False,
+            bill_settings_url=billing_settings_app_url(
+                org_id, org, current_user.id, from_bills=from_param == "bills"
+            ),
+        )
+
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
     # Never shown. The anchor only answers "has this payer ever been billed", which is
@@ -1288,13 +1322,6 @@ def entity_settings_module(org_id):
 
     consent_takeover = build_consent_takeover(
         org_id, current_user.id, can_manage=can_manage_modules
-    )
-
-    from_param = request.args.get("from")
-    template = (
-        "entity/settings_module_bills_ui.html"
-        if from_param == "bills"
-        else "entity/settings_module.html"
     )
 
     return render_template(
@@ -1350,8 +1377,48 @@ def _nominate_if_given(org_id, payload):
     return None
 
 
+@entity_bp.route("/entity/settings/module/<string:org_id>/toggle", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+@require_permission(
+    Permission.MODULE_MANAGE,
+    entity_arg="org_id",
+    message="You do not have permission to manage modules for this entity.",
+)
+def entity_settings_module_toggle(org_id):
+    """Save the company's module switches - the module page's Save button while
+    subscriptions are dark. JSON ``{"modules": {code: bool, ...}}`` in; the saved state of
+    every catalogue module out, ``{"modules": {code: bool}}``, which the page's panel
+    re-renders from.
+
+    Exists only in that mode: once subscriptions are live, access is a projection of
+    the subscription row and the decision modal is the one way to change it, so this
+    answers 404 rather than offering a second route to the same modules.
+    """
+    if subscriptions_enabled():
+        abort(404)
+    from blueprints.entity.services.modules import (MODULE_CODES, _enabled_state,
+                                                    set_entity_module)
+
+    payload = request.get_json(silent=True) or {}
+    wanted = payload.get("modules")
+    if not isinstance(wanted, dict) or not wanted:
+        return jsonify({"error": "modules is required: {code: true|false}"}), 400
+    for code, enabled in wanted.items():
+        code = str(code or "").strip().upper()
+        if code not in MODULE_CODES:
+            return jsonify({"error": f"Unknown module code: {code!r}."}), 400
+        data, status = set_entity_module(
+            org_id, code, bool(enabled), actor="settings_ui", user_id=str(current_user.id)
+        )
+        if status != 200:
+            return jsonify(data), status
+    return jsonify({"modules": _enabled_state(org_id)}), 200
+
+
 @entity_bp.route("/entity/settings/module/<string:org_id>/checkout", methods=["POST"])
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1412,6 +1479,7 @@ def entity_settings_module_checkout(org_id):
     "/entity/settings/module/<string:org_id>/authorize-billing", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1507,6 +1575,7 @@ def _session_payment_methods(handler):
     "/entity/settings/module/<string:org_id>/payment-methods", methods=["GET"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1535,6 +1604,7 @@ def entity_settings_module_payment_methods(org_id):
     methods=["POST"],
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1557,6 +1627,7 @@ def entity_settings_module_payment_methods_setup_intent(org_id):
     "/entity/settings/module/<string:org_id>/payment-methods/confirm", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1587,6 +1658,7 @@ def entity_settings_module_payment_methods_confirm(org_id):
     "/entity/settings/module/<string:org_id>/payment-methods/default", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1640,6 +1712,7 @@ def _restart_state_and_codes(org_id, requested):
     "/entity/settings/module/<string:org_id>/restart-quote", methods=["GET"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1679,6 +1752,7 @@ def entity_settings_module_restart_quote(org_id):
     "/entity/settings/module/<string:org_id>/restart-billing", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1780,6 +1854,7 @@ def _entity_has_card(entity_id) -> bool:
     "/entity/settings/module/<string:org_id>/confirm-billing", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1838,6 +1913,7 @@ def entity_settings_module_confirm_billing(org_id):
     "/entity/settings/module/<string:org_id>/checkout-complete", methods=["GET"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1891,6 +1967,7 @@ def entity_settings_module_checkout_complete(org_id):
 
 @entity_bp.route("/entity/settings/module/<string:org_id>/start-trial", methods=["POST"])
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1935,6 +2012,7 @@ def entity_settings_module_start_trial(org_id):
     "/entity/settings/module/<string:org_id>/resume-preview", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -1994,6 +2072,7 @@ def entity_settings_module_resume_preview(org_id):
     "/entity/settings/module/<string:org_id>/subscribe-preview", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -2035,6 +2114,7 @@ def entity_settings_module_subscribe_preview(org_id):
     "/entity/settings/module/<string:org_id>/cancel-preview", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -2106,6 +2186,7 @@ def entity_settings_module_cancel_preview(org_id):
 
 @entity_bp.route("/entity/settings/module/<string:org_id>/retry-payment", methods=["POST"])
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -2183,6 +2264,7 @@ def entity_settings_module_retry_payment(org_id):
 
 @entity_bp.route("/entity/settings/module/<string:org_id>/cancel", methods=["POST"])
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -2228,6 +2310,7 @@ def entity_settings_module_cancel(org_id):
     "/entity/settings/module/<string:org_id>/payment-method", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -2283,6 +2366,7 @@ def entity_settings_module_payment_method(org_id):
 
 @entity_bp.route("/entity/settings/module/<string:org_id>/renew", methods=["POST"])
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,
@@ -2318,6 +2402,7 @@ def entity_settings_module_renew(org_id):
     "/entity/settings/module/<string:org_id>/manage-billing", methods=["POST"]
 )
 @login_required
+@require_subscriptions_enabled
 @require_entity_access(entity_arg="org_id")
 @require_permission(
     Permission.MODULE_MANAGE,

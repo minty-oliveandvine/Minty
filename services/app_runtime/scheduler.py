@@ -119,6 +119,14 @@ def start_scheduler(app):
     Called from ``create_app``. Returning None is the normal case: only the deployed web
     service sets ``SUBSCRIPTION_SCHEDULER_ENABLED``.
     """
+    # The feature switch outranks the scheduler's own: with subscriptions dark there is
+    # nothing to convert, renew or retry, and a timer that charged anyway would be the
+    # one thing the switch exists to make impossible.
+    from blueprints.shared.feature_flags import subscriptions_enabled
+
+    if not subscriptions_enabled():
+        logger.info("scheduler: not started - subscriptions are dark (SUBSCRIPTION_ENABLED)")
+        return None
     if not _flag("SUBSCRIPTION_SCHEDULER_ENABLED", False):
         logger.debug("scheduler: disabled (SUBSCRIPTION_SCHEDULER_ENABLED is not set)")
         return None
