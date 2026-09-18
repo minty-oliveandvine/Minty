@@ -95,3 +95,13 @@ export function moneyRegex(amount: number): RegExp {
   const withCommas = fixed2.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return new RegExp([fixed2, fixed1, withCommas].map((s) => s.replace('.', '\\.')).join('|'));
 }
+
+/**
+ * The mode the stack under test runs in. ``E2E_SUBSCRIPTIONS=0`` says the backends were
+ * started with ``SUBSCRIPTION_ENABLED=0`` (subscriptions dark, the cutover state); unset
+ * or ``1`` means live. Specs that show different screens in the two states branch on it.
+ */
+export function subscriptionsDark(): boolean {
+  const raw = (process.env.E2E_SUBSCRIPTIONS ?? '1').trim().toLowerCase();
+  return raw === '0' || raw === 'false' || raw === 'off';
+}

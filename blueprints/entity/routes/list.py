@@ -11,6 +11,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import aliased
 
 from blueprints.entity import entity_bp
+from blueprints.shared.feature_flags import subscriptions_enabled
 from blueprints.entity.services.modules import (build_subscription_notices,
                                                 claim_subscription_notice,
                                                 get_enabled_modules_for_entities,
@@ -426,7 +427,8 @@ def report_dashboard(id):
     # means logging out between every attempt, and the claim is spent even on a visit
     # that had nothing to show.
     force_notice = bool(current_app.debug) and request.args.get("notice") == "1"
-    claimed = force_notice or claim_subscription_notice(session, id)
+    # dark: no notice, and the claim is not spent (nothing to claim)
+    claimed = subscriptions_enabled() and (force_notice or claim_subscription_notice(session, id))
     subscription_notice = None
     if claimed:
         try:

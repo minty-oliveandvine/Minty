@@ -1,0 +1,142 @@
+{#
+  THE MODULE PAGE WHILE SUBSCRIPTIONS ARE DARK (blueprints/shared/feature_flags.py).
+
+  One card per module with its switch - a PENDING choice until Save. Save writes the whole
+  set and repaints from the server's answer: the cards' status words, the settings tabs
+  (data-module-tab) and the side panel's module groups (data-module-nav, the "dashboard" of
+  what the company can open) - no reload. No price, no trial, no notice: none of that exists
+  until the feature is switched on.
+
+  ``plain_modules`` comes from entity.services.modules.get_plain_module_cards; Save posts
+  ``{modules: {code: bool}}`` to ``entity_settings_module_toggle``, a dark-mode-only route.
+#}
+<p class="text-sm text-gray-600 mb-6">Choose which modules your company wants to use.
+  {%- if not can_manage_modules %}
+  <span class="text-gray-400">(Only admins can change modules.)</span>
+  {%- endif %}
+</p>
+
+<div class="space-y-4" id="plainModules"
+     data-save-url="{{ url_for('entity.entity_settings_module_toggle', org_id=org.id) }}">
+    {% for card in plain_modules %}
+    <div class="flex flex-wrap items-start gap-4 rounded-2xl border border-gray-200/70 bg-white p-4 shadow-sm transition-shadow hover:shadow-md" data-module-card="{{ card.code }}">
+      <div class="shrink-0 w-20 h-20 rounded-xl border border-gray-100 bg-white flex items-center justify-center overflow-hidden">
+        <img src="{{ url_for('static', filename=card.image) }}" alt="{{ card.name }}" class="w-full h-full object-contain" />
+      </div>
+      <div class="flex-1 min-w-0">
+        <h3 class="font-bold text-gray-900">{{ card.name }}</h3>
+        <p class="text-sm text-gray-600 mt-1">{{ card.description }}</p>
+        <a href="{{ card.learn_more }}" target="_blank" rel="noopener noreferrer" class="text-sm text-gray-500 underline mt-2 inline-block hover:text-gray-700">Learn more</a>
+      </div>
+      <div class="w-full shrink-0 flex flex-row items-center justify-between gap-3 pt-0.5 sm:w-auto sm:flex-col sm:items-end">
+        <span class="text-sm font-semibold {{ 'text-[#2FBFC7]' if card.enabled else 'text-gray-400' }}" data-module-status="{{ card.code }}">{{ 'active' if card.enabled else 'not active' }}</span>
+        {% if can_manage_modules %}
+        <button type="button" role="switch" aria-checked="{{ 'true' if card.enabled else 'false' }}" aria-label="{{ card.name }}"
+                data-module-switch="{{ card.code }}" data-saved="{{ 'true' if card.enabled else 'false' }}"
+                class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[#2FBFC7] focus:ring-offset-2 {{ 'bg-[#2FBFC7]' if card.enabled else 'bg-gray-300' }}">
+          <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform {{ 'translate-x-5' if card.enabled else 'translate-x-0.5' }}"></span>
+        </button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+
+    {% if can_manage_modules %}
+    <div class="flex items-center justify-end gap-3 pt-2">
+      <span class="text-xs text-gray-500 hidden" data-unsaved>Unsaved changes</span>
+      <button type="button" data-save-modules disabled
+              class="bg-[#54d3da] hover:bg-[#54d3da]/90 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold px-6 py-3 rounded-xl shadow-sm transition-colors">
+        Save
+      </button>
+    </div>
+    {% endif %}
+</div>
+
+{% if can_manage_modules %}
+<script>
+  (function () {
+    var root = document.getElementById('plainModules');
+    if (!root) return;
+    var url = root.getAttribute('data-save-url');
+    var csrf = (document.querySelector('meta[name="csrf_token"]') || {}).content || '';
+    var saveButton = root.querySelector('[data-save-modules]');
+    var unsaved = root.querySelector('[data-unsaved]');
+
+    function switches() { return Array.prototype.slice.call(root.querySelectorAll('[data-module-switch]')); }
+    function isOn(button) { return button.getAttribute('aria-checked') === 'true'; }
+
+    function paintSwitch(button, on) {
+      button.setAttribute('aria-checked', on ? 'true' : 'false');
+      button.classList.toggle('bg-[#2FBFC7]', on);
+      button.classList.toggle('bg-gray-300', !on);
+      var knob = button.firstElementChild;
+      if (knob) {
+        knob.classList.toggle('translate-x-5', on);
+        knob.classList.toggle('translate-x-0.5', !on);
+      }
+    }
+
+    // The saved state, everywhere the page shows it: the card's status word, the settings
+    // tabs above, and the side panel's module groups (rendered hidden when off).
+    function paintSaved(code, on) {
+      var status = root.querySelector('[data-module-status="' + code + '"]');
+      if (status) {
+        status.textContent = on ? 'active' : 'not active';
+        status.classList.toggle('text-[#2FBFC7]', on);
+        status.classList.toggle('text-gray-400', !on);
+      }
+      // an inline style, not the hidden attribute: Tailwind's .flex utility outranks [hidden]
+      document.querySelectorAll('[data-module-tab="' + code + '"], [data-module-nav="' + code + '"]').forEach(function (el) {
+        el.style.display = on ? '' : 'none';
+      });
+    }
+
+    function refreshDirty() {
+      var dirty = switches().some(function (b) { return (b.getAttribute('data-saved') === 'true') !== isOn(b); });
+      saveButton.disabled = !dirty;
+      unsaved.classList.toggle('hidden', !dirty);
+    }
+
+    root.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-module-switch]');
+      if (!button) return;
+      paintSwitch(button, !isOn(button));  // pending until Save
+      refreshDirty();
+    });
+
+    saveButton.addEventListener('click', function () {
+      if (saveButton.disabled) return;
+      var modules = {};
+      switches().forEach(function (b) { modules[b.getAttribute('data-module-switch')] = isOn(b); });
+      saveButton.disabled = true;
+      saveButton.textContent = 'Saving…';
+      fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ modules: modules })
+      })
+        .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+        .then(function (r) {
+          if (!r.ok) throw new Error((r.body && (r.body.error || r.body.message)) || 'Could not save the modules.');
+          var saved = r.body.modules || {};
+          switches().forEach(function (b) {
+            var code = b.getAttribute('data-module-switch');
+            var on = !!saved[code];
+            b.setAttribute('data-saved', on ? 'true' : 'false');
+            paintSwitch(b, on);
+            paintSaved(code, on);
+          });
+          if (window.showSuccessToast) window.showSuccessToast('Modules saved.');
+        })
+        .catch(function (err) {
+          if (window.showErrorToast) window.showErrorToast(err.message || 'Could not save the modules.');
+        })
+        .finally(function () {
+          saveButton.textContent = 'Save';
+          refreshDirty();
+        });
+    });
+  })();
+</script>
+{% endif %}
