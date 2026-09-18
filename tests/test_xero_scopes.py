@@ -59,26 +59,14 @@ IDENTITY_SCOPES = frozenset({"openid", "profile", "email", "offline_access"})
 # App/db plumbing (same pattern as test_entity_create.py)
 # ---------------------------------------------------------------------------
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -416,8 +404,8 @@ def test_every_xero_call_succeeds_with_granted_scopes(app, client, db_session, m
         # files: receipts go through the Files API, not the Accounting
         # attachments endpoint. That endpoint has no DELETE, so a republish
         # could never remove a receipt it had replaced.
-        expense = SimpleNamespace(
-            files="https://cdn.example.test/receipt.png",
+        expense = SimpleNamespace(  # C4: the first receipt's key is ``s3_key`` (no ``files``)
+            s3_key="https://cdn.example.test/receipt.png",
             remarks="fuel receipt",
             item="fuel",
         )

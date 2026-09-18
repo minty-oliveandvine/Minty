@@ -39,6 +39,8 @@ class _Plan:
         self.currency = currency
 
 
+from blueprints.subscription.services.billing import plan_code
+
 PLANS = {
     "BILL": _Plan("Payment Request", 28000),
     "PETTY_CASH": _Plan("Petty Cash", 28000),
@@ -71,7 +73,8 @@ def _wire(app, monkeypatch, *, anchor=_ANCHOR, plans=None):
     catalog = PLANS if plans is None else plans
     monkeypatch.setattr(
         store, "billing_plan_for_codes",
-        lambda codes: catalog.get("+".join(sorted(str(c).upper() for c in codes))),
+        # keyed by plan words (BILL), asked with module codes (PAYMENT_REQUEST): plan_code maps
+        lambda codes: catalog.get(plan_code(codes)),
     )
     monkeypatch.setattr(
         store, "billing_cycle_for_user", lambda uid: (anchor, "HKD")
@@ -89,10 +92,10 @@ def test_forecast_is_the_upgrade_net_not_the_new_price(app, monkeypatch):
     modules = _wire(app, monkeypatch)
 
     out = modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL")]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST")]
     )
 
-    assert out == {"BILL": 37333 - 26133 == 11200 and 11200}
+    assert out == {"PAYMENT_REQUEST": 37333 - 26133 == 11200 and 11200}
 
 
 def test_forecast_equals_what_build_change_bills(app, monkeypatch):
@@ -108,14 +111,14 @@ def test_forecast_equals_what_build_change_bills(app, monkeypatch):
 
     period = period_containing(_ANCHOR, _CONVERTS_AT)
     invoice = changes.build_change(
-        "e1", "Alpha Co", {"PETTY_CASH"}, {"PETTY_CASH", "BILL"}, period, _CONVERTS_AT
+        "e1", "Alpha Co", {"PETTY_CASH"}, {"PETTY_CASH", "PAYMENT_REQUEST"}, period, _CONVERTS_AT
     )
 
     out = modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL")]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST")]
     )
 
-    assert out["BILL"] == invoice.total
+    assert out["PAYMENT_REQUEST"] == invoice.total
 
 
 def test_every_figure_comes_from_build_change(app, monkeypatch):
@@ -140,11 +143,11 @@ def test_every_figure_comes_from_build_change(app, monkeypatch):
 
     out = modules._forecast_conversion_charges(
         "e1", "u1", set(),
-        [_card("PETTY_CASH", at=_CONVERTS_AT), _card("BILL", at=_LATER)],
+        [_card("PETTY_CASH", at=_CONVERTS_AT), _card("PAYMENT_REQUEST", at=_LATER)],
     )
 
     # Both the anchoring conversion AND the later one, or one of them is doing its own maths.
-    assert out == {"PETTY_CASH": 999, "BILL": 999}
+    assert out == {"PETTY_CASH": 999, "PAYMENT_REQUEST": 999}
 
 
 def test_forecast_prorates_against_the_period_the_conversion_LANDS_in(app, monkeypatch):
@@ -164,14 +167,14 @@ def test_forecast_prorates_against_the_period_the_conversion_LANDS_in(app, monke
     assert landing.start > _ANCHOR, "should be a LATER period, not the anchor's own"
 
     expected = changes.build_change(
-        "e1", "Alpha Co", {"PETTY_CASH"}, {"PETTY_CASH", "BILL"}, landing, next_cycle
+        "e1", "Alpha Co", {"PETTY_CASH"}, {"PETTY_CASH", "PAYMENT_REQUEST"}, landing, next_cycle
     )
 
     out = modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL", at=next_cycle)]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST", at=next_cycle)]
     )
 
-    assert out["BILL"] == expected.total
+    assert out["PAYMENT_REQUEST"] == expected.total
 
 
 # --- the sequence ---------------------------------------------------------------
@@ -191,7 +194,7 @@ def test_a_later_trial_is_prorated_against_the_cycle_the_first_one_starts(app, m
 
     out = modules._forecast_conversion_charges(
         "e1", "u1", set(),
-        [_card("BILL", at=_LATER), _card("PETTY_CASH", at=_CONVERTS_AT)],
+        [_card("PAYMENT_REQUEST", at=_LATER), _card("PETTY_CASH", at=_CONVERTS_AT)],
     )
 
     # Petty Cash converts first, so it starts the cycle: a full period at its own price.
@@ -199,11 +202,11 @@ def test_a_later_trial_is_prorated_against_the_cycle_the_first_one_starts(app, m
     # Payment Request then joins a cycle anchored on Petty Cash's conversion date, and
     # pays only the remainder — strictly less than a month of it.
     expected = changes.build_change(
-        "e1", "e1", {"PETTY_CASH"}, {"PETTY_CASH", "BILL"},
+        "e1", "e1", {"PETTY_CASH"}, {"PETTY_CASH", "PAYMENT_REQUEST"},
         period_containing(_CONVERTS_AT, _LATER), _LATER,
     )
-    assert out["BILL"] == expected.total
-    assert 0 < out["BILL"] < 28000, "a part-period must cost less than a whole one"
+    assert out["PAYMENT_REQUEST"] == expected.total
+    assert 0 < out["PAYMENT_REQUEST"] < 28000, "a part-period must cost less than a whole one"
 
 
 def test_order_is_by_date_not_by_card_order(app, monkeypatch):
@@ -216,10 +219,10 @@ def test_order_is_by_date_not_by_card_order(app, monkeypatch):
 
     out = modules._forecast_conversion_charges(
         "e1", "u1", set(),
-        [_card("PETTY_CASH", at=_LATER), _card("BILL", at=_CONVERTS_AT)],
+        [_card("PETTY_CASH", at=_LATER), _card("PAYMENT_REQUEST", at=_CONVERTS_AT)],
     )
 
-    assert out["BILL"] == 28000, "BILL converts first, so BILL anchors at a full period"
+    assert out["PAYMENT_REQUEST"] == 28000, "BILL converts first, so BILL anchors at a full period"
     assert 0 < out["PETTY_CASH"] < 28000
 
 
@@ -234,10 +237,10 @@ def test_two_trials_converting_the_same_day_total_the_bundle(app, monkeypatch):
 
     out = modules._forecast_conversion_charges(
         "e1", "u1", set(),
-        [_card("PETTY_CASH", at=_CONVERTS_AT), _card("BILL", at=_CONVERTS_AT)],
+        [_card("PETTY_CASH", at=_CONVERTS_AT), _card("PAYMENT_REQUEST", at=_CONVERTS_AT)],
     )
 
-    assert out["PETTY_CASH"] + out["BILL"] == 40000
+    assert out["PETTY_CASH"] + out["PAYMENT_REQUEST"] == 40000
 
 
 def test_a_trial_that_will_not_convert_is_skipped_and_does_not_anchor(app, monkeypatch):
@@ -252,12 +255,12 @@ def test_a_trial_that_will_not_convert_is_skipped_and_does_not_anchor(app, monke
         "e1", "u1", set(),
         [
             _card("PETTY_CASH", at=_CONVERTS_AT, needs_card=True),  # expires
-            _card("BILL", at=_LATER),                               # converts
+            _card("PAYMENT_REQUEST", at=_LATER),                               # converts
         ],
     )
 
     assert "PETTY_CASH" not in out
-    assert out["BILL"] == 28000, "BILL is the first real conversion, so it anchors"
+    assert out["PAYMENT_REQUEST"] == 28000, "BILL is the first real conversion, so it anchors"
 
 
 # --- the quiet cases -----------------------------------------------------------
@@ -275,9 +278,9 @@ def test_the_conversion_that_starts_the_cycle_is_charged_a_full_period(app, monk
     """
     modules = _wire(app, monkeypatch, anchor=None)
 
-    out = modules._forecast_conversion_charges("e1", "u1", set(), [_card("BILL")])
+    out = modules._forecast_conversion_charges("e1", "u1", set(), [_card("PAYMENT_REQUEST")])
 
-    assert out == {"BILL": 28000}
+    assert out == {"PAYMENT_REQUEST": 28000}
 
 
 def test_an_entity_joining_an_existing_payer_IS_prorated(app, monkeypatch):
@@ -293,13 +296,13 @@ def test_an_entity_joining_an_existing_payer_IS_prorated(app, monkeypatch):
     from blueprints.subscription.services import changes
     from blueprints.subscription.services.billing import period_containing
 
-    out = modules._forecast_conversion_charges("e1", "u1", set(), [_card("BILL")])
+    out = modules._forecast_conversion_charges("e1", "u1", set(), [_card("PAYMENT_REQUEST")])
 
     expected = changes.build_change(
-        "e1", "e1", set(), {"BILL"},
+        "e1", "e1", set(), {"PAYMENT_REQUEST"},
         period_containing(_ANCHOR, _CONVERTS_AT), _CONVERTS_AT,
     )
-    assert out["BILL"] == expected.total > 0
+    assert out["PAYMENT_REQUEST"] == expected.total > 0
 
 
 def test_a_downgrade_forecasts_nothing(app, monkeypatch):
@@ -313,10 +316,10 @@ def test_a_downgrade_forecasts_nothing(app, monkeypatch):
     modules = _wire(app, monkeypatch, plans=cheaper)
 
     out = modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL")]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST")]
     )
 
-    assert out == {"BILL": 0}
+    assert out == {"PAYMENT_REQUEST": 0}
 
 
 def test_an_unpriceable_combination_forecasts_nothing(app, monkeypatch):
@@ -324,24 +327,24 @@ def test_an_unpriceable_combination_forecasts_nothing(app, monkeypatch):
     modules = _wire(app, monkeypatch, plans={"PETTY_CASH": _Plan("Petty Cash", 28000)})
 
     out = modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL")]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST")]
     )
 
-    assert out == {"BILL": 0}
+    assert out == {"PAYMENT_REQUEST": 0}
 
 
 def test_no_payer_or_no_trials_forecasts_nothing(app, monkeypatch):
     modules = _wire(app, monkeypatch)
 
     assert modules._forecast_conversion_charges(
-        "e1", None, {"PETTY_CASH"}, [_card("BILL")]
+        "e1", None, {"PETTY_CASH"}, [_card("PAYMENT_REQUEST")]
     ) == {}
     # A paid module is not a conversion, and a trial with no end date cannot be placed.
     assert modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL", status="active")]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST", status="active")]
     ) == {}
     assert modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL", at=None)]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST", at=None)]
     ) == {}
 
 
@@ -356,5 +359,5 @@ def test_a_broken_lookup_forecasts_nothing_rather_than_failing(app, monkeypatch)
     monkeypatch.setattr(store, "billing_cycle_for_user", _boom)
 
     assert modules._forecast_conversion_charges(
-        "e1", "u1", {"PETTY_CASH"}, [_card("BILL")]
+        "e1", "u1", {"PETTY_CASH"}, [_card("PAYMENT_REQUEST")]
     ) == {}

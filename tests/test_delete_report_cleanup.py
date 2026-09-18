@@ -237,8 +237,10 @@ class TestDeleteReportCleansSiblingDrafts:
     def test_other_drafts_expenses_are_deleted(self):
         """Sibling rows' expense records must be deleted."""
         source = self._get_delete_function_source()
-        assert "ShopExpense.query.filter_by(report_id=draft.id).delete()" in source, (
-            "ShopExpense must be deleted for each sibling draft"
+        # C4: the lines go through the receipts-aware helper, so their attachments
+        # leave S3 with them (F2).
+        assert "_delete_expenses_with_receipts(draft.id)" in source, (
+            "the expense lines (and their receipts) must be deleted for each sibling draft"
         )
 
     def test_exception_handler_rolls_back(self):

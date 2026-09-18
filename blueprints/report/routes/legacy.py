@@ -180,7 +180,7 @@ def report_insert_xero_transaction() -> Any:
         total_tax=0.0,
         total=1500.0,
         status="AUTHORISED",
-        create_at=datetime.now(tz),
+        created_at=datetime.now(tz),
     )
 
     # Insert into database

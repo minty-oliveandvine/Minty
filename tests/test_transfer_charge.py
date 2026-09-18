@@ -88,7 +88,7 @@ def _wire(monkeypatch, *, anchor=ANCHOR, issued=None, raises=None, existing=None
 
 def _charge(checkout, **kw):
     return checkout._bill_transfer_in_house(
-        "e1", "new-payer", "cus_new", {"BILL"}, at=AT, idempotency_key=KEY, **kw
+        "e1", "new-payer", "cus_new", {"PAYMENT_REQUEST"}, at=AT, idempotency_key=KEY, **kw
     )
 
 
@@ -276,7 +276,7 @@ def test_the_quote_matches_what_is_actually_charged(monkeypatch):
     hand instead of sharing it — it shipped quoting zero. These call one function."""
     checkout, calls = _wire(monkeypatch)
 
-    quote = checkout.quote_transfer_charge("e1", "new-payer", {"BILL"}, at=AT)
+    quote = checkout.quote_transfer_charge("e1", "new-payer", {"PAYMENT_REQUEST"}, at=AT)
     _charge(checkout)
 
     _cid, invoice, _kw = calls["issued"][0]
@@ -290,7 +290,7 @@ def test_quoting_an_unanchored_payer_writes_nothing(monkeypatch):
     WOULD become, it does not set it."""
     checkout, calls = _wire(monkeypatch, anchor=None)
 
-    quote = checkout.quote_transfer_charge("e1", "new-payer", {"BILL"}, at=AT)
+    quote = checkout.quote_transfer_charge("e1", "new-payer", {"PAYMENT_REQUEST"}, at=AT)
 
     assert quote["anchor_is_new"] is True
     assert quote["anchor_at"] == AT

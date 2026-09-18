@@ -23,8 +23,6 @@ from werkzeug.security import generate_password_hash
 
 UTC = timezone.utc
 
-_schema_attached = False
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,21 +31,11 @@ _schema_attached = False
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -56,6 +44,18 @@ def db_session(app):
             except Exception:
                 pass
         db.session.commit()
+
+
+def _company(db, label):
+    """A real company row for a test label: entity_module_subscription.entity_id is a uuid FK
+    to entities since C7, so the labels the tests used to write ("e1") become rows."""
+    from models.db import Entity
+
+    eid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"notify-company-{label}"))
+    if db.session.get(Entity, eid) is None:
+        db.session.add(Entity(id=eid, name=f"Company {label}", status="disconnected"))
+        db.session.flush()
+    return eid
 
 
 def _make_payer(db, email="payer@test.com"):
@@ -310,7 +310,7 @@ def test_a_trial_that_needs_action_says_what_to_do_and_by_when(app, db_session, 
     with app.app_context():
         payer = _make_payer(db_session)
         notify.notify(payer, notify.TRIAL_ENDING, dedupe_key="k", context={
-            "entity_id": "e1",
+            "entity_id": _company(db_session, "e1"),
             "entity_name": "Olive Ltd",
             "codes": ["PETTY_CASH"],
             "trial_end": frozen + timedelta(days=7),
@@ -329,7 +329,7 @@ def test_a_trial_that_needs_action_says_what_to_do_and_by_when(app, db_session, 
         assert "choose a subscription plan" in message.html
         assert "8 Sep 2026" in message.html
         assert "Go to Manage Subscription" in message.html
-        assert "https://app.minty.test/entity/settings/module/e1" in message.html
+        assert f"https://app.minty.test/entity/settings/module/{_company(db_session, 'e1')}" in message.html
 
 
 def test_the_trial_countdown_never_reads_as_a_negative(app, db_session, mail,
@@ -347,7 +347,7 @@ def test_the_trial_countdown_never_reads_as_a_negative(app, db_session, mail,
                                       ("same", 0, "today"),
                                       ("one", 1, "in 1 day")):
             notify.notify(payer, notify.TRIAL_ENDING, dedupe_key=key, context={
-                "entity_id": "e1", "entity_name": "Olive Ltd", "codes": ["BILL"],
+                "entity_id": _company(db_session, "e1"), "entity_name": "Olive Ltd", "codes": ["PAYMENT_REQUEST"],
                 "trial_end": frozen + timedelta(days=offset), "needs_card": True,
             })
             assert mail.sent[-1].subject == f"Your Minty trial ends {expected}"
@@ -365,7 +365,7 @@ def test_the_two_blocked_trial_states_now_read_identically(app, db_session, mail
     from blueprints.subscription.services import notify
 
     base = {
-        "entity_id": "e1",
+        "entity_id": _company(db_session, "e1"),
         "entity_name": "Olive Ltd",
         "codes": ["PETTY_CASH"],
         "trial_end": datetime(2026, 9, 1, tzinfo=UTC),
@@ -398,7 +398,7 @@ def test_the_trial_email_states_no_price(app, db_session, mail):
     with app.app_context():
         payer = _make_payer(db_session)
         notify.notify(payer, notify.TRIAL_ENDING, dedupe_key="k", context={
-            "entity_id": "e1", "entity_name": "Olive Ltd", "codes": ["BILL"],
+            "entity_id": _company(db_session, "e1"), "entity_name": "Olive Ltd", "codes": ["PAYMENT_REQUEST"],
             "trial_end": datetime(2026, 9, 1, tzinfo=UTC),
             "amount": 40000, "currency": "HKD", "needs_card": True,
         })
@@ -438,7 +438,7 @@ def test_links_are_dropped_rather_than_pointed_at_localhost(app, db_session, mai
         payer = _make_payer(db_session)
         app.config["PUBLIC_URL"] = None
         notify.notify(payer, notify.TRIAL_EXPIRED, dedupe_key="k", context={
-            "entity_id": "e1", "entity_name": "Olive Ltd", "codes": ["BILL"],
+            "entity_id": _company(db_session, "e1"), "entity_name": "Olive Ltd", "codes": ["PAYMENT_REQUEST"],
         })
 
         html = mail.sent[0].html
@@ -743,10 +743,10 @@ def test_trials_ending_soon_are_found_in_a_one_day_window(app, db_session):
     with app.app_context():
         now = datetime(2026, 8, 4, 12, tzinfo=UTC)
         payer = _make_payer(db_session)
-        for days, code in ((3, "BILL"), (5, "PETTY_CASH")):
+        for days, code in ((3, "PAYMENT_REQUEST"), (5, "PETTY_CASH")):
             db_session.session.add(EntityModuleSubscription(
                 id=str(uuid.uuid4()),
-                entity_id=f"e{days}",
+                entity_id=_company(db_session, f"e{days}"),
                 function_code=code,
                 payer_user_id=payer,
                 phase="trial",
@@ -757,7 +757,7 @@ def test_trials_ending_soon_are_found_in_a_one_day_window(app, db_session):
         start = now + timedelta(days=3)
         found = store.trials_ending_between(start, start + timedelta(days=1))
 
-        assert [row.function_code for row in found] == ["BILL"]
+        assert [row.function_code for row in found] == ["PAYMENT_REQUEST"]
 
 
 def test_the_warning_window_is_day_aligned_not_run_time_aligned(
@@ -780,8 +780,8 @@ def test_the_warning_window_is_day_aligned_not_run_time_aligned(
         trial_end = datetime(2026, 8, 20, 5, 0, tzinfo=UTC)
         db_session.session.add(EntityModuleSubscription(
             id=str(uuid.uuid4()),
-            entity_id="e1",
-            function_code="BILL",
+            entity_id=_company(db_session, "e1"),
+            function_code="PAYMENT_REQUEST",
             payer_user_id=payer,
             phase="trial",
             trial_end=trial_end,
@@ -797,7 +797,7 @@ def test_the_warning_window_is_day_aligned_not_run_time_aligned(
         )
         result = checkout.notify_trials_ending(days_before=3)
 
-        assert [w["entity_id"] for w in result["warned"]] == ["e1"]
+        assert [w["entity_id"] for w in result["warned"]] == [_company(db_session, "e1")]
 
 
 def test_a_trial_that_will_convert_cleanly_is_not_warned_at_all(app, db_session,
@@ -817,8 +817,8 @@ def test_a_trial_that_will_convert_cleanly_is_not_warned_at_all(app, db_session,
         payer = _make_payer(db_session)
         db_session.session.add(EntityModuleSubscription(
             id=str(uuid.uuid4()),
-            entity_id="e1",
-            function_code="BILL",
+            entity_id=_company(db_session, "e1"),
+            function_code="PAYMENT_REQUEST",
             payer_user_id=payer,
             phase="trial",
             trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
@@ -849,8 +849,8 @@ def test_a_trial_blocked_only_on_consent_is_still_warned(app, db_session, monkey
         payer = _make_payer(db_session)
         db_session.session.add(EntityModuleSubscription(
             id=str(uuid.uuid4()),
-            entity_id="e1",
-            function_code="BILL",
+            entity_id=_company(db_session, "e1"),
+            function_code="PAYMENT_REQUEST",
             payer_user_id=payer,
             phase="trial",
             trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
@@ -866,7 +866,7 @@ def test_a_trial_blocked_only_on_consent_is_still_warned(app, db_session, monkey
 
         result = checkout.notify_trials_ending(days_before=7)
 
-        assert [w["entity_id"] for w in result["warned"]] == ["e1"]
+        assert [w["entity_id"] for w in result["warned"]] == [_company(db_session, "e1")]
 
 
 def test_a_cancelled_trial_is_not_warned_about(app, db_session):
@@ -881,8 +881,8 @@ def test_a_cancelled_trial_is_not_warned_about(app, db_session):
         payer = _make_payer(db_session)
         db_session.session.add(EntityModuleSubscription(
             id=str(uuid.uuid4()),
-            entity_id="e1",
-            function_code="BILL",
+            entity_id=_company(db_session, "e1"),
+            function_code="PAYMENT_REQUEST",
             payer_user_id=payer,
             phase="scheduled_cancel",
             trial_end=now + timedelta(days=3),
@@ -912,8 +912,8 @@ def test_a_trial_whose_tile_was_MISSED_is_still_warned(app, db_session, monkeypa
         payer = _make_payer(db_session)
         db_session.session.add(EntityModuleSubscription(
             id=str(uuid.uuid4()),
-            entity_id="e_missed",
-            function_code="BILL",
+            entity_id=_company(db_session, "e_missed"),
+            function_code="PAYMENT_REQUEST",
             payer_user_id=payer,
             phase="trial",
             trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
@@ -926,7 +926,7 @@ def test_a_trial_whose_tile_was_MISSED_is_still_warned(app, db_session, monkeypa
         )
         result = checkout.notify_trials_ending(days_before=3)
 
-        assert [w["entity_id"] for w in result["warned"]] == ["e_missed"]
+        assert [w["entity_id"] for w in result["warned"]] == [_company(db_session, "e_missed")]
 
 
 def test_a_trial_ending_TODAY_is_left_to_the_trial_end_job(app, db_session, monkeypatch):
@@ -943,8 +943,8 @@ def test_a_trial_ending_TODAY_is_left_to_the_trial_end_job(app, db_session, monk
         payer = _make_payer(db_session)
         db_session.session.add(EntityModuleSubscription(
             id=str(uuid.uuid4()),
-            entity_id="e_today",
-            function_code="BILL",
+            entity_id=_company(db_session, "e_today"),
+            function_code="PAYMENT_REQUEST",
             payer_user_id=payer,
             phase="trial",
             trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
@@ -983,7 +983,7 @@ def test_a_trial_warning_reaches_a_payer_the_entity_was_handed_to(
 
         trial_end = datetime(2026, 8, 20, 5, 0, tzinfo=UTC)
         row = EntityModuleSubscription(
-            id=str(uuid.uuid4()), entity_id="e1", function_code="BILL",
+            id=str(uuid.uuid4()), entity_id=_company(db_session, "e1"), function_code="PAYMENT_REQUEST",
             payer_user_id=outgoing, phase="trial", trial_end=trial_end,
         )
         db_session.session.add(row)
@@ -995,7 +995,7 @@ def test_a_trial_warning_reaches_a_payer_the_entity_was_handed_to(
 
         # Warned once, to the payer at the time.
         assert [w["entity_id"] for w in
-                checkout.notify_trials_ending(days_before=3)["warned"]] == ["e1"]
+                checkout.notify_trials_ending(days_before=3)["warned"]] == [_company(db_session, "e1")]
 
         # The handover: only the payer moves. Entity, codes and trial_end are untouched,
         # which is exactly why an entity-scoped key would swallow the second warning.
@@ -1003,7 +1003,7 @@ def test_a_trial_warning_reaches_a_payer_the_entity_was_handed_to(
         db_session.session.commit()
 
         assert [w["entity_id"] for w in
-                checkout.notify_trials_ending(days_before=3)["warned"]] == ["e1"]
+                checkout.notify_trials_ending(days_before=3)["warned"]] == [_company(db_session, "e1")]
 
         sent = SubscriptionEmailLog.query.filter_by(event="trial_ending").all()
         assert len(sent) == 2, "each payer gets their own warning"
@@ -1021,7 +1021,7 @@ def test_the_same_payer_is_still_only_warned_once(app, db_session, mail, monkeyp
     with app.app_context():
         payer = _make_payer(db_session)
         db_session.session.add(EntityModuleSubscription(
-            id=str(uuid.uuid4()), entity_id="e1", function_code="BILL",
+            id=str(uuid.uuid4()), entity_id=_company(db_session, "e1"), function_code="PAYMENT_REQUEST",
             payer_user_id=payer, phase="trial",
             trial_end=datetime(2026, 8, 20, 5, 0, tzinfo=UTC),
         ))

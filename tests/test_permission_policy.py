@@ -28,13 +28,14 @@ def test_normalize_role_aliases():
 def test_normalize_system_role_aliases():
     assert normalize_system_role(None) == "normal"
     assert normalize_system_role("normal") == "normal"
-    assert normalize_system_role("SUPERUSER") == "superuser"
+    assert normalize_system_role("SUPERADMIN") == "superadmin"
+    assert normalize_system_role("SUPERUSER") == "superadmin"  # pre-rename spelling
     assert normalize_system_role("unexpected") == "normal"
 
 
 def test_legacy_role_to_system_role_promotes_only_admin_variants():
-    assert legacy_role_to_system_role("admin") == "superuser"
-    assert legacy_role_to_system_role("super admin") == "superuser"
+    assert legacy_role_to_system_role("admin") == "superadmin"
+    assert legacy_role_to_system_role("super admin") == "superadmin"
     assert legacy_role_to_system_role("cashier") == "normal"
     assert legacy_role_to_system_role("accountant") == "normal"
 
@@ -136,7 +137,9 @@ def test_coa_create_delete_permissions_require_accountant(monkeypatch):
     assert not has_permission(manager, Permission.COA_DELETE, entity_id="e-1")
 
 
-def test_has_permission_denies_without_membership_except_superuser(monkeypatch):
+def test_has_permission_denies_without_membership_except_readonly_superadmin(monkeypatch):
+    """No membership: a normal user sees nothing; a superadmin is READ-ONLY on that entity
+    (``is_superuser_readonly``) - the views in READONLY_ALLOWED_PERMISSIONS, no writes."""
     from services import permission_policy
 
     def _no_membership(_user_id, _entity_id):
@@ -145,10 +148,11 @@ def test_has_permission_denies_without_membership_except_superuser(monkeypatch):
     monkeypatch.setattr(permission_policy, "_membership_for", _no_membership)
 
     normal_user = SimpleNamespace(id="u-1", system_role="normal")
-    superuser = SimpleNamespace(id="u-2", system_role="superuser")
+    superadmin = SimpleNamespace(id="u-2", system_role="superadmin")
 
     assert not has_permission(normal_user, Permission.XERO_SETTINGS_VIEW, entity_id="e-1")
-    assert has_permission(superuser, Permission.XERO_SETTINGS_UPDATE, entity_id="e-1")
+    assert has_permission(superadmin, Permission.XERO_SETTINGS_VIEW, entity_id="e-1")
+    assert not has_permission(superadmin, Permission.XERO_SETTINGS_UPDATE, entity_id="e-1")
 
 
 def test_report_edit_delete_rules(monkeypatch):

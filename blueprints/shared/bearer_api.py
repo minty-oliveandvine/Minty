@@ -20,7 +20,7 @@ against a ``String(36)`` id is a string comparison. :func:`user_id_from_bearer` 
 that on the coercing form.
 
 The route modules keep their own thin ``_cors`` / ``_user_id_from_bearer`` names in front
-of these, so anything patching a route module still intercepts (see CODE_CLEANSE_NOTES.md
+of these, so anything patching a route module still intercepts (see docs/code_cleanse/CODE_CLEANSE_NOTES.md
 on dependency injection).
 """
 from __future__ import annotations

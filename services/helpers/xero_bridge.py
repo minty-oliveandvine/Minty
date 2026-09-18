@@ -124,11 +124,11 @@ def get_xero_data_dynamic(
             tenant_id = xero_org_id
         elif entity_id:
             ent = Entity.query.get(entity_id)
-            tenant_id = (
-                ent.xero_org_id if ent else getattr(
-                    token_user, "xero_entity_id", None))
+            tenant_id = ent.xero_org_id if ent else None
         else:
-            tenant_id = getattr(token_user, "xero_entity_id", None)
+            # no entity in the call and no explicit org: nothing to address the tenant by
+            # (the per-user tenant copy, user.xero_entity_id, is gone - schema item 19)
+            tenant_id = None
 
         headers = {
             "Authorization": "Bearer " + token_user.access_token,

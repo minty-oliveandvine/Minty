@@ -20,30 +20,9 @@ import pytest
 
 
 @pytest.fixture
-def db_session(app, tmp_path_factory):
-    """See tests/test_terms_gate.py — same ATTACH dance for the pettycashv2
-    schema, since these requests touch the user table through load_user."""
-    from sqlalchemy import event
-
+def db_session(app):
+    """These requests touch the user table through load_user; empty it afterwards."""
     from models.db import db
-
-    with app.app_context():
-        engine = db.engine
-        schema_path = str(
-            tmp_path_factory.mktemp("schema") / "pettycashv2.sqlite"
-        ).replace("\\", "/")
-
-        @event.listens_for(engine, "connect")
-        def _attach_schema(dbapi_connection, _record):  # noqa: ANN001
-            try:
-                dbapi_connection.execute(
-                    f"ATTACH DATABASE '{schema_path}' AS pettycashv2"
-                )
-            except Exception:
-                pass
-
-        engine.dispose()
-        db.create_all()
 
     yield db
 

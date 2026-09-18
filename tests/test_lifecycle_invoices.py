@@ -54,9 +54,9 @@ CURRENCY = "HKD"
 # month looks like, which is the steady state the renewals below charge.
 COMPANIES = {
     "steady": ("S1 Steady Co", {"PETTY_CASH"}, PETTY_CASH),
-    "growth": ("S1 Growth Co", {"PETTY_CASH", "BILL"}, BUNDLE),
+    "growth": ("S1 Growth Co", {"PETTY_CASH", "PAYMENT_REQUEST"}, BUNDLE),
     "churn": ("S1 Churn Co", {"PETTY_CASH"}, PETTY_CASH),
-    "comeback": ("S1 Comeback Co", {"BILL"}, BILL),
+    "comeback": ("S1 Comeback Co", {"PAYMENT_REQUEST"}, BILL),
 }
 
 MONTHLY_TOTAL = sum(amount for _n, _c, amount in COMPANIES.values())   # 124000

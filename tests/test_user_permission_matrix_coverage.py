@@ -348,16 +348,13 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "delete_user_role",
             "USER_ROLE_DELETE",
         ),
-        (
-            "blueprints/entity/routes/create.py",
-            "entity_create",
-            "ENTITY_CREATE",
-        ),
-        (
-            "blueprints/entity/routes/list.py",
-            "delete_entity",
-            "ENTITY_DELETE",
-        ),
+        # ``entity_create`` (ENTITY_CREATE) is not in this list: the rule is "any signed-in
+        # user" (services/permission_policy.has_permission), which ``@login_required`` on the
+        # route already is - the GET redirects to the onboarding wizard, the POST is the
+        # legacy fallback. ENTITY_CREATE stays in the matrix as the statement of that rule.
+        # ``delete_entity`` (ENTITY_DELETE) went with the entity soft-delete in C2 of
+        # docs/modernisation/modernisation_plan.md: entity_status has no 'deleted' and nothing linked to
+        # the route. The permission stays in the matrix for the day a real delete exists.
         (
             "blueprints/entity/routes/settings.py",
             "entity_settings_users",
@@ -375,14 +372,16 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "entity_settings_module",
             "MODULE_VIEW",
         ),
+        # the module toggle/save form went with the in-house subscription engine; modules
+        # are now switched on by subscribing, and these two are the writes on that page
         (
             "blueprints/entity/routes/settings.py",
-            "entity_settings_module_toggle",
+            "entity_settings_module_checkout",
             "MODULE_MANAGE",
         ),
         (
             "blueprints/entity/routes/settings.py",
-            "entity_settings_module_save",
+            "entity_settings_module_authorize_billing",
             "MODULE_MANAGE",
         ),
         (

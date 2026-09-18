@@ -28,6 +28,7 @@ import uuid
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
 from blueprints.subscription.models.column_types import uuid_column
+from blueprints.shared.schema import SCHEMA
 
 # ``plan_code`` — which builds the canonical ``code`` value below — lives in
 # ``services.billing`` rather than here. It is pure string canonicalisation with no
@@ -38,7 +39,7 @@ from blueprints.subscription.models.column_types import uuid_column
 
 class BillingPlan(TimestampMixin, db.Model):
     __tablename__ = "billing_plan"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": SCHEMA}
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     # The module SET this plan bills — see ``plan_code``.
@@ -48,7 +49,7 @@ class BillingPlan(TimestampMixin, db.Model):
     amount = db.Column(db.Integer, nullable=False)
     currency = db.Column(
         db.CHAR(3),
-        db.ForeignKey("pettycashv2.currency_info.currency_code"),
+        db.ForeignKey(f"{SCHEMA}.currency_info.currency_code"),
         nullable=False,
     )
     # Monthly only in practice — the business sells nothing else, and no other interval

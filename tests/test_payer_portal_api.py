@@ -63,7 +63,7 @@ def test_running_trial_shows_its_own_end_date(app):
     from blueprints.subscription.services import portal
 
     ends = NOW + timedelta(days=9)
-    state = _state(_row("BILL", "trial", trial_end=ends))
+    state = _state(_row("PAYMENT_REQUEST", "trial", trial_end=ends))
     assert state["status"] == portal.STATUS_TRIALING
     assert state["date_label"] == "Trial ends"
     assert state["date"] == ends
@@ -110,7 +110,7 @@ def test_cancelled_trial_keeps_its_free_days_and_says_so(app):
 
     ends = NOW + timedelta(days=5)
     state = _state(
-        _row("BILL", "scheduled_cancel", trial_end=ends, app_access_until=ends)
+        _row("PAYMENT_REQUEST", "scheduled_cancel", trial_end=ends, app_access_until=ends)
     )
     assert state["status"] == portal.STATUS_CANCELLED
     assert state["date_label"] == "Trial ends"
@@ -122,7 +122,7 @@ def test_past_due_is_never_folded_into_active(app):
 
     paid_to = NOW - timedelta(days=2)
     state = _state(
-        _row("BILL", "past_due", first_billed_at=NOW - timedelta(days=40)),
+        _row("PAYMENT_REQUEST", "past_due", first_billed_at=NOW - timedelta(days=40)),
         paid_through=paid_to,
     )
     assert state["status"] == portal.STATUS_PAST_DUE
@@ -155,7 +155,7 @@ def test_a_trial_that_ran_out_says_so_rather_than_just_ended(app):
     from blueprints.subscription.services import portal
 
     ended = NOW - timedelta(days=3)
-    state = _state(_row("BILL", "trial", trial_end=ended))
+    state = _state(_row("PAYMENT_REQUEST", "trial", trial_end=ended))
 
     assert state["status"] == portal.STATUS_TRIAL_EXPIRED
     assert portal.STATUS_LABELS[state["status"]] == "trial expired"
@@ -214,7 +214,7 @@ def payer_portal(app, monkeypatch):
                             function_code="PETTY_CASH", function_name="Petty Cash"
                         ),
                         SimpleNamespace(
-                            function_code="BILL", function_name="Bill Payment"
+                            function_code="PAYMENT_REQUEST", function_name="Bill Payment"
                         ),
                     ]
                 ),
@@ -299,7 +299,7 @@ def test_every_canonical_module_gets_a_line_even_when_never_held(
         result = portal.build_payer_subscriptions("u1")
 
     row = _entity(result, "Amazon")
-    assert [m["code"] for m in row["modules"]] == ["PETTY_CASH", "BILL"]
+    assert [m["code"] for m in row["modules"]] == ["PETTY_CASH", "PAYMENT_REQUEST"]
     assert row["modules"][0]["status_label"] == "active"
     assert row["modules"][1]["status_label"] == "not subscribed"
     assert row["modules"][1]["date"] is None
@@ -396,7 +396,7 @@ def test_page_past_the_end_clamps_rather_than_emptying(app, payer_portal):
     from blueprints.subscription.services import portal
 
     payer_portal(
-        rows=[_row("BILL", "trial", entity_id="e1", trial_end=NOW + timedelta(days=3))],
+        rows=[_row("PAYMENT_REQUEST", "trial", entity_id="e1", trial_end=NOW + timedelta(days=3))],
         entities=[{"id": "e1", "name": "Apple", "country": "HK"}],
     )
 
@@ -413,7 +413,7 @@ def test_internal_sort_keys_never_reach_the_response(app, payer_portal):
     from blueprints.subscription.services import portal
 
     payer_portal(
-        rows=[_row("BILL", "trial", entity_id="e1", trial_end=NOW + timedelta(days=3))],
+        rows=[_row("PAYMENT_REQUEST", "trial", entity_id="e1", trial_end=NOW + timedelta(days=3))],
         entities=[{"id": "e1", "name": "Apple", "country": "HK"}],
     )
 

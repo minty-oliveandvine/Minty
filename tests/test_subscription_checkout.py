@@ -74,7 +74,7 @@ def _bundle():
     from blueprints.subscription.services import catalog
 
     return catalog.BundlePlanView(
-        function_codes=("PETTY_CASH", "BILL"),
+        function_codes=("PETTY_CASH", "PAYMENT_REQUEST"),
         display_name="Super Minty",
         amount=40000,
         currency_code="HKD",
@@ -83,7 +83,7 @@ def _bundle():
     )
 
 
-_PLANS = {"BILL": ("fn_bill",), "PETTY_CASH": ("fn_pc",)}
+_PLANS = {"PAYMENT_REQUEST": ("fn_bill",), "PETTY_CASH": ("fn_pc",)}
 
 
 class _Plan:
@@ -114,7 +114,7 @@ class _ModuleRow:
 
     def __init__(self, phase="active", *, trial_end=None):
         self.phase = phase
-        self.function_code = "BILL"
+        self.function_code = "PAYMENT_REQUEST"
         self.payer_user_id = "u1"
         self.app_access_until = None
         self.first_billed_at = None
@@ -241,7 +241,7 @@ def test_checkout_without_card_redirects_to_setup(monkeypatch):
     checkout, calls = _wire(monkeypatch, default_pm=None)
 
     result = checkout.start_modules_checkout(
-        _FakeEntity(), _FakeUser(), "s", "c", ["BILL", "PETTY_CASH"]
+        _FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST", "PETTY_CASH"]
     )
 
     # No saved card → hosted setup-checkout redirect; nothing billed until return.
@@ -249,7 +249,7 @@ def test_checkout_without_card_redirects_to_setup(monkeypatch):
     assert calls["charged"] == []
     # Modules' currency + codes ride on the session metadata for the completion step.
     assert calls["setup"][0]["currency"] == "HKD"
-    assert calls["setup"][0]["metadata"]["modules_to_subscribe"] == "BILL,PETTY_CASH"
+    assert calls["setup"][0]["metadata"]["modules_to_subscribe"] == "PAYMENT_REQUEST,PETTY_CASH"
 
 
 def test_module_checkout_creates_no_customer_for_a_new_payer(monkeypatch):
@@ -276,7 +276,7 @@ def test_module_checkout_creates_no_customer_for_a_new_payer(monkeypatch):
     monkeypatch.setattr(stripe_client, "get_stripe", _no_stripe)
 
     result = checkout.start_modules_checkout(
-        _FakeEntity(), _FakeUser(), "s", "c", ["BILL"]
+        _FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"]
     )
 
     assert result["url"] == "https://setup.example/session"
@@ -301,7 +301,7 @@ def test_a_saved_card_alone_does_not_authorise_a_second_entity(monkeypatch):
     )
 
     result = checkout.start_modules_checkout(
-        _FakeEntity(), _FakeUser(), "s", "c", ["BILL"]
+        _FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"]
     )
 
     # NOTHING billed.
@@ -330,11 +330,11 @@ def test_confirming_records_consent_then_bills(monkeypatch):
     )
 
     created = checkout.confirm_modules_checkout(
-        _FakeEntity(), _FakeUser(), "s", "c", ["BILL"]
+        _FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"]
     )
 
     assert consents == [("e1", "u1", "confirmed")]
-    assert created["created"] == ["BILL"]
+    assert created["created"] == ["PAYMENT_REQUEST"]
     assert len(calls["charged"]) == 1  # billed, once
 
 
@@ -348,12 +348,12 @@ def test_confirmation_amount_is_the_bundle_price_not_the_sum(monkeypatch):
     monkeypatch.setattr(checkout, "payment_method_display", lambda pm: None)
 
     result = checkout.start_modules_checkout(
-        _FakeEntity(), _FakeUser(), "s", "c", ["BILL", "PETTY_CASH"]
+        _FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST", "PETTY_CASH"]
     )
 
     # 40000 (bundle), NOT 28000 + 28000.
     assert result["needs_confirmation"]["amount"] == 40000
-    assert sorted(result["needs_confirmation"]["codes"]) == ["BILL", "PETTY_CASH"]
+    assert sorted(result["needs_confirmation"]["codes"]) == ["PAYMENT_REQUEST", "PETTY_CASH"]
 
 
 # --- buying, in-house ---------------------------------------------------------
@@ -369,27 +369,27 @@ def test_buying_is_collected_by_an_in_house_invoice(monkeypatch):
     checkout, calls = _wire(monkeypatch, default_pm="pm_1")
 
     created = checkout.start_modules_checkout(
-        _FakeEntity(), _FakeUser(), "s", "c", ["BILL"]
+        _FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"]
     )
 
-    assert created == {"created": ["BILL"]}
+    assert created == {"created": ["PAYMENT_REQUEST"]}
     assert len(calls["charged"]) == 1
-    assert calls["charged"][0]["after"] == {"BILL"}
+    assert calls["charged"][0]["after"] == {"PAYMENT_REQUEST"}
     assert calls["charged"][0]["start"] == _ANCHOR
 
     # The row is active, stamped as billed, and the access gate is open.
     assert len(calls["rows"]) == 1
     _eid, code, _payer, fields = calls["rows"][0]
-    assert code == "BILL"
+    assert code == "PAYMENT_REQUEST"
     assert fields["phase"] == "active"
     assert fields["first_billed_at"] is not None
-    assert calls["granted"] == [("e1", "BILL", True)]
+    assert calls["granted"] == [("e1", "PAYMENT_REQUEST", True)]
 
 
 def test_adding_a_second_module_is_priced_as_an_upgrade(monkeypatch):
     """The entity already bills BILL. Adding PETTY_CASH must be priced from what it
     already bills to the bundle — the MARGINAL 120 — not at PETTY_CASH's own 280."""
-    checkout, calls = _wire(monkeypatch, default_pm="pm_saved", billed_codes={"BILL"})
+    checkout, calls = _wire(monkeypatch, default_pm="pm_saved", billed_codes={"PAYMENT_REQUEST"})
 
     result = checkout.start_modules_checkout(
         _FakeEntity(), _FakeUser(), "s", "c", ["PETTY_CASH"]
@@ -397,8 +397,8 @@ def test_adding_a_second_module_is_priced_as_an_upgrade(monkeypatch):
 
     assert result == {"created": ["PETTY_CASH"]}
     assert len(calls["charged"]) == 1
-    assert calls["charged"][0]["before"] == {"BILL"}
-    assert calls["charged"][0]["after"] == {"BILL", "PETTY_CASH"}
+    assert calls["charged"][0]["before"] == {"PAYMENT_REQUEST"}
+    assert calls["charged"][0]["after"] == {"PAYMENT_REQUEST", "PETTY_CASH"}
 
 
 def test_an_uncollected_in_house_purchase_tells_the_user(monkeypatch):
@@ -407,7 +407,7 @@ def test_an_uncollected_in_house_purchase_tells_the_user(monkeypatch):
     checkout, calls = _wire(monkeypatch, default_pm="pm_1", paid=False)
 
     with pytest.raises(checkout.CheckoutError) as exc:
-        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["BILL"])
+        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"])
 
     assert exc.value.status == 402
     assert "payment method" in str(exc.value.message)
@@ -420,11 +420,11 @@ def test_an_uncollected_in_house_purchase_tells_the_user(monkeypatch):
 def test_checkout_rejects_already_active_module(monkeypatch):
     """Double-buy guard: the entity already bills BILL, so buying it again is refused."""
     checkout, calls = _wire(
-        monkeypatch, module_rows={("e1", "BILL"): _ModuleRow("active")}
+        monkeypatch, module_rows={("e1", "PAYMENT_REQUEST"): _ModuleRow("active")}
     )
 
     with pytest.raises(checkout.CheckoutError) as exc:
-        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["BILL"])
+        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"])
     assert exc.value.status == 409
     assert calls["setup"] == []
 
@@ -436,11 +436,11 @@ def test_checkout_refuses_a_past_due_module_that_stripe_called_inactive(monkeypa
     module row still says ``active``, because the phase tracks what is owned rather than
     whether the last payment cleared."""
     checkout, calls = _wire(
-        monkeypatch, module_rows={("e1", "BILL"): _ModuleRow("active")}
+        monkeypatch, module_rows={("e1", "PAYMENT_REQUEST"): _ModuleRow("active")}
     )
 
     with pytest.raises(checkout.CheckoutError) as exc:
-        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["BILL"])
+        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"])
     assert exc.value.status == 409
 
 
@@ -452,11 +452,11 @@ def test_checkout_refuses_a_module_that_is_already_on_a_free_trial(monkeypatch):
     The old Stripe-backed guard could not see this at all — an app-level trial creates
     no subscription, so a trialing module looked unsold and was purchasable."""
     checkout, calls = _wire(
-        monkeypatch, module_rows={("e1", "BILL"): _ModuleRow("trial")}
+        monkeypatch, module_rows={("e1", "PAYMENT_REQUEST"): _ModuleRow("trial")}
     )
 
     with pytest.raises(checkout.CheckoutError) as exc:
-        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["BILL"])
+        checkout.start_modules_checkout(_FakeEntity(), _FakeUser(), "s", "c", ["PAYMENT_REQUEST"])
 
     assert exc.value.status == 409
     # The message must not claim a paid subscription exists, and should make clear
@@ -474,18 +474,18 @@ def test_complete_setup_sets_the_default_card_then_bills(monkeypatch):
     session = {
         "customer": "cus_1",
         "setup_intent": {"payment_method": "pm_new"},
-        "metadata": {"modules_to_subscribe": "BILL,PETTY_CASH",
+        "metadata": {"modules_to_subscribe": "PAYMENT_REQUEST,PETTY_CASH",
                      "entity_id": "e1", "user_id": "u1"},
     }
     monkeypatch.setattr(checkout, "retrieve_checkout_session", lambda sid: session)
 
     created = checkout.complete_setup_checkout(_FakeEntity(), _FakeUser(), "cs_1")
 
-    assert created == ["BILL", "PETTY_CASH"]
+    assert created == ["PAYMENT_REQUEST", "PETTY_CASH"]
     assert calls["default_pm"] == [("cus_1", "pm_new")]  # saved card set as default
     # Both modules on ONE charge, at the bundle price rather than two standalone ones.
     assert len(calls["charged"]) == 1
-    assert calls["charged"][0]["after"] == {"BILL", "PETTY_CASH"}
+    assert calls["charged"][0]["after"] == {"PAYMENT_REQUEST", "PETTY_CASH"}
 
 
 def test_complete_setup_surfaces_a_failure_to_collect(monkeypatch):
@@ -495,7 +495,7 @@ def test_complete_setup_surfaces_a_failure_to_collect(monkeypatch):
     session = {
         "customer": "cus_1",
         "setup_intent": {"payment_method": "pm_new"},
-        "metadata": {"modules_to_subscribe": "BILL",
+        "metadata": {"modules_to_subscribe": "PAYMENT_REQUEST",
                      "entity_id": "e1", "user_id": "u1"},
     }
     monkeypatch.setattr(checkout, "retrieve_checkout_session", lambda sid: session)

@@ -209,7 +209,7 @@
                     <img src="{{ url_for('static', filename='img/cash_reg.webp') }}" alt="" class="w-4 h-4 object-contain">
                   </span>
                   {% endif %}
-                  {% if 'BILL' in org.modules %}
+                  {% if 'PAYMENT_REQUEST' in org.modules %}
                   <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[#2563EB]" style="background-color:#DBEAFE;" title="Bills" aria-label="Bills module">
                     <svg class="w-4 h-4" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M200-280v-280h80v280h-80Zm240 0v-280h80v280h-80ZM80-120v-80h800v80H80Zm600-160v-280h80v280h-80ZM80-640v-60l400-220 400 220v60H80Zm178-80h444-444Zm0 0h444L480-841 258-720Z"/></svg>
                   </span>

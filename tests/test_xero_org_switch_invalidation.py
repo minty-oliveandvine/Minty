@@ -15,30 +15,26 @@ from __future__ import annotations
 
 import pytest
 
-_schema_attached = False
+import uuid
 
-ENTITY_ID = "org-switch-entity-001"
+# uuid columns since phase C; stable so the assertions can name them
+def _uid(label):
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"org-switch-{label}"))
+
+
+ENTITY_ID = _uid("entity-001")
+CONTACT_A, CONTACT_B, ACCOUNT_A = _uid("contact-a"), _uid("contact-b"), _uid("account-a")
 ORG_A = "xero-org-OLD"
 ORG_B = "xero-org-NEW"
 
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -65,21 +61,21 @@ def seeded(db_session):
     db.session.add(entity)
 
     contact_a = XeroContactSync(
-        id="contact-a",
+        id=CONTACT_A,
         entity_id=ENTITY_ID,
         xero_contact_id="xero-contact-a",
         xero_org_id=ORG_A,
         name="Acme (old org)",
     )
     contact_b = XeroContactSync(
-        id="contact-b",
+        id=CONTACT_B,
         entity_id=ENTITY_ID,
         xero_contact_id="xero-contact-b",
         xero_org_id=ORG_B,
         name="Acme (new org)",
     )
     account_a = AccountInfo(
-        id="account-a",
+        id=ACCOUNT_A,
         entity_id=ENTITY_ID,
         type="pettycash",
         name="Petty Cash",
@@ -92,8 +88,8 @@ def seeded(db_session):
     db.session.add(
         EntityPettycashSettings(
             entity_id=ENTITY_ID,
-            pettycash_account_id="account-a",
-            cash_sale_contact_id="contact-a",
+            pettycash_account_id=ACCOUNT_A,
+            cash_sale_contact_id=CONTACT_A,
         )
     )
     db.session.commit()

@@ -17,26 +17,14 @@ import uuid
 import pytest
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -68,7 +56,7 @@ def _user(db, email):
 def _entity(db, name="Acme"):
     from models.db import Entity
 
-    row = Entity(id=str(uuid.uuid4()), name=name, status="active")
+    row = Entity(id=str(uuid.uuid4()), name=name, status="disconnected")
     db.session.add(row)
     db.session.commit()
     return row

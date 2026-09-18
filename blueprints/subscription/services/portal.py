@@ -120,7 +120,7 @@ def _module_names() -> dict[str, str]:
 
     Falls back to the code itself, which is what ``get_module_cards`` does — a catalog
     row can be missing in a half-seeded environment and a table with a blank column is
-    worse than one reading "BILL".
+    worse than one reading "PAYMENT_REQUEST".
     """
     names = {code: code for code in MODULE_CODES}
     try:
@@ -366,6 +366,11 @@ def build_payer_subscriptions(
     names = _module_names()
 
     subscriber = _person(payer, user_id)
+    # The account-level figure for the summary block: the earliest date anything on this
+    # payer's account is paid through. (F5: the summary used to read the LAST company's
+    # per-card ``paid_through`` from the loop below - undefined for a payer with no
+    # companies, so their page answered 500.)
+    account_paid_through = sub_store.paid_through_for_user(user_id)
 
     items: list[dict] = []
     for entity in entities:
@@ -445,8 +450,8 @@ def build_payer_subscriptions(
         "billing": {
             "anchor": _fmt(anchor_at),
             "anchor_iso": _iso(anchor_at),
-            "paid_through": _fmt(paid_through),
-            "paid_through_iso": _iso(paid_through),
+            "paid_through": _fmt(account_paid_through),
+            "paid_through_iso": _iso(account_paid_through),
             "currency": currency,
         },
         "entities": window,

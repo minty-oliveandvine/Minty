@@ -28,7 +28,7 @@ class _Account:
 
 
 class _Row:
-    def __init__(self, entity_id="e1", code="BILL", phase="active",
+    def __init__(self, entity_id="e1", code="PAYMENT_REQUEST", phase="active",
                  billed_through=None):
         self.entity_id = entity_id
         self.function_code = code
@@ -243,7 +243,7 @@ def test_one_line_per_entity_priced_by_the_module_SET(monkeypatch):
     discount, so summing standalone prices would overcharge."""
     renewals, calls = _wire(
         monkeypatch,
-        rows=[_Row("e1", "BILL"), _Row("e1", "PETTY_CASH"), _Row("e2", "BILL")],
+        rows=[_Row("e1", "PAYMENT_REQUEST"), _Row("e1", "PETTY_CASH"), _Row("e2", "PAYMENT_REQUEST")],
     )
 
     renewals.run_renewals(NOW, scope=["u1"], issue=True)
@@ -261,8 +261,8 @@ def test_trials_and_cancelling_modules_are_not_billed(monkeypatch):
     reading of the same rule."""
     renewals, calls = _wire(
         monkeypatch,
-        rows=[_Row("e1", "BILL", phase="trial"),
-              _Row("e2", "BILL", phase="scheduled_cancel")],
+        rows=[_Row("e1", "PAYMENT_REQUEST", phase="trial"),
+              _Row("e2", "PAYMENT_REQUEST", phase="scheduled_cancel")],
     )
 
     result = renewals.run_renewals(NOW, scope=["u1"], issue=True)
@@ -413,7 +413,7 @@ def test_the_period_key_is_stable_for_the_same_period(monkeypatch):
 
 
 class _Extension:
-    def __init__(self, entity_id="e1", code="BILL", amount=4258, id="ext_1"):
+    def __init__(self, entity_id="e1", code="PAYMENT_REQUEST", amount=4258, id="ext_1"):
         self.id = id
         self.entity_id = entity_id
         self.function_code = code
@@ -443,14 +443,14 @@ def test_an_extension_line_is_named_from_the_catalog_not_from_the_code(monkeypat
     """
     from blueprints.subscription.services import store
 
-    renewals, calls = _wire(monkeypatch, extensions=[_Extension(code="BILL")])
+    renewals, calls = _wire(monkeypatch, extensions=[_Extension(code="PAYMENT_REQUEST")])
     asked: list[list[str]] = []
 
     def _plan_for(codes):
         codes = [str(c).upper() for c in codes]
         asked.append(codes)
         return {
-            ("BILL",): _Plan("Payment Request", 28000),
+            ("PAYMENT_REQUEST",): _Plan("Payment Request", 28000),
             ("PETTY_CASH",): _Plan("Petty Cash", 28000),
         }.get(tuple(sorted(codes)), _Plan())
 
@@ -462,7 +462,7 @@ def test_an_extension_line_is_named_from_the_catalog_not_from_the_code(monkeypat
     extension = next(ln for ln in invoice.lines if "cancellation" in ln.description)
     assert extension.product_name == "Payment Request (access after cancellation)"
     assert "Bill (" not in extension.description
-    assert ["BILL"] in asked, "the extension is priced per module, not per bundle"
+    assert ["PAYMENT_REQUEST"] in asked, "the extension is priced per module, not per bundle"
 
 
 def test_a_module_with_no_catalog_row_still_gets_billed(monkeypatch):
@@ -489,7 +489,7 @@ def test_a_payer_whose_LAST_entity_was_cancelled_is_still_billed(monkeypatch):
     for having nothing to renew would give those days away."""
     renewals, calls = _wire(
         monkeypatch,
-        rows=[_Row("e1", "BILL", phase="scheduled_cancel")],   # nothing billable
+        rows=[_Row("e1", "PAYMENT_REQUEST", phase="scheduled_cancel")],   # nothing billable
         extensions=[_Extension(amount=4258)],
     )
 
@@ -548,7 +548,7 @@ def test_the_run_that_advances_the_cycle_is_the_run_that_stamps_the_extension(mo
     """
     renewals, calls = _wire(
         monkeypatch,
-        rows=[_Row("e1", "BILL", phase="active"),
+        rows=[_Row("e1", "PAYMENT_REQUEST", phase="active"),
               _Row("e2", "PETTY_CASH", phase="scheduled_cancel")],
         extensions=[_Extension(id="ext_9", entity_id="e2", code="PETTY_CASH")],
     )
@@ -658,7 +658,7 @@ def test_an_unpaid_adopted_invoice_ALSO_closes_its_extensions(monkeypatch):
 
 
 class _BilledRow(_Row):
-    def __init__(self, entity_id="e1", code="BILL", phase="active", first_billed_at=None):
+    def __init__(self, entity_id="e1", code="PAYMENT_REQUEST", phase="active", first_billed_at=None):
         super().__init__(entity_id, code, phase)
         self.first_billed_at = first_billed_at
 
@@ -801,7 +801,7 @@ def test_a_dead_row_s_stale_claim_excludes_nothing(monkeypatch):
     renewals, calls = _wire(
         monkeypatch,
         rows=[
-            _Row(code="BILL"),
+            _Row(code="PAYMENT_REQUEST"),
             _Row(code="PETTY_CASH", phase="cancelled", billed_through=PERIOD_END),
         ],
     )

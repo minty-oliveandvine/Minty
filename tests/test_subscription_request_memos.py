@@ -164,7 +164,7 @@ def test_plan_for_module_no_longer_rebuilds_the_catalog(app, monkeypatch):
     catalog, builds = _wire_catalog(monkeypatch)
 
     with app.test_request_context():
-        for code in ("PETTY_CASH", "BILL", "PETTY_CASH", "BILL"):
+        for code in ("PETTY_CASH", "PAYMENT_REQUEST", "PETTY_CASH", "PAYMENT_REQUEST"):
             catalog.plan_for_module(code)
 
     assert len(builds) == 1

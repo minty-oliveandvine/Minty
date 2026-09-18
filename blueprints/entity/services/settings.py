@@ -12,6 +12,7 @@ from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
 from models.db import (AccountInfo, Entity, EntityAccountXero,
                        EntityPettycashSettings, XeroContactSync, db)
+from blueprints.shared.schema import SCHEMA
 
 # Columns on entity_pettycash_settings naming a row in account_info or
 # xero_contact_sync. Both parents are FK'd ON DELETE SET NULL, so the deletes
@@ -93,7 +94,7 @@ def invalidate_entity_xero_cache(entity_id, old_org_id):
     try:
         bill_accounts_removed = db.session.execute(
             text(
-                "DELETE FROM pettycashv2.entity_bill_account_xero "
+                f"DELETE FROM {SCHEMA}.entity_bill_account_xero "
                 "WHERE entity_id = :entity_id"
             ),
             {"entity_id": str(entity_id)},
@@ -155,19 +156,31 @@ def _upsert_account_info(values: dict):
     xero_account_id) conflict.
 
     Idempotent under concurrent background syncs: the unique constraint
-    uq_account_info_entity_xero_account turns what used to be a duplicate-
-    producing race into a no-op update. Falls back to a plain insert when
-    xero_account_id is missing (NULLs don't participate in the constraint).
+    ``uq_account_entity_xero`` (the schema's name; C5) turns what used to be a
+    duplicate-producing race into a no-op update. Falls back to a plain insert when
+    xero_account_id is missing (NULLs don't participate in the constraint). On any
+    other database (the SQLite test path) it is a get-or-update, which has the same
+    result without the race protection.
     """
     if not values.get("xero_account_id"):
         db.session.add(AccountInfo(**values))
         return
     set_ = {c: values[c] for c in _ACCOUNT_INFO_UPSERT_COLS if c in values}
+    if db.engine.dialect.name != "postgresql":
+        row = AccountInfo.query.filter_by(
+            entity_id=values["entity_id"], xero_account_id=values["xero_account_id"]
+        ).first()
+        if row is None:
+            db.session.add(AccountInfo(**values))
+        else:
+            for column, value in set_.items():
+                setattr(row, column, value)
+        return
     stmt = (
         pg_insert(AccountInfo.__table__)
         .values(**values)
         .on_conflict_do_update(
-            constraint="uq_account_info_entity_xero_account",
+            constraint="uq_account_entity_xero",
             set_=set_,
         )
     )
@@ -468,6 +481,7 @@ def sync_xero_accounts_to_db(entity_id, access_token, xero_org_id):
     try:
         sync_xero_coa_pettycash(entity_id, xero_org_id)
     except Exception as eax_exc:
+        db.session.rollback()  # a failed statement leaves the transaction aborted
         logger.warning(
             "sync_xero_accounts_to_db: entity_account_xero sync skipped "
             "entity=%s: %s",
@@ -481,6 +495,7 @@ def sync_xero_accounts_to_db(entity_id, access_token, xero_org_id):
     try:
         sync_xero_coa_bill(entity_id)
     except Exception as bill_exc:
+        db.session.rollback()
         logger.warning(
             "sync_xero_accounts_to_db: entity_bill_account_xero sync skipped "
             "entity=%s: %s",
@@ -573,7 +588,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
 
     Module 2 (bills) counterpart of sync_xero_coa_pettycash. Reads the
     already-synced account_info table (no Xero API call) and inserts a matching
-    pettycashv2.entity_bill_account_xero row for any eligible account that does
+    pettycashv3.entity_bill_account_xero row for any eligible account that does
     not have one yet. Eligible == account type in BILL_COA_INCLUDED_TYPES
     (the bill CoA allowlist, which also includes FIXED).
 
@@ -589,7 +604,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
     run together with sync_xero_accounts_to_db on the settings page GET.
     Returns (inserted, refreshed).
     """
-    _TBL = "pettycashv2.entity_bill_account_xero"
+    _TBL = f"{SCHEMA}.entity_bill_account_xero"
 
     eligible_accounts = AccountInfo.query.filter(
         AccountInfo.entity_id == entity_id,
@@ -639,9 +654,10 @@ def sync_xero_coa_bill(entity_id, user_id=""):
                     "        false, :active, false, :xero_id, 0, :uid, "
                     "        NOW(), NOW())"
                 ),
+                # created_by is a uuid column: the unattended sync has no person
                 {"id": str(uuid4()), "eid": entity_id, "code": code,
                  "name": name, "type": acc_type, "xero_id": xero_id,
-                 "uid": user_id, "active": (acc.status == "ACTIVE")},
+                 "uid": (str(user_id) or None), "active": (acc.status == "ACTIVE")},
             )
             ids_in_db.add(xero_id)
             inserted += 1
@@ -657,7 +673,7 @@ def sync_xero_coa_bill(entity_id, user_id=""):
                 f"DELETE FROM {_TBL} b "
                 "WHERE b.entity_id = :eid "
                 "AND NOT EXISTS ("
-                "  SELECT 1 FROM pettycashv2.account_info a "
+                f"  SELECT 1 FROM {SCHEMA}.account_info a "
                 "  WHERE a.entity_id = :eid "
                 "    AND a.xero_account_id = b.xero_account_id"
                 ")"
@@ -883,7 +899,7 @@ def _check_account_info_diff(entity_id, xero_by_id):
 
 def _check_bill_account_diff(entity_id, xero_by_id):
     """Compare Module 2 entity_bill_account_xero rows against Xero snapshot."""
-    _TBL = "pettycashv2.entity_bill_account_xero"
+    _TBL = f"{SCHEMA}.entity_bill_account_xero"
 
     rows = db.session.execute(
         text(
@@ -965,44 +981,6 @@ def sync_contacts_if_changed_background(
     )
 
 
-def backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id):
-    """Fetch and persist Xero lock dates for an entity if either date is missing."""
-    try:
-        entity = Entity.query.get(entity_id)
-        if not entity:
-            logger.warning("backfill_lock_dates_if_needed: entity not found entity=%s", entity_id)
-            return
-        if not xero_org_id:
-            return
-        if entity.period_lock_date is not None and entity.end_of_year_lock_date is not None:
-            return
-
-        from blueprints.xero.services.integration import \
-            get_organisation_lock_dates
-        lock_dates = get_organisation_lock_dates(access_token, xero_org_id)
-        entity.period_lock_date = lock_dates["period_lock_date"]
-        entity.end_of_year_lock_date = lock_dates["end_of_year_lock_date"]
-        db.session.commit()
-        logger.info(
-            "backfill_lock_dates_if_needed: saved entity=%s period=%s eoy=%s",
-            entity_id, entity.period_lock_date, entity.end_of_year_lock_date,
-        )
-    except Exception as exc:
-        db.session.rollback()
-        logger.warning("backfill_lock_dates_if_needed: failed entity=%s: %s", entity_id, exc)
-
-
-def backfill_lock_dates_if_needed_background(entity_id, access_token, xero_org_id, flask_app=None):
-    """Fire-and-forget version — runs backfill_lock_dates_if_needed in a daemon thread."""
-    _run_in_background(
-        "backfill_lock_dates_if_needed_background",
-        backfill_lock_dates_if_needed,
-        entity_id, access_token, xero_org_id,
-        entity_id=entity_id,
-        flask_app=flask_app,
-    )
-
-
 _EXPENSE_COA_TYPES = ("EXPENSE", "DIRECTCOSTS", "INVENTORY")
 # Account types never shown in the Module 1 Chart of Accounts selector.
 COA_EXCLUDED_TYPES = frozenset({
@@ -1014,7 +992,7 @@ COA_INCLUDED_TYPES = frozenset({
     "DIRECTCOSTS", "EXPENSE", "OVERHEADS", "PREPAYMENT",
 })
 # Allowlist for the Module 2 Bill Chart of Accounts. Sync only writes these
-# Xero account types into pettycashv2.entity_bill_account_xero.
+# Xero account types into pettycashv3.entity_bill_account_xero.
 BILL_COA_INCLUDED_TYPES = frozenset({
     "DIRECTCOSTS", "EXPENSE", "FIXED", "OVERHEADS", "PREPAYMENT",
 })
@@ -1442,17 +1420,6 @@ def sync_all_entities_contacts_and_accounts(flask_app=None):
                         "sync_all_entities: chart sync failed entity=%s: %s",
                         entity_id, exc,
                     )
-
-                if entity.period_lock_date is None or entity.end_of_year_lock_date is None:
-                    try:
-                        backfill_lock_dates_if_needed(entity_id, access_token, xero_org_id)
-                        logger.info("sync_all_entities: lock date backfill entity=%s", entity_id)
-                    except Exception as exc:
-                        db.session.rollback()
-                        logger.error(
-                            "sync_all_entities: lock date backfill failed entity=%s: %s",
-                            entity_id, exc,
-                        )
 
             except Exception as exc:
                 logger.error(

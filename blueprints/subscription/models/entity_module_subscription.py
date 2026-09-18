@@ -16,11 +16,15 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
+from blueprints.shared.column_types import pg_enum
+from blueprints.shared.enums import ModuleCode
 from blueprints.subscription.models.column_types import (
     EXTENSION_STATE,
     SUBSCRIPTION_PHASE,
+    tz_datetime,
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityModuleSubscription(TimestampMixin, db.Model):
@@ -29,22 +33,22 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
         db.UniqueConstraint(
             "entity_id", "function_code", name="uq_ems_entity_function"
         ),
-        {"schema": "pettycashv2"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # --- identity ---
     entity_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.entities.id"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.entities.id"),
         nullable=False,
         index=True,
     )
-    function_code = db.Column(db.String(100), nullable=False, index=True)  # PETTY_CASH / BILL
+    function_code = db.Column(pg_enum(ModuleCode), nullable=False, index=True)  # PETTY_CASH / PAYMENT_REQUEST
     payer_user_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.user.id"),
         nullable=False,
         index=True,
     )
@@ -55,14 +59,14 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     # Each has a PHASE_* constant in ``constants``; there is no tuple of them all,
     # because nothing validated against one.
     # Single access-end authority: trial end, cancel extension, or past-due grace.
-    app_access_until = db.Column(db.DateTime(timezone=True), nullable=True)
+    app_access_until = db.Column(tz_datetime(), nullable=True)
 
     # --- app-level trial (no Stripe object exists during the trial) ---
     # Only the END is kept. ``trial_start`` and ``trial_used`` were written at trial
     # creation and read by nothing: the start is recoverable from ``created_at``, and
     # "has this module been trialled" is answered by the row existing at all, which is
     # what ``start_module_trial`` actually checks.
-    trial_end = db.Column(db.DateTime(timezone=True), nullable=True)
+    trial_end = db.Column(tz_datetime(), nullable=True)
 
     # When this module was FIRST charged for. Null = never billed, i.e. still a free
     # trial. Set once and never cleared, so it answers "is this a paid module?" for the
@@ -73,7 +77,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     # item id, which only the Stripe biller ever set. In-house that was always NULL, so
     # every paid module looked like a trial: cancelled ones were expired by the
     # trial-end job, and un-cancelling one was refused with "your free trial has ended".
-    first_billed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    first_billed_at = db.Column(tz_datetime(), nullable=True)
 
     # No ``current_period_end``. It was stamped on every conversion and purchase and
     # read by nothing: access is decided by ``phase`` and ``app_access_until``, and the
@@ -100,7 +104,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     # Not ``app_access_until`` either: that returns at precedence rule 1 in
     # ``access.access_end`` (suppressing the past-due grace) and is cleared by every
     # successful charge, by termination and by trial expiry.
-    billed_through = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    billed_through = db.Column(tz_datetime(), nullable=True, index=True)
 
     # --- cancel extension ---
     # ``extension_state`` is one of: pending, invoiced, or one of the terminal undo

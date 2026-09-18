@@ -21,34 +21,39 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+
+        import char_factories
+
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
+
+
+@pytest.fixture
+def client(app):
+    """A client whose requests each start with a fresh Flask-Login cache.
+
+    The ``db_session`` fixture above holds ONE app context open for the whole test, so
+    every request shares its ``g`` - and Flask-Login caches the loaded user there. In
+    production each request has its own ``g``; here the user cached by the login request
+    would be read again by the next one after teardown detached it (DetachedInstanceError).
+    """
+    from flask import g
+    from flask.testing import FlaskClient
+
+    class FreshLoginCacheClient(FlaskClient):
+        def open(self, *args, **kwargs):
+            g.pop("_login_user", None)
+            return super().open(*args, **kwargs)
+
+    return FreshLoginCacheClient(app, app.response_class)
 
 
 def _make_user(db_session, username="presence.user"):
@@ -309,10 +314,11 @@ def test_the_signed_in_fragment_stands_up_on_its_own(app, db_session):
         assert "No one's signed in at the moment." in empty
 
 
-def test_being_in_one_company_does_not_list_you_in_another(app, db_session):
-    """The reported bug. Presence lives on the user — signed in, seen recently —
-    but the Users page asks about a company. Without recording WHICH company, one
-    sign-in listed the person as present in every company they belonged to."""
+def test_presence_is_a_fact_about_the_person_not_the_company(app, db_session):
+    """Schema item 14 (docs/schema/01_schema_rebased.sql): ``user.current_entity_id`` is gone,
+    so Settings > Users answers "who is signed in to Minty" - a person who opened one company
+    is listed in every company they belong to. This test pins that decision and its cost;
+    it replaces the per-company assertions that held while the column existed."""
     from services.user_presence import is_signed_in_clause, resume_presence
     from models.db import User
 
@@ -329,34 +335,16 @@ def test_being_in_one_company_does_not_list_you_in_another(app, db_session):
             return user.id in {r[0] for r in rows}
 
         assert present_in("entity-one") is True
-        assert present_in("entity-two") is False
+        assert present_in("entity-two") is True, "item 14: presence is not narrowed by company"
 
-
-def test_moving_to_another_company_moves_you_between_the_lists(app, db_session):
-    """A person is in one place at a time, so arriving in B leaves A."""
-    from services.user_presence import is_signed_in_clause, resume_presence
-    from models.db import User
-
-    user = _make_user(db_session, username="mover.user")
-    with app.test_request_context("/"):
-        def present_in(entity_id):
-            rows = (
-                db_session.session.query(User.id)
-                .filter(is_signed_in_clause(entity_id))
-                .all()
-            )
-            return user.id in {r[0] for r in rows}
-
-        resume_presence(user, "entity-one")
         resume_presence(user, "entity-two")
-
-        assert present_in("entity-one") is False
+        assert present_in("entity-one") is True
         assert present_in("entity-two") is True
 
 
-def test_signing_in_places_you_in_no_company_yet(app, db_session):
-    """Signing in lands you on the entity list, having chosen none — so a fresh
-    session must not inherit wherever the last one ended."""
+def test_signing_in_lists_you_everywhere_you_belong(app, db_session):
+    """A fresh session is signed in to Minty; with no per-company record there is nothing
+    for it to inherit or to shed."""
     from services.user_presence import (is_signed_in_clause, mark_signed_in,
                                         resume_presence)
     from models.db import User
@@ -371,8 +359,7 @@ def test_signing_in_places_you_in_no_company_yet(app, db_session):
             .filter(is_signed_in_clause("entity-one"))
             .all()
         )
-        assert user.id not in {r[0] for r in rows}
-        # Still signed in to Minty, just not inside a company.
+        assert user.id in {r[0] for r in rows}
         assert _reload(db_session, user.id).signed_in_at is not None
 
 
@@ -444,7 +431,13 @@ def test_leaving_a_company_keeps_the_session_but_drops_presence(app, client, db_
     route must NOT log the user out — but it must take them off the company's
     signed-in list, because they are no longer there.
     """
+    from blueprints.legal.services.consent import record_consent
+
     user_id = _make_user(db_session, username="leaver.user").id
+    # someone inside a company has agreed to the Terms; without this the acceptance gate
+    # answers /leave-entity itself (a redirect to the entity list) and the view never runs
+    record_consent(user_id, source="gate")
+    db_session.session.commit()
     client.post(
         "/login",
         data={"username": "leaver.user", "password": "password123"},

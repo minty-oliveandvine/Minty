@@ -288,9 +288,9 @@ def test_the_closing_card_is_the_running_trial_card_plus_one_line(app):
     running = _render(app, _trial_card())
     closing = _render(app, _trial_card(trial_closing=True))
 
-    # The pill survives, date and all.
-    assert "Free trial · ends 15 Aug" in closing
-    assert "bg-[#1F2937]" in closing
+    # The pill survives, date and all (the gold trial pill of edd2b07, not the old black one).
+    assert "Free trial ends 15 Aug" in closing
+    assert "bg-[#FFFDF0]" in closing
     assert "active" in closing
     # The ONLY difference is the added line.
     assert "trial ended- finalising" in closing

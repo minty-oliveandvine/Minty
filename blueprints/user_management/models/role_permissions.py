@@ -1,16 +1,21 @@
-﻿import uuid
-from datetime import datetime
+"""Which permissions a role holds (``role_permission``; was ``role_permissions``).
 
+The schema's key is ``(role_id, permission_id)`` - no ``id``, no stamps.
+"""
+from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class RolePermissions(db.Model):
-    __tablename__ = "role_permissions"
-    __table_args__ = {"schema": "pettycashv2"}
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    role_id = db.Column(db.String(36), db.ForeignKey("pettycashv2.roles.id"))
-    permission_id = db.Column(
-        db.String(36), db.ForeignKey("pettycashv2.permissions.id")
+    __tablename__ = "role_permission"
+    __table_args__ = {"schema": SCHEMA}
+    role_id = db.Column(
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.role.id", ondelete="CASCADE"), primary_key=True,
     )
-    created_at = db.Column(db.DateTime, default=datetime.now)
-    updated_at = db.Column(db.DateTime, default=datetime.now)
+    permission_id = db.Column(
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.permission.id", ondelete="CASCADE"), primary_key=True,
+    )
+
+
+RolePermission = RolePermissions

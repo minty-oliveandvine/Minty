@@ -31,8 +31,10 @@ from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin
 from blueprints.subscription.models.column_types import (
     TRANSFER_STATUS,
+    tz_datetime,
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 # The status vocabulary lives in ``constants``, which is deliberately dependency-free —
 # importing it from here instead would make every consumer of a status pull the model
@@ -65,37 +67,37 @@ class SubscriptionTransfer(CreatedAtMixin, db.Model):
         ),
         db.Index("ix_subscription_transfer_to_user", "to_user_id", "status"),
         db.Index("ix_subscription_transfer_entity", "entity_id", "created_at"),
-        {"schema": "pettycashv2"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         nullable=False,
     )
 
     # WHO, on each side. No FK either way, for the same reason ``subscription_invoice``
     # has none on its payer: this is a record of something that happened between two
     # people, and it has to survive both of them leaving.
-    from_user_id = db.Column(db.String(36), nullable=False)
-    to_user_id = db.Column(db.String(36), nullable=False)
+    from_user_id = db.Column(uuid_column(), nullable=False)
+    to_user_id = db.Column(uuid_column(), nullable=False)
 
     status = db.Column(TRANSFER_STATUS, nullable=False, default=TRANSFER_PENDING)
 
     # Checked at accept, not only by a sweep. An offer whose day has passed must be
     # refused even if nothing has swept it yet — otherwise "expires in 7 days" means
     # "expires whenever the sweep next runs", which is a different promise.
-    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
-    responded_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    expires_at = db.Column(tz_datetime(), nullable=False)
+    responded_at = db.Column(tz_datetime(), nullable=True)
 
     # --- what the accept actually did -------------------------------------------
     # Evidence, written at accept and never recomputed. The quote shown at OFFER time is
     # only an estimate: the old payer's ``paid_through`` advances on every successful
     # renewal, so an offer that outlives a cycle would be quoting a window that has since
     # moved. These record what was true at the moment it was taken.
-    accepted_billed_through = db.Column(db.DateTime(timezone=True), nullable=True)
-    accepted_anchor_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    accepted_billed_through = db.Column(tz_datetime(), nullable=True)
+    accepted_anchor_at = db.Column(tz_datetime(), nullable=True)
     quoted_amount = db.Column(db.Integer, nullable=True)  # minor units, like every amount
     quoted_currency = db.Column(db.CHAR(3), nullable=True)
 

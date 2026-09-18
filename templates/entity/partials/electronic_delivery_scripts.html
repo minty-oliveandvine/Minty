@@ -852,7 +852,7 @@
       const newMethod = {
         id: newId,
         name: name,
-        type: "Electronic",
+        type: "electronic",
         value_name: name.toLowerCase() + '_sales',
         enabled: true,
         display_order: displayOrder
@@ -892,7 +892,7 @@
         id: newId,
         name: name,
         value_name: name.toLowerCase() + '_sales',
-        type: "Delivery",
+        type: "delivery",
         enabled: true,
         display_order: displayOrder
       };
@@ -1206,9 +1206,9 @@
             const electronicMethodsData = [];
             const deliveryMethodsData = [];
             data.payment_methods.forEach(method => {
-              if (method.type === 'Electronic') {
+              if (method.type === 'electronic') {
                 electronicMethodsData.push(method);
-              } else if (method.type === 'Delivery') {
+              } else if (method.type === 'delivery') {
                 deliveryMethodsData.push(method);
               }
             });

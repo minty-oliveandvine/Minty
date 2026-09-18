@@ -15,9 +15,6 @@
           <form id="addUserForm" class="space-y-4">
             <!-- Hidden Company UUID -->
             <input type="hidden" id="companyUuid" name="company_uuid" value="{{ org.id }}" required>
-            
-            <!-- Hidden Xero Entity ID -->
-            <input type="hidden" id="xeroEntityId" name="xero_entity_id" value="{{ org.xero_org_id if org.xero_org_id else '' }}">
 
             <!-- First Name -->
             <div>

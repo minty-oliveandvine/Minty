@@ -21,9 +21,16 @@ class Role(str, Enum):
     SUPER_ADMIN = "super_admin"
 
 
+# The database's vocabulary (blueprints/shared/enums.SystemRole); re-exported here because
+# this module has always been where the code looked it up. SUPERUSER is the historical name
+# of the member whose stored word is now "superadmin".
+from blueprints.shared.enums import SystemRole as _DbSystemRole
+
+
 class SystemRole(str, Enum):
-    NORMAL = "normal"
-    SUPERUSER = "superuser"
+    NORMAL = _DbSystemRole.NORMAL.value
+    ADMIN = _DbSystemRole.ADMIN.value
+    SUPERUSER = _DbSystemRole.SUPERADMIN.value
 
 
 class Permission(str, Enum):

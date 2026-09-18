@@ -83,7 +83,6 @@ def entity_list():
             accessor.last_name,
         )
         .outerjoin(accessor, Entity.last_accessed_by_user_id == accessor.id)
-        .filter(or_(Entity.status.is_(None), Entity.status != "deleted"))
         # "Setup in progress" floats to the top so a half-finished entity is
         # the first thing seen, then most-recently-opened first. Never-opened
         # entities sort last rather than first, which is what NULLS LAST buys.
@@ -93,7 +92,7 @@ def entity_list():
         )
     )
     if is_superuser(current_user):
-        # Superusers see every non-deleted entity, even those they have no
+        # Superusers see every entity, even those they have no
         # user_entity row on (they enter read-only on those).
         rows = base_query.all()
     else:
@@ -169,15 +168,11 @@ def report_dashboard(id):
             "info",
         )
         return redirect(url_for("entity.entity_list"))
-    #prev code
-    #org = Entity.query.filter(Entity.id == id).first()
-    #new code fix
-    org = Entity.query.filter(func.trim(Entity.id) == id.strip()).first()
+    # entities.id is a uuid: no trim() on the column (Postgres has no btrim(uuid)); the
+    # URL value is stripped before the compare instead.
+    org = Entity.query.filter(Entity.id == id.strip()).first()
     if not org:
         flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
-        return redirect(url_for("entity.entity_list"))
-    if org.status == "deleted":
-        flash("This one's gone — it was deleted.", "warning")
         return redirect(url_for("entity.entity_list"))
 
     user_entity = UserEntity.query.filter(
@@ -279,8 +274,9 @@ def report_dashboard(id):
     org.has_existing_draft = current_draft is not None
     org.draft_id = current_draft.id if current_draft else None
     org.draft_current_section = current_draft.current_section if current_draft else None
+    # NULL on legacy drafts (6 of 25 in production): the template iterates it
     org.draft_completed_sections = (
-        current_draft.completed_sections if current_draft else []
+        (current_draft.completed_sections or []) if current_draft else []
     )
     org.draft_progress_completed = (
         len(current_draft.completed_sections)
@@ -300,10 +296,12 @@ def report_dashboard(id):
     org.draft_date = earliest_draft_date or (
         current_draft.transaction_date if current_draft else None
     )
+    # "last edited" is updated_at (timestamptz since C4; SQLite hands it back naive)
+    last_edit = current_draft.updated_at or current_draft.created_at if current_draft else None
+    if last_edit is not None and last_edit.tzinfo is None:
+        last_edit = last_edit.replace(tzinfo=timezone.utc)
     org.draft_last_edit_seconds = (
-        int((datetime.now() - current_draft.date).total_seconds())
-        if current_draft
-        else 0
+        int((datetime.now(timezone.utc) - last_edit).total_seconds()) if last_edit is not None else 0
     )
     org.is_new_user = latest_report is None
 
@@ -468,25 +466,6 @@ def report_dashboard(id):
         display_date=display_date,
         latest_report_submitter_first_name=latest_report_submitter_first_name,
     )
-
-
-@entity_bp.route("/entity/<string:id>/delete", methods=["POST"])
-@login_required
-@require_entity_access(entity_arg="id")
-@require_permission(
-    Permission.ENTITY_DELETE,
-    entity_arg="id",
-    message="You do not have permission to delete this entity.",
-)
-def delete_entity(id):
-    org = Entity.query.filter(Entity.id == id).first_or_404()
-    if org.status == "deleted":
-        flash("This one's already been deleted.", "info")
-        return redirect(url_for("entity.entity_list"))
-    org.status = "deleted"
-    db.session.commit()
-    flash("That entity's deleted.", "success")
-    return redirect(url_for("entity.entity_list"))
 
 
 # Entity list and report dashboard. Logic moved from app.

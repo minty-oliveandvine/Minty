@@ -32,7 +32,7 @@
 --      existing CashInfo model. Rename it with the v3 cutover.
 --
 --  Four corrections applied on top of v3's section F — see
---  docs/cash_denomination_schema_review.md for the full rationale:
+--  docs/archive/runbooks/cash_denomination_schema_review.md for the full rationale:
 --    1. UNIQUE includes `type`, so a $10 note and a $10 coin can coexist.
 --       v3's UNIQUE (currency_id, cash_value) silently blocks one of them.
 --    2. entity_cash_setting exists at all — v3 has entity_sale_setting for
@@ -108,7 +108,7 @@ ALTER TABLE pettycashv2.cash_info
 --
 -- v3 proposes UNIQUE (currency_id, cash_value). HKD circulates BOTH a $10
 -- note and a $10 coin, so that constraint admits only one of them —
--- see docs/cash_denomination_schema_review.md point 1.
+-- see docs/archive/runbooks/cash_denomination_schema_review.md point 1.
 -- conrelid scopes the check to THIS table. Without it the guard matches a
 -- same-named constraint in any other schema (e.g. a clone this script was
 -- already run against), silently skips creating it here, and the ON CONFLICT

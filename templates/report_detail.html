@@ -104,7 +104,7 @@
     <div class="container mt-5">
         <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo" alt="Logo">
         <div class="navbar mb-3">
-            <a href="{% if current_user.system_role == 'superuser' %}{{ url_for('user_management.admin') }}{% else %}{{ url_for('auth.index') }}{% endif %}" class="btn btn-primary">Back to Home / 메인 화면으로 돌아가기</a>
+            <a href="{% if current_user.system_role == 'superadmin' %}{{ url_for('user_management.admin') }}{% else %}{{ url_for('auth.index') }}{% endif %}" class="btn btn-primary">Back to Home / 메인 화면으로 돌아가기</a>
             <a href="{{ url_for('report.edit_report', id=report.id) }}" class="btn btn-edit">Edit Report / 리포트 수정하기</a>
             <a href="{{ url_for('report.download_report', id=report.id) }}" class="btn btn-download">Download as Excel / 엑셀로 다운로드</a>
             <a href="{{ url_for('auth.logout') }}" class="btn btn-secondary">Logout</a>

@@ -41,9 +41,10 @@ def log_history(
 
         old_value_str = str(old_value) if old_value is not None else None
         new_value_str = str(new_value) if new_value is not None else None
+        # ``company`` is accepted for the callers' sake and not stored: the report knows its
+        # company (report_history lost the column in the redesign).
         history = ReportHistory(
             report_id=report_id,
-            company=company,
             user_id=resolved_user_id,
             action=action,
             field_changed=field_changed,

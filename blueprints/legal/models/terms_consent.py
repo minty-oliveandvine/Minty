@@ -21,9 +21,10 @@ agreed to precisely what, and when" — which is the whole question. `source`,
 
 import uuid
 
-from sqlalchemy.dialects.postgresql import UUID
+from blueprints.shared.column_types import MintyUuid
 
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 # How the agreement was given. Kept as a plain string column rather than a DB
 # enum so adding a future sign-up route is a code change, not a migration.
@@ -51,18 +52,16 @@ class TermsConsent(db.Model):
             "user_id", "terms_version", name="uq_terms_consent_user_version"
         ),
         db.Index("ix_terms_consent_user", "user_id"),
-        {"schema": "pettycashv2"},
+        {"schema": SCHEMA},
     )
 
-    id = db.Column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
-        db.String(36),
+        MintyUuid(),
         # Section 13 of the Terms allows permanent deletion of a user. Keeping
         # consent records about a deleted person is data we would have no
         # reason to hold, so they go with them.
-        db.ForeignKey("pettycashv2.user.id", ondelete="CASCADE"),
+        db.ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"),
         nullable=False,
     )
     terms_version = db.Column(db.String(32), nullable=False)

@@ -90,7 +90,6 @@ def report_deposit(id=None):
                 Report.expenses,
                 Report.bank_deposit,
                 Report.closing_balance,
-                Report.receipt_files,
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,

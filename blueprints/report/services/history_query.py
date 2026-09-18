@@ -87,7 +87,9 @@ def get_entity_report_history(
             # submitted reports. Since Stage 4a it also holds draft-shaped rows
             # (status='draft'), so the literal made every in-progress draft
             # render as Submitted. Read the real column instead.
-            "status": report.status or "posted",
+            "status": report.status or "submitted",
+            "submitted_at": ensure_hk_timezone(report.submitted_at) if report.submitted_at else None,
+            "published_at": ensure_hk_timezone(report.published_at) if report.published_at else None,
             "uploaded_by": report.uploaded_by,
             "first_name": user.first_name if user else "",
             "xero_integrated_yes": report.xero_integrated_yes or False,
@@ -99,7 +101,7 @@ def get_entity_report_history(
                     report_id=report.id,
                     cache=resolution_cache,
                 )
-                if report.publishing_status in ("failed", "partially_published")
+                if report.publishing_status == "failed"
                 else []
             ),
             "total_sales": report.total_sales or 0.0,
@@ -108,8 +110,8 @@ def get_entity_report_history(
             # Derived from status, not hardcoded: a draft-shaped `report` row
             # is not a submitted report, and these two drive the dedup
             # tie-break below (submitted wins over draft for a given date).
-            "is_report": (report.status or "posted") != "draft",
-            "is_draft": (report.status or "posted") == "draft",
+            "is_report": (report.status or "submitted") != "draft",
+            "is_draft": (report.status or "submitted") == "draft",
         }
 
     for draft in all_drafts:

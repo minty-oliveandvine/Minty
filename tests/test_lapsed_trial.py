@@ -76,9 +76,9 @@ def test_a_lapse_beside_a_running_trial_is_a_panel_not_a_takeover(app, monkeypat
         app, monkeypatch,
         [
             _Row("PETTY_CASH", "expired", ended_ago=timedelta(days=20)),
-            _Row("BILL", "trial", ended_ago=timedelta(days=-10)),
+            _Row("PAYMENT_REQUEST", "trial", ended_ago=timedelta(days=-10)),
         ],
-        {"PETTY_CASH": False, "BILL": True},
+        {"PETTY_CASH": False, "PAYMENT_REQUEST": True},
     )
     assert state["mode"] == "panel"
     assert [item["code"] for item in state["lapsed"]] == ["PETTY_CASH"]
@@ -91,9 +91,9 @@ def test_a_lapse_beside_a_paid_module_shows_nothing(app, monkeypatch):
         app, monkeypatch,
         [
             _Row("PETTY_CASH", "expired", ended_ago=timedelta(days=20)),
-            _Row("BILL", "active"),
+            _Row("PAYMENT_REQUEST", "active"),
         ],
-        {"PETTY_CASH": False, "BILL": True},
+        {"PETTY_CASH": False, "PAYMENT_REQUEST": True},
     )
     assert state["mode"] is None
 
@@ -104,9 +104,9 @@ def test_a_lapse_beside_a_past_due_module_shows_nothing(app, monkeypatch):
         app, monkeypatch,
         [
             _Row("PETTY_CASH", "expired", ended_ago=timedelta(days=20)),
-            _Row("BILL", "past_due"),
+            _Row("PAYMENT_REQUEST", "past_due"),
         ],
-        {"PETTY_CASH": False, "BILL": True},
+        {"PETTY_CASH": False, "PAYMENT_REQUEST": True},
     )
     assert state["mode"] is None
 
@@ -202,14 +202,14 @@ def test_staggered_trials_report_a_date_each(app, monkeypatch):
         app, monkeypatch,
         [
             _Row("PETTY_CASH", "expired", ended_ago=timedelta(days=30)),
-            _Row("BILL", "expired", ended_ago=timedelta(days=5)),
+            _Row("PAYMENT_REQUEST", "expired", ended_ago=timedelta(days=5)),
         ],
-        {"PETTY_CASH": False, "BILL": False},
+        {"PETTY_CASH": False, "PAYMENT_REQUEST": False},
     )
     assert state["mode"] == "takeover"
     dates = {item["code"]: item["lapsed_on"] for item in state["lapsed"]}
-    assert dates["PETTY_CASH"] != dates["BILL"]
-    assert [item["code"] for item in state["lapsed"]] == ["PETTY_CASH", "BILL"]
+    assert dates["PETTY_CASH"] != dates["PAYMENT_REQUEST"]
+    assert [item["code"] for item in state["lapsed"]] == ["PETTY_CASH", "PAYMENT_REQUEST"]
 
 
 def test_the_mode_does_not_depend_on_which_half_was_missing(app, monkeypatch):
@@ -255,13 +255,13 @@ def test_codes_for_restart_keeps_only_what_lapsed(app, monkeypatch):
     module the entity never lapsed must not become a charge."""
     from blueprints.subscription.services import consent as consent_mod
 
-    state = {"lapsed": [{"code": "PETTY_CASH"}, {"code": "BILL"}]}
+    state = {"lapsed": [{"code": "PETTY_CASH"}, {"code": "PAYMENT_REQUEST"}]}
 
     with app.app_context():
         assert consent_mod.codes_for_restart(state, ["PETTY_CASH"]) == ["PETTY_CASH"]
-        assert consent_mod.codes_for_restart(state, ["BILL", "PETTY_CASH"]) == [
+        assert consent_mod.codes_for_restart(state, ["PAYMENT_REQUEST", "PETTY_CASH"]) == [
             "PETTY_CASH",
-            "BILL",
+            "PAYMENT_REQUEST",
         ], "canonical order, not the order submitted"
         assert consent_mod.codes_for_restart(state, []) == []
         assert consent_mod.codes_for_restart(state, None) == []
@@ -276,7 +276,7 @@ def test_codes_for_restart_refuses_a_set_it_cannot_honour(app, monkeypatch):
     state = {"lapsed": [{"code": "PETTY_CASH"}]}
 
     with app.app_context():
-        assert consent_mod.codes_for_restart(state, ["BILL"]) == []
-        assert consent_mod.codes_for_restart(state, ["PETTY_CASH", "BILL"]) == []
+        assert consent_mod.codes_for_restart(state, ["PAYMENT_REQUEST"]) == []
+        assert consent_mod.codes_for_restart(state, ["PETTY_CASH", "PAYMENT_REQUEST"]) == []
         assert consent_mod.codes_for_restart(state, ["NOT_A_MODULE"]) == []
         assert consent_mod.codes_for_restart({"lapsed": []}, ["PETTY_CASH"]) == []
