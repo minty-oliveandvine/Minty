@@ -1,4 +1,5 @@
 # Report detail, edit, delete, download, resume; delegates to services.
+
 from datetime import datetime
 from io import BytesIO
 from typing import Any, cast
@@ -11,6 +12,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.report import report_bp
+from blueprints.report.services.shared import split_receipt_keys
 from blueprints.report.services.history import log_history
 from blueprints.report.services.report_detail import has_route
 from blueprints.report.services.s3_storage import (delete_expense_with_receipts,
@@ -228,7 +230,7 @@ def edit_report(id):
             index = 0
             while f"shopExpenses[{index}][item]" in request.form:
                 kept_keys.update(
-                    key for key in request.form.get(f"existing_files[{index}]", "").split(",") if key
+                    key for key in split_receipt_keys(request.form.get(f"existing_files[{index}]", ""))
                 )
                 index += 1
             for expense in ShopExpense.query.filter_by(report_id=report.id).all():
@@ -249,11 +251,11 @@ def edit_report(id):
                     existing_files = request.form.get(f"existing_files[{index}]", "")
                     files = request.files.getlist(f"files[{index}][]")
 
-                    file_paths = existing_files.split(",") if existing_files else []
+                    file_paths = split_receipt_keys(existing_files) if existing_files else []
 
                     if files and any(file.filename for file in files):
                         if existing_files:
-                            delete_files_from_s3(existing_files.split(","))
+                            delete_files_from_s3(split_receipt_keys(existing_files))
 
                         description = (
                             item if item else (remarks if remarks else "EXPENSE")

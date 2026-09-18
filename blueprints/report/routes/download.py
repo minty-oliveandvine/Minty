@@ -14,6 +14,7 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
+from blueprints.report.services.shared import split_receipt_keys
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
 from blueprints.shared.enums import DiscrepancyType
 from models.db import Report, ShopExpense, db
@@ -250,8 +251,7 @@ def download_attachments():
                 date_folder = report.transaction_date.strftime("%Y-%m-%d")
                 for expense in report.shop_expenses:
                     if expense.files:
-                        for file_path in expense.files.split(","):
-                            file_path = file_path.strip()
+                        for file_path in split_receipt_keys(expense.files):
                             file_data = download_file_from_s3(file_path)
                             if file_data:
                                 zip_file.writestr(

@@ -23,7 +23,9 @@ of inline JS that reads the field names and JSON keys the schema redesign rename
 | Flask (Minty) | 5001 | `.venv/Scripts/python.exe -m flask --app main.py run --port 5001` |
 | PostgreSQL | 5432 | the database Flask's `LOCAL_DATABASE_URI` points at |
 
-Override the base URL with `E2E_BASE_URL`.
+Override the base URL with `E2E_BASE_URL` (a deployed host works: the seed then needs the
+deployment's database, so run it with the `.env` that points there).
+`E2E_SUBSCRIPTIONS=0` says Flask runs with `SUBSCRIPTION_ENABLED=0` (subscriptions dark).
 
 ## The seeded identity
 
@@ -60,8 +62,19 @@ LOCAL_DATABASE_URI=$OLD RDS_DATABASE_URI=$OLD SUBSCRIPTION_SCHEDULER_ENABLED=0 \
 | `01_login.spec.ts` | login form, wrong password, first sign-in shows the terms modal (scroll-to-end, tick, accept), the company dashboard |
 | `02_report_wizard.spec.ts` | opening (live opening balance) → sales (three live sub-totals) → expenses (receipt upload, supplier and account pickers, running total) → deposit (cash on hand) → cash count (calculator modal, hidden fields, zero discrepancy) → ending (summary figures) → submitted → history row and the posted report's summary |
 | `03_settings.spec.ts` | petty-cash account mapping, the sales-methods editor (add via the catalogue picker → visible on the sales form), users, the Xero page and an entity rename round-trip, the module page, the CSV export's movement lines |
+| `04_xero_publish.spec.ts` | `E2E_XERO=1` only: the report 02 posted → Publish on its submitted page → `/api/report/<id>/publishing_status` reaches `xero_integrated_yes` → Republish offered. Real bank transactions, a transfer and the receipt land in the linked organisation |
 
 Serial, one worker: every spec signs in as the same user and writes to the same entity.
+
+## A shop connected to Xero (`E2E_XERO=1`)
+
+Link the seeded entity to a Xero **Demo Company** by hand once (an admin of the entity connects
+on the Xero page and runs the sync). The seed then leaves the mapping and the synced contacts
+alone, `e2e/helpers.ts::fixtures()` switches the supplier / expense account / mapping names to
+the organisation's real rows (`ABC Furniture`, `General Expenses`, …; override any of them
+with `E2E_SUPPLIER_QUERY`, `E2E_SUPPLIER`, `E2E_EXPENSE_ACCOUNT_QUERY`, `E2E_EXPENSE_ACCOUNT`),
+and `04_xero_publish` runs. Without the variable the placeholders the seed writes are used and
+the publish spec skips.
 
 ## Findings the suite records
 
@@ -75,5 +88,6 @@ starts passing — and then must lose the marker — when the defect is fixed.
 
 ## What this layer does not cover
 
-Xero OAuth (no real connection is made; the connect page is only rendered), Stripe, email
-delivery, the Next.js apps (`onboarding/e2e`, `billing-frontend/e2e`) and the Django services.
+Xero OAuth itself (the connection is made by hand; with `E2E_XERO=1` the publish uses it),
+Stripe, email delivery, the Next.js apps (`onboarding/e2e`, `billing-frontend/e2e`) and the
+Django services.

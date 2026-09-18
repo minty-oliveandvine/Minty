@@ -3,7 +3,7 @@
 // silently (field names, JSON keys), so every step asserts what the page SHOWS, not what the
 // database holds. Amounts are chosen so each total is a distinct number.
 import { expect, test, type Page } from '@playwright/test';
-import { login, moneyRegex, reportDate, requireCredentials, requireStack } from './helpers';
+import { RECEIPT_PNG, brokenImages, fixtures, login, moneyRegex, reportDate, requireCredentials, requireStack } from './helpers';
 
 // A first report opens at 0 (the page carries yesterday's closing in a hidden field); the
 // user types the cash added to the float.
@@ -60,22 +60,35 @@ test.describe.serial('report wizard', () => {
   test('expenses: one line with a receipt is added and totalled', async ({ page }) => {
     await page.goto(stepUrl('expense'));
     await page.getByRole('button', { name: /add new expense/i }).click();
-    await page.locator('#expense_files').setInputFiles({
-      name: 'receipt.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('ÿØÿàfake-jpeg-bytes', 'binary'),
-    });
+    await page.locator('#expense_files').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: RECEIPT_PNG });
     await page.locator('#expense_amount').fill(String(EXPENSE));
     await page.locator('#expense_remarks').fill('Tape');
     // supplier and account are searchable inputs fed by the entity's synced contacts/accounts
-    await page.locator('#expense_contact').fill('E2E Stationery');
-    await page.locator('#expenseContactSuggestions').getByText('E2E Stationery Supplier').first().click();
-    await page.locator('#expense_account_code').fill('Office');
-    await page.locator('#expenseAccountSuggestions').getByText('E2E Office Expenses 429').first().click();
+    const fx = fixtures();
+    await page.locator('#expense_contact').fill(fx.supplierQuery);
+    await page.locator('#expenseContactSuggestions').getByText(fx.supplierName, { exact: true }).first().click();
+    await page.locator('#expense_account_code').fill(fx.accountQuery);
+    await page.locator('#expenseAccountSuggestions').getByText(fx.accountName, { exact: true }).first().click();
     await page.locator('#addExpenseForm button[onclick="addExpense()"]').click();
     // the new line appears in the list with its description and amount, and the total moves
     await expect(page.getByText('Tape').first()).toBeVisible();
     await expect(page.getByText(moneyRegex(EXPENSE)).first()).toBeVisible();
     await next(page).click();
     await expect(page).toHaveURL(/\/report\/deposit/);
+  });
+
+  test('expenses: the stored receipt renders when the line is reopened', async ({ page }) => {
+    // the line comes back from the database now (its receipt key minted from the account
+    // name, commas included); opening it shows the receipt through /download/<key>, and the
+    // image must actually load - a key the bucket lacks is a broken image
+    await page.goto(stepUrl('expense'));
+    await page.locator('[data-expense-id][onclick^="viewExistingExpense"]').first().click();
+    const modal = page.locator('#viewExpenseModal');
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText(fixtures().accountName);
+    const receipt = modal.locator('#viewExpenseContent img');
+    await expect(receipt).toHaveCount(1);
+    expect(await brokenImages(page, '#viewExpenseContent')).toEqual([]);
   });
 
   test('deposit: the page shows the cash on hand before the deposit', async ({ page }) => {
@@ -166,6 +179,6 @@ test.describe.serial('report wizard', () => {
     // the expense lines sit behind "Show more"; a line is named by its ACCOUNT (the remark
     // "Tape" is the description and is not shown here)
     await page.locator('#expensesShowMore').click();
-    await expect(detail).toContainText('E2E Office Expenses 429');
+    await expect(detail).toContainText(fixtures().accountName);
   });
 });

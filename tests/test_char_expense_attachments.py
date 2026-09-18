@@ -144,6 +144,23 @@ def test_patching_a_draft_line_moves_its_amount_exactly(app, day, client, s3):
     assert client.patch(f"/report/expense/draft/{F.new_id()}", json={"item": "x"}).status_code == 404
 
 
+def test_a_receipt_is_stored_under_a_normalised_name(day, client, s3):
+    """The stored key is minted from the expense item and is ``[A-Z0-9_]`` only: no comma
+    ("Meal, Transport etc" used to split the receipt in two on the way back), no ``&``."""
+    import re
+
+    owner, entity = day
+    body = add_expense(client, entity, DAY, "Staff Welfare - Meal, Transport & etc", "547.00")
+    (file,) = body["expense"]["files"]
+    key = file["s3_key"]
+    assert re.fullmatch(r"expenses/[0-9a-f-]{36}/01_SEP_2026_STAFF_WELFARE_MEAL_TRANSPORT_AND_ETC_547\.jpg", key), key
+    assert key in s3.objects
+    # the page lists ONE file for the line, and the download resolves it
+    listed = expense_page_files(client, entity)[body["expense"]["id"]]
+    assert [f["s3_key"] for f in listed] == [key]
+    assert client.get(f"/download/{key}").status_code == 302
+
+
 def test_a_receipt_downloads_from_the_store(day, client, s3):
     owner, entity = day
     key = add_expense(client, entity, DAY, "Taxi", "80.00")["expense"]["files"][0]["s3_key"]

@@ -2,7 +2,7 @@
 // users, the Xero page, the module page, and the CSV export. These pages read the tables the
 // redesign reshapes most (sale_info / entity_sale_setting, entity_pettycash_settings, entities).
 import { expect, test } from '@playwright/test';
-import { login, moneyRegex, reportDate, requireCredentials, requireStack, subscriptionsDark } from './helpers';
+import { login, moneyRegex, reportDate, requireCredentials, requireStack, subscriptionsDark, fixtures, xeroLive } from './helpers';
 
 test.describe('entity settings', () => {
   let entityId = '';
@@ -17,10 +17,10 @@ test.describe('entity settings', () => {
   test('petty cash settings show the account mapping and the sales methods', async ({ page }) => {
     await page.goto(`/entity/settings/entity/${entityId}`);
     const body = page.locator('body');
-    for (const name of ['E2E Petty Cash 090', 'E2E Bank 091', 'E2E Cash Sales 200', 'E2E Director Loan 835', 'E2E Cash Discrepancy 499']) {
+    for (const name of fixtures().mappingAccounts) {
       await expect(body).toContainText(name);
     }
-    for (const contact of ['E2E Cash Customer', 'E2E Director', 'E2E Discrepancy']) {
+    for (const contact of fixtures().mappingContacts) {
       await expect(body).toContainText(contact);
     }
     // the methods seeded through the real service, grouped by type
@@ -71,10 +71,16 @@ test.describe('entity settings', () => {
     await expect(page.locator('body')).toContainText(/admin/i);
   });
 
-  test('xero settings page renders the entity name, country/currency and the connect button', async ({ page }) => {
+  test('xero settings page renders the entity name, country/currency and the connection button', async ({ page }) => {
     await page.goto(`/entity/${entityId}/settings/xero`);
     await expect(page.getByRole('textbox', { name: /entity name/i })).toHaveValue('E2E Petty Cash Shop');
-    await expect(page.getByRole('button', { name: /connect to xero/i })).toBeVisible();
+    // a shop linked to a Demo Company by hand is Connected and offers Disconnect; the seed's shop is not
+    if (xeroLive()) {
+      await expect(page.locator('body')).toContainText('Connected');
+      await expect(page.getByRole('button', { name: /disconnect from xero/i })).toBeVisible();
+    } else {
+      await expect(page.getByRole('button', { name: /^connect to xero/i })).toBeVisible();
+    }
     await expect(page.getByRole('heading', { name: /country & currency/i })).toBeVisible();
   });
 
@@ -160,11 +166,12 @@ test.describe('entity settings', () => {
     const rows = text.split(/\r?\n/).filter((r) => r.trim());
     expect(rows[0]).toMatch(/^Date,Account Code,Amount/);
     // one line per movement of the report the wizard spec posted: the float added at the
-    // start (director account 835), the expense by its remark and account code (429), the
-    // cash sale (200) and the deposit (090)
+    // start (director account 835), the expense by its remark and account code (445), the
+    // cash sale (200) and the deposit, booked against the petty cash account (090 on the
+    // seed's mapping, 091 on the Demo Company's)
     expect(text).toMatch(/Cash Addition/);
-    expect(text).toMatch(/,429,-25\.1,Tape/);
+    expect(text).toMatch(new RegExp(`,${fixtures().expenseCode},-25\\.1,Tape`));
     expect(text).toMatch(/,200,300\.1,Cash Sale/);
-    expect(text).toMatch(/,090,-500\.0,Bank Deposit/);
+    expect(text).toMatch(new RegExp(`,${fixtures().pettyCashCode},-500\\.0,Bank Deposit`));
   });
 });

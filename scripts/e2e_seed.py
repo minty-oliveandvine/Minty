@@ -132,7 +132,18 @@ def main() -> int:
         # --- petty-cash settings: the dashboard shows "Setup Required" (and hides the wizard)
         #     until the entity has its Xero account/contact mapping. No Xero here: the rows
         #     are local placeholders named E2E-*, enough for the mapping to be complete.
+        #
+        #     A shop that IS connected to Xero (the deployed e2e shop, linked to a Demo
+        #     Company by hand) keeps the mapping the sync and the settings page gave it:
+        #     placeholders there would be picked by a spec and rejected by Xero on publish.
+        #     The specs read the real names from E2E_SUPPLIER / E2E_EXPENSE_ACCOUNT then.
         from models.db import AccountInfo, EntityPettycashSettings, XeroContactSync
+
+        xero_connected = bool(entity.xero_org_id)
+        if xero_connected:
+            print(f"entity is connected to Xero ({entity.xero_tenant_name}); mapping left as it is")
+            XeroContactSync.query.filter_by(entity_id=entity.id, category="E2E").delete(synchronize_session=False)
+            db.session.commit()
 
         def account(name, kind):
             row = AccountInfo.query.filter_by(entity_id=entity.id, name=name).first()
@@ -156,43 +167,48 @@ def main() -> int:
         if settings is None:
             settings = EntityPettycashSettings(entity_id=entity.id)
             db.session.add(settings)
-        settings.pettycash_account_id = account("E2E Petty Cash 090", "BANK").id
-        settings.bank_account_id = account("E2E Bank 091", "BANK").id
-        settings.cash_sale_account_id = account("E2E Cash Sales 200", "REVENUE").id
-        settings.discrepancy_bank_account_id = account("E2E Discrepancy Bank 092", "BANK").id
-        settings.discrepancy_account_id = account("E2E Cash Discrepancy 499", "EXPENSE").id
-        settings.director_account_id = account("E2E Director Loan 835", "CURRLIAB").id
-        settings.cash_sale_contact_id = contact("E2E Cash Customer").id
-        settings.director_contact_id = contact("E2E Director").id
-        settings.discrepancy_contact_id = contact("E2E Discrepancy").id
-        # the expense form's account dropdown reads entity_account_xero (is_active) joined to
-        # account_info; its supplier dropdown reads xero_contact_sync (already seeded above)
-        from models.db import EntityAccountXero
+        if xero_connected:
+            settings = None  # nothing below applies; the mapping is the real one
+        if settings is not None:
+            settings.pettycash_account_id = account("E2E Petty Cash 090", "BANK").id
+            settings.bank_account_id = account("E2E Bank 091", "BANK").id
+            settings.cash_sale_account_id = account("E2E Cash Sales 200", "REVENUE").id
+            settings.discrepancy_bank_account_id = account("E2E Discrepancy Bank 092", "BANK").id
+            settings.discrepancy_account_id = account("E2E Cash Discrepancy 499", "EXPENSE").id
+            settings.director_account_id = account("E2E Director Loan 835", "CURRLIAB").id
+            settings.cash_sale_contact_id = contact("E2E Cash Customer").id
+            settings.director_contact_id = contact("E2E Director").id
+            settings.discrepancy_contact_id = contact("E2E Discrepancy").id
+            # the expense form's account dropdown reads entity_account_xero (is_active) joined to
+            # account_info; its supplier dropdown reads xero_contact_sync (already seeded above)
+            from models.db import EntityAccountXero
 
-        for name in ("E2E Office Expenses 429", "E2E Cleaning 408"):
-            acc = account(name, "EXPENSE")
-            if EntityAccountXero.query.filter_by(account_id=acc.id).first() is None:
-                db.session.add(EntityAccountXero(id=str(uuid.uuid4()), account_id=acc.id, name=acc.name,
-                                                 type=acc.type, xero_account_id=acc.xero_account_id, is_active=True))
-        contact("E2E Stationery Supplier")
-        db.session.commit()
+            # the third name carries commas on purpose: the receipt key is minted from the
+            # account name, and a comma inside a key once split it into two broken halves
+            for name in ("E2E Office Expenses 429", "E2E Cleaning 408", "E2E Light, Power, Heating 445"):
+                acc = account(name, "EXPENSE")
+                if EntityAccountXero.query.filter_by(account_id=acc.id).first() is None:
+                    db.session.add(EntityAccountXero(id=str(uuid.uuid4()), account_id=acc.id, name=acc.name,
+                                                     type=acc.type, xero_account_id=acc.xero_account_id, is_active=True))
+            contact("E2E Stationery Supplier")
+            db.session.commit()
 
-        # the payment-request app's "Account Code" picker reads entity_bill_account_xero, a
-        # billing-backend table with no Minty model - raw SQL, schema-qualified as always
-        from sqlalchemy import text as sql
+            # the payment-request app's "Account Code" picker reads entity_bill_account_xero, a
+            # billing-backend table with no Minty model - raw SQL, schema-qualified as always
+            from sqlalchemy import text as sql
 
-        for code, name in (("429", "E2E Office Expenses"), ("408", "E2E Cleaning")):
-            exists = db.session.execute(sql(
-                f"SELECT 1 FROM {SCHEMA}.entity_bill_account_xero WHERE entity_id = :e AND account_code = :c"
-            ), {"e": entity.id, "c": code}).first()
-            if exists is None:
-                db.session.execute(sql(
-                    f"INSERT INTO {SCHEMA}.entity_bill_account_xero "
-                    "(id, entity_id, account_code, account_name, account_type, is_default, is_active, is_deleted, "
-                    " xero_account_id, sort_order, created_by, created_at, updated_at) "
-                    "VALUES (:id, :e, :c, :n, 'EXPENSE', false, true, false, :x, 0, :u, now(), now())"
-                ), {"id": str(uuid.uuid4()), "e": entity.id, "c": code, "n": name, "x": str(uuid.uuid4()), "u": user.id})
-        db.session.commit()
+            for code, name in (("429", "E2E Office Expenses"), ("408", "E2E Cleaning"), ("445", "E2E Light, Power, Heating")):
+                exists = db.session.execute(sql(
+                    f"SELECT 1 FROM {SCHEMA}.entity_bill_account_xero WHERE entity_id = :e AND account_code = :c"
+                ), {"e": entity.id, "c": code}).first()
+                if exists is None:
+                    db.session.execute(sql(
+                        f"INSERT INTO {SCHEMA}.entity_bill_account_xero "
+                        "(id, entity_id, account_code, account_name, account_type, is_default, is_active, is_deleted, "
+                        " xero_account_id, sort_order, created_by, created_at, updated_at) "
+                        "VALUES (:id, :e, :c, :n, 'EXPENSE', false, true, false, :x, 0, :u, now(), now())"
+                    ), {"id": str(uuid.uuid4()), "e": entity.id, "c": code, "n": name, "x": str(uuid.uuid4()), "u": user.id})
+            db.session.commit()
 
         # --- wipe the entity's report history so the wizard starts clean ----------
         from models.db import Report, ReportCashCount, ReportHistory, ReportSaleDetail, ShareLink, ShopExpense
