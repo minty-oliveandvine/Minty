@@ -30,6 +30,7 @@ import uuid
 from sqlalchemy import CHAR, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.types import DateTime, TypeDecorator
+from blueprints.shared.schema import SCHEMA
 
 
 class MintyUuid(TypeDecorator):
@@ -79,7 +80,7 @@ def pg_enum(enum_cls):
     from sqlalchemy import Enum
 
     return Enum(
-        enum_cls, name=enum_cls.pg_name, schema="pettycashv3", native_enum=True,
+        enum_cls, name=enum_cls.pg_name, schema=SCHEMA, native_enum=True,
         create_type=False, values_callable=lambda e: [m.value for m in e],
     )
 

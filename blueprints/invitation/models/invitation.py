@@ -8,19 +8,20 @@ import uuid
 from blueprints.shared.column_types import MintyUuid, pg_enum
 from blueprints.shared.enums import EntityRole, InvitationStatus
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class Invitation(db.Model):
     __tablename__ = "invitation"
     __table_args__ = (
         db.UniqueConstraint("token", name="invitation_token_key"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
+        db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         nullable=False,
     )
     email = db.Column(db.String(150), nullable=False)
@@ -34,7 +35,7 @@ class Invitation(db.Model):
     status = db.Column(pg_enum(InvitationStatus), nullable=False, default=InvitationStatus.PENDING)
     invited_by = db.Column(
         MintyUuid(),
-        db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"),
+        db.ForeignKey(f"{SCHEMA}.user.id", ondelete="SET NULL"),
         nullable=True,
     )
     created_at = db.Column(

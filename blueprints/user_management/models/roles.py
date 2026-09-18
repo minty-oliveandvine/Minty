@@ -3,13 +3,14 @@ import uuid
 
 from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class Roles(db.Model):
     __tablename__ = "role"
     __table_args__ = (
         db.UniqueConstraint("name", name="role_name_key"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)

@@ -76,6 +76,8 @@ services:
       FLASK_ENV: ${FLASK_ENV:-development}
       FLASK_DEBUG: ${FLASK_DEBUG:-False}
       PYTHONUNBUFFERED: "1"
+      # the schema all three services read (blueprints/shared/schema.py, config.settings.DB_SCHEMA)
+      MINTY_DB_SCHEMA: ${MINTY_DB_SCHEMA:-pettycashv3}
       # SECRET_KEY is shared with billing-backend below — JWTs minted by Flask
       # are verified by Django with this same key. They MUST match.
       SECRET_KEY: ${SECRET_KEY:-minty_stack_shared_secret_key}
@@ -143,6 +145,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
       PYTHONUNBUFFERED: "1"
+      MINTY_DB_SCHEMA: ${MINTY_DB_SCHEMA:-pettycashv3}
       # Same key as Flask above. A mismatch here means every cross-module
       # handoff fails with an invalid-signature 401.
       SECRET_KEY: ${SECRET_KEY:-minty_stack_shared_secret_key}
@@ -251,6 +254,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
       PYTHONUNBUFFERED: "1"
+      MINTY_DB_SCHEMA: ${MINTY_DB_SCHEMA:-pettycashv3}
       # Same key as Flask and billing-backend. Flask MINTS the onboarding JWT and
       # this service only verifies it, so a mismatch is not a boot failure — it is
       # a 401 on every request, which the wizard reports as an expired session.

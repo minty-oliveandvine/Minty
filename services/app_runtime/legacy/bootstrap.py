@@ -31,6 +31,7 @@ from models.db import db
 from pettycash.core.blueprint_loader import (register_blueprints,
                                              register_compat_alias)
 from pettycash.core.hooks import init_app as init_hooks
+from blueprints.shared.schema import SCHEMA
 
 load_dotenv()
 
@@ -390,7 +391,7 @@ def create_app():
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24
     app.config["WTF_CSRF_TIME_LIMIT"] = 24 * 60 * 60
     if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
-        app.config["SESSION_SQLALCHEMY_SCHEMA"] = "pettycashv3"
+        app.config["SESSION_SQLALCHEMY_SCHEMA"] = SCHEMA
     Session(app)
 
     if app.config["ENV"] != "production":

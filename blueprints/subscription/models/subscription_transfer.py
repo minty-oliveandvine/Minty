@@ -34,6 +34,7 @@ from blueprints.subscription.models.column_types import (
     tz_datetime,
     uuid_column,
 )
+from blueprints.shared.schema import SCHEMA
 
 # The status vocabulary lives in ``constants``, which is deliberately dependency-free —
 # importing it from here instead would make every consumer of a status pull the model
@@ -66,13 +67,13 @@ class SubscriptionTransfer(CreatedAtMixin, db.Model):
         ),
         db.Index("ix_subscription_transfer_to_user", "to_user_id", "status"),
         db.Index("ix_subscription_transfer_entity", "entity_id", "created_at"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"),
+        db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         nullable=False,
     )
 

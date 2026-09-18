@@ -8,6 +8,7 @@ from sqlalchemy.orm import synonym
 from blueprints.shared.column_types import MintyUuid, Money, cents, pg_enum
 from blueprints.shared.enums import DiscrepancyType, PublishStatus, ReportStatus
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class Report(db.Model):
@@ -30,11 +31,11 @@ class Report(db.Model):
     __tablename__ = "report"
     __table_args__ = (
         db.UniqueConstraint("entity_id", "transaction_date", name="report_entity_date_key"),
-        {"schema": "pettycashv3"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
-    entity_id = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.entities.id", ondelete="CASCADE"), nullable=False)
+    entity_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"), nullable=False)
     transaction_date = db.Column(db.Date, nullable=False)
     next_transaction_date = db.Column(db.Date, nullable=True)
     status = db.Column(pg_enum(ReportStatus), nullable=False, default=ReportStatus.DRAFT)
@@ -59,7 +60,7 @@ class Report(db.Model):
     xero_integrated = db.Column(db.Boolean, nullable=True, default=False)
     # 'personal' | 'company': where the money ADDED to the float came from (schema item 13)
     cash_addition_type = db.Column(db.String(20), nullable=True)
-    created_by = db.Column(MintyUuid(), db.ForeignKey("pettycashv3.user.id", ondelete="SET NULL"), nullable=True)
+    created_by = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.user.id", ondelete="SET NULL"), nullable=True)
     submitted_at = db.Column(db.DateTime(timezone=True), nullable=True)
     published_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.current_timestamp())

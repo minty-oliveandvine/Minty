@@ -17,6 +17,7 @@ from blueprints.auth.system_roles import (
 from blueprints.shared.enums import SystemRole
 from models.db import db, tz
 from blueprints.shared.column_types import MintyUuid
+from blueprints.shared.schema import SCHEMA
 
 
 class User(UserMixin, db.Model):
@@ -35,7 +36,7 @@ class User(UserMixin, db.Model):
     """
 
     __tablename__ = "user"
-    __table_args__ = {"schema": "pettycashv3"}
+    __table_args__ = {"schema": SCHEMA}
     SYSTEM_ROLE_NORMAL = USER_SYSTEM_ROLE_NORMAL
     SYSTEM_ROLE_SUPERUSER = USER_SYSTEM_ROLE_SUPERUSER
     SYSTEM_ROLE_DEFAULT = USER_SYSTEM_ROLE_DEFAULT
@@ -58,7 +59,7 @@ class User(UserMixin, db.Model):
     )
     username = db.Column(db.String(150), nullable=False, unique=True)
     system_role = db.Column(
-        db.Enum(SystemRole, name="system_role", schema="pettycashv3", native_enum=True,
+        db.Enum(SystemRole, name="system_role", schema=SCHEMA, native_enum=True,
                 create_type=False, values_callable=lambda e: [m.value for m in e]),
         nullable=False, default=USER_SYSTEM_ROLE_DEFAULT,
     )
