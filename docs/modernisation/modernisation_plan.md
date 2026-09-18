@@ -881,16 +881,43 @@ Each unit gets its own short plan (files, tests, gate) when it starts; C1's is t
   is a support event, not a defect: Phase E step 1's announcement should say so, and the
   cutover runbook needs the 47 names (query: enabled = false on PETTY_CASH and a report in the
   last 90 days) so support can reach them first. No grandfathering step, no re-enable.
-- Still open before the window: whether both hosts share the B2 bucket (`04` writes the old keys
-  verbatim); Supabase's current data is discarded at cutover (decision 2).
+- **Step 5 repeated 2026-09-18 on the cutover-candidate dump** (`production-backup_20260918.dump`,
+  4,959 → 4,903 reports carried, 1,023 bills, 13,887 attachments; loaded DARK into `minty_e1`):
+  two expectations moved with two days of data and were re-measured in `gen.py` — R2 restored
+  contacts 238 → **239**, R4 zero-count rows 277 → **282** (the 7 without a denomination
+  unchanged) — then ALL GREEN (restore 2.2 · upgrade 24.2 · build 1.1 · 03 196.3 · 04 5.2 ·
+  manifest 1.7 ≈ 230 s ⇒ window 7 min), `m1a01: skipped`, `ALTER SCHEMA … RENAME TO
+  pettycashv3`, audit 0, `scripts/schema_migration/cutover_checks.py` OK (125 entity-months to
+  the cent, bills/lines/audit equal, 0 subscription rows, 136/176 grants carried, 0 live
+  companies with Petty Cash off), Minty e2e 19 against it. **Rule confirmed twice now: every
+  fresh dump moves a count or two — the first act inside the window is a run whose only
+  purpose is to re-measure, before anything is trusted.** The same day the schema name became
+  a setting, `MINTY_DB_SCHEMA` (default `pettycashv3`; every suite green under `pettycash_alt`
+  too), and the cutover-checks script joined the repo.
+- **Resolved 2026-09-18:** both hosts **share the B2 bucket** (user), so `04` writing the old
+  keys verbatim is correct and no copy step exists; the cutover dump comes from the user
+  (`PROD09182026.backup` → `backups/production-backup_20260918.dump`, the 09-18 rehearsal below).
+  Supabase's current data is discarded at cutover (decision 2). Nothing else is open before
+  the dress rehearsal.
 
 ## Phase E — production cutover
 
 Dress rehearsal on **staging** first, exactly as below, at least two days before production.
 
-1. Announce; set `SCHEDULED_MAINTENANCE_*` (the env flags already exist) → maintenance page.
-2. Pause: `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty instance; disable the Stripe webhook
-   endpoint in the Stripe dashboard (events queue and replay on re-enable); note the time.
+1. Announce. **The window is held by suspending the Render web services** (Minty,
+   billing-backend, onboarding-backend; decided 2026-09-18) — there is no maintenance gate in
+   Minty (`SCHEDULED_MAINTENANCE_*` never existed; only billing-frontend has a static
+   `/maintenance` page, which the Vercel apps can be pointed at for the window). A real gate,
+   `MAINTENANCE_MODE`, is a Part 2 deliverable (step 2, the shared packages) so every later
+   cutover has one.
+2. Pause: `SUBSCRIPTION_ENABLED=0` and `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty
+   instance (Render env; the change restarts the service, which is what applies it — the flag
+   is read at `create_app`), `SUBSCRIPTION_ENABLED=0` on onboarding-backend,
+   `NEXT_PUBLIC_SUBSCRIPTION_ENABLED=0` on billing-frontend; nobody runs
+   `flask subscriptions run-daily --issue` by hand. Note the time. **There is no Stripe
+   webhook to disable**: the receiver went with the in-house biller (Minty charges
+   synchronously and owns subscription state), and Stripe does not queue events for a disabled
+   endpoint anyway — a stale endpoint in the dashboard can be deleted, nothing depends on it.
 3. `pg_dump` Supabase (custom format) to two places. Verify it restores.
 4. Run the pipeline on the staging Postgres from a fresh dump of the old production host
    (`rehearse.py --dump … --db <name> --attachments`, then `ALTER SCHEMA pettycash_test RENAME
@@ -900,7 +927,9 @@ Dress rehearsal on **staging** first, exactly as below, at least two days before
 5. `pg_dump -n pettycashv3 -Fc --no-owner --no-acl` of that result; `pg_restore -d <Supabase>
    --no-owner --no-acl` (no `-n`) — it creates `pettycashv3` beside the existing `pettycashv2`.
    **No rename-swap** (decided 2026-09-16: `pettycashv3` is the permanent name). The phase-C
-   builds already carry the `pettycashv3` qualifier, so no config changes anywhere. Drop
+   builds read the schema name from `MINTY_DB_SCHEMA` (default `pettycashv3`, since
+   2026-09-18 — `blueprints/shared/schema.py`, `config.settings.DB_SCHEMA` in both Django
+   services), so no config changes anywhere: leave the variable unset. Drop
    `pettycashv2.alembic_version`; delete `bills` rows from `django_migrations`.
 6. Deploy the phase-C builds of Minty, `billing-backend`, `onboarding-backend` (Render, from the
    branch that has been green on Postgres since phase C).
@@ -1489,7 +1518,7 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 1. `SECRET_KEY` identical across every Python service; `minty-accounts-api` is the only minter (Flask until step 5).
 2. `minty-db` is the only repo with a `migrations/` directory and the only process that runs `migrate`. Every service imports `minty_db.models` with `MINTY_DB_OWNER = False`; no service declares its own model for a `pettycashv2` table. Writes follow the ownership map in `minty-db`'s README.
 3. Outbound calls to another service go through one client module per service (`core/minty_client.py` pattern), never scattered `requests` calls.
-4. `pettycashv2` via `search_path`; raw SQL schema-qualified.
+4. The schema name is a setting, never a literal: `MINTY_DB_SCHEMA` (default `pettycashv3`) is the one variable every service reads — `minty-db` inherits it from Part 1's `blueprints/shared/schema.py` / `config.settings.DB_SCHEMA` — and a guard test per repo fails on any other spelling; raw SQL is schema-qualified through it.
 5. Only `minty-xero-api` holds `XERO_CLIENT_ID/SECRET` (Flask until step 3).
 6. **Ports: one digit per domain, shared by its API and its frontend** — `800d` for the `-api`, `300d` for the `-web`, digits in the order a user meets the products:
 
@@ -1508,6 +1537,7 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 
    Local dev only — Render and Vercel inject `$PORT`. The payments pair moves at **step 4**, the same change that splits `billing-frontend` and renames both repos: `docker/stack/docker-compose.yml` + `.env.example` defaults, `billing-frontend/lib/apiBase.ts:8`, `billing-backend/config/settings.py:38` (CORS), `Minty/blueprints/shared/bearer_api.py:34` and `blueprints/entity/routes/modules.py:162` (redirect fallbacks), READMEs. Until then payments stays on 8000/3000 and `minty-web` does not exist, so nothing collides. `docker/stack/docker-compose.yml` is the one place the whole system is wired; every new service adds itself there with `${<NAME>_PATH:-../../../<repo>}` and `${<NAME>_HOST_PORT:-800d}`, and every hardcoded `localhost:<port>` fallback in code must agree with it. **The stack's Postgres moves to host port 5433** (container stays 5432): this machine already has a native Postgres on 5432 (`production-backup` lives there), and the compose default colliding with it is the first item in `docker/stack/README.md §8` — flip the default so a fresh checkout works beside a local Postgres, and invert the `.env.example` comment (override to 5432 only if you have none).
 7. Frontends route through one cutover map per app (`apiRoutes.ts`), never inline base URLs.
+8. `MAINTENANCE_MODE` is honoured by every `-api` and every `-web` (from the shared packages, step 2); a cutover window is held by that switch, never by improvisation.
 
 ## Sequencing
 
@@ -1551,6 +1581,7 @@ dependency: xero is smallest and already behind one env var; accounts must prece
 2. **Foundations, before any new service** — the biggest step, and the one that removes the most risk from every later one:
    - `minty-db` adopts the schema **Part 1 already put in production**: `0001_initial` = `01_schema_rebased.sql` via `SeparateDatabaseAndState`, `migrate --fake-initial` on every environment, both Django services import `minty_db.models`, `docker/stack` cold start switches to the `minty-db` init container. (The redesign itself, the 217 application changes, the pipeline rehearsal, the cutover and the Alembic deletion are Part 1 — if Part 1 has not shipped, this step cannot start.)
    - `minty-shared-py` from onboarding-backend's `core/`; both existing Django services repoint at it and at `minty-db`; their `shared_models/` directories go.
+   - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a `minty-e2e` journey (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
    - `minty-e2e`: Playwright scaffold + the stack CI workflow (cold-started from empty, since that now works) + the first two journeys (sign-up→finalize, connect Xero→publish report), which are the ones steps 3 and 5 will break if they go wrong. Contract-type generation into `minty-shared-ts` starts here too.
 3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_TOKEN_SERVICE_URL`, then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: `minty-e2e` Xero journey + `onboarding/e2e/xero.spec.ts`.
 4. **`minty-shared-ts` + split `minty-web` out of `billing-frontend`** — together; the split is what forces the shared package into existence. `minty-web/e2e` created with it. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway, and **move the payments pair to 8003/3003** so `minty-web` takes 3000 (rule 6 lists the six places).
@@ -1574,7 +1605,8 @@ route groups, a cutover map on the frontend, models from `minty-db`, and "verifi
 - `terraform plan` in `minty-infra` is a no-op against production after the imports; every Render service and Vercel project in the dashboards appears in state (`terraform state list`), and a `SECRET_KEY` rotation is one variable change + one apply, verified by a token minted by accounts being accepted by every other service.
 - `pip show minty-db minty-shared` in every Django container reports the same tags; `billing-backend/shared_models`, `billing-backend/bills/migrations` and `onboarding-backend/shared_models` no longer exist.
 - `onboarding/lib/apiRoutes.ts` ends with an empty "proxied to Flask" block and `flaskBase.ts` is deleted; `onboarding/e2e` passes against the full stack after each of steps 3, 5, 7.
-- Each service's README states the seven cross-cutting rules; `grep -rn XERO_CLIENT_SECRET` across the org hits only `minty-xero-api` (and `minty-legacy` until step 3).
+- Flipping `MAINTENANCE_MODE` in `minty-infra` puts every app on its maintenance page and makes every API refuse writes, and `minty-e2e` has a journey that proves it.
+- Each service's README states the eight cross-cutting rules; `grep -rn XERO_CLIENT_SECRET` across the org hits only `minty-xero-api` (and `minty-legacy` until step 3).
 
 ---
 
