@@ -11,40 +11,45 @@ from __future__ import annotations
 
 import time
 import uuid
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import pytest
 from werkzeug.security import generate_password_hash
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+
+        import char_factories
+
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
+
+
+@pytest.fixture
+def client(app):
+    """A client whose requests each start with a fresh Flask-Login cache.
+
+    The ``db_session`` fixture above holds ONE app context open for the whole test, so
+    every request shares its ``g`` - and Flask-Login caches the loaded user there. In
+    production each request has its own ``g``; here the user cached by the login request
+    would be read again by the next one after teardown detached it (DetachedInstanceError).
+    """
+    from flask import g
+    from flask.testing import FlaskClient
+
+    class FreshLoginCacheClient(FlaskClient):
+        def open(self, *args, **kwargs):
+            g.pop("_login_user", None)
+            return super().open(*args, **kwargs)
+
+    return FreshLoginCacheClient(app, app.response_class)
 
 
 def _make_user(db_session, *, id_token=None, username="idle.user"):
@@ -101,7 +106,11 @@ def test_logout_non_xero_user_redirects_home(app, db_session):
 
 
 # --------------------------------------------------------------------------- #
-# Idle auto-logout backstop (hooks.before_request)
+# Idle window reset at login (hooks.before_request)
+#
+# The server-side idle backstop itself (the /logout?reason=idle redirect and the
+# 401 for AJAX) was removed in July 2026 along with static/js/idle-logout.js; only
+# the login-time reset of ``last_activity`` remains.
 # --------------------------------------------------------------------------- #
 
 def test_login_resets_idle_window_despite_stale_last_activity(app, client, db_session):
@@ -125,41 +134,6 @@ def test_login_resets_idle_window_despite_stale_last_activity(app, client, db_se
     assert resp.status_code != 401
 
 
-def test_idle_timeout_redirects_to_logout(app, client, db_session):
-    """A request after the idle window is bounced to /logout?reason=idle."""
-    _make_user(db_session)
-    _login(client)
-
-    idle_limit = app.config.get("IDLE_TIMEOUT_SECONDS", 1800)
-    with client.session_transaction() as sess:
-        sess["last_activity"] = time.time() - (idle_limit + 100)
-
-    resp = client.get("/index", follow_redirects=False)
-    assert resp.status_code == 302
-    location = resp.location or ""
-    assert "/logout" in location
-    assert "reason=idle" in location
-
-
-def test_idle_timeout_ajax_returns_401_session_expired(app, client, db_session):
-    """AJAX requests after the idle window get a 401 with a session_expired code
-    and a redirect hint to /logout (so the client can end the Xero session)."""
-    _make_user(db_session)
-    _login(client)
-
-    idle_limit = app.config.get("IDLE_TIMEOUT_SECONDS", 1800)
-    with client.session_transaction() as sess:
-        sess["last_activity"] = time.time() - (idle_limit + 100)
-
-    resp = client.get(
-        "/index",
-        headers={"X-Requested-With": "XMLHttpRequest"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 401
-    body = resp.get_json()
-    assert body["code"] == "session_expired"
-    assert "/logout" in body["redirect"]
 
 
 def test_request_within_idle_window_is_allowed(app, client, db_session):

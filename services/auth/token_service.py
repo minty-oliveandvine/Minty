@@ -104,8 +104,16 @@ def token_expired(current_user, application=None, tz=None):
         if not current_user:
             return {"Token Expired": "Missing user"}, 500
         _log(app, "info", f"Checking token expiration for user: {current_user.username}")
+        if current_user.expires_in is None or current_user.token_created_at is None:
+            # No bundle (never connected, disconnected, or the row was cleared): there is
+            # nothing to be current, so "expired" - and not an error worth a log line.
+            return True
         expires_in_seconds = int(current_user.expires_in) - 300
-        created_at = _get_timezone(tz).localize(current_user.token_created_at).timestamp()
+        obtained = current_user.token_created_at
+        if getattr(obtained, "tzinfo", None) is None:
+            # naive: written as local time (SQLite, and rows older than the timestamptz change)
+            obtained = _get_timezone(tz).localize(obtained)
+        created_at = obtained.timestamp()
         timenow = datetime.now(_get_timezone(tz)).timestamp()
         elapsed_seconds = timenow - created_at
         _log(
@@ -242,78 +250,29 @@ def upsert_user_token(user, token_data, application=None, is_refresh=False):
 
 
 def apply_refreshed_tokens(user, new_tokens, application=None):
-    """Commit a refreshed token bundle to BOTH the legacy User columns and
-    the new user_token table, and stamp refresh_token_last_used_at.
+    """Commit a refreshed token bundle to ``user_token`` and stamp
+    ``refresh_token_last_used_at``.
 
-    Returns ``True`` if anything was applied, ``False`` otherwise. Use this
-    everywhere a refresh response comes back from Xero so the two stores stay
-    in lockstep.
+    Returns ``True`` if anything was applied, ``False`` otherwise. Use this everywhere
+    a token response comes back from Xero. There is one store: ``User.access_token`` and
+    friends are properties over the same row (blueprints/auth/models/user.py), so every
+    reader sees the new bundle immediately.
     """
-    from models.db import db
-
-    app = _resolve_app(application)
     if not user or not new_tokens:
         return False
-
-    try:
-        user.access_token = (
-            new_tokens.get("access_token") or user.access_token
-        )
-        user.refresh_token = (
-            new_tokens.get("refresh_token", user.refresh_token) or user.refresh_token
-        )
-        user.expires_in = new_tokens.get("expires_in") or user.expires_in
-        user.id_token = (
-            new_tokens.get("id_token", user.id_token) or user.id_token
-        )
-        user.token_created_at = datetime.now(_get_timezone(None))
-        db.session.commit()
-    except Exception as exc:
-        _log(app, "error", f"Error applying refreshed tokens to user {user.id}: {str(exc)}")
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
-        return False
-
-    upsert_user_token(user, new_tokens, application=application, is_refresh=True)
-    return True
+    return upsert_user_token(user, new_tokens, application=application, is_refresh=True) is not None
 
 
 def _hydrate_user_from_user_token(user, application=None):
-    """Copy fresh tokens from ``user_token`` onto ``user`` in memory.
+    """True when ``user`` holds a usable Xero bundle.
 
-    Returns True if hydration happened (a usable user_token row was found),
-    False otherwise. We hydrate in-memory rather than refactoring every
-    callsite that reads ``user.access_token``.
+    Historically copied the ``user_token`` row onto the six shadow columns of ``user``;
+    those columns are gone and ``User.access_token`` reads the row directly, so the only
+    question left is whether there is anything to read.
     """
-    app = _resolve_app(application)
     if not user or not getattr(user, "id", None):
         return False
-    try:
-        row = UserToken.query.filter_by(user_id=user.id).first()
-    except Exception as exc:
-        _log(app, "warning", f"Error loading user_token for user {user.id}: {str(exc)}")
-        return False
-
-    if row is None or not row.access_token:
-        return False
-
-    user.access_token = row.access_token
-    if row.refresh_token is not None:
-        user.refresh_token = row.refresh_token
-    if row.id_token is not None:
-        user.id_token = row.id_token
-    if row.access_token_expires_in is not None:
-        user.expires_in = row.access_token_expires_in
-    if row.access_token_obtained_at is not None:
-        # token_expired() reads ``user.token_created_at`` and treats it as
-        # naive local time, so we mirror that contract here.
-        obtained = row.access_token_obtained_at
-        if getattr(obtained, "tzinfo", None) is not None:
-            obtained = obtained.replace(tzinfo=None)
-        user.token_created_at = obtained
-    return True
+    return bool(user.access_token)
 
 
 def get_xero_token_user_for_entity(entity_id, application=None, token_cache=None):
@@ -489,49 +448,21 @@ def _xero_refresh_lock(user_id, application=None, wait_seconds: float = 5.0):
 
 
 def _resolve_service_token_bearer(entity, application=None):
-    """Pick the user whose Xero tokens represent ``entity``.
+    """The user whose Xero bundle serves ``entity``: ``entity.connected_by_user_id``.
 
-    Prefers ``entity.connected_by_user_id``. Falls back to the legacy
-    ``User.xero_entity_id == entity.xero_org_id`` lookup, because no migration
-    ever backfilled the connector column — entities connected before
-    2026-05-13 have it NULL until someone re-runs the Xero connect flow, and
-    refusing them would break publishing that works today.
-
-    The fallback is scaffolding. Every use is logged at WARNING so the backfill
-    population can be measured from production traffic; once that count reaches
-    zero the fallback (and this function) should be deleted.
+    That column is the only record of who connected a company (the old
+    ``user.xero_entity_id`` fallback went with the column, schema item 19). No connector
+    means the company needs a human to reconnect; say so rather than guess.
     """
     app = _resolve_app(application)
-
     connector_id = getattr(entity, "connected_by_user_id", None)
-    if connector_id:
-        bearer = User.query.filter(User.id == connector_id).first()
-        if bearer is not None:
-            return bearer
-        _log(
-            app,
-            "warning",
-            f"connected_by_user_id {connector_id} on entity {entity.id} "
-            f"points to a missing user; falling back to legacy lookup",
-        )
-
-    # No ORDER BY here would let Postgres return a different user per call.
-    bearer = (
-        User.query.filter(
-            User.xero_entity_id == str(entity.xero_org_id),
-            User.access_token.isnot(None),
-            User.access_token != "",
-        )
-        .order_by(nulls_last(User.token_created_at.desc()), User.id)
-        .first()
-    )
-    if bearer is not None:
-        _log(
-            app,
-            "warning",
-            f"LEGACY_CONNECTOR_FALLBACK entity={entity.id} bearer={bearer.id} "
-            f"— entity.connected_by_user_id is not set; backfill required",
-        )
+    if not connector_id:
+        _log(app, "info", f"Entity {entity.id} has no connected_by_user_id; reconnect required")
+        return None
+    bearer = User.query.filter(User.id == str(connector_id)).first()
+    if bearer is None:
+        _log(app, "warning",
+             f"connected_by_user_id {connector_id} on entity {entity.id} points to a missing user")
     return bearer
 
 

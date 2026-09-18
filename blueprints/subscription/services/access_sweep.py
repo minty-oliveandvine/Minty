@@ -12,7 +12,7 @@ names that module keeps working. The two entity-side dependencies -- ``_enabled_
 and ``set_entity_module`` -- are reached through the MODULE OBJECT and read at call
 time, not bound at import. That is deliberate and load-bearing: the suite patches those
 names on ``entity.services.modules``, and a ``from ... import`` here would capture the
-real ones at import and silently ignore the patch (see CODE_CLEANSE_NOTES.md, "dependency
+real ones at import and silently ignore the patch (see docs/code_cleanse/CODE_CLEANSE_NOTES.md, "dependency
 injection is required in this repo").
 
 The lazy imports inside the functions are the existing house pattern and are what keeps

@@ -286,8 +286,7 @@ def report_expense(id=None):
             org=org,
             current_section="expenses",  # Always set to current page
             completed_sections=(
-                current_draft.completed_sections if current_draft else [
-                    "opening"]
+                (current_draft.completed_sections or ["opening"]) if current_draft else ["opening"]
             ),
             is_draft=True,
             draft_id=current_draft.id if current_draft else None,
@@ -735,7 +734,7 @@ def report_expense(id=None):
         transaction_date=transaction_date,
         current_section="expenses",  # Always set to current page
         completed_sections=(
-            current_draft.completed_sections if current_draft else ["opening"]
+            (current_draft.completed_sections or ["opening"]) if current_draft else ["opening"]
         ),
         is_draft=True,
         draft_id=current_draft.id if current_draft else None,

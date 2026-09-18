@@ -104,10 +104,13 @@ Two CREATE TABLEs and one nullable ADD COLUMN — no rewrite, no lock on existin
 nothing reading it. A deploy in either order is safe: old code cannot see the tables, and
 new code does not consult them until the cutover revision ships the services that do.
 
-The tables are EMPTY after this runs. ``scripts/backfill_billing_groups.py`` is what
-makes them true — it reads each payer's Stripe default and gives every payer exactly one
-group holding exactly today's state, so the cutover is a behavioural no-op until someone
-nominates a second card. It needs Stripe and therefore cannot live in a migration.
+The tables are EMPTY after this runs. ``scripts/backfill_billing_groups.py`` was what
+made them true — it read each payer's Stripe default and gave every payer exactly one
+group holding exactly today's state, so the cutover was a behavioural no-op until someone
+nominated a second card. It needed Stripe and therefore could not live in a migration.
+It was retired on 2026-09-17: it had run on dev, dev's subscriptions were wiped on
+2026-09-11, and production has no subscriptions to backfill (the 2026-09-16 rehearsal
+carried 0 rows of both tables), so there was nothing left for it to do.
 
 -----------------------------------------------------------------------------
 THE DOWNGRADE REFUSES ONCE THE CUTOVER HAS RUN
@@ -209,7 +212,7 @@ def _upgrade_group_table(bind):
         op.create_index(IX_GROUP_DUNNING, GROUP, ["dunning_started_at"], schema=SCHEMA)
 
     print(
-        f"Created {SCHEMA}.{GROUP} (empty — scripts/backfill_billing_groups.py fills it)."
+        f"Created {SCHEMA}.{GROUP} (empty — the app fills it as payers nominate cards)."
     )
 
 

@@ -130,7 +130,7 @@ def day(value) -> str:
 
 
 def modules_phrase(codes) -> str:
-    """``['PETTY_CASH', 'BILL']`` -> ``'Petty Cash and Payment Request'``."""
+    """``['PETTY_CASH', 'PAYMENT_REQUEST']`` -> ``'Petty Cash and Payment Request'``."""
     names = [_module_name(code) for code in codes if code]
     if not names:
         return "your modules"
@@ -140,7 +140,8 @@ def modules_phrase(codes) -> str:
 
 
 def _module_name(code: str) -> str:
-    pretty = {"PETTY_CASH": "Petty Cash", "BILL": "Payment Request"}
+    # BILL is the plan word (billing_plan.code); PAYMENT_REQUEST the module code.
+    pretty = {"PETTY_CASH": "Petty Cash", "PAYMENT_REQUEST": "Payment Request", "BILL": "Payment Request"}
     key = str(code or "").strip().upper()
     return pretty.get(key, key.title().replace("_", " "))
 
@@ -237,7 +238,7 @@ def settings_url(entity_id) -> str:
 # a masthead that is broken by default.
 
 LOGO_CID = "minty-logo"
-#: Built by ``scripts/build_email_assets.py`` from ``static/img/new_logo.png``, not that
+#: Built by ``scripts/subscription/build_email_assets.py`` from ``static/img/new_logo.png``, not that
 #: file itself: the source is a padded 571x379 canvas weighing 98KB, and this one is
 #: attached to EVERY message the billing system sends. Trimmed and downsized it is ~19KB.
 LOGO_PATH = ("img", "email", "logo.png")
@@ -251,7 +252,7 @@ ILLUSTRATION_CID = "minty-art"
 def illustration_path(event: str) -> tuple[str, ...]:
     """Where ``event``'s illustration lives under ``static/``.
 
-    Built by ``scripts/build_email_assets.py``, which trims and downsizes the source art;
+    Built by ``scripts/subscription/build_email_assets.py``, which trims and downsizes the source art;
     the files here are ~10-40KB, not the ~1MB originals in ``static/img``.
     """
     return ("img", "email", f"{event}.png")

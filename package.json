@@ -4,13 +4,18 @@
   "description": "Petty Cash Management System",
   "scripts": {
     "build": "npx tailwindcss -i ./src/input.css -o ./static/css/styles.css --minify",
-    "watch": "npx tailwindcss -i ./src/input.css -o ./static/css/styles.css --watch"
+    "watch": "npx tailwindcss -i ./src/input.css -o ./static/css/styles.css --watch",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.17",
     "postcss": "^8.4.35",
     "prettier": "^3.6.2",
     "prettier-plugin-jinja-template": "^2.1.0",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^3.4.17",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5"
   }
 }

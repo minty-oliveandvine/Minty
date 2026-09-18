@@ -20,7 +20,7 @@ schema, each resolved at the v3 cutover:
   * ``type`` stays VARCHAR rather than becoming a cash_type enum.
 
 Two corrections applied on top of v3 — see
-docs/cash_denomination_schema_review.md:
+docs/archive/runbooks/cash_denomination_schema_review.md:
 
   * UNIQUE includes ``type``. v3 proposes UNIQUE (currency_id, cash_value),
     which silently blocks HKD's $10 note and $10 coin from coexisting.

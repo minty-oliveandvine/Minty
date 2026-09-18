@@ -15,26 +15,14 @@ import uuid
 
 import pytest
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         _seed_registries(db)
         yield db
         db.session.rollback()
@@ -54,6 +42,7 @@ def _seed_registries(db):
     db.session.add(
         CurrencyInfo(id=hkd_id, currency_code="HKD", currency_name="Hong Kong Dollar")
     )
+    db.session.flush()  # the country rows point at it (a real FK on Postgres; no ORM relationship orders the inserts)
     db.session.add_all(
         [
             # The long registry form is what a display label must match against.

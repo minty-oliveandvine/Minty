@@ -32,6 +32,7 @@ import uuid
 from models.db import db
 from blueprints.subscription.models.mixins import CreatedAtMixin
 from blueprints.subscription.models.column_types import uuid_column
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityBillingConsent(CreatedAtMixin, db.Model):
@@ -42,20 +43,20 @@ class EntityBillingConsent(CreatedAtMixin, db.Model):
         db.UniqueConstraint(
             "entity_id", "user_id", name="uq_entity_billing_consent_entity_user"
         ),
-        {"schema": "pettycashv2"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.entities.id"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.entities.id"),
         nullable=False,
     )
     # Who agreed. FK to user (not user_stripe_customer) for the same reason the
     # subscription mirror does it: consent can be recorded before a customer exists.
     user_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.user.id"),
         nullable=False,
         index=True,
     )

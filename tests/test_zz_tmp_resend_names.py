@@ -1,8 +1,8 @@
 """Verify send_invitation_email falls back to the persisted invitation names."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
-def test_resend_uses_persisted_names(monkeypatch):
+def test_resend_uses_persisted_names(app, monkeypatch):
     import blueprints.invitation.services.invite as inv
 
     captured = {}
@@ -20,15 +20,17 @@ def test_resend_uses_persisted_names(monkeypatch):
             return "http://x/static/"
         return "http://x/invite/" + kw.get("token", "")
 
-    def fake_render(_tpl, **ctx):
+    def fake_build(**ctx):  # the mail body is built here, not by render_template
         captured["accept_url"] = ctx.get("accept_url")
         return "<html></html>"
 
     mail = MagicMock()
     monkeypatch.setattr(inv, "url_for", fake_url_for)
-    monkeypatch.setattr(inv, "render_template", fake_render, raising=False)
-    monkeypatch.setattr(inv.Entity, "query", MagicMock(get=lambda _id: None))
-    monkeypatch.setattr(inv.User, "query", MagicMock(get=lambda _id: None))
+    monkeypatch.setattr(inv, "_build_invitation_html", fake_build)
+    monkeypatch.setattr(inv, "_record_sent", lambda _id: None)
+    with app.app_context():  # reading ``Model.query`` to replace it needs a context
+        monkeypatch.setattr(inv.Entity, "query", MagicMock(get=lambda _id: None))
+        monkeypatch.setattr(inv.User, "query", MagicMock(get=lambda _id: None))
     monkeypatch.setattr(inv, "current_app", MagicMock(extensions={"mail": mail}))
     monkeypatch.setattr(inv, "Message", MagicMock())
     monkeypatch.setenv("PUBLIC_URL", "http://x")

@@ -25,26 +25,14 @@ import pytest
 
 UTC = timezone.utc
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -55,7 +43,7 @@ def db_session(app):
         db.session.commit()
 
 
-def _entity(db, *, status="active", name="Acme"):
+def _entity(db, *, status="disconnected", name="Acme"):
     from models.db import Entity
 
     row = Entity(id=str(uuid.uuid4()), name=name, status=status)
@@ -80,15 +68,16 @@ def _function(db, code, *, is_active):
     return row
 
 
-def _grant(db, entity, fn, *, enabled=True, actor="entity_create"):
+def _grant(db, entity, fn, *, enabled=True, actor=None):
+    # ``actor`` is accepted for the callers' readability only: entity_function_map.created_by
+    # is the person (a user id or NULL, schema section 4), never a label.
     from models.db import EntityFunctionMap
 
     row = EntityFunctionMap(
-        id=str(uuid.uuid4()),
         entity_id=entity.id,
         entity_function_id=fn.id,
         is_enabled=enabled,
-        created_by=actor,
+        created_by=None,
     )
     db.session.add(row)
     db.session.commit()
@@ -165,15 +154,15 @@ def test_map_row_is_what_decides(app, db_session):
     with app.app_context():
         entity = _entity(db_session)
         # is_active FALSE throughout: an explicit grant must still win.
-        fn = _function(db_session, "BILL", is_active=False)
+        fn = _function(db_session, "PAYMENT_REQUEST", is_active=False)
 
         _grant(db_session, entity, fn, enabled=True)
-        assert _is_module_enabled(entity.id, "BILL") is True
+        assert _is_module_enabled(entity.id, "PAYMENT_REQUEST") is True
 
         row = fn.entity_mappings[0]
         row.is_enabled = False
         db_session.session.commit()
-        assert _is_module_enabled(entity.id, "BILL") is False
+        assert _is_module_enabled(entity.id, "PAYMENT_REQUEST") is False
 
 
 def test_entity_creation_grants_nothing(app, db_session):
@@ -182,18 +171,18 @@ def test_entity_creation_grants_nothing(app, db_session):
                                                     apply_default_modules)
     from blueprints.entity.routes.modules import _is_module_enabled
 
-    assert DEFAULT_MODULE_STATE == {"PETTY_CASH": False, "BILL": False}
+    assert DEFAULT_MODULE_STATE == {"PETTY_CASH": False, "PAYMENT_REQUEST": False}
 
     with app.app_context():
         entity = _entity(db_session)
         _function(db_session, "PETTY_CASH", is_active=True)
-        _function(db_session, "BILL", is_active=True)
+        _function(db_session, "PAYMENT_REQUEST", is_active=True)
 
         _data, status = apply_default_modules(entity.id)
         assert status == 200
 
         assert _is_module_enabled(entity.id, "PETTY_CASH") is False
-        assert _is_module_enabled(entity.id, "BILL") is False
+        assert _is_module_enabled(entity.id, "PAYMENT_REQUEST") is False
 
 
 # --- the sweep --------------------------------------------------------------
@@ -207,7 +196,7 @@ def test_sweep_revokes_access_with_no_subscription_row(app, db_session):
     with app.app_context():
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "BILL", is_active=False)
+        _function(db_session, "PAYMENT_REQUEST", is_active=False)
         _grant(db_session, entity, pc, enabled=True)
 
         assert _is_module_enabled(entity.id, "PETTY_CASH") is True
@@ -227,7 +216,7 @@ def test_sweep_exempts_entities_still_onboarding(app, db_session):
     with app.app_context():
         entity = _entity(db_session, status="onboarding")
         pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "BILL", is_active=False)
+        _function(db_session, "PAYMENT_REQUEST", is_active=False)
         _grant(db_session, entity, pc, enabled=True, actor="onboarding")
 
         result = sweep_expired_module_access()
@@ -236,22 +225,8 @@ def test_sweep_exempts_entities_still_onboarding(app, db_session):
         assert _is_module_enabled(entity.id, "PETTY_CASH") is True
 
 
-def _naive_clock(monkeypatch):
-    """Make the sweep's clock naive for the duration of a test.
-
-    SQLite drops tzinfo on the way back out, so a stored ``app_access_until`` returns
-    naive while ``clock.now()`` is aware — and comparing them raises inside the sweep's
-    per-entity ``except``, which swallows it and reports "nothing lapsed". The date
-    branches are then untestable and, worse, quietly appear to pass. Production stores
-    timestamptz and has neither problem, so this aligns the harness rather than the code.
-    """
-    from datetime import datetime as _dt
-
-    from blueprints.subscription.services import clock as clock_mod
-
-    monkeypatch.setattr(clock_mod, "now", lambda: _dt.now())
-
-
+# ``_naive_clock`` went with C7: the subscription tables' timestamps are ``AwareDateTime``,
+# which hands back an aware stamp on SQLite too, so the sweep's clock can stay aware.
 def test_sweep_terminates_a_cancellation_whose_access_ran_out(app, db_session, monkeypatch):
     """The date that ends access also ends the SUBSCRIPTION.
 
@@ -264,10 +239,9 @@ def test_sweep_terminates_a_cancellation_whose_access_ran_out(app, db_session, m
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     with app.app_context():
-        _naive_clock(monkeypatch)
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "BILL", is_active=False)
+        _function(db_session, "PAYMENT_REQUEST", is_active=False)
         _grant(db_session, entity, pc, enabled=True, actor="subscription")
 
         past = datetime.now() - timedelta(days=1)
@@ -294,10 +268,9 @@ def test_sweep_does_not_terminate_a_cancellation_still_running(app, db_session, 
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     with app.app_context():
-        _naive_clock(monkeypatch)
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "BILL", is_active=False)
+        _function(db_session, "PAYMENT_REQUEST", is_active=False)
         _grant(db_session, entity, pc, enabled=True, actor="subscription")
 
         future = datetime.now() + timedelta(days=10)
@@ -321,10 +294,9 @@ def test_sweep_leaves_an_ended_trial_to_the_trial_job(app, db_session, monkeypat
     from blueprints.entity.services.modules import sweep_expired_module_access
 
     with app.app_context():
-        _naive_clock(monkeypatch)
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "BILL", is_active=False)
+        _function(db_session, "PAYMENT_REQUEST", is_active=False)
         _grant(db_session, entity, pc, enabled=True, actor="subscription")
 
         past = datetime.now() - timedelta(days=1)
@@ -347,7 +319,7 @@ def test_sweep_leaves_a_running_trial_alone(app, db_session):
     with app.app_context():
         entity = _entity(db_session)
         pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "BILL", is_active=False)
+        _function(db_session, "PAYMENT_REQUEST", is_active=False)
         _grant(db_session, entity, pc, enabled=True, actor="subscription")
 
         future = datetime.now(UTC) + timedelta(days=10)

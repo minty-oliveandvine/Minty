@@ -1,25 +1,36 @@
+"""What a report's Xero publish created (``xero_report_sync``): one row per report.
+
+``xero_response_text`` holds the publish record (``xero/services/publish_record.py``) - the
+Xero object ids per module, so a republish updates rather than duplicates. Schema 2.43 fixed
+the two typos (``sync_statuc``, ``xero_reponse_text``), made ``report_id`` NOT NULL + UNIQUE
+and put it ON DELETE CASCADE: the record goes with the report (the r9a09 SET NULL "audit
+trail survives the report" is gone - schema item 22 gave the row stamps instead).
+"""
 from uuid import uuid4
 
+from blueprints.shared.column_types import MintyUuid
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class XeroReportSync(db.Model):
     __tablename__ = "xero_report_sync"
-    __table_args__ = {"schema": "pettycashv2"}
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid4()))
-    # Re-pointed at report.id in r4a04 (Stage 3); formerly report_v2.report_id.
-    #
-    # Reshaped in r9a09 (Step 4d): this was part of a composite PK, which is
-    # the only reason r4a04 had to use CASCADE — a PK column cannot be SET
-    # NULL. `id` is now the sole PK, so deleting a report nulls this column
-    # instead of deleting the row. That matters because this table is the
-    # audit trail that detects a double-publish to Xero.
-    report_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.report.id", ondelete="SET NULL"),
-        nullable=True,
+    __table_args__ = (
+        db.UniqueConstraint("report_id", name="xero_report_sync_report_key"),
+        {"schema": SCHEMA},
     )
-    sync_statuc = db.Column(db.String(20))
-    reported_at = db.Column(db.DateTime)
-    completed_at = db.Column(db.DateTime)
-    xero_reponse_text = db.Column(db.Text)
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid4()))
+    report_id = db.Column(
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.report.id", ondelete="CASCADE"), nullable=False,
+    )
+    sync_status = db.Column(db.String(20))
+    reported_at = db.Column(db.DateTime(timezone=True))
+    completed_at = db.Column(db.DateTime(timezone=True))
+    xero_response_text = db.Column(db.Text)
+    created_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, server_default=db.func.current_timestamp(),
+    )
+    updated_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, server_default=db.func.current_timestamp(),
+        onupdate=db.func.current_timestamp(),
+    )

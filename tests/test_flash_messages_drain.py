@@ -47,8 +47,9 @@ def test_partial_renders_and_drains_stale_flash():
         )
         html = render_template_string(source)
 
-        # Rendered: the message text is emitted (into the showFlashMessages call).
-        assert "Hmm, I looked everywhere but couldn't find that one." in html
+        # Rendered: the message text is emitted (into the showFlashMessages call);
+        # ``tojson`` HTML-escapes the apostrophe as ', as test_entity_list_flash_drain pins.
+        assert 'Hmm, I looked everywhere but couldn\\u0027t find that one.' in html  # tojson HTML-escapes the apostrophe
         # Drained: the cross-request leak vector is emptied.
         assert session.get("_flashes", []) == []
 

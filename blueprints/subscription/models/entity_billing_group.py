@@ -31,6 +31,7 @@ import uuid
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
 from blueprints.subscription.models.column_types import uuid_column
+from blueprints.shared.schema import SCHEMA
 
 
 class EntityBillingGroup(TimestampMixin, db.Model):
@@ -43,19 +44,19 @@ class EntityBillingGroup(TimestampMixin, db.Model):
         db.Index("ix_entity_billing_group_entity", "entity_id"),
         db.Index("ix_entity_billing_group_payer", "payer_user_id"),
         db.Index("ix_entity_billing_group_group", "billing_group_id"),
-        {"schema": "pettycashv2"},
+        {"schema": SCHEMA},
     )
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.entities.id", ondelete="CASCADE"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         nullable=False,
     )
     # Whose nomination this is. FK to ``user`` for the same reason the group's is.
     payer_user_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.user.id"),
         nullable=False,
     )
     # uuid, unlike entity_id and payer_user_id above. This one points INSIDE the
@@ -64,7 +65,7 @@ class EntityBillingGroup(TimestampMixin, db.Model):
     # a uuid column to a varchar one. See column_types for the whole boundary.
     billing_group_id = db.Column(
         uuid_column(),
-        db.ForeignKey("pettycashv2.payer_billing_group.id"),
+        db.ForeignKey(f"{SCHEMA}.payer_billing_group.id"),
         nullable=False,
     )
     # How the card came to be nominated — "capture" (a card entered while setting this

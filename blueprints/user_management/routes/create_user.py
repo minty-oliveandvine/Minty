@@ -47,7 +47,8 @@ def create_user():
     username = email
     company_uuid = data["company_uuid"]
     role = str(data["role"]).strip().lower()
-    xero_entity_id = data.get("xero_entity_id")
+    # ``xero_entity_id`` used to be accepted here; the column is gone (a company records
+    # who connected it in entities.connected_by_user_id). Old callers may still send it.
 
     if not can_manage_role_assignment_for_entity(current_user, role, company_uuid):
         return (
@@ -77,7 +78,6 @@ def create_user():
             first_name=first_name,
             last_name=last_name,
             password=bcrypt_hash_password(password),
-            xero_entity_id=xero_entity_id,
             system_role=User.SYSTEM_ROLE_DEFAULT,
         )
         db.session.add(new_user)
@@ -88,7 +88,7 @@ def create_user():
             role=role,
             approved=True,
             joined_at=datetime.now(),
-            create_at=datetime.now(),
+            created_at=datetime.now(),
         )
         db.session.add(new_user_entity)
         db.session.commit()
@@ -117,7 +117,6 @@ def create_user():
                     "last_name": last_name,
                     "company_uuid": company_uuid,
                     "role": role,
-                    "xero_entity_id": xero_entity_id,
                 },
                 "message": "User created successfully.",
             }

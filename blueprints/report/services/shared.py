@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
-from models.db import (Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
+from blueprints.shared.enums import SaleType
+from models.db import (Report, ReportSale, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 
@@ -22,93 +23,8 @@ parse_nested_keys = _parse_nested_keys
 # not every column: this is the identity//balance core needed for the row to be
 # a valid FK parent and to render, not a full copy. The submit path still owns
 # the authoritative field-by-field copy (ending.py:1418).
-_DRAFT_MIRROR_FIELDS = (
-    "transaction_date",
-    "next_transaction_date",
-    "opening_balance",
-    "cash_addition",
-    "adjusted_opening_balance",
-    "cash_sales",
-    "shop_sales",
-    "delivery_sales",
-    "total_sales",
-    "expenses",
-    "bank_deposit",
-    "closing_balance",
-    "uploaded_by",
-    "company",
-    "status",
-    "current_section",
-    "completed_sections",
-    "withdrawal_type",
-    "withdrawal_bank_account",
-)
-
-
-def ensure_report_row_for_draft(draft, commit=False):
-    """Create the paired ``report`` row for ``draft`` if it does not exist yet.
-
-    A draft and its report share one id (ending.py:387 joins on exactly that),
-    so this is an existence check on the primary key, not a search.
-
-    Why this exists: report_sale_detail and report_expense_detail rows are
-    written all through data entry, keyed on the draft id, but until now a
-    ``report`` row only appeared at submit (ending.py:1418). That left every
-    in-progress draft's detail rows pointing at an id with no parent — which is
-    why Stage 2a had to drop those FKs, and why Stage 3 cannot put them back
-    until a report row exists from creation onward. This closes that gap.
-
-    The row is created with ``status='draft'``. It is NOT a submitted report and
-    nothing should treat it as one: every reader that means "submitted" filters
-    on status, and the ones that do not are being migrated in a later substage.
-    ``expenses`` and ``closing_balance`` are copied as-is, NULL included, which
-    r3a03 made possible by relaxing those two NOT NULLs.
-
-    Idempotent and non-fatal: returns the existing row if there is one, and
-    never raises into the caller's request — a failure here must not block the
-    draft write that prompted it.
-    """
-    if draft is None or not getattr(draft, "id", None):
-        return None
-    try:
-        existing = Report.query.get(draft.id)
-        if existing is not None:
-            return existing
-
-        values = {f: getattr(draft, f, None) for f in _DRAFT_MIRROR_FIELDS}
-        # `company` and `transaction_date` stay NOT NULL on report (they are
-        # always known at draft creation); bail rather than raise if a caller
-        # somehow has neither.
-        if not values.get("company") or not values.get("transaction_date"):
-            logger.warning(
-                f"ensure_report_row_for_draft: draft {draft.id} lacks company/"
-                "transaction_date; skipping report row"
-            )
-            return None
-        # opening_balance is NOT NULL on report but nullable on the draft.
-        if values.get("opening_balance") is None:
-            values["opening_balance"] = 0.0
-        values.setdefault("status", "draft")
-        if not values.get("status"):
-            values["status"] = "draft"
-
-        report = Report(id=draft.id, **values)
-        db.session.add(report)
-        if commit:
-            db.session.commit()
-        else:
-            db.session.flush()
-        logger.info(
-            f"Created draft-shaped report row {report.id} "
-            f"(status={values['status']}) alongside its draft"
-        )
-        return report
-    except Exception as exc:
-        logger.error(
-            f"ensure_report_row_for_draft failed for draft "
-            f"{getattr(draft, 'id', '?')}: {exc}"
-        )
-        return None
+# ensure_report_row_for_draft / _DRAFT_MIRROR_FIELDS went with C4: the row IS the draft since
+# Stage 4a, nothing called the mirror any more, and it spoke the pre-redesign column names.
 
 
 def header_publishing_status_for(
@@ -456,13 +372,13 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
             opening_balance=amount,
             cash_addition=0.0,
             adjusted_opening_balance=adjusted,
-            cash_sales=0.0, shop_sales=0.0,
-            delivery_sales=0.0, total_sales=0.0, expenses=0.0, bank_deposit=0.0,
+            cashsale_total=0.0, nocashsale_total=0.0, total_sales=0.0,
+            expense_total=0.0, bank_deposit=0.0,
             closing_balance=adjusted,
             current_section="opening",  # start the first report at opening
             completed_sections=[],
-            uploaded_by=username,
-            company=entity_id,
+            uploaded_by=username,  # resolved to created_by by the model
+            entity_id=entity_id,
             status="draft",
         )
         db.session.add(draft)
@@ -578,21 +494,16 @@ def get_cash_sales_from_detail(report_id, fallback_value=0.0):
     logger.info(
         f"Getting cash sales from report_sale_detail for report {report_id}")
     report_sale_details = (
-        db.session.query(ReportSaleDetail, EntitySaleSetting)
-        .join(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        db.session.query(ReportSaleDetail, SaleInfo)
+        .join(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
     cash_sales = 0.0
-    for sale_detail, sale_info_item in report_sale_details:
-        amount = sale_detail.amount or 0
-        sale_type = (
-            sale_info_item.type
-            if sale_info_item and sale_info_item.type
-            else sale_detail.type
-        )
-        if sale_type == "Cash":
-            cash_sales += amount
+    for sale_detail, method in report_sale_details:
+        # the Cash method is the catalogue row keyed cash_sales (its type is 'other')
+        if method is not None and method.is_cash:
+            cash_sales += sale_detail.amount or 0
     if cash_sales > 0:
         logger.info(f"Found cash sales from report_sale_detail: {cash_sales}")
         return cash_sales
@@ -609,16 +520,13 @@ def calculate_sales_from_report_sale_detail(report_draft_id):
     )
     sales_data = (
         db.session.query(
-            EntitySaleSetting.value_name,
-            EntitySaleSetting.type,
+            SaleInfo.value_name,
+            SaleInfo.type,
             db.func.sum(ReportSaleDetail.amount).label("total_amount"),
         )
-        .join(ReportSaleDetail, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id)
-        # The ReportDraft join went with Step 4a-6. It contributed no columns
-        # and no extra predicate — the filter below already pins the report —
-        # so it only served to require the draft row's existence.
+        .join(ReportSaleDetail, SaleInfo.id == ReportSaleDetail.sale_id)
         .filter(ReportSaleDetail.report_id == report_draft_id)
-        .group_by(EntitySaleSetting.value_name, EntitySaleSetting.type)
+        .group_by(SaleInfo.value_name, SaleInfo.type)
         .all()
     )
     report_draft = Report.query.get(report_draft_id)
@@ -630,14 +538,13 @@ def calculate_sales_from_report_sale_detail(report_draft_id):
     for value_name, sale_type, amount in sales_data:
         if value_name and amount:
             sales_totals[value_name] = float(amount) or 0.0
-            if sale_type == "Delivery":
+            if sale_type == SaleType.DELIVERY:
                 delivery_sales_total += sales_totals[value_name]
-            elif sale_type == "Cash":
-                shop_sales_total += sales_totals[value_name]
-                if value_name == "cash_sales":
-                    cash_found_in_data = True
             else:
+                # electronic, and 'other' (which is where Cash lives)
                 shop_sales_total += sales_totals[value_name]
+                if value_name == SaleInfo.CASH_VALUE_NAME:
+                    cash_found_in_data = True
     if cash_sales > 0:
         sales_totals["cash_sales"] = cash_sales
         if not cash_found_in_data:
@@ -665,41 +572,40 @@ def update_report_draft_sales_from_detail(report_draft):
     logger.info(
         f"Updating sales for draft {report_draft.id} from report_sale_detail")
     sales_data = calculate_sales_from_report_sale_detail(report_draft.id)
-    report_draft.shop_sales = sales_data["shop_sales"]
-    report_draft.delivery_sales = sales_data["delivery_sales"]
+    # the stored aggregates: cash, everything-but-cash, and their sum
+    report_draft.cashsale_total = sales_data["cash_sales"]
+    report_draft.nocashsale_total = sales_data["total_sales"] - sales_data["cash_sales"]
     report_draft.total_sales = sales_data["total_sales"]
 
 
 def sum_sales_by_type(report_id):
     """Sum a report's sale amounts per type from report_sale_detail.
 
-    Returns {"Electronic": x, "Delivery": y, "Cash": z}. Replaces summing a
-    hardcoded list of ``*_sales`` columns, so a method added to the
-    ``sales_method`` catalog is included automatically with no code change.
+    Returns ``{"electronic": x, "delivery": y, "cash": z}`` - the two enum buckets plus
+    Cash pulled out of ``other`` by its catalogue row, because the closing-balance formula
+    treats cash on its own. Replaces summing a hardcoded list of ``*_sales`` columns, so a
+    method added to the catalogue is included automatically.
 
-    Type resolution mirrors the display path in ending.py: prefer the catalog
-    row, fall back to the entity's sale_info row, then to the type stored on
-    the detail row itself. Outer joins throughout — a report whose method has
-    since been deleted must still contribute its amount.
+    Outer join: a report whose method has since been switched off must still contribute
+    its amount (the catalogue row is never deleted, only the company's link is disabled).
     """
     rows = (
-        db.session.query(
-            ReportSaleDetail.amount,
-            ReportSaleDetail.type,
-            EntitySaleSetting.type,
-            SaleInfo.type,
-        )
-        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
-        .outerjoin(SaleInfo, ReportSaleDetail.sale_info_id == SaleInfo.id)
+        db.session.query(ReportSaleDetail.amount, SaleInfo.type, SaleInfo.value_name)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
 
-    totals = {"Electronic": 0.0, "Delivery": 0.0, "Cash": 0.0}
-    for amount, detail_type, sale_info_type, method_type in rows:
-        sale_type = method_type or sale_info_type or detail_type
-        if sale_type in totals:
-            totals[sale_type] += amount or 0.0
+    totals = {"electronic": 0.0, "delivery": 0.0, "cash": 0.0}
+    for amount, method_type, value_name in rows:
+        if value_name == SaleInfo.CASH_VALUE_NAME:
+            totals["cash"] += amount or 0.0
+            continue
+        sale_type = SaleType.normalize(method_type.value if method_type is not None else None)
+        if sale_type == SaleType.DELIVERY:
+            totals["delivery"] += amount or 0.0
+        elif sale_type is not None:
+            totals["electronic"] += amount or 0.0
     return totals
 
 
@@ -725,19 +631,12 @@ def write_sales_detail_rows(
         )
 
     sale_rows = EntitySaleSetting.query.filter(EntitySaleSetting.entity_id == entity_id).all()
-    by_value_name = {}
-    for row in sale_rows:
-        # Duplicate sale_info rows exist (see the max(sale_id) dedup in
-        # payment_methods.py); keep the lowest sale_id so this is deterministic
-        # and matches what the SQL backfill chose.
-        existing = by_value_name.get(row.value_name)
-        if existing is None or (row.sale_id or "") < (existing.sale_id or ""):
-            by_value_name[row.value_name] = row
+    by_value_name = {row.value_name: row for row in sale_rows if row.value_name}
 
     written = 0
     for source, sale_type in (
-        (shop_sales_data or {}, "Electronic"),
-        (delivery_sales_data or {}, "Delivery"),
+        (shop_sales_data or {}, SaleType.ELECTRONIC),
+        (delivery_sales_data or {}, SaleType.DELIVERY),
     ):
         for short_name, amount in source.items():
             if short_name == "cash":
@@ -753,16 +652,7 @@ def write_sales_detail_rows(
                     entity_id, short_name, value,
                 )
                 continue
-            db.session.add(
-                ReportSaleDetail(
-                    sale_id=sale_row.sale_id,
-                    report_id=report_id,
-                    sale_info_id=sale_row.sale_info_id,
-                    type=sale_row.type or sale_type,
-                    amount=value,
-                    create_at=datetime.now(tz),
-                )
-            )
+            db.session.add(ReportSale(sale_id=sale_row.sale_id, report_id=report_id, amount=value))
             written += 1
 
     logger.info(
@@ -784,21 +674,18 @@ def sales_amounts_by_short_name(report_id, entity_id):
     sales form posts them. Cash is excluded: it stays a column.
     """
     rows = (
-        db.session.query(EntitySaleSetting.value_name, EntitySaleSetting.type, ReportSaleDetail.amount)
-        .join(ReportSaleDetail, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
-        .filter(
-            ReportSaleDetail.report_id == report_id,
-            EntitySaleSetting.entity_id == entity_id,
-        )
+        db.session.query(SaleInfo.value_name, SaleInfo.type, ReportSaleDetail.amount)
+        .join(ReportSaleDetail, ReportSaleDetail.sale_id == SaleInfo.id)
+        .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
 
     shop, delivery = {}, {}
     for value_name, sale_type, amount in rows:
-        if not value_name or value_name == "cash_sales":
+        if not value_name or value_name == SaleInfo.CASH_VALUE_NAME:
             continue
         short = value_name[: -len("_sales")] if value_name.endswith("_sales") else value_name
-        target = delivery if sale_type == "Delivery" else shop
+        target = delivery if sale_type == SaleType.DELIVERY else shop
         target[short] = (target.get(short) or 0.0) + (amount or 0.0)
     return shop, delivery
 
@@ -809,36 +696,26 @@ def sales_by_method_for(report_id):
     Backs the ``sales_by_method`` property on Report, which is
     what templates iterate instead of naming each ``*_sales`` column.
 
-    Keys are the ``sales_method.code`` (e.g. 'VISA'); rows whose catalog link
-    is missing fall back to the legacy ``value_name`` so nothing is silently
-    dropped during the transition. Amounts for the same method are summed,
-    which also collapses any duplicate detail rows.
+    Keys are the catalogue's ``value_name`` ('visa_sales'), the form-field convention the
+    templates already know; amounts for the same method are summed.
     """
     rows = (
-        db.session.query(
-            SaleInfo.code,
-            SaleInfo.name,
-            SaleInfo.display_order,
-            EntitySaleSetting.value_name,
-            EntitySaleSetting.sale_name,
-            ReportSaleDetail.amount,
-        )
-        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
-        .outerjoin(SaleInfo, ReportSaleDetail.sale_info_id == SaleInfo.id)
+        db.session.query(SaleInfo.value_name, SaleInfo.sale_name, SaleInfo.display_order, ReportSaleDetail.amount)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == report_id)
         .all()
     )
 
     out = {}
-    for code, name, order, value_name, sale_name, amount in rows:
-        key = code or value_name
+    for value_name, sale_name, order, amount in rows:
+        key = value_name or sale_name
         if not key:
             continue
         entry = out.setdefault(
             key,
             {
                 "code": key,
-                "name": name or sale_name or key,
+                "name": sale_name or key,
                 "display_order": order if order is not None else 999,
                 "amount": 0.0,
             },
@@ -860,13 +737,11 @@ def recalculate_report(report_to_update, *, commit=True):
 
         # Cash is a separate concept with its own column; it is included in
         # shop_sales here exactly as the previous hardcoded sum did.
-        cash_component = totals["Cash"] or (report_to_update.cash_sales or 0.0)
+        cash_component = totals["cash"] or (report_to_update.cashsale_total or 0.0)
 
-        report_to_update.shop_sales = totals["Electronic"] + cash_component
-        report_to_update.delivery_sales = totals["Delivery"]
-        report_to_update.total_sales = (
-            report_to_update.shop_sales + report_to_update.delivery_sales
-        )
+        report_to_update.cashsale_total = cash_component
+        report_to_update.nocashsale_total = totals["electronic"] + totals["delivery"]
+        report_to_update.total_sales = cash_component + report_to_update.nocashsale_total
 
         opening_balance = report_to_update.opening_balance or 0.0
         cash_addition = report_to_update.cash_addition or 0.0
@@ -958,3 +833,18 @@ def update_report_after_deposit_change(report_to_update, new_bank_deposit):
     propagate_opening_balance_to_next_day_draft(report_to_update)
     db.session.commit()
     return recalculated_report
+
+
+def mark_diverged_from_xero(report):
+    """An edit after a Xero publish: the report's figures no longer match what Xero holds.
+
+    The report goes back to ``submitted`` (the word the history page and the badge show)
+    with ``xero_integrated`` off, so it can be published afresh. ``publishing_status`` and
+    ``published_at`` are kept: they are what lets the publish flow warn that Xero already
+    holds a copy and would duplicate every transaction.
+    """
+    from blueprints.shared.enums import ReportStatus
+
+    report.xero_integrated = False
+    if report.status == ReportStatus.PUBLISHED:
+        report.status = ReportStatus.SUBMITTED

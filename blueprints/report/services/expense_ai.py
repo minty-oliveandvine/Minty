@@ -1,6 +1,6 @@
 """AI-assisted expense capture — the one module that talks to the model.
 
-Stage 1 of the AI adoption plan (docs/Stage 1 Expense Implementation.md).
+Stage 1 of the AI adoption plan (docs/expense_ai/Stage 1 Expense Implementation.md).
 Everything provider-specific lives here and nowhere else: §5.6 rules out a
 provider abstraction layer, and keeping the call inside a single module is
 what makes a future provider change cheap without building one.

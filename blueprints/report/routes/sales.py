@@ -15,7 +15,7 @@ from blueprints.report.services.shared import (
     safe_float, sum_sales_by_type, update_draft_progress,
     update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, db, tz
+from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, db, tz
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -46,35 +46,21 @@ def resolve_posted_sale_amount(field, shop_sales_data, delivery_sales_data):
 
 
 def get_unique_sale_info_for_entity(entity_id):
+    """The company's enabled sales methods, in Settings-page order.
+
+    Returns the ``EntitySaleSetting`` links (each with its catalogue row joined, so
+    ``.sale_name`` / ``.value_name`` / ``.type`` read through). One link per catalogue row is
+    the table's key since C3, so there is nothing to de-duplicate any more.
     """
-    Get unique payment methods for an entity, preventing duplicates.
-    Returns: list of EntitySaleSetting objects ordered by display_order (matches Settings page).
-    """
-    payment_methods_subquery = (
-        db.session.query(
-            EntitySaleSetting.value_name,
-            db.func.max(EntitySaleSetting.sale_id).label('max_sale_id')
-        )
+    return (
+        EntitySaleSetting.query.join(SaleInfo, SaleInfo.id == EntitySaleSetting.sale_id)
         .filter(
             EntitySaleSetting.entity_id == entity_id,
-            EntitySaleSetting.value_name != "deliveroo_sales",
-            EntitySaleSetting.enabled == True
+            EntitySaleSetting.is_active.is_(True),
         )
-        .group_by(EntitySaleSetting.value_name)
-        .subquery()
-    )
-    
-    payment_methods = (
-        db.session.query(EntitySaleSetting)
-        .join(
-            payment_methods_subquery,
-            EntitySaleSetting.sale_id == payment_methods_subquery.c.max_sale_id
-        )
-        .order_by(EntitySaleSetting.display_order.asc(), EntitySaleSetting.create_date.asc())
+        .order_by(EntitySaleSetting.display_order.asc(), SaleInfo.sale_name.asc())
         .all()
     )
-    
-    return payment_methods
 
 
 @report_bp.route("/report/sale", methods=["GET", "POST"])
@@ -136,7 +122,6 @@ def report_sale(id=None):
                 Report.expenses,
                 Report.bank_deposit,
                 Report.closing_balance,
-                Report.receipt_files,
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
@@ -187,7 +172,7 @@ def report_sale(id=None):
             header_publishing_status=header_publishing_status_for(report_id=(report.id if report else None)),
             report=report,
             current_section="sales",
-            completed_sections=report.completed_sections if report else ["opening"],
+            completed_sections=(report.completed_sections or ["opening"]) if report else ["opening"],
             is_draft=True,
             draft_id=report.id if report else None,
             current_user=current_user,
@@ -311,8 +296,8 @@ def report_sale(id=None):
                 )
                 total_sales = total_shop_sales + total_delivery_sales
 
-                report_draft.shop_sales = total_shop_sales
-                report_draft.delivery_sales = total_delivery_sales
+                # stored aggregates: cash, everything-but-cash, their sum
+                report_draft.nocashsale_total = total_sales - safe_float(cash_sales)
                 report_draft.total_sales = total_sales
 
                 # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
@@ -354,13 +339,9 @@ def report_sale(id=None):
                         # with id=full_report.id), so both already resolve the
                         # same report_sale_detail rows. Only cash and the
                         # aggregate caches are stored per-row.
-                        existing_report.cash_sales = report_draft.cash_sales
-                        existing_report.shop_sales = report_draft.shop_sales
-                        existing_report.delivery_sales = report_draft.delivery_sales
+                        existing_report.cashsale_total = report_draft.cashsale_total
+                        existing_report.nocashsale_total = report_draft.nocashsale_total
                         existing_report.total_sales = report_draft.total_sales
-                        existing_report.date = datetime.now(
-                            tz
-                        )  # Update date to current timestamp
                         # Recalculate closing balance
                         cash_sales_for_report = get_cash_sales_from_detail(
                             existing_report.id,
@@ -416,7 +397,6 @@ def report_sale(id=None):
                     if report_sale_detail:
                         # Update existing record
                         report_sale_detail.amount = amount
-                        report_sale_detail.create_at = datetime.now()
                         logger.info(
                             f"Updated ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
                         )
@@ -425,12 +405,7 @@ def report_sale(id=None):
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_draft.id,
-                            # Catalog link, so the row stays self-describing
-                            # even if this sale_info row is later removed.
-                            sale_info_id=sale.sale_info_id,
-                            type=sale.type,
                             amount=amount,
-                            create_at=datetime.now(),
                         )
                         db.session.add(report_sale_detail)
                         logger.info(
@@ -512,8 +487,7 @@ def report_sale(id=None):
                     )
                     total_sales = total_shop_sales + total_delivery_sales
 
-                    report_draft.shop_sales = total_shop_sales
-                    report_draft.delivery_sales = total_delivery_sales
+                    report_draft.nocashsale_total = total_sales - safe_float(cash_sales)
                     report_draft.total_sales = total_sales
 
                     # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
@@ -572,7 +546,6 @@ def report_sale(id=None):
                         if report_sale_detail:
                             # Update existing record
                             report_sale_detail.amount = amount
-                            report_sale_detail.create_at = datetime.now()
                             logger.info(
                                 f"Updated ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
                             )
@@ -581,12 +554,7 @@ def report_sale(id=None):
                             report_sale_detail = ReportSaleDetail(
                                 sale_id=sale.sale_id,
                                 report_id=report_draft.id,
-                                # Catalog link, so the row stays self-describing
-                                # even if this sale_info row is later removed.
-                                sale_info_id=sale.sale_info_id,
-                                type=sale.type,
                                 amount=amount,
-                                create_at=datetime.now(),
                             )
                             db.session.add(report_sale_detail)
                             logger.info(
@@ -703,18 +671,12 @@ def report_sale(id=None):
                     if report_sale_detail:
                         # Update the amount and update timestamp
                         report_sale_detail.amount = amount
-                        report_sale_detail.create_at = datetime.now()
                     else:
                         # Insert new detail
                         report_sale_detail = ReportSaleDetail(
                             sale_id=sale.sale_id,
                             report_id=report_draft.id,
-                            # Catalog link, so the row stays self-describing
-                            # even if this sale_info row is later removed.
-                            sale_info_id=sale.sale_info_id,
-                            type=sale.type,
                             amount=amount,
-                            create_at=datetime.now(),
                         )
                         db.session.add(report_sale_detail)
                         logger.info(
@@ -889,15 +851,12 @@ def report_sale(id=None):
                 db.session.query(
                     ReportSaleDetail.sale_id,
                     ReportSaleDetail.amount,
-                    ReportSaleDetail.type,
-                    EntitySaleSetting.sale_name,
-                    EntitySaleSetting.value_name,
+                    SaleInfo.sale_name,
+                    SaleInfo.value_name,
                 )
-                .join(
-                    EntitySaleSetting, EntitySaleSetting.sale_id == ReportSaleDetail.sale_id, isouter=True
-                )
+                .join(SaleInfo, SaleInfo.id == ReportSaleDetail.sale_id, isouter=True)
                 .filter(ReportSaleDetail.report_id == existing_draft.id)
-                .order_by(ReportSaleDetail.create_at.desc())
+                .order_by(ReportSaleDetail.created_at.desc())
                 .all()
             )
 
@@ -993,7 +952,7 @@ def report_sale(id=None):
             # Add stepper data for dynamic progress display
             current_section="sales",  # Always set to current page
             completed_sections=(
-                existing_draft.completed_sections if existing_draft else ["opening"]
+                (existing_draft.completed_sections or ["opening"]) if existing_draft else ["opening"]
             ),
             is_latest_report=is_latest_report,
             transaction_date=transaction_date,

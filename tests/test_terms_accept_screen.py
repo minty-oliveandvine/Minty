@@ -14,38 +14,12 @@ import pytest
 
 from legal import registry
 
-_schema_attached = False
-
 
 @pytest.fixture
-def db_session(app, tmp_path_factory):
-    """See tests/test_terms_consent.py for why this attaches a file, not
-    ``':memory:'``."""
-    global _schema_attached
-    from sqlalchemy import event
+def db_session(app):
+    """The harness's Postgres build; the tables are emptied afterwards."""
 
     from models.db import db
-
-    with app.app_context():
-        engine = db.engine
-        if not _schema_attached:
-            schema_path = str(
-                tmp_path_factory.mktemp("schema") / "pettycashv2.sqlite"
-            ).replace("\\", "/")
-
-            @event.listens_for(engine, "connect")
-            def _attach_schema(dbapi_connection, _record):  # noqa: ANN001
-                try:
-                    dbapi_connection.execute(
-                        f"ATTACH DATABASE '{schema_path}' AS pettycashv2"
-                    )
-                except Exception:
-                    pass
-
-            engine.dispose()
-            _schema_attached = True
-
-        db.create_all()
 
     # Yield OUTSIDE the app context. Holding one open across client requests
     # makes every request share a single session: the first request's commit

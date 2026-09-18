@@ -11,7 +11,7 @@ from loguru import logger
 
 from blueprints.user_management import user_management_bp
 from blueprints.user_management.services.access_guards import require_superuser
-from models.db import Report
+from models.db import Report, User
 
 
 @user_management_bp.route("/admin", methods=["GET", "POST"])
@@ -94,7 +94,7 @@ def admin():
         cumulative_delivery_sales_by_company=cumulative_delivery_sales_by_company,
         cumulative_total_sales_by_company=cumulative_total_sales_by_company,
         cumulative_expenses_by_company=cumulative_expenses_by_company,
-        super_admin=(getattr(user, "system_role", None) == "superuser"),
+        super_admin=(getattr(user, "system_role", None) == User.SYSTEM_ROLE_SUPERUSER),
     )
 
 

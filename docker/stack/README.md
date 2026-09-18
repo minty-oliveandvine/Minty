@@ -9,6 +9,7 @@ that setup covers this repo alone.
 | `minty` | `Minty` | <http://localhost:5001> | Module 1 — Flask app (owns the database schema) |
 | `billing-backend` | `billing-backend` | <http://localhost:8000> | Module 2 — Django API |
 | `billing-frontend` | `billing-frontend` | <http://localhost:3000> | Module 2 — Next.js UI |
+| `onboarding-backend` | `onboarding-backend` | <http://localhost:8001> | Onboarding API — Django, extracted from Minty |
 | `onboarding` | `onboarding` | <http://localhost:3001> | Onboarding — Next.js UI |
 | `db` | — | `localhost:5432` | PostgreSQL 15, shared by both backends |
 
@@ -71,7 +72,7 @@ every dependency). Later starts are much faster.
 Startup is ordered, and that order matters:
 
 1. `db` comes up and passes its health check.
-2. `minty` creates the `pettycashv2` schema, then starts serving.
+2. `minty` creates the `pettycashv3` schema, then starts serving.
 3. `billing-backend` waits for `minty` to be **healthy** — it is a tenant of
    Flask's schema and must never get there first.
 4. The two frontends start.
@@ -207,12 +208,12 @@ tables in it. Use one or the other consistently.
 → Docker Desktop isn't running. Start it and wait for the whale icon.
 
 **"port is already allocated"**
-→ Something on your machine already uses 5432/5001/8000/3000/3001. Either stop
+→ Something on your machine already uses 5432/5001/8000/8001/3000/3001. Either stop
 it, or change the matching `*_HOST_PORT` in `.env` (and the `*_PUBLIC_URL` that
 goes with it).
 
 **`billing-backend` exits with "Database/schema not ready"**
-→ `minty` never got as far as creating the `pettycashv2` schema. Read its logs
+→ `minty` never got as far as creating the `pettycashv3` schema. Read its logs
 first: `docker compose logs minty`.
 
 **The app loads but every page errors on a missing table**
@@ -259,6 +260,7 @@ docker compose restart minty billing-backend
 
 # Minty            http://localhost:5001
 # Billing API      http://localhost:8000
+# Onboarding API   http://localhost:8001
 # Billing UI       http://localhost:3000
 # Onboarding UI    http://localhost:3001
 

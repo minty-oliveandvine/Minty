@@ -15,6 +15,7 @@ from iso4217 import Currency
 from loguru import logger
 
 from blueprints.entity import entity_bp
+from blueprints.shared.enums import EntityStatus
 from blueprints.shared import bearer_api
 from blueprints.entity.forms import CreateEntityForm
 from blueprints.entity.services.payment_methods import (
@@ -260,6 +261,7 @@ def entity_create():
                 form.entity_name.data,
                 _resolve_country_code(form.country_code.data),
                 _resolve_currency_id(form.currency_code.data),
+                status=EntityStatus.DISCONNECTED,  # live at once, no Xero org yet
             )
             if error:
                 form.entity_name.errors = [*form.entity_name.errors, error]
@@ -511,7 +513,7 @@ def onboarding_create_entity():
         return _cors(resp)
 
     from models.db import db as _db
-    entity.status = "onboarding"
+    entity.status = EntityStatus.ONBOARDING
     entity.contact_phone = contact_phone
     entity.business_email = business_email
     _db.session.commit()
@@ -1224,7 +1226,7 @@ def onboarding_billing_authorize():
 def onboarding_modules():
     """Token-authenticated module selection (onboarding Step 2).
 
-    POST {entity_id, module: "PETTY_CASH" | "BILL"} → upserts both rows in
+    POST {entity_id, module: "PETTY_CASH" | "PAYMENT_REQUEST"} → upserts both rows in
     ``entity_function_map`` (selected → is_enabled=true, the other → false).
     Returns {"modules": {code: bool, ...}} reflecting the resulting state.
 
@@ -1278,7 +1280,7 @@ def onboarding_modules():
         return _cors(resp)
 
     data, status = apply_module_selections(
-        entity_id, selected, actor=ACTOR_ONBOARDING
+        entity_id, selected, actor=ACTOR_ONBOARDING, user_id=str(user_id)
     )
     resp = jsonify(data)
     resp.status_code = status
@@ -1337,7 +1339,9 @@ def onboarding_finalize():
         return _cors(resp)
 
     if entity.status == "onboarding":
-        entity.status = "active"
+        # entity_status (schema item 9): a live company is 'connected' when a Xero org is
+        # linked, else 'disconnected'; there is no 'active'.
+        entity.status = EntityStatus.CONNECTED if entity.xero_org_id else EntityStatus.DISCONNECTED
         _db.session.commit()
 
         # Start card-free Stripe trials for the modules the wizard enabled. The

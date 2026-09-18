@@ -4,7 +4,7 @@ Covers:
 - Creating invitations (service layer)
 - Duplicate / already-member guards
 - Accepting invitations (pending → accepted, UserEntity created)
-- Xero-connected vs not-connected redirect hints
+- The accept link's email-bound handoff to the onboarding /auth page
 - Cancelling invitations
 - API route responses (send, list pending, cancel)
 - Accept page redirects
@@ -12,7 +12,7 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -48,9 +48,8 @@ def _make_entity(db, Entity, name="Test Corp", xero_org_id=None):
     entity = Entity(
         id=eid,
         name=name,
-        country_code="HK",
-        currency_code="HKD",
-        status="active",
+        # no country / currency: both are FKs to reference rows this test does not seed
+        status="disconnected",
         xero_org_id=xero_org_id,
     )
     db.session.add(entity)
@@ -58,6 +57,10 @@ def _make_entity(db, Entity, name="Test Corp", xero_org_id=None):
     db.session.refresh(entity)
     entity._cached_id = eid
     return entity
+
+
+# an id that exists nowhere (the columns are uuids since C6, so it must still be one)
+NOWHERE = "00000000-0000-4000-8000-00000000dead"
 
 
 def _id(obj):
@@ -71,7 +74,6 @@ def _make_user_entity(db, UserEntity, user_id, entity_id, role="cashier", approv
         role=role,
         approved=approved,
         joined_at=datetime.utcnow(),
-        create_at=datetime.utcnow(),
     )
     db.session.add(ue)
     db.session.commit()
@@ -79,8 +81,16 @@ def _make_user_entity(db, UserEntity, user_id, entity_id, role="cashier", approv
 
 
 def _login(client, user):
-    """Log the user in via the Flask-Login test helper."""
+    """Log the user in via the Flask-Login test helper, with the live Terms accepted -
+    the terms gate (blueprints/legal) answers 403 on the API and redirects pages until
+    then, which is what the 403s these tests used to hit were."""
     uid = getattr(user, "_cached_id", None) or user.id
+    from blueprints.legal.services.consent import record_consent
+    from models.db import db
+
+    with client.application.app_context():
+        record_consent(uid, source="gate")
+        db.session.commit()
     with client.session_transaction() as sess:
         sess["_user_id"] = uid
 
@@ -89,33 +99,17 @@ def _login(client, user):
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
-        db.session.rollback()
-        for table in reversed(db.metadata.sorted_tables):
-            try:
-                db.session.execute(table.delete())
-            except Exception:
-                pass
-        db.session.commit()
+        import char_factories
+
+        char_factories.truncate_all(app)  # TRUNCATE ... CASCADE on Postgres
 
 
 @pytest.fixture
@@ -180,7 +174,7 @@ class TestCreateInvitation:
 
             from blueprints.invitation.services.invite import create_invitation
 
-            inv, err = create_invitation("nonexistent-id", "x@test.com", "cashier", inviter.id)
+            inv, err = create_invitation(NOWHERE, "x@test.com", "cashier", inviter.id)
             assert inv is None
             assert "entity not found" in err.lower()
 
@@ -227,21 +221,6 @@ class TestAcceptInvitation:
 
             assert hint == "dashboard"
 
-    def test_accept_without_xero_returns_not_connected_hint(self, app, db_session, models):
-        with app.app_context():
-            entity = _make_entity(db_session, models["Entity"], xero_org_id="xero-456")
-            inviter = _make_user(db_session, models["User"], email="admin7@test.com", role="admin")
-            invitee = _make_user(db_session, models["User"], email="no_xero@test.com", role="cashier")
-
-            from blueprints.invitation.services.invite import create_invitation, accept_invitation
-
-            inv, _ = create_invitation(entity.id, "no_xero@test.com", "cashier", inviter.id)
-
-            with patch("blueprints.invitation.services.invite._is_user_in_xero_org", return_value=False):
-                entity_id, err, hint = accept_invitation(inv.token, invitee.id)
-
-            assert hint == "xero_not_connected"
-
     def test_accept_wrong_email_rejected(self, app, db_session, models):
         with app.app_context():
             entity = _make_entity(db_session, models["Entity"])
@@ -254,7 +233,7 @@ class TestAcceptInvitation:
             entity_id, err, hint = accept_invitation(inv.token, wrong_user.id)
 
             assert entity_id is None
-            assert "different email" in err.lower()
+            assert "different account" in err.lower()
 
     def test_accept_is_idempotent_for_same_user(self, app, db_session, models):
         """Re-accepting an already-accepted invite as the SAME user is a no-op
@@ -302,7 +281,7 @@ class TestAcceptInvitation:
             # Rejected — either as a wrong-email or already-used conflict.
             assert err is not None
             assert (
-                "different email" in err.lower()
+                "different account" in err.lower()
                 or "invalid" in err.lower()
                 or "already" in err.lower()
             )
@@ -321,13 +300,13 @@ class TestCancelInvitation:
 
             assert success is True
             assert err is None
-            assert models["Invitation"].query.get(inv.id).status == "cancelled"
+            assert models["Invitation"].query.get(inv.id).status == "revoked"  # invitation_status enum word (C6)
 
     def test_cancel_nonexistent_invitation(self, app, db_session, models):
         with app.app_context():
             from blueprints.invitation.services.invite import cancel_invitation
 
-            success, err = cancel_invitation("nonexistent-id")
+            success, err = cancel_invitation(NOWHERE)
             assert success is False
             assert err is not None
 
@@ -375,7 +354,7 @@ class TestResendInvitation:
         with app.app_context():
             from blueprints.invitation.services.invite import resend_invitation
 
-            invitation, err, retry_after = resend_invitation("nonexistent-id")
+            invitation, err, retry_after = resend_invitation(NOWHERE)
             assert invitation is None
             assert err is not None
             assert retry_after == 0
@@ -491,55 +470,9 @@ class TestInvitationAPI:
 
 
 class TestAcceptInvitationRoute:
-    def _create_inv_get_token(self, db_session, models, entity_id, email, inviter_id):
-        """Helper: create invitation inside app context, return plain token string."""
-        from blueprints.invitation.services.invite import create_invitation
-        inv, _ = create_invitation(entity_id, email, "cashier", inviter_id)
-        token = inv.token
-        db_session.session.expunge(inv)
-        return token
-
-    def test_accept_page_unauthenticated_redirects_to_login(self, app, db_session, models):
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"])
-            inviter = _make_user(db_session, models["User"], email="adm_route@test.com", role="admin")
-            token = self._create_inv_get_token(db_session, models, _id(entity), "route_test@test.com", _id(inviter))
-
-            resp = c.get(f"/invitation/accept/{token}")
-            assert resp.status_code == 302
-            assert "login" in resp.headers["Location"].lower()
-
-    def test_accept_page_authenticated_redirects_to_dashboard(self, app, db_session, models):
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"], xero_org_id="xero-rt")
-            eid = _id(entity)
-            inviter = _make_user(db_session, models["User"], email="adm_rt2@test.com", role="admin")
-            invitee = _make_user(db_session, models["User"], email="accept_rt@test.com", role="cashier")
-            token = self._create_inv_get_token(db_session, models, eid, "accept_rt@test.com", _id(inviter))
-
-            _login(c, invitee)
-
-            with patch("blueprints.invitation.services.invite._is_user_in_xero_org", return_value=True):
-                resp = c.get(f"/invitation/accept/{token}")
-
-            assert resp.status_code == 302
-            assert f"/entity/{eid}" in resp.headers["Location"]
-
-    def test_accept_page_no_xero_redirects_to_not_connected(self, app, db_session, models):
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"], xero_org_id="xero-rt2")
-            eid = _id(entity)
-            inviter = _make_user(db_session, models["User"], email="adm_rt3@test.com", role="admin")
-            invitee = _make_user(db_session, models["User"], email="noxero_rt@test.com", role="cashier")
-            token = self._create_inv_get_token(db_session, models, eid, "noxero_rt@test.com", _id(inviter))
-
-            _login(c, invitee)
-
-            with patch("blueprints.invitation.services.invite._is_user_in_xero_org", return_value=False):
-                resp = c.get(f"/invitation/accept/{token}")
-
-            assert resp.status_code == 302
-            assert "xero-not-connected" in resp.headers["Location"]
+    """The accept LINK itself is covered by TestAcceptInvitationPageEmailBinding (it hands
+    off to the onboarding /auth page); what is left here is the not-connected page and a
+    bad token."""
 
     def test_xero_not_connected_page_renders(self, app, db_session, models):
         with app.test_client() as c:
@@ -575,7 +508,9 @@ class TestEmailOtpInviteAcceptance:
             EmailOtp(
                 email=email,
                 code_hash=generate_password_hash(code, method="pbkdf2:sha256"),
-                expires_at=datetime.utcnow() + timedelta(minutes=10),
+                # timestamptz since C1: an aware stamp, or Postgres reads the naive
+                # one in its session zone and the code has "expired"
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
                 attempts=0,
             )
         )
@@ -648,7 +583,7 @@ class TestEmailOtpInviteAcceptance:
             })
             data = resp.get_json()
             assert resp.status_code == 400
-            assert "different email" in data["message"].lower()
+            assert "different account" in data["message"].lower()
             # And no membership was created.
             assert models["UserEntity"].query.filter_by(
                 user_id=_id(other), entity_id=eid
@@ -693,10 +628,18 @@ class TestAcceptInvitationPageEmailBinding:
       - no session              -> bounce to onboarding /auth (token preserved)
       - matching session        -> bounce to onboarding /auth
       - mismatched session      -> FULL LOGOUT + bounce to /auth as invited email
+                                   (never via Xero's end-session: xero_auth uses prompt=login)
       - expired / reused / bad  -> error, no handoff, no logout
 
     Normalized-email comparison (trim + lowercase) governs the match.
     """
+
+    class _Inv:
+        """The invitation's plain values. The request's session teardown detaches the ORM
+        row, so reading ``inv.token`` after ``c.get(...)`` used to raise DetachedInstanceError."""
+
+        def __init__(self, row):
+            self.id, self.token, self.email = row.id, row.token, row.email
 
     def _invite(self, db_session, models, invited="invitee@test.com",
                 inviter_email="pageadmin@test.com"):
@@ -707,7 +650,7 @@ class TestAcceptInvitationPageEmailBinding:
         from blueprints.invitation.services.invite import create_invitation
         inv, err = create_invitation(entity.id, invited, "cashier", inviter.id)
         assert err is None
-        return entity, inv
+        return entity, self._Inv(inv)
 
     def test_no_session_bounces_to_onboarding_auth_with_token(
         self, app, db_session, models
@@ -785,27 +728,6 @@ class TestAcceptInvitationPageEmailBinding:
             refreshed = models["Invitation"].query.get(inv.id)
             assert refreshed.status == "pending"
 
-    def test_mismatched_session_with_xero_goes_via_end_session(
-        self, app, db_session, models
-    ):
-        """A mismatched session that has a Xero id_token is routed through the
-        Xero end-session URL so the wrong Xero account can't silently resume."""
-        with app.test_client() as c:
-            _, inv = self._invite(db_session, models)
-            wrong = _make_user(
-                db_session, models["User"],
-                email="wrongxero@test.com", role="cashier",
-            )
-            wrong.id_token = "fake.jwt.token"
-            db_session.session.commit()
-            _login(c, wrong)
-            resp = c.get(f"/invitation/accept/{inv.token}")
-            assert resp.status_code in (301, 302)
-            with c.session_transaction() as sess:
-                assert sess.get("_user_id") is None
-            # Routed to Xero's end-session endpoint.
-            assert "xero.com" in resp.headers["Location"].lower()
-
     def test_expired_token_errors_without_logout(
         self, app, db_session, models
     ):
@@ -813,7 +735,7 @@ class TestAcceptInvitationPageEmailBinding:
         from models.db import tz
         with app.test_client() as c:
             _, inv = self._invite(db_session, models)
-            inv.expires_at = datetime.now(tz) - timedelta(days=1)
+            models["Invitation"].query.get(inv.id).expires_at = datetime.now(tz) - timedelta(days=1)
             db_session.session.commit()
 
             # Even a mismatched session must NOT be logged out for an invalid
@@ -838,7 +760,7 @@ class TestAcceptInvitationPageEmailBinding:
     ):
         with app.test_client() as c:
             _, inv = self._invite(db_session, models)
-            inv.status = "accepted"
+            models["Invitation"].query.get(inv.id).status = "accepted"
             db_session.session.commit()
             resp = c.get(f"/invitation/accept/{inv.token}")
             assert resp.status_code in (301, 302)

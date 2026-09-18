@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from flask import current_app, url_for
 from flask_mail import Message
@@ -11,6 +11,7 @@ from loguru import logger
 
 from blueprints.invitation.models.invitation import Invitation
 from models.db import Entity, User, UserEntity, db, tz
+from blueprints.shared.enums import InvitationStatus
 
 # Invitations are valid for this many days from creation (Hong Kong time).
 INVITATION_TTL_DAYS = int(os.environ.get("INVITATION_TTL_DAYS", 7))
@@ -377,8 +378,8 @@ def accept_invitation(
             entity_id=invitation.entity_id,
             role=invitation.role,
             approved=True,
-            joined_at=datetime.utcnow(),
-            create_at=datetime.utcnow(),
+            joined_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
         )
         db.session.add(user_entity)
 
@@ -418,7 +419,7 @@ def cancel_invitation(invitation_id: str) -> tuple[bool, str | None]:
     invitation = Invitation.query.filter_by(id=invitation_id, status="pending").first()
     if not invitation:
         return False, "Invitation not found or already processed."
-    invitation.status = "cancelled"
+    invitation.status = InvitationStatus.REVOKED  # the enum word for "cancelled"
     db.session.commit()
     return True, None
 

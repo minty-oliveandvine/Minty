@@ -142,6 +142,10 @@ def get_accounts_from_xero(
 def get_organisation_lock_dates(access_token, xero_org_id):
     """Fetch PeriodLockDate and EndOfYearLockDate from Xero Organisation API.
 
+    Nothing in Minty stores or acts on them any more (the ``entities`` columns went with
+    the schema redesign; billing-backend asks Xero itself at publish time). Kept as the
+    ``accounting.settings``-scope probe ``tests/test_xero_scopes.py`` exercises.
+
     Returns:
         dict with keys ``period_lock_date`` and ``end_of_year_lock_date``,
         each a ``datetime.date`` or None.

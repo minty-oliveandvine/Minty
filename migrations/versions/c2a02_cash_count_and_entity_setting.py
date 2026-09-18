@@ -13,7 +13,7 @@ Two tables, the cash-count mirrors of report_sale_detail and sale_info:
 Both names come from the proposed v3 schema (01_schema.sql section F).
 entity_cash_setting mirrors v3's entity_sale_setting exactly, including
 ``is_active`` rather than ``enabled`` — v3 has no cash equivalent of its own,
-which is correction 2 in docs/cash_denomination_schema_review.md.
+which is correction 2 in docs/archive/runbooks/cash_denomination_schema_review.md.
 
 Why not reuse entity_cash_detail_v2 (entity_id + cash_id, already exists and
 already FKs both sides): it holds cash_instock, a running quantity-on-hand.

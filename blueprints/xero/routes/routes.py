@@ -763,11 +763,6 @@ def xero_callback():
             # not yet stored, then refresh tokens.
             if not user.xero_email:
                 user.xero_email = xero_email
-            user.access_token = access_token
-            user.id_token = id_token
-            user.expires_in = expires_in
-            user.refresh_token = refresh_token
-            user.token_created_at = datetime.now(tz)
             db.session.commit()
             upsert_user_token(user, response)
 
@@ -1002,7 +997,6 @@ def xero_callback():
                                     entity.status = "connected"
                                 entity.last_connected_at = datetime.now()
                                 entity.connected_by_user_id = user.id
-                                user.xero_entity_id = tenant_id
                                 db.session.commit()
                                 # Persist the fresh token bundle to user_token
                                 # so the entity-connector lookup can read it.
@@ -1069,19 +1063,10 @@ def xero_callback():
                 # leave the entity intact and return to the Accounting step.
                 logger.info("Onboarding Xero connect cancelled/denied by user")
                 return _onboarding_xero_return(False)
-            entity = (
-                Entity.query.get(entity_id)
-                if entity_id
-                else Entity.query.order_by(desc(Entity.created_at)).first()
-            )
-            if entity is None:
-                logger.error(f"Entity Connect cancel: entity '{entity_id}' not found")
-                return redirect(url_for("entity.entity_list"))
-            entity.status = "cancelled"
-            db.session.commit()
-            logger.info(
-                "Newly created petty cash entity status set to cancelled")
-            logger.error(f"Error in xero auth {error}")
+            # Declining the Xero consent screen leaves the company as it was: a live
+            # company without a Xero org is simply 'disconnected' (entity_status has no
+            # 'cancelled' - that word belongs to subscriptions).
+            logger.info(f"Xero connect cancelled/denied for entity '{entity_id}': {error}")
             flash("Your new petty cash entity is ready!", "success")
             return redirect(url_for("entity.entity_list"))
     elif base_state == "entity_reconnect":
@@ -1130,11 +1115,7 @@ def xero_callback():
                 auth_id = dec_acc_token["authentication_event_id"]
                 logger.info(f"Entity Reconnect Auth Id {auth_id}")
                 try:
-                    user.access_token = response.get("access_token")
-                    user.id_token = response.get("id_token")
-                    user.expires_in = response.get("expires_in")
-                    user.refresh_token = response.get("refresh_token")
-                    user.token_created_at = datetime.now(tz)
+                    upsert_user_token(user, response)
                     db.session.commit()
                     try:
                         login_user(user)
@@ -1273,10 +1254,6 @@ def xero_callback():
                                 entity.status = "connected"
                                 entity.last_connected_at = datetime.now()
                                 entity.connected_by_user_id = user.id
-                                if not user.xero_entity_id or str(
-                                    user.xero_entity_id
-                                ) != str(tenant_id):
-                                    user.xero_entity_id = tenant_id
                                 db.session.commit()
                                 # Persist the fresh token bundle to user_token
                                 # so the entity-connector lookup can read it.
@@ -1715,22 +1692,7 @@ def disconnect_from_xero():
                     f"still connected to other entities"
                 )
             else:
-                connector.access_token = None
-                connector.refresh_token = None
-                connector.xero_entity_id = None
-                connector.id_token = None
-                connector.expires_in = None
-                connector.token_created_at = None
-
-                token_row = UserToken.query.filter_by(
-                    user_id=connector.id
-                ).first()
-                if token_row is not None:
-                    token_row.access_token = None
-                    token_row.refresh_token = None
-                    token_row.id_token = None
-                    token_row.access_token_expires_in = None
-                    token_row.access_token_obtained_at = None
+                connector.clear_tokens()
                 logger.info(
                     f"Cleared Xero tokens for user {connector.username}"
                 )

@@ -31,11 +31,12 @@ from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
 from blueprints.shared import bearer_api
-from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY
+from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY, MODULE_BILL
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity, db)
 from services.permission_policy import Role, is_superuser
 from services.user_presence import resume_presence
+from blueprints.shared.enums import ModuleCode
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -137,7 +138,7 @@ def module_selector(entity_id):
     # whenever access changes, and the daily sweep closes it when a grace window
     # lapses (modules.sweep_expired_module_access).
     current_app.logger.info(f"Checking enabled modules for entity {entity_id}")
-    billing_enabled = _is_module_enabled(entity_id, "BILL")
+    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
     current_app.logger.info(
         f"Modules for {entity_id}: BILL={billing_enabled} PETTY_CASH={petty_cash_enabled}"
@@ -271,7 +272,7 @@ def go_to_bills(entity_id):
             flash("Hmm, it looks like you don't have permission to look there.", "danger")
             return redirect(url_for("entity.entity_list"))
 
-    if not _is_module_enabled(entity_id, "BILL"):
+    if not _is_module_enabled(entity_id, MODULE_BILL):
         flash("The Payment module isn't switched on for this entity yet - an admin can turn it on in the entity's module settings.", "warning")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
@@ -328,6 +329,14 @@ def _is_module_enabled(entity_id: str, function_code: str) -> bool:
     a module to every entity that had never subscribed to it, and left the "Start
     free trial" button showing on a module the user was already inside.
     """
+    # function_code is the closed module_code enum: a word outside it is not a module, and
+    # asking the database would be an error, not a miss
+    if function_code not in ModuleCode.values():
+        current_app.logger.warning(
+            f"Function {function_code} not found - denying access"
+        )
+        return False
+
     entity_function = EntityFunction.query.filter(
         EntityFunction.function_code == function_code
     ).first()
@@ -381,7 +390,7 @@ def billing_app_home_url(entity_id: str, org: Entity, user_id, *, from_bills: bo
     ).strip("/")
     next_arg = f"/{home_seg}" if home_seg else "/"
     role = _resolve_user_entity_role(user_id, entity_id)
-    billing_enabled = _is_module_enabled(entity_id, "BILL")
+    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
     token = _generate_module_token(
         user_id,
@@ -410,7 +419,7 @@ def billing_settings_app_url(entity_id: str, org: Entity, user_id, *, from_bills
         or "settings"
     ).strip("/") or "settings"
     role = _resolve_user_entity_role(user_id, entity_id)
-    billing_enabled = _is_module_enabled(entity_id, "BILL")
+    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
     token = _generate_module_token(
         user_id,
@@ -440,7 +449,7 @@ def billing_app_profile_url(entity_id: str, org: Entity, user_id, *, from_bills:
     ).strip("/")
     next_arg = f"/{profile_seg}" if profile_seg else "/profile"
     role = _resolve_user_entity_role(user_id, entity_id)
-    billing_enabled = _is_module_enabled(entity_id, "BILL")
+    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
     token = _generate_module_token(
         user_id,

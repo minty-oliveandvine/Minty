@@ -1,0 +1,244 @@
+# -*- coding: utf-8 -*-
+"""Diff every model in Minty, billing-backend and onboarding-backend against the schema.
+
+Reports, with file:line:
+  * a model whose table does not exist under the new name
+  * a model column the new schema does not have  -> breaks every SELECT
+  * a declared type that no longer matches the column
+
+Which database it reads is taken from the environment, so the same script audits the
+phase C database (minty_cleanse, the default - production data on the new schema), the
+test harness's build (tests/pg_harness.py -> minty_test_<worker>, schema pettycashv3) or
+production. Since phase C closed (2026-09-17) it reports 0 findings for all three repos;
+tests/test_char_schema_audit.py keeps it that way.
+
+    AUDIT_URI      full postgres URI            default: localhost/AUDIT_DB as the .env user
+    AUDIT_DB       database name                default minty_cleanse   (ignored if AUDIT_URI)
+    AUDIT_SCHEMA   schema to read               default pettycashv3
+    AUDIT_REPOS    comma list of repo names     default Minty,billing-backend,onboarding-backend
+    AUDIT_STRICT=1 exit 1 when there is any finding (for use as a test)
+    PG_BIN         directory holding psql       default: PATH
+
+onboarding-backend was NOT in the original audit; its shared_models (585 lines) mirror the
+same tables and drift the same way. Do not remove it from the default list.
+"""
+import ast, glob, io, os, re, shutil, subprocess, sys
+
+DB = os.environ.get("AUDIT_DB", "minty_cleanse")
+SCHEMA = os.environ.get("AUDIT_SCHEMA", "pettycashv3")
+ALL_REPOS = {"Minty": r"c:\dev\Minty", "billing-backend": r"c:\dev\billing-backend",
+             "onboarding-backend": r"c:\dev\onboarding-backend"}
+REPOS = {k: ALL_REPOS[k] for k in
+         os.environ.get("AUDIT_REPOS", ",".join(ALL_REPOS)).split(",") if k}
+SKIP = ("\\.venv\\", "/.venv/", "site-packages", "__pycache__", "\\migrations\\", "/migrations/",
+        "\\tests\\", "/tests/", "\\node_modules\\")
+
+
+def _psql_bin():
+    pg_bin = os.environ.get("PG_BIN")
+    if pg_bin and os.path.exists(os.path.join(pg_bin, "psql.exe")):
+        return os.path.join(pg_bin, "psql.exe")
+    found = shutil.which("psql")
+    if found:
+        return found
+    hits = sorted(glob.glob(r"C:\Program Files\PostgreSQL\*\bin\psql.exe"), reverse=True)
+    return hits[0] if hits else "psql"
+
+
+def _target():
+    uri = os.environ.get("AUDIT_URI")
+    if uri:
+        return [uri]
+    pw = re.match(r".*://[^:]+:([^@]+)@",
+                  [l for l in io.open(r"c:\dev\Minty\.env", encoding="utf-8")
+                   if l.startswith("LOCAL_DATABASE_URI=")][0]).group(1)
+    os.environ["PGPASSWORD"] = pw
+    return ["-h", "localhost", "-U", "postgres", "-d", DB]
+
+
+def psql(sql):
+    p = subprocess.run([_psql_bin(), *_target(),
+                        "-X", "-q", "-A", "-F", "\x01", "-t", "-c", sql],
+                       capture_output=True, text=True, encoding="utf-8")
+    if p.returncode:
+        sys.exit(p.stderr)
+    return [l.split("\x01") for l in p.stdout.replace("\r", "").strip().split("\n") if l]
+
+
+cat = {}
+for t, c, dt, udt in psql(
+        "select table_name, column_name, data_type, udt_name from information_schema.columns "
+        "where table_schema='%s'" % SCHEMA):
+    cat.setdefault(t, {})[c] = udt if dt == "USER-DEFINED" else dt
+
+# ---- expected postgres type for a declared model type ----------------------
+SA = {
+    "String": "character varying", "Unicode": "character varying", "VARCHAR": "character varying",
+    "Text": "text", "UnicodeText": "text",
+    "Integer": "integer", "BigInteger": "bigint", "SmallInteger": "smallint",
+    "Boolean": "boolean", "Float": "double precision", "Numeric": "numeric",
+    "Date": "date", "Time": "time without time zone",
+    "JSON": "json", "JSONB": "jsonb", "UUID": "uuid", "ARRAY": "ARRAY",
+    "LargeBinary": "bytea", "Uuid": "uuid", "MintyUuid": "uuid", "uuid_column": "uuid",
+}
+DJ = {
+    "CharField": "character varying", "CharNField": "character", "TextField": "text", "SlugField": "character varying",
+    "EmailField": "character varying", "URLField": "character varying",
+    "IntegerField": "integer", "BigIntegerField": "bigint",
+    "PositiveIntegerField": "integer", "SmallIntegerField": "smallint",
+    "BooleanField": "boolean", "FloatField": "double precision",
+    "DecimalField": "numeric", "DateField": "date", "UUIDField": "uuid",
+    "JSONField": "jsonb", "BinaryField": "bytea", "AutoField": "integer",
+    "BigAutoField": "bigint",
+}
+
+
+def type_of(call, django):
+    """Return (expected_pg_type, rendered) for a Column()/Field() call."""
+    def name(n):
+        if isinstance(n, ast.Attribute):
+            return n.attr
+        if isinstance(n, ast.Name):
+            return n.id
+        return None
+
+    if django:
+        fn = name(call.func)
+        if fn in ("ForeignKey", "OneToOneField"):
+            return None, fn                      # target's pk type; not checked
+        if fn == "PgEnumField":
+            # shared_models/fields.py: the first positional argument names the enum type
+            first = call.args[0] if call.args else None
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                return first.value, "PgEnumField(%s)" % first.value
+            return None, "PgEnumField(?)"
+        if fn in ("DateTimeField",):
+            return "timestamp", fn
+        return DJ.get(fn), fn
+
+    # SQLAlchemy: first positional arg is the type
+    if not call.args:
+        return None, "Column(?)"
+    a = call.args[0]
+    fn = name(a.func) if isinstance(a, ast.Call) else name(a)
+    if fn == "Enum" and isinstance(a, ast.Call):
+        # db.Enum(PyEnum, name="report_status", ...): the Postgres type IS the name kwarg,
+        # so an enum column is checked against the enum, not waved through as unknown.
+        for k in a.keywords:
+            if k.arg == "name" and isinstance(k.value, ast.Constant):
+                return k.value.value, "Enum(%s)" % k.value.value
+        return None, "Enum(?)"
+    if fn == "TIMESTAMP" and isinstance(a, ast.Call):
+        tz = any(k.arg == "timezone" and isinstance(k.value, ast.Constant) and k.value.value for k in a.keywords)
+        return ("timestamp with time zone" if tz else "timestamp without time zone"), ("TIMESTAMP(tz)" if tz else "TIMESTAMP")
+    if fn == "DateTime":
+        tz = False
+        if isinstance(a, ast.Call):
+            for k in a.keywords:
+                if k.arg == "timezone" and isinstance(k.value, ast.Constant):
+                    tz = bool(k.value.value)
+        return ("timestamp with time zone" if tz else "timestamp without time zone"), \
+               ("DateTime(tz)" if tz else "DateTime")
+    return SA.get(fn), fn or "?"
+
+
+def const(n):
+    return n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else None
+
+
+findings, unparsed = [], []
+for repo, root in REPOS.items():
+    django = repo != "Minty"
+    for dirpath, _, files in os.walk(root):
+        if any(s in dirpath + os.sep for s in SKIP):
+            continue
+        for fn in files:
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fn)
+            # utf-8-sig, NOT utf-8: several of these files carry a BOM, and
+            # ast.parse rejects U+FEFF. Skipping them silently is how an audit
+            # comes back clean while missing a model - it hid the User model.
+            try:
+                tree = ast.parse(io.open(path, encoding="utf-8-sig",
+                                         errors="replace").read())
+            except SyntaxError as e:
+                unparsed.append("%s: %s" % (path, e))
+                continue
+            for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+                table, cols, managed = None, [], True
+                for node in cls.body:
+                    if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                            and isinstance(node.targets[0], ast.Name):
+                        tgt = node.targets[0].id
+                        if tgt == "__tablename__":
+                            table = const(node.value)
+                        elif isinstance(node.value, ast.Call):
+                            f = node.value.func
+                            nm = f.attr if isinstance(f, ast.Attribute) else \
+                                 (f.id if isinstance(f, ast.Name) else "")
+                            if nm == "Column" or nm.endswith("Field") or nm == "ForeignKey":
+                                # SQLAlchemy: Column("db_name", Type, ...) names the column
+                                # explicitly; the attribute is then a code-side name.
+                                call = node.value
+                                if nm == "Column" and call.args and isinstance(call.args[0], ast.Constant)                                         and isinstance(call.args[0].value, str):
+                                    tgt = call.args[0].value
+                                    call = ast.Call(func=call.func, args=call.args[1:], keywords=call.keywords)
+                                    ast.copy_location(call, node.value)
+                                # Django: a relation's column is db_column=..., else <name>_id
+                                if nm in ("ForeignKey", "OneToOneField"):
+                                    db_col = next((k.value.value for k in call.keywords
+                                                   if k.arg == "db_column" and isinstance(k.value, ast.Constant)), None)
+                                    tgt = db_col or (tgt + "_id")
+                                cols.append((tgt, call, node.lineno))
+                    if isinstance(node, ast.ClassDef) and node.name == "Meta":
+                        for m in node.body:
+                            if isinstance(m, ast.Assign) and isinstance(m.targets[0], ast.Name):
+                                if m.targets[0].id == "db_table":
+                                    table = const(m.value)
+                                if m.targets[0].id == "managed" and \
+                                        isinstance(m.value, ast.Constant):
+                                    managed = bool(m.value.value)
+                if not table or not cols:
+                    continue
+                rel = os.path.relpath(path, root).replace("\\", "/")
+                if table not in cat:
+                    findings.append((repo, table, rel, cls.lineno, "TABLE",
+                                     cls.name, "table not in the new schema", ""))
+                    continue
+                for cname, call, lineno in cols:
+                    if django and cname not in cat[table]:
+                        # Django FK fields store <name>_id
+                        if cname + "_id" in cat[table]:
+                            continue
+                    if cname not in cat[table]:
+                        findings.append((repo, table, rel, lineno, "MISSING",
+                                         cname, "column not in the new schema",
+                                         "breaks every SELECT on this model"))
+                        continue
+                    want, rendered = type_of(call, django)
+                    got = cat[table][cname]
+                    if want is None:
+                        continue
+                    if want == "timestamp" and got.startswith("timestamp"):
+                        continue
+                    if want != got:
+                        findings.append((repo, table, rel, lineno, "TYPE", cname,
+                                         "%s -> declared %s, schema is %s" % (cname, rendered, got),
+                                         "" if not managed else ""))
+
+order = {"TABLE": 0, "MISSING": 1, "TYPE": 2}
+findings.sort(key=lambda f: (order[f[4]], f[0], f[1], f[3]))
+for f in findings:
+    print("%-16s %-9s %-26s %-46s %s" % (f[0], f[4], f[1], f[2]+":"+str(f[3]), f[5] if f[4]!="TYPE" else f[6]))
+print()
+if unparsed:
+    print()
+    print("!!! %d FILE(S) COULD NOT BE PARSED - the audit does not cover them:" % len(unparsed))
+    for u in unparsed:
+        print("   ", u)
+print("TOTAL %d  (table %d, missing-column %d, type %d)  repos=%s  schema=%s" % (
+    len(findings), *(sum(1 for f in findings if f[4] == k) for k in ("TABLE", "MISSING", "TYPE")),
+    ",".join(REPOS), SCHEMA))
+if os.environ.get("AUDIT_STRICT") == "1" and (findings or unparsed):
+    sys.exit(1)

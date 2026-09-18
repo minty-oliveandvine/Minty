@@ -126,22 +126,7 @@ def disconnect_entity_xero(user_id, entity_id):
                     connector.username,
                 )
             else:
-                connector.access_token = None
-                connector.refresh_token = None
-                connector.xero_entity_id = None
-                connector.id_token = None
-                connector.expires_in = None
-                connector.token_created_at = None
-
-                token_row = UserToken.query.filter_by(
-                    user_id=connector.id
-                ).first()
-                if token_row is not None:
-                    token_row.access_token = None
-                    token_row.refresh_token = None
-                    token_row.id_token = None
-                    token_row.access_token_expires_in = None
-                    token_row.access_token_obtained_at = None
+                connector.clear_tokens()
                 logger.info(
                     "onboarding disconnect: cleared Xero tokens for user %s",
                     connector.username,

@@ -31,6 +31,7 @@ from models.db import db
 from pettycash.core.blueprint_loader import (register_blueprints,
                                              register_compat_alias)
 from pettycash.core.hooks import init_app as init_hooks
+from blueprints.shared.schema import SCHEMA
 
 load_dotenv()
 
@@ -324,6 +325,7 @@ def create_app():
                                                   onboarding_finalize,
                                                   onboarding_invite,
                                                   onboarding_invite_cancel,
+                                                  onboarding_billing_accounts,
                                                   onboarding_billing_authorize,
                                                   onboarding_billing_confirm,
                                                   onboarding_billing_set_default,
@@ -363,6 +365,9 @@ def create_app():
     csrf.exempt(onboarding_billing_confirm)
     csrf.exempt(onboarding_billing_set_default)
     csrf.exempt(onboarding_billing_authorize)
+    # opening a billing account: the same bearer-only call, and the payment method it names
+    # must belong to the token's payer (``payment_methods._owned``)
+    csrf.exempt(onboarding_billing_accounts)
     # Onboarding /auth and /auth/confirm call these from a different origin
     # (port 3001) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_check,
@@ -386,7 +391,7 @@ def create_app():
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24
     app.config["WTF_CSRF_TIME_LIMIT"] = 24 * 60 * 60
     if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
-        app.config["SESSION_SQLALCHEMY_SCHEMA"] = "pettycashv2"
+        app.config["SESSION_SQLALCHEMY_SCHEMA"] = SCHEMA
     Session(app)
 
     if app.config["ENV"] != "production":

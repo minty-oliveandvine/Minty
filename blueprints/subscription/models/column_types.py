@@ -10,9 +10,9 @@ rather than each declaring its own, for two reasons:
   * the label sets are a fact about the DATABASE, not about any one model, so
     they belong beside each other where a reader can see the whole vocabulary.
 
-WHY ``as_uuid=False``
+WHY THE IDS ARE ``str``
 
-The ids round-trip as Python ``str``, not ``uuid.UUID``. That is what keeps this a
+The ids round-trip as Python ``str``, not ``uuid.UUID`` (``MintyUuid`` does that). That is what keeps this a
 type change and not a rewrite: every ``default=lambda: str(uuid.uuid4())`` keeps
 working, every ``str(x)`` coercion at a query boundary keeps matching, and every
 interpolated idempotency key - ``f"transfer-{offer.id}-{n}"`` in transfers, the
@@ -36,20 +36,31 @@ is not in the list raises ``LookupError``. A missing label therefore does not
 announce itself when the row is written - it detonates later, on an unrelated
 read, a long way from the cause.
 """
-from sqlalchemy.dialects.postgresql import ENUM, UUID
+from sqlalchemy.dialects.postgresql import ENUM
 
+from blueprints.shared import enums as vocabulary
+from blueprints.shared.column_types import AwareDateTime, MintyUuid
 from blueprints.subscription import constants
+from blueprints.shared.schema import SCHEMA
 
-SCHEMA = "pettycashv2"
+# re-exported: the subscription models import SCHEMA from here (blueprints/shared/schema.py owns it)
+SCHEMA = SCHEMA  # noqa: PLW0127
 
 
 def uuid_column():
     """The id type: a uuid in the database, a ``str`` in Python.
 
-    A function rather than a shared instance so each column gets its own type
-    object, matching how the rest of the codebase declares these.
+    ``MintyUuid`` since C7 - the one uuid type the whole application uses (native
+    ``uuid`` on Postgres, hyphenated CHAR(36) on SQLite so a join to a column declared
+    elsewhere still matches). A function rather than a shared instance so each column
+    gets its own type object, matching how the rest of the codebase declares these.
     """
-    return UUID(as_uuid=False)
+    return MintyUuid()
+
+
+def tz_datetime():
+    """``timestamptz`` that is aware on every driver - see ``AwareDateTime``."""
+    return AwareDateTime()
 
 
 PHASES = (
@@ -89,18 +100,22 @@ TRANSFER_STATUSES = (
 OUTCOMES = (constants.OUTCOME_SUCCEEDED, constants.OUTCOME_ABORTED)
 
 
-def _enum(name, values):
+def _enum(name, values, vocabulary_enum):
+    """The Postgres enum, from the constants; asserted equal to the shared vocabulary
+    (``blueprints/shared/enums.py``, which ``tests/test_enums_match_schema.py`` checks
+    against the schema file) so the two spellings cannot drift."""
+    assert tuple(values) == vocabulary_enum.values(), (name, values, vocabulary_enum.values())
     return ENUM(*values, name=name, schema=SCHEMA, create_type=False)
 
 
 #: entity_module_subscription.phase, subscription_audit_log.phase_before/_after
-SUBSCRIPTION_PHASE = _enum("subscription_phase", PHASES)
+SUBSCRIPTION_PHASE = _enum("subscription_phase", PHASES, vocabulary.SubscriptionPhase)
 
 #: entity_module_subscription.extension_state, subscription_audit_log.extension_state
-EXTENSION_STATE = _enum("extension_state", EXTENSION_STATES)
+EXTENSION_STATE = _enum("extension_state", EXTENSION_STATES, vocabulary.ExtensionState)
 
 #: subscription_transfer.status
-TRANSFER_STATUS = _enum("transfer_status", TRANSFER_STATUSES)
+TRANSFER_STATUS = _enum("transfer_status", TRANSFER_STATUSES, vocabulary.TransferStatus)
 
 #: subscription_audit_log.outcome
-AUDIT_OUTCOME = _enum("audit_outcome", OUTCOMES)
+AUDIT_OUTCOME = _enum("audit_outcome", OUTCOMES, vocabulary.AuditOutcome)

@@ -8,13 +8,15 @@ it validates the row against the rules the columns cannot express and falls back
 in-code defaults if it does not hold together.
 """
 from models.db import db
+from blueprints.subscription.models.column_types import tz_datetime
+from blueprints.shared.schema import SCHEMA
 
 
 class BillingPolicy(db.Model):
     """Singleton (``id`` is always 1). Commercial policy, not arithmetic."""
 
     __tablename__ = "billing_policy"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": SCHEMA}
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=False, default=1)
 
@@ -44,7 +46,7 @@ class BillingPolicy(db.Model):
     )
 
     updated_at = db.Column(
-        db.DateTime(timezone=True),
+        tz_datetime(),
         server_default=db.func.now(),
         onupdate=db.func.now(),
         nullable=False,

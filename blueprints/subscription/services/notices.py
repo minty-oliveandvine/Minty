@@ -15,7 +15,7 @@ resolved at call time, never bound at import.
 That is not stylistic. ``test_subscription_notice.py`` patches
 ``blueprints.entity.services.modules.TRIAL_ENDING_SOON_DAYS`` and
 ``...build_subscription_notices`` by dotted path; a ``from ... import`` here would capture
-the real values at import and the patches would be silently ignored (CODE_CLEANSE_NOTES.md,
+the real values at import and the patches would be silently ignored (docs/code_cleanse/CODE_CLEANSE_NOTES.md,
 "dependency injection is required in this repo").
 """
 from __future__ import annotations

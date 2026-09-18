@@ -8,6 +8,7 @@ from loguru import logger
 
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
+from blueprints.shared.enums import SaleType
 from models.db import (AccountInfo, EntityPettycashSettings,
                        EntitySaleSetting, SaleInfo, UserEntity, db, tz)
 
@@ -30,8 +31,13 @@ def check_user_has_entities(user_id):
     return count > 0
 
 
-def create_entity_for_user(user_id, entity_name, country_code, currency_id):
+def create_entity_for_user(user_id, entity_name, country_code, currency_id, *,
+                           status="onboarding"):
     """Create an entity owned (admin) by ``user_id`` plus its default settings.
+
+    ``status`` is the ``entity_status`` the row starts in: ``onboarding`` (the wizard,
+    the default and the database's) or ``disconnected`` for the legacy create form, whose
+    company is live at once and has no Xero organisation yet.
 
     ``country_code`` is the ISO alpha-2 country_info PK and ``currency_id``
     a currency_info uuid (the entities columns are FKs to those registries —
@@ -72,6 +78,7 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_id):
         entity = Entity(
             id=str(_uuid.uuid4()),
             name=name,
+            status=status,
             country_code=country_code or None,
             currency_id=currency_id or None,
         )
@@ -88,7 +95,7 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_id):
         # blueprint load order independent of the modules service.
         from blueprints.entity.services.modules import apply_default_modules
 
-        _data, _status = apply_default_modules(entity.id)
+        _data, _status = apply_default_modules(entity.id, user_id=str(user_id))
         if _status != 200:
             logger.error(
                 f"Default modules not seeded for entity {entity.id}: {_data}"
@@ -113,133 +120,45 @@ def get_settings_redirect_url(entity_id):
 
 
 def create_default_entity_settings(entity_id):
-    """Create default payment methods and delivery sales types for a new entity."""
-    try:
-        # Cash leads the list — it is the most-used method. Its type is 'Cash',
-        # not 'Electronic': get_cash_sales_from_detail keys on that to find the
-        # figure that feeds the closing balance.
-        cash_methods = [
-            {
-                "sale_name": "Cash",
-                "value_name": "cash_sales",
-                "type": "Cash",
-                "display_order": 0,
-            },
-        ]
-        electronic_methods = [
-            {
-                "sale_name": "Visa",
-                "value_name": "visa_sales",
-                "type": "Electronic",
-                "display_order": 1,
-            },
-            {
-                "sale_name": "Alipay",
-                "value_name": "alipay_sales",
-                "type": "Electronic",
-                "display_order": 2,
-            },
-            {
-                "sale_name": "WeChat Pay",
-                "value_name": "wechat_sales",
-                "type": "Electronic",
-                "display_order": 3,
-            },
-            {
-                "sale_name": "Mastercard",
-                "value_name": "master_sales",
-                "type": "Electronic",
-                "display_order": 4,
-            },
-            {
-                "sale_name": "UnionPay",
-                "value_name": "unionpay_sales",
-                "type": "Electronic",
-                "display_order": 5,
-            },
-            {
-                "sale_name": "Amex",
-                "value_name": "amex_sales",
-                "type": "Electronic",
-                "display_order": 6,
-            },
-            {
-                "sale_name": "Octopus",
-                "value_name": "octopus_sales",
-                "type": "Electronic",
-                "display_order": 7,
-            },
-        ]
-        delivery_methods = [
-            {
-                "sale_name": "Food Panda",
-                "value_name": "foodpanda_sales",
-                "type": "Delivery",
-                "display_order": 1,
-            },
-            {
-                "sale_name": "Keeta",
-                "value_name": "keeta_sales",
-                "type": "Delivery",
-                "display_order": 2,
-            },
-            {
-                "sale_name": "OpenRice",
-                "value_name": "openrice_sales",
-                "type": "Delivery",
-                "display_order": 3,
-            },
-        ]
-        # Seed from the SaleInfo catalog when it is populated, so a method
-        # added to the catalog reaches new entities without touching this list.
-        # The hardcoded lists above remain the fallback for a database where
-        # the catalog has not been seeded yet (and as the source of the
-        # per-method display_order).
-        catalog = (
-            SaleInfo.query.filter(
-                SaleInfo.entity_id.is_(None),
-                SaleInfo.is_active.is_(True),
-            )
-            .order_by(SaleInfo.type.asc(), SaleInfo.display_order.asc())
-            .all()
-        )
+    """Link a new company to the default sales methods.
 
-        if catalog:
-            for method in catalog:
-                db.session.add(
-                    EntitySaleSetting(
-                        entity_id=entity_id,
-                        sale_name=method.name,
-                        # value_name stays the legacy key until every read has
-                        # moved to sale_info_id.
-                        value_name=method.legacy_column,
-                        type=method.type,
-                        sale_info_id=method.id,
-                        display_order=method.display_order,
-                        enabled=True,
-                        create_date=datetime.now(tz),
-                        updated_at=datetime.now(tz),
-                    )
-                )
-        else:
-            for method in cash_methods + electronic_methods + delivery_methods:
-                db.session.add(
-                    EntitySaleSetting(
-                        entity_id=entity_id,
-                        sale_name=method["sale_name"],
-                        value_name=method["value_name"],
-                        type=method["type"],
-                        display_order=method["display_order"],
-                        enabled=True,
-                        create_date=datetime.now(tz),
-                        updated_at=datetime.now(tz),
-                    )
-                )
+    The catalogue (``sale_info``) is global; this only decides which of its rows a brand-new
+    company starts with - Cash, the common cards and wallets, the three delivery platforms -
+    and in what order. A default that is not in the catalogue yet is added to it (a fresh
+    database), everything else is found by name. Cash is ``type=other`` with
+    ``value_name=cash_sales``: the report's cash section keys on that value_name.
+    """
+    defaults = [
+        # (name, value_name, type, order)
+        ("Cash", "cash_sales", SaleType.OTHER, 0),
+        ("Visa", "visa_sales", SaleType.ELECTRONIC, 1),
+        ("Alipay", "alipay_sales", SaleType.ELECTRONIC, 2),
+        ("WeChat Pay", "wechat_sales", SaleType.ELECTRONIC, 3),
+        ("Mastercard", "master_sales", SaleType.ELECTRONIC, 4),
+        ("UnionPay", "unionpay_sales", SaleType.ELECTRONIC, 5),
+        ("Amex", "amex_sales", SaleType.ELECTRONIC, 6),
+        ("Octopus", "octopus_sales", SaleType.ELECTRONIC, 7),
+        ("Food Panda", "foodpanda_sales", SaleType.DELIVERY, 1),
+        ("Keeta", "keeta_sales", SaleType.DELIVERY, 2),
+        ("OpenRice", "openrice_sales", SaleType.DELIVERY, 3),
+    ]
+    try:
+        existing = {
+            link.sale_id for link in EntitySaleSetting.query.filter_by(entity_id=entity_id).all()
+        }
+        for name, value_name, sale_type, order in defaults:
+            row = SaleInfo.by_value_name(value_name) or SaleInfo.ensure(
+                name, sale_type, value_name=value_name, display_order=order
+            )
+            if row.id in existing:
+                continue
+            db.session.add(
+                EntitySaleSetting(entity_id=entity_id, sale_id=row.id, is_active=True, display_order=order)
+            )
+            existing.add(row.id)
         logger.info(f"Created default settings for entity {entity_id}")
     except Exception as e:
-        logger.error(
-            f"Error creating default settings for entity {entity_id}: {str(e)}"
-        )
+        logger.error(f"Error creating default settings for entity {entity_id}: {str(e)}")
         raise
 
 

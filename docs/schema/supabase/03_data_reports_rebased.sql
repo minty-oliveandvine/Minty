@@ -1,0 +1,1471 @@
+BEGIN;
+SET LOCAL TIME ZONE 'Asia/Hong_Kong';
+
+TRUNCATE TABLE
+  pettycash_test.xero_report_sync,
+  pettycash_test.xero_bill_sync_payload,
+  pettycash_test.xero_bill_sync_line,
+  pettycash_test.xero_bill_response_line,
+  pettycash_test.xero_bill_sync,
+  pettycash_test.xero_bank_transfer,
+  pettycash_test.xero_bank_transaction,
+  pettycash_test.user_stripe_customer,
+  pettycash_test.terms_consent,
+  pettycash_test.subscription_transfer,
+  pettycash_test.subscription_invoice_line,
+  pettycash_test.subscription_invoice,
+  pettycash_test.subscription_email_log,
+  pettycash_test.subscription_audit_log,
+  pettycash_test.report_sale,
+  pettycash_test.report_history,
+  pettycash_test.report_expense,
+  pettycash_test.report_cash_count,
+  pettycash_test.report,
+  pettycash_test.payment_attachment,
+  pettycash_test.payment,
+  pettycash_test.entity_module_subscription,
+  pettycash_test.entity_billing_group,
+  pettycash_test.entity_billing_consent,
+  pettycash_test.entity_bill_currency,
+  pettycash_test.entity_bill_account_xero,
+  pettycash_test.billing_account_payment_method,
+  pettycash_test.payer_billing_group,
+  pettycash_test.bill_line,
+  pettycash_test.bill_audit,
+  pettycash_test.bill_attachment,
+  pettycash_test.bill,
+  pettycash_test.attachment
+  RESTART IDENTITY CASCADE;
+
+INSERT INTO pettycash_test.attachment
+  (id,
+   original_name,
+   stored_name,
+   file_path,
+   file_extension,
+   mime_type,
+   file_size,
+   storage_provider,
+   checksum_sha256,
+   uploaded_by,
+   is_deleted,
+   deleted_at,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('attachment.id:'||s.id)::uuid END),
+       s.original_name,
+       s.stored_name,
+       s.file_path,
+       s.file_extension,
+       s.mime_type,
+       s.file_size,
+       s.storage_provider,
+       s.checksum_sha256,
+       (CASE WHEN s.uploaded_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.uploaded_by::uuid WHEN NULLIF(s.uploaded_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.uploaded_by) THEN md5('user:'||s.uploaded_by)::uuid ELSE NULL END),
+       s.is_deleted,
+       s.deleted_at,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.attachment s;
+
+INSERT INTO pettycash_test.bill
+  (id,
+   entity_id,
+   contact_id,
+   currency_id,
+   contact_name,
+   reference,
+   status,
+   published,
+   amount,
+   amount_paid,
+   description,
+   invoice_date,
+   due_date,
+   xero_account_code,
+   created_by,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill.id:'||s.id)::uuid END),
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('bill.entity_id:'||s.entity_id)::uuid END),
+       (CASE WHEN s.xero_contact_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_contact_id::uuid ELSE NULL END),
+       (SELECT ci.id FROM pettycash_test.currency_info ci WHERE ci.currency_code = s.currency_code),
+       s.contact,
+       s.reference,
+       (CASE s.status::text WHEN 'voided' THEN 'void' ELSE s.status::text END)::pettycash_test.bill_status,
+       (CASE s.published::text WHEN 'not_published' THEN 'draft' ELSE s.published::text END)::pettycash_test.publish_state,
+       s.amount,
+       COALESCE((SELECT sum(p.amount) FROM pettycashv2.payment p  WHERE p.bill_id = s.id AND p.payment_status = 'completed'), 0),
+       s.description,
+       s.invoice_date,
+       s.due_date,
+       s.xero_account_code,
+       (CASE WHEN s.uploaded_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.uploaded_by::uuid WHEN NULLIF(s.uploaded_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.uploaded_by) THEN md5('user:'||s.uploaded_by)::uuid ELSE NULL END),
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.bill s;
+
+INSERT INTO pettycash_test.bill_attachment
+  (id,
+   bill_id,
+   attachment_id,
+   attachment_role,
+   sort_order,
+   note,
+   xero_attachment_id,
+   xero_filename,
+   created_by,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill_attachment.id:'||s.id)::uuid END),
+       (CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END),
+       (CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END),
+       s.attachment_role::text::pettycash_test.bill_attachment_role,
+       s.sort_order,
+       s.note,
+       s.xero_attachment_id,
+       s.xero_filename,
+       (CASE WHEN s.created_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.created_by::uuid WHEN NULLIF(s.created_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.created_by) THEN md5('user:'||s.created_by)::uuid ELSE NULL END),
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.bill_attachment s
+WHERE (((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.attachment _p WHERE _p.id = ((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END))))
+  AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END))));
+
+INSERT INTO pettycash_test.bill_audit
+  (id,
+   bill_id,
+   user_id,
+   action,
+   detail,
+   created_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill_audit.id:'||s.id)::uuid END),
+       (CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_audit.bill_id:'||s.bill_id)::uuid END),
+       (CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END),
+       s.action,
+       s.detail,
+       s.date
+FROM pettycashv2.audit s
+WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_audit.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_audit.bill_id:'||s.bill_id)::uuid END))));
+
+INSERT INTO pettycash_test.bill_line
+  (id,
+   bill_id,
+   description,
+   quantity,
+   unit_amount,
+   line_amount,
+   account_code,
+   account_name,
+   tax_type,
+   sort_order,
+   note,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill_line.id:'||s.id)::uuid END),
+       (CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_line.bill_id:'||s.bill_id)::uuid END),
+       s.description,
+       s.quantity,
+       s.unit_amount,
+       s.line_amount,
+       s.account_code,
+       s.account_name,
+       s.tax_type,
+       s.sort_order,
+       s.note,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.bill_line_item s
+WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_line.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_line.bill_id:'||s.bill_id)::uuid END))));
+
+INSERT INTO pettycash_test.payer_billing_group
+  (id,
+   payer_user_id,
+   stripe_payment_method_id,
+   billing_email,
+   billing_company,
+   paid_through,
+   dunning_started_at,
+   dunning_attempts,
+   created_at,
+   updated_at)
+SELECT s.id,
+       (CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_user_id) THEN md5('user:'||s.payer_user_id)::uuid ELSE NULL END),
+       s.stripe_payment_method_id,
+       s.billing_email,
+       s.billing_company,
+       s.paid_through,
+       s.dunning_started_at,
+       s.dunning_attempts,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.payer_billing_group s
+WHERE (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_user_id) THEN md5('user:'||s.payer_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_user_id) THEN md5('user:'||s.payer_user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.billing_account_payment_method
+  (id,
+   billing_group_id,
+   stripe_payment_method_id,
+   is_default,
+   created_at,
+   updated_at)
+SELECT s.id,
+       s.billing_group_id,
+       s.stripe_payment_method_id,
+       s.is_default,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.billing_account_payment_method s
+WHERE ((s.billing_group_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group _p WHERE _p.id = (s.billing_group_id)));
+
+INSERT INTO pettycash_test.entity_bill_account_xero
+  (id,
+   entity_id,
+   account_code,
+   account_name,
+   account_type,
+   xero_account_id,
+   is_default,
+   is_active,
+   is_deleted,
+   sort_order,
+   created_by,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('entity_bill_account_xero.id:'||s.id)::uuid END),
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_bill_account_xero.entity_id:'||s.entity_id)::uuid END),
+       s.account_code,
+       s.account_name,
+       s.account_type,
+       s.xero_account_id,
+       s.is_default,
+       s.is_active,
+       s.is_deleted,
+       s.sort_order,
+       (CASE WHEN s.created_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.created_by::uuid WHEN NULLIF(s.created_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.created_by) THEN md5('user:'||s.created_by)::uuid ELSE NULL END),
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.entity_bill_account_xero s;
+
+INSERT INTO pettycash_test.entity_bill_currency
+  (id,
+   entity_id,
+   currency_id,
+   is_default,
+   is_enabled,
+   sort_order,
+   created_by,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('entity_bill_currency.id:'||s.id)::uuid END),
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_bill_currency.entity_id:'||s.entity_id)::uuid END),
+       NULLIF(s.currency_info_id,'')::uuid,
+       s.is_default,
+       s.is_enabled,
+       s.sort_order,
+       (CASE WHEN s.created_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.created_by::uuid WHEN NULLIF(s.created_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.created_by) THEN md5('user:'||s.created_by)::uuid ELSE NULL END),
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.entity_bill_currency s;
+
+INSERT INTO pettycash_test.entity_billing_consent
+  (id,
+   entity_id,
+   user_id,
+   source,
+   created_at)
+SELECT s.id,
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_consent.entity_id:'||s.entity_id)::uuid END),
+       (CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END),
+       s.source,
+       s.created_at
+FROM pettycashv2.entity_billing_consent s
+WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_consent.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_consent.entity_id:'||s.entity_id)::uuid END))))
+  AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.entity_billing_group
+  (id,
+   entity_id,
+   payer_user_id,
+   billing_group_id,
+   source,
+   created_at,
+   updated_at)
+SELECT s.id,
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.entity_id:'||s.entity_id)::uuid END),
+       (CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.payer_user_id:'||s.payer_user_id)::uuid END),
+       s.billing_group_id,
+       s.source,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.entity_billing_group s
+WHERE ((s.billing_group_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group _p WHERE _p.id = (s.billing_group_id)))
+  AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.entity_id:'||s.entity_id)::uuid END))))
+  AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.payer_user_id:'||s.payer_user_id)::uuid END))));
+
+INSERT INTO pettycash_test.entity_module_subscription
+  (id,
+   entity_id,
+   function_code,
+   payer_user_id,
+   phase,
+   app_access_until,
+   trial_end,
+   first_billed_at,
+   billed_through,
+   extension_amount,
+   extension_state,
+   created_at,
+   updated_at)
+SELECT s.id,
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END),
+       (CASE s.function_code::text WHEN 'BILL' THEN 'PAYMENT_REQUEST' ELSE s.function_code::text END)::pettycash_test.module_code,
+       (CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END),
+       s.phase::text::pettycash_test.subscription_phase,
+       s.app_access_until,
+       s.trial_end,
+       s.first_billed_at,
+       s.billed_through,
+       s.extension_amount,
+       s.extension_state::text::pettycash_test.extension_state,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.entity_module_subscription s
+WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END))))
+  AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END))));
+
+INSERT INTO pettycash_test.payment
+  (id,
+   bill_id,
+   payment_date,
+   amount,
+   currency_id,
+   payment_method,
+   payment_status,
+   reference_no,
+   note,
+   xero_payment_id,
+   created_by,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('payment.id:'||s.id)::uuid END),
+       (CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END),
+       s.payment_date,
+       s.amount,
+       (SELECT ci.id FROM pettycash_test.currency_info ci WHERE ci.currency_code = s.currency_code),
+       s.payment_method,
+       s.payment_status::text::pettycash_test.payment_status,
+       s.reference_no,
+       s.note,
+       s.xero_payment_id,
+       (CASE WHEN s.created_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.created_by::uuid WHEN NULLIF(s.created_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.created_by) THEN md5('user:'||s.created_by)::uuid ELSE NULL END),
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.payment s
+WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END))));
+
+INSERT INTO pettycash_test.payment_attachment
+  (id,
+   payment_id,
+   attachment_id,
+   attachment_role,
+   sort_order,
+   note,
+   xero_attachment_id,
+   xero_filename,
+   created_by,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('payment_attachment.id:'||s.id)::uuid END),
+       (CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END),
+       (CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END),
+       s.attachment_role::text::pettycash_test.payment_attachment_role,
+       s.sort_order,
+       s.note,
+       s.xero_attachment_id,
+       s.xero_filename,
+       (CASE WHEN s.created_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.created_by::uuid WHEN NULLIF(s.created_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.created_by) THEN md5('user:'||s.created_by)::uuid ELSE NULL END),
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.payment_attachment s
+WHERE (((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.attachment _p WHERE _p.id = ((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END))))
+  AND (((CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payment _p WHERE _p.id = ((CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END))));
+
+INSERT INTO pettycash_test.report
+  (id,
+   entity_id,
+   transaction_date,
+   next_transaction_date,
+   status,
+   publishing_status,
+   opening_balance,
+   cash_addition,
+   adjusted_opening_balance,
+   cashsale_total,
+   nocashsale_total,
+   total_sales,
+   expense_total,
+   bank_deposit,
+   closing_balance,
+   safe_box_balance,
+   discrepancy_amount,
+   discrepancy_type,
+   discrepancy_reason,
+   current_section,
+   completed_sections,
+   xero_integrated,
+   cash_addition_type,
+   created_by,
+   created_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report.id:'||s.id)::uuid END),
+       (CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END),
+       s.transaction_date,
+       s.next_transaction_date,
+       (CASE WHEN (s.status = 'posted' AND s.xero_integrated_yes IS TRUE AND EXISTS (SELECT 1 FROM pettycashv2.report_history _h WHERE _h.report_id = s.id AND _h.action = 'published')) THEN 'published' WHEN s.status = 'posted' THEN 'submitted' ELSE s.status::text END)::text::pettycash_test.report_status,
+       (CASE WHEN (s.status = 'posted' AND s.xero_integrated_yes IS TRUE AND EXISTS (SELECT 1 FROM pettycashv2.report_history _h WHERE _h.report_id = s.id AND _h.action = 'published')) THEN 'completed' WHEN s.publishing_status IN ('failed','partially_published') THEN 'failed' ELSE 'unpublished' END)::text::pettycash_test.publish_status,
+       s.opening_balance::numeric,
+       s.cash_addition::numeric,
+       s.adjusted_opening_balance::numeric,
+       s.cash_sales::numeric,
+       COALESCE(s.total_sales,0)::numeric - COALESCE(s.cash_sales,0)::numeric,
+       s.total_sales::numeric,
+       s.expenses::numeric,
+       s.bank_deposit::numeric,
+       s.closing_balance::numeric,
+       s.safe_box_balance::numeric,
+       s.discrepancy_amount::numeric,
+       COALESCE((CASE s.discrepancy_type::text WHEN 'surplus' THEN 'over' WHEN 'shortage' THEN 'short' ELSE s.discrepancy_type::text END), 'none')::pettycash_test.discrepancy_type,
+       s.discrepancy_reason,
+       s.current_section,
+       s.completed_sections::jsonb,
+       s.xero_integrated_yes,
+       s.withdrawal_type,
+       (SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1),
+       COALESCE(s.date::timestamptz, s.transaction_date::timestamptz)
+FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = 'posted') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s
+WHERE (((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1))))
+  AND (((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END))));
+
+INSERT INTO pettycash_test.report_cash_count
+  (id,
+   report_id,
+   cash_id,
+   quantity,
+   cash_value,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_cash_count.id:'||s.id)::uuid END),
+       (CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_cash_count.report_id:'||s.report_id)::uuid END),
+       md5('cash:'||s.cash_id::text)::uuid,
+       s.quantity,
+       s.cash_value,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.report_cash_count s
+WHERE ((md5('cash:'||s.cash_id::text)::uuid) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.cash_info _p WHERE _p.id = (md5('cash:'||s.cash_id::text)::uuid)))
+  AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_cash_count.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_cash_count.report_id:'||s.report_id)::uuid END))));
+
+DELETE FROM pettycash_test.xero_contact_sync WHERE category = 'restored';
+DELETE FROM pettycash_test.account_info WHERE description LIKE 'restored by the schema migration%';
+
+INSERT INTO pettycash_test.xero_contact_sync (id, entity_id, xero_contact_id, xero_org_id, name, category)
+SELECT DISTINCT ON (r.company, se.contact_id)
+       md5('restored-contact:'||r.company||':'||se.contact_id)::uuid,
+       r.company::uuid, se.contact_id, en.xero_org_id,
+       COALESCE(NULLIF(se.contact_name,''), 'Unknown contact (restored)'), 'restored'
+  FROM pettycashv2.shop_expense se
+  JOIN pettycashv2.report r   ON r.id = se.report_id
+  JOIN pettycashv2.entities en ON en.id = r.company
+ WHERE se.contact_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+   AND NOT EXISTS (SELECT 1 FROM pettycashv2.xero_contact_sync c
+                    WHERE c.entity_id = r.company AND c.xero_contact_id = se.contact_id)
+ ORDER BY r.company, se.contact_id, (NULLIF(se.contact_name,'') IS NOT NULL) DESC, r.transaction_date DESC, se.id;
+
+INSERT INTO pettycash_test.account_info (id, entity_id, type, name, xero_account_id, xero_code, status, description)
+SELECT DISTINCT ON (r.company, se.account_id)
+       md5('restored-account:'||r.company||':'||se.account_id)::uuid,
+       r.company::uuid, 'EXPENSE', COALESCE(NULLIF(se.account_code,''), se.account_id),
+       se.account_id, NULLIF(se.account_code,''), 'INACTIVE',
+       'restored by the schema migration: referenced by expenses, absent from the synced chart'
+  FROM pettycashv2.shop_expense se
+  JOIN pettycashv2.report r   ON r.id = se.report_id
+  JOIN pettycashv2.entities en ON en.id = r.company
+ WHERE se.account_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+   AND NOT EXISTS (SELECT 1 FROM pettycashv2.account_info a
+                    WHERE a.entity_id = r.company
+                      AND (a.xero_account_id::text = se.account_id OR a.xero_code = NULLIF(se.account_code,'')))
+ ORDER BY r.company, se.account_id, (NULLIF(se.account_code,'') IS NOT NULL) DESC, r.transaction_date DESC, se.id;
+
+INSERT INTO pettycash_test.report_expense
+  (id,
+   report_id,
+   account_id,
+   contact_id,
+   item,
+   amount,
+   remarks)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_expense.id:'||s.id)::uuid END),
+       (CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_expense.report_id:'||s.report_id)::uuid END),
+       (CASE WHEN NULLIF(s.account_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'') ORDER BY a.id LIMIT 1), md5('restored-account:'||_r.company||':'||s.account_id)::uuid) END),
+       (CASE WHEN NULLIF(s.contact_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5('restored-contact:'||_r.company||':'||s.contact_id)::uuid) END),
+       s.item,
+       s.amount::numeric,
+       s.remarks
+FROM pettycashv2.shop_expense s JOIN pettycashv2.report _r ON _r.id = s.report_id
+WHERE (((CASE WHEN NULLIF(s.account_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'') ORDER BY a.id LIMIT 1), md5('restored-account:'||_r.company||':'||s.account_id)::uuid) END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.account_info _p WHERE _p.id = ((CASE WHEN NULLIF(s.account_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'') ORDER BY a.id LIMIT 1), md5('restored-account:'||_r.company||':'||s.account_id)::uuid) END))))
+  AND (((CASE WHEN NULLIF(s.contact_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5('restored-contact:'||_r.company||':'||s.contact_id)::uuid) END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_contact_sync _p WHERE _p.id = ((CASE WHEN NULLIF(s.contact_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5('restored-contact:'||_r.company||':'||s.contact_id)::uuid) END))))
+  AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_expense.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_expense.report_id:'||s.report_id)::uuid END))));
+
+INSERT INTO pettycash_test.report_history
+  (id,
+   report_id,
+   user_id,
+   action,
+   field_changed,
+   old_value,
+   new_value,
+   created_at)
+SELECT md5('report_history:'||s.id::text)::uuid,
+       (CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_history.report_id:'||s.report_id)::uuid END),
+       (CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END),
+       s.action,
+       s.field_changed,
+       s.old_value,
+       s.new_value,
+       s.timestamp::timestamptz
+FROM pettycashv2.report_history s
+WHERE (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_history.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_history.report_id:'||s.report_id)::uuid END))))
+  AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.report_sale
+  (id,
+   report_id,
+   sale_id,
+   amount,
+   created_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_sale.id:'||s.id)::uuid END),
+       (CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_sale.report_id:'||s.report_id)::uuid END),
+       (SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''), (SELECT NULLIF(ess.sale_info_id,'') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1),
+       s.amount::numeric,
+       s.create_at::timestamptz
+FROM pettycashv2.report_sale_detail s
+WHERE (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_sale.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_sale.report_id:'||s.report_id)::uuid END))))
+  AND (((SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''), (SELECT NULLIF(ess.sale_info_id,'') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.sale_info _p WHERE _p.id = ((SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''), (SELECT NULLIF(ess.sale_info_id,'') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1))));
+
+INSERT INTO pettycash_test.subscription_audit_log
+  (id,
+   entity_id,
+   function_code,
+   payer_user_id,
+   actor_user_id,
+   action,
+   phase_before,
+   phase_after,
+   app_access_until,
+   extension_amount,
+   extension_state,
+   outcome,
+   cancel_reason,
+   note,
+   payer_before,
+   payer_after,
+   created_at)
+SELECT s.id,
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END),
+       (CASE s.function_code::text WHEN 'BILL' THEN 'PAYMENT_REQUEST' ELSE s.function_code::text END)::pettycash_test.module_code,
+       (CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END),
+       (CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END),
+       s.action,
+       s.phase_before::text::pettycash_test.subscription_phase,
+       s.phase_after::text::pettycash_test.subscription_phase,
+       s.app_access_until,
+       s.extension_amount,
+       s.extension_state::text::pettycash_test.extension_state,
+       s.outcome::text::pettycash_test.audit_outcome,
+       s.cancel_reason,
+       s.note,
+       (CASE WHEN s.payer_before ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_before::uuid WHEN NULLIF(s.payer_before,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_before) THEN md5('user:'||s.payer_before)::uuid ELSE NULL END),
+       (CASE WHEN s.payer_after ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_after::uuid WHEN NULLIF(s.payer_after,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_after) THEN md5('user:'||s.payer_after)::uuid ELSE NULL END),
+       s.created_at
+FROM pettycashv2.subscription_audit_log s
+WHERE (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END))))
+  AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END))))
+  AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END))));
+
+INSERT INTO pettycash_test.subscription_email_log
+  (id,
+   user_id,
+   event,
+   dedupe_key,
+   recipient,
+   status,
+   error,
+   created_at)
+SELECT s.id,
+       (CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END),
+       s.event,
+       s.dedupe_key,
+       s.recipient,
+       s.status,
+       s.error,
+       s.created_at
+FROM pettycashv2.subscription_email_log s
+WHERE (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.subscription_invoice
+  (id,
+   payer_user_id,
+   billing_group_id,
+   stripe_customer_id,
+   external_id,
+   period_start,
+   period_end,
+   currency,
+   total,
+   status,
+   memo,
+   payment_method,
+   hosted_invoice_url,
+   idempotency_key,
+   issued_at,
+   paid_at,
+   created_at,
+   updated_at)
+SELECT s.id,
+       (CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice.payer_user_id:'||s.payer_user_id)::uuid END),
+       s.billing_group_id,
+       s.stripe_customer_id,
+       s.external_id,
+       s.period_start,
+       s.period_end,
+       s.currency,
+       s.total,
+       s.status,
+       s.memo,
+       s.payment_method,
+       s.hosted_invoice_url,
+       s.idempotency_key,
+       s.issued_at,
+       s.paid_at,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.subscription_invoice s
+WHERE ((s.billing_group_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group _p WHERE _p.id = (s.billing_group_id)))
+  AND ((s.currency) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.currency_info _p WHERE _p.currency_code = (s.currency)))
+  AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice.payer_user_id:'||s.payer_user_id)::uuid END))));
+
+INSERT INTO pettycash_test.subscription_invoice_line
+  (id,
+   invoice_id,
+   entity_id,
+   entity_name,
+   product_name,
+   amount,
+   kind,
+   at,
+   created_at)
+SELECT s.id,
+       s.invoice_id,
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice_line.entity_id:'||s.entity_id)::uuid END),
+       s.entity_name,
+       s.product_name,
+       s.amount,
+       s.kind,
+       s.at,
+       s.created_at
+FROM pettycashv2.subscription_invoice_line s
+WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice_line.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice_line.entity_id:'||s.entity_id)::uuid END))))
+  AND ((s.invoice_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.subscription_invoice _p WHERE _p.id = (s.invoice_id)));
+
+INSERT INTO pettycash_test.subscription_transfer
+  (id,
+   entity_id,
+   from_user_id,
+   to_user_id,
+   status,
+   created_at,
+   expires_at,
+   responded_at,
+   accepted_billed_through,
+   accepted_anchor_at,
+   quoted_amount,
+   quoted_currency,
+   charge_attempt,
+   charge_key,
+   charge_invoice_id,
+   note)
+SELECT s.id,
+       (CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END),
+       (CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END),
+       (CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END),
+       s.status::text::pettycash_test.transfer_status,
+       s.created_at,
+       s.expires_at,
+       s.responded_at,
+       s.accepted_billed_through,
+       s.accepted_anchor_at,
+       s.quoted_amount,
+       s.quoted_currency,
+       s.charge_attempt,
+       s.charge_key,
+       s.charge_invoice_id,
+       s.note
+FROM pettycashv2.subscription_transfer s
+WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END))))
+  AND (((CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END))))
+  AND (((CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.terms_consent
+  (id,
+   user_id,
+   terms_version,
+   document_hash,
+   accepted_at,
+   source,
+   ip_address,
+   user_agent)
+SELECT s.id,
+       (CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END),
+       s.terms_version,
+       s.document_hash,
+       s.accepted_at,
+       s.source,
+       s.ip_address,
+       s.user_agent
+FROM pettycashv2.terms_consent s
+WHERE (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.user_stripe_customer
+  (id,
+   user_id,
+   stripe_customer_id,
+   anchor_at,
+   currency,
+   created_at,
+   updated_at)
+SELECT s.id,
+       (CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END),
+       s.stripe_customer_id,
+       s.anchor_at,
+       s.currency,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.user_stripe_customer s
+WHERE ((s.currency) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.currency_info _p WHERE _p.currency_code = (s.currency)))
+  AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+
+INSERT INTO pettycash_test.xero_bank_transaction
+  (id,
+   sync_report_id,
+   type,
+   xero_contact_id,
+   xero_contact_name,
+   unit_amount,
+   quantity,
+   xero_account_id,
+   xero_account_code,
+   description,
+   xero_bank_account_id,
+   xero_bank_transaction_id,
+   subtotal,
+   total_tax,
+   total,
+   status,
+   created_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.id:'||s.id)::uuid END),
+       (CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.sync_report_id:'||s.sync_report_id)::uuid END),
+       s.type,
+       s.xero_contact_id,
+       s.xero_contact_name,
+       s.unit_amount::numeric,
+       s.quantity::numeric,
+       s.xero_account_id,
+       s.xero_account_code,
+       s.description,
+       s.xero_bank_account_id,
+       s.xero_bank_transaction_id,
+       s.subtotal::numeric,
+       s.total_tax::numeric,
+       s.total::numeric,
+       s.status,
+       s.create_at::timestamptz
+FROM pettycashv2.xero_bank_transaction s
+WHERE (((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.sync_report_id:'||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.sync_report_id:'||s.sync_report_id)::uuid END))));
+
+INSERT INTO pettycash_test.xero_bank_transfer
+  (id,
+   sync_report_id,
+   from_bank_account_id,
+   to_bank_account_id,
+   amount,
+   transfer_date,
+   xero_bank_transfer_id,
+   from_bank_transaction_id,
+   to_bank_transaction_id,
+   status,
+   error_message,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.id:'||s.id)::uuid END),
+       (CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.sync_report_id:'||s.sync_report_id)::uuid END),
+       s.from_bank_account_id,
+       s.to_bank_account_id,
+       s.amount::numeric,
+       s.transfer_date::timestamptz,
+       s.xero_bank_transfer_id,
+       s.from_bank_transaction_id,
+       s.to_bank_transaction_id,
+       s.status,
+       s.error_message,
+       COALESCE(s.transfer_date::timestamptz, now()),
+       COALESCE(s.transfer_date::timestamptz, now())
+FROM pettycashv2.xero_bank_transfer s
+WHERE (((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.sync_report_id:'||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.sync_report_id:'||s.sync_report_id)::uuid END))));
+
+INSERT INTO pettycash_test.xero_bill_sync
+  (id,
+   bill_id,
+   sync_direction,
+   sync_type,
+   sync_status,
+   request_type,
+   request_status,
+   request_contact_id,
+   request_invoice_number,
+   request_reference,
+   request_invoice_date,
+   request_due_date,
+   response_invoice_id,
+   response_status,
+   response_amount_due,
+   response_amount_paid,
+   response_total,
+   response_currency_code,
+   http_status_code,
+   idempotency_key,
+   response_invoice_number,
+   xero_response_id,
+   xero_provider_name,
+   xero_datetime_utc,
+   retry_count,
+   last_retry_at,
+   has_errors,
+   error_message,
+   requested_by,
+   requested_at,
+   responded_at,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.id:'||s.id)::uuid END),
+       (CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END),
+       (CASE s.sync_direction::text WHEN 'outbound' THEN 'push' ELSE s.sync_direction::text END)::pettycash_test.sync_direction,
+       s.sync_type,
+       s.sync_status::text::pettycash_test.sync_status,
+       s.request_type,
+       s.request_status,
+       s.request_contact_id,
+       s.request_invoice_number,
+       s.request_reference,
+       s.request_invoice_date,
+       s.request_due_date,
+       s.response_invoice_id,
+       s.response_status,
+       s.response_amount_due,
+       s.response_amount_paid,
+       s.response_total,
+       s.response_currency_code,
+       s.http_status_code,
+       s.idempotency_key,
+       s.response_invoice_number,
+       s.xero_response_id,
+       s.xero_provider_name,
+       s.xero_datetime_utc,
+       s.retry_count,
+       s.last_retry_at,
+       s.has_errors,
+       s.error_message,
+       (CASE WHEN s.requested_by ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.requested_by::uuid WHEN NULLIF(s.requested_by,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.requested_by) THEN md5('user:'||s.requested_by)::uuid ELSE NULL END),
+       s.requested_at,
+       s.responded_at,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.xero_bill_sync s
+WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END))));
+
+INSERT INTO pettycash_test.xero_bill_response_line
+  (id,
+   xero_bill_sync_id,
+   xero_line_item_id,
+   description,
+   quantity,
+   unit_amount,
+   line_amount,
+   tax_type,
+   tax_amount,
+   account_code,
+   account_id,
+   validation_errors,
+   created_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.id:'||s.id)::uuid END),
+       (CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END),
+       s.xero_line_item_id,
+       s.description,
+       s.quantity,
+       s.unit_amount,
+       s.line_amount,
+       s.tax_type,
+       s.tax_amount,
+       s.account_code,
+       s.account_id,
+       s.validation_errors,
+       s.created_at
+FROM pettycashv2.xero_bill_response_line s
+WHERE (((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync _p WHERE _p.id = ((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END))));
+
+INSERT INTO pettycash_test.xero_bill_sync_line
+  (id,
+   xero_bill_sync_id,
+   bill_line_id,
+   description,
+   quantity,
+   unit_amount,
+   line_amount,
+   account_code,
+   tax_type,
+   sort_order,
+   response_line_item_id,
+   response_account_id,
+   response_tax_amount,
+   created_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.id:'||s.id)::uuid END),
+       (CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END),
+       (CASE WHEN s.bill_line_item_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_line_item_id::uuid WHEN NULLIF(s.bill_line_item_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.bill_line_id:'||s.bill_line_item_id)::uuid END),
+       s.description,
+       s.quantity,
+       s.unit_amount,
+       s.line_amount,
+       s.account_code,
+       s.tax_type,
+       s.sort_order,
+       s.response_line_item_id,
+       s.response_account_id,
+       s.response_tax_amount,
+       s.created_at
+FROM pettycashv2.xero_bill_sync_line s
+WHERE (((CASE WHEN s.bill_line_item_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_line_item_id::uuid WHEN NULLIF(s.bill_line_item_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.bill_line_id:'||s.bill_line_item_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill_line _p WHERE _p.id = ((CASE WHEN s.bill_line_item_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_line_item_id::uuid WHEN NULLIF(s.bill_line_item_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.bill_line_id:'||s.bill_line_item_id)::uuid END))))
+  AND (((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync _p WHERE _p.id = ((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END))));
+
+INSERT INTO pettycash_test.xero_bill_sync_payload
+  (id,
+   xero_bill_sync_id,
+   request_json,
+   response_json,
+   request_headers,
+   response_headers,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.id:'||s.id)::uuid END),
+       (CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END),
+       s.request_json,
+       s.response_json,
+       s.request_headers,
+       s.response_headers,
+       s.created_at,
+       s.updated_at
+FROM pettycashv2.xero_bill_sync_payload s
+WHERE (((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync _p WHERE _p.id = ((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END))));
+
+INSERT INTO pettycash_test.xero_report_sync
+  (id,
+   report_id,
+   sync_status,
+   reported_at,
+   completed_at,
+   xero_response_text,
+   created_at,
+   updated_at)
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.id:'||s.id)::uuid END),
+       (CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.report_id:'||s.report_id)::uuid END),
+       s.sync_statuc,
+       s.reported_at::timestamptz,
+       s.completed_at::timestamptz,
+       s.xero_reponse_text,
+       COALESCE(s.reported_at::timestamptz, now()),
+       COALESCE(s.completed_at::timestamptz, s.reported_at::timestamptz, now())
+FROM pettycashv2.xero_report_sync s
+WHERE (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.report_id:'||s.report_id)::uuid END))));
+
+DO $$DECLARE r record; s bigint; d bigint; bad int := 0;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES ('attachment','attachment',0), ('bill','bill',0), ('bill_attachment','bill_attachment',0), ('audit','bill_audit',0), ('bill_line_item','bill_line',0), ('payer_billing_group','payer_billing_group',0), ('billing_account_payment_method','billing_account_payment_method',0), ('entity_bill_account_xero','entity_bill_account_xero',0), ('entity_bill_currency','entity_bill_currency',0), ('entity_billing_consent','entity_billing_consent',0), ('entity_billing_group','entity_billing_group',0), ('entity_module_subscription','entity_module_subscription',0), ('payment','payment',0), ('payment_attachment','payment_attachment',0), ('report','report',98), ('report_cash_count','report_cash_count',278), ('shop_expense','report_expense',99), ('report_history','report_history',5), ('report_sale_detail','report_sale',444), ('subscription_audit_log','subscription_audit_log',0), ('subscription_email_log','subscription_email_log',0), ('subscription_invoice','subscription_invoice',0), ('subscription_invoice_line','subscription_invoice_line',0), ('subscription_transfer','subscription_transfer',0), ('terms_consent','terms_consent',0), ('user_stripe_customer','user_stripe_customer',0), ('xero_bank_transaction','xero_bank_transaction',0), ('xero_bank_transfer','xero_bank_transfer',0), ('xero_bill_sync','xero_bill_sync',0), ('xero_bill_response_line','xero_bill_response_line',0), ('xero_bill_sync_line','xero_bill_sync_line',0), ('xero_bill_sync_payload','xero_bill_sync_payload',0), ('xero_report_sync','xero_report_sync',0)) AS v(src, dst, skip) LOOP
+    EXECUTE format('SELECT count(*) FROM pettycashv2.%I', r.src) INTO s;
+    EXECUTE format('SELECT count(*) FROM pettycash_test.%I', r.dst) INTO d;
+    IF s - d <> r.skip THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R1  % : src=%  dst=%  skipped=% (expected %)   %',
+      rpad(r.dst,28), s, d, s - d, r.skip,
+      CASE WHEN s - d = r.skip THEN 'OK' ELSE '*** MISMATCH ***' END;
+  END LOOP;
+  IF bad > 0 THEN RAISE EXCEPTION 'R1: % table(s) off their expected count', bad; END IF;
+END
+$$;
+
+DO $$DECLARE r record; bad int := 0;
+BEGIN
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE s.status::text WHEN 'voided' THEN 'void' ELSE s.status::text END)::pettycash_test.bill_status)::text v, count(*) n FROM pettycashv2.bill s GROUP BY 1) a
+      FULL JOIN (SELECT status::text v, count(*) n FROM pettycash_test.bill GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  bill.status % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE s.published::text WHEN 'not_published' THEN 'draft' ELSE s.published::text END)::pettycash_test.publish_state)::text v, count(*) n FROM pettycashv2.bill s GROUP BY 1) a
+      FULL JOIN (SELECT published::text v, count(*) n FROM pettycash_test.bill GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  bill.published % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.attachment_role::text::pettycash_test.bill_attachment_role)::text v, count(*) n FROM pettycashv2.bill_attachment s WHERE (((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.attachment _p WHERE _p.id = ((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END)))) AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT attachment_role::text v, count(*) n FROM pettycash_test.bill_attachment GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  bill_attachment.attachment_role % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE s.function_code::text WHEN 'BILL' THEN 'PAYMENT_REQUEST' ELSE s.function_code::text END)::pettycash_test.module_code)::text v, count(*) n FROM pettycashv2.entity_module_subscription s WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT function_code::text v, count(*) n FROM pettycash_test.entity_module_subscription GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  entity_module_subscription.function_code % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.phase::text::pettycash_test.subscription_phase)::text v, count(*) n FROM pettycashv2.entity_module_subscription s WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT phase::text v, count(*) n FROM pettycash_test.entity_module_subscription GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  entity_module_subscription.phase % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.extension_state::text::pettycash_test.extension_state)::text v, count(*) n FROM pettycashv2.entity_module_subscription s WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT extension_state::text v, count(*) n FROM pettycash_test.entity_module_subscription GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  entity_module_subscription.extension_state % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.payment_status::text::pettycash_test.payment_status)::text v, count(*) n FROM pettycashv2.payment s WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT payment_status::text v, count(*) n FROM pettycash_test.payment GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  payment.payment_status % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.attachment_role::text::pettycash_test.payment_attachment_role)::text v, count(*) n FROM pettycashv2.payment_attachment s WHERE (((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.attachment _p WHERE _p.id = ((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END)))) AND (((CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payment _p WHERE _p.id = ((CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT attachment_role::text v, count(*) n FROM pettycash_test.payment_attachment GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  payment_attachment.attachment_role % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE WHEN (s.status = 'posted' AND s.xero_integrated_yes IS TRUE AND EXISTS (SELECT 1 FROM pettycashv2.report_history _h WHERE _h.report_id = s.id AND _h.action = 'published')) THEN 'published' WHEN s.status = 'posted' THEN 'submitted' ELSE s.status::text END)::text::pettycash_test.report_status)::text v, count(*) n FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = 'posted') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT status::text v, count(*) n FROM pettycash_test.report GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  report.status % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE WHEN (s.status = 'posted' AND s.xero_integrated_yes IS TRUE AND EXISTS (SELECT 1 FROM pettycashv2.report_history _h WHERE _h.report_id = s.id AND _h.action = 'published')) THEN 'completed' WHEN s.publishing_status IN ('failed','partially_published') THEN 'failed' ELSE 'unpublished' END)::text::pettycash_test.publish_status)::text v, count(*) n FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = 'posted') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT publishing_status::text v, count(*) n FROM pettycash_test.report GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  report.publishing_status % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (COALESCE((CASE s.discrepancy_type::text WHEN 'surplus' THEN 'over' WHEN 'shortage' THEN 'short' ELSE s.discrepancy_type::text END), 'none')::pettycash_test.discrepancy_type)::text v, count(*) n FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = 'posted') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT discrepancy_type::text v, count(*) n FROM pettycash_test.report GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  report.discrepancy_type % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE s.function_code::text WHEN 'BILL' THEN 'PAYMENT_REQUEST' ELSE s.function_code::text END)::pettycash_test.module_code)::text v, count(*) n FROM pettycashv2.subscription_audit_log s WHERE (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT function_code::text v, count(*) n FROM pettycash_test.subscription_audit_log GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  subscription_audit_log.function_code % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.phase_before::text::pettycash_test.subscription_phase)::text v, count(*) n FROM pettycashv2.subscription_audit_log s WHERE (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT phase_before::text v, count(*) n FROM pettycash_test.subscription_audit_log GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  subscription_audit_log.phase_before % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.phase_after::text::pettycash_test.subscription_phase)::text v, count(*) n FROM pettycashv2.subscription_audit_log s WHERE (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT phase_after::text v, count(*) n FROM pettycash_test.subscription_audit_log GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  subscription_audit_log.phase_after % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.extension_state::text::pettycash_test.extension_state)::text v, count(*) n FROM pettycashv2.subscription_audit_log s WHERE (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT extension_state::text v, count(*) n FROM pettycash_test.subscription_audit_log GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  subscription_audit_log.extension_state % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.outcome::text::pettycash_test.audit_outcome)::text v, count(*) n FROM pettycashv2.subscription_audit_log s WHERE (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT outcome::text v, count(*) n FROM pettycash_test.subscription_audit_log GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  subscription_audit_log.outcome % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.status::text::pettycash_test.transfer_status)::text v, count(*) n FROM pettycashv2.subscription_transfer s WHERE (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END)))) GROUP BY 1) a
+      FULL JOIN (SELECT status::text v, count(*) n FROM pettycash_test.subscription_transfer GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  subscription_transfer.status % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT ((CASE s.sync_direction::text WHEN 'outbound' THEN 'push' ELSE s.sync_direction::text END)::pettycash_test.sync_direction)::text v, count(*) n FROM pettycashv2.xero_bill_sync s WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT sync_direction::text v, count(*) n FROM pettycash_test.xero_bill_sync GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  xero_bill_sync.sync_direction % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  FOR r IN
+    SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
+      FROM (SELECT (s.sync_status::text::pettycash_test.sync_status)::text v, count(*) n FROM pettycashv2.xero_bill_sync s WHERE (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END)))) GROUP BY 1) a
+      FULL JOIN (SELECT sync_status::text v, count(*) n FROM pettycash_test.xero_bill_sync GROUP BY 1) b ON b.v = a.v
+     ORDER BY 1
+  LOOP
+    IF r.src <> r.dst THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R3  xero_bill_sync.sync_status % : mapped-src=%  dst=%   %',
+      rpad(COALESCE(r.v,'NULL'),16), r.src, r.dst, CASE WHEN r.src = r.dst THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  IF bad > 0 THEN RAISE EXCEPTION 'R3: an enum mapping did not land'; END IF;
+END
+$$;
+
+DO $$DECLARE n bigint; bad int := 0;
+BEGIN
+  SELECT count(*) INTO n FROM pettycashv2.attachment s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.attachment d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('attachment.id:'||s.id)::uuid END)));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('attachment',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.bill s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.bill d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill.id:'||s.id)::uuid END)));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('bill',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.bill_attachment s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.bill_attachment d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill_attachment.id:'||s.id)::uuid END))) AND (((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.attachment _p WHERE _p.id = ((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.attachment_id:'||s.attachment_id)::uuid END)))) AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_attachment.bill_id:'||s.bill_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('bill_attachment',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.audit s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.bill_audit d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill_audit.id:'||s.id)::uuid END))) AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_audit.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_audit.bill_id:'||s.bill_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('bill_audit',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.bill_line_item s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.bill_line d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('bill_line.id:'||s.id)::uuid END))) AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_line.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('bill_line.bill_id:'||s.bill_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('bill_line',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.payer_billing_group s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group d WHERE d.id = (s.id)) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_user_id) THEN md5('user:'||s.payer_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.payer_user_id) THEN md5('user:'||s.payer_user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('payer_billing_group',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.billing_account_payment_method s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.billing_account_payment_method d WHERE d.id = (s.id)) AND ((s.billing_group_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group _p WHERE _p.id = (s.billing_group_id)));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('billing_account_payment_method',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.entity_bill_account_xero s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.entity_bill_account_xero d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('entity_bill_account_xero.id:'||s.id)::uuid END)));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('entity_bill_account_xero',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.entity_bill_currency s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.entity_bill_currency d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('entity_bill_currency.id:'||s.id)::uuid END)));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('entity_bill_currency',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.entity_billing_consent s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.entity_billing_consent d WHERE d.id = (s.id)) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_consent.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_consent.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('entity_billing_consent',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.entity_billing_group s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.entity_billing_group d WHERE d.id = (s.id)) AND ((s.billing_group_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group _p WHERE _p.id = (s.billing_group_id))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_billing_group.payer_user_id:'||s.payer_user_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('entity_billing_group',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.entity_module_subscription s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.entity_module_subscription d WHERE d.id = (s.id)) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('entity_module_subscription.payer_user_id:'||s.payer_user_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('entity_module_subscription',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.payment s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.payment d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('payment.id:'||s.id)::uuid END))) AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('payment.bill_id:'||s.bill_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('payment',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.payment_attachment s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.payment_attachment d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('payment_attachment.id:'||s.id)::uuid END))) AND (((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.attachment _p WHERE _p.id = ((CASE WHEN s.attachment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.attachment_id::uuid WHEN NULLIF(s.attachment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.attachment_id:'||s.attachment_id)::uuid END)))) AND (((CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payment _p WHERE _p.id = ((CASE WHEN s.payment_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payment_id::uuid WHEN NULLIF(s.payment_id,'') IS NULL THEN NULL ELSE md5('payment_attachment.payment_id:'||s.payment_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('payment_attachment',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = 'posted') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.report d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report.id:'||s.id)::uuid END))) AND (((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN u.id::uuid WHEN NULLIF(u.id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5('user:'||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.company::uuid WHEN NULLIF(s.company,'') IS NULL THEN NULL ELSE md5('report.entity_id:'||s.company)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('report',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.report_cash_count s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.report_cash_count d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_cash_count.id:'||s.id)::uuid END))) AND ((md5('cash:'||s.cash_id::text)::uuid) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.cash_info _p WHERE _p.id = (md5('cash:'||s.cash_id::text)::uuid))) AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_cash_count.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_cash_count.report_id:'||s.report_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('report_cash_count',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.shop_expense s JOIN pettycashv2.report _r ON _r.id = s.report_id
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.report_expense d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_expense.id:'||s.id)::uuid END))) AND (((CASE WHEN NULLIF(s.account_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'') ORDER BY a.id LIMIT 1), md5('restored-account:'||_r.company||':'||s.account_id)::uuid) END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.account_info _p WHERE _p.id = ((CASE WHEN NULLIF(s.account_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'') ORDER BY a.id LIMIT 1), md5('restored-account:'||_r.company||':'||s.account_id)::uuid) END)))) AND (((CASE WHEN NULLIF(s.contact_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5('restored-contact:'||_r.company||':'||s.contact_id)::uuid) END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_contact_sync _p WHERE _p.id = ((CASE WHEN NULLIF(s.contact_id,'') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5('restored-contact:'||_r.company||':'||s.contact_id)::uuid) END)))) AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_expense.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_expense.report_id:'||s.report_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('report_expense',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.report_history s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.report_history d WHERE d.id = (md5('report_history:'||s.id::text)::uuid)) AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_history.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_history.report_id:'||s.report_id)::uuid END)))) AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('report_history',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.report_sale_detail s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.report_sale d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_sale.id:'||s.id)::uuid END))) AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_sale.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('report_sale.report_id:'||s.report_id)::uuid END)))) AND (((SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''), (SELECT NULLIF(ess.sale_info_id,'') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.sale_info _p WHERE _p.id = ((SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''), (SELECT NULLIF(ess.sale_info_id,'') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('report_sale',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.subscription_audit_log s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.subscription_audit_log d WHERE d.id = (s.id)) AND (((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.actor_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.actor_user_id::uuid WHEN NULLIF(s.actor_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.actor_user_id) THEN md5('user:'||s.actor_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_audit_log.payer_user_id:'||s.payer_user_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('subscription_audit_log',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.subscription_email_log s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.subscription_email_log d WHERE d.id = (s.id)) AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('subscription_email_log',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.subscription_invoice s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.subscription_invoice d WHERE d.id = (s.id)) AND ((s.billing_group_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.payer_billing_group _p WHERE _p.id = (s.billing_group_id))) AND ((s.currency) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.currency_info _p WHERE _p.currency_code = (s.currency))) AND (((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice.payer_user_id:'||s.payer_user_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.payer_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.payer_user_id::uuid WHEN NULLIF(s.payer_user_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice.payer_user_id:'||s.payer_user_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('subscription_invoice',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.subscription_invoice_line s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.subscription_invoice_line d WHERE d.id = (s.id)) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice_line.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_invoice_line.entity_id:'||s.entity_id)::uuid END)))) AND ((s.invoice_id) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.subscription_invoice _p WHERE _p.id = (s.invoice_id)));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('subscription_invoice_line',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.subscription_transfer s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.subscription_transfer d WHERE d.id = (s.id)) AND (((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.entity_id::uuid WHEN NULLIF(s.entity_id,'') IS NULL THEN NULL ELSE md5('subscription_transfer.entity_id:'||s.entity_id)::uuid END)))) AND (((CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.from_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.from_user_id::uuid WHEN NULLIF(s.from_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.from_user_id) THEN md5('user:'||s.from_user_id)::uuid ELSE NULL END)))) AND (((CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.to_user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.to_user_id::uuid WHEN NULLIF(s.to_user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.to_user_id) THEN md5('user:'||s.to_user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('subscription_transfer',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.terms_consent s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.terms_consent d WHERE d.id = (s.id)) AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('terms_consent',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.user_stripe_customer s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.user_stripe_customer d WHERE d.id = (s.id)) AND ((s.currency) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.currency_info _p WHERE _p.currency_code = (s.currency))) AND (((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((CASE WHEN s.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.user_id::uuid WHEN NULLIF(s.user_id,'') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = s.user_id) THEN md5('user:'||s.user_id)::uuid ELSE NULL END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('user_stripe_customer',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_bank_transaction s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_bank_transaction d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.id:'||s.id)::uuid END))) AND (((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.sync_report_id:'||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transaction.sync_report_id:'||s.sync_report_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_bank_transaction',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_bank_transfer s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_bank_transfer d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.id:'||s.id)::uuid END))) AND (((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.sync_report_id:'||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'') IS NULL THEN NULL ELSE md5('xero_bank_transfer.sync_report_id:'||s.sync_report_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_bank_transfer',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_bill_sync s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.id:'||s.id)::uuid END))) AND (((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill _p WHERE _p.id = ((CASE WHEN s.bill_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_id::uuid WHEN NULLIF(s.bill_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync.bill_id:'||s.bill_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_bill_sync',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_bill_response_line s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_bill_response_line d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.id:'||s.id)::uuid END))) AND (((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync _p WHERE _p.id = ((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_response_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_bill_response_line',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_bill_sync_line s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync_line d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.id:'||s.id)::uuid END))) AND (((CASE WHEN s.bill_line_item_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_line_item_id::uuid WHEN NULLIF(s.bill_line_item_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.bill_line_id:'||s.bill_line_item_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.bill_line _p WHERE _p.id = ((CASE WHEN s.bill_line_item_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.bill_line_item_id::uuid WHEN NULLIF(s.bill_line_item_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.bill_line_id:'||s.bill_line_item_id)::uuid END)))) AND (((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync _p WHERE _p.id = ((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_line.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_bill_sync_line',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_bill_sync_payload s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync_payload d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.id:'||s.id)::uuid END))) AND (((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_bill_sync _p WHERE _p.id = ((CASE WHEN s.xero_bill_sync_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.xero_bill_sync_id::uuid WHEN NULLIF(s.xero_bill_sync_id,'') IS NULL THEN NULL ELSE md5('xero_bill_sync_payload.xero_bill_sync_id:'||s.xero_bill_sync_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_bill_sync_payload',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  SELECT count(*) INTO n FROM pettycashv2.xero_report_sync s
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.xero_report_sync d WHERE d.id = ((CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.id:'||s.id)::uuid END))) AND (((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.report_id:'||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'') IS NULL THEN NULL ELSE md5('xero_report_sync.report_id:'||s.report_id)::uuid END))));
+  IF n > 0 THEN bad := bad + 1; END IF;
+  RAISE NOTICE 'R5  % key(%) : % lost   %', rpad('xero_report_sync',26), 'id', n,
+    CASE WHEN n = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  IF bad > 0 THEN RAISE EXCEPTION 'R5: % table(s) lost keys', bad; END IF;
+END
+$$;
+
+DO $$DECLARE r record; a numeric; b numeric; bad int := 0;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES ('SELECT round(coalesce(sum(s.opening_balance),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','opening_balance','report','opening_balance'), ('SELECT round(coalesce(sum(s.cash_addition),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','cash_addition','report','cash_addition'), ('SELECT round(coalesce(sum(s.adjusted_opening_balance),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','adjusted_opening_balance','report','adjusted_opening_balance'), ('SELECT round(coalesce(sum(s.cash_sales),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','cash_sales','report','cashsale_total'), ('SELECT round(coalesce(sum(s.total_sales),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','total_sales','report','total_sales'), ('SELECT round(coalesce(sum(s.expenses),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','expenses','report','expense_total'), ('SELECT round(coalesce(sum(s.bank_deposit),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','bank_deposit','report','bank_deposit'), ('SELECT round(coalesce(sum(s.closing_balance),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','closing_balance','report','closing_balance'), ('SELECT round(coalesce(sum(s.safe_box_balance),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','safe_box_balance','report','safe_box_balance'), ('SELECT round(coalesce(sum(s.discrepancy_amount),0)::numeric, 2) FROM (SELECT DISTINCT ON (s.company, s.transaction_date) s.* FROM pettycashv2.report s ORDER BY s.company, s.transaction_date, (s.status = ''posted'') DESC, (s.actual_cash_total IS NOT NULL) DESC, COALESCE(s.expenses,0) DESC, s.date DESC NULLS LAST, s.id) s WHERE (((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test."user" _p WHERE _p.id = ((SELECT (CASE WHEN u.id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN u.id::uuid WHEN NULLIF(u.id,'''') IS NOT NULL AND EXISTS (SELECT 1 FROM pettycashv2."user" _u WHERE _u.id = u.id) THEN md5(''user:''||u.id)::uuid ELSE NULL END) FROM pettycashv2."user" u WHERE u.username = s.uploaded_by LIMIT 1)))) AND (((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.entities _p WHERE _p.id = ((CASE WHEN s.company ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.company::uuid WHEN NULLIF(s.company,'''') IS NULL THEN NULL ELSE md5(''report.entity_id:''||s.company)::uuid END))))','discrepancy_amount','report','discrepancy_amount'), ('SELECT round(coalesce(sum(s.amount),0)::numeric, 2) FROM pettycashv2.shop_expense s JOIN pettycashv2.report _r ON _r.id = s.report_id WHERE (((CASE WHEN NULLIF(s.account_id,'''') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'''')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'''')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'''') ORDER BY a.id LIMIT 1), md5(''restored-account:''||_r.company||'':''||s.account_id)::uuid) END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.account_info _p WHERE _p.id = ((CASE WHEN NULLIF(s.account_id,'''') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(a.id,'''')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_account_id::text = s.account_id ORDER BY a.id LIMIT 1), (SELECT NULLIF(a.id,'''')::uuid FROM pettycashv2.account_info a WHERE a.entity_id = _r.company AND a.xero_code = NULLIF(s.account_code,'''') ORDER BY a.id LIMIT 1), md5(''restored-account:''||_r.company||'':''||s.account_id)::uuid) END)))) AND (((CASE WHEN NULLIF(s.contact_id,'''') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'''')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5(''restored-contact:''||_r.company||'':''||s.contact_id)::uuid) END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.xero_contact_sync _p WHERE _p.id = ((CASE WHEN NULLIF(s.contact_id,'''') IS NULL THEN NULL ELSE COALESCE( (SELECT NULLIF(c.id,'''')::uuid FROM pettycashv2.xero_contact_sync c WHERE c.entity_id = _r.company AND c.xero_contact_id = s.contact_id ORDER BY c.id LIMIT 1), md5(''restored-contact:''||_r.company||'':''||s.contact_id)::uuid) END)))) AND (((CASE WHEN s.report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'''') IS NULL THEN NULL ELSE md5(''report_expense.report_id:''||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'''') IS NULL THEN NULL ELSE md5(''report_expense.report_id:''||s.report_id)::uuid END))))','amount','report_expense','amount'), ('SELECT round(coalesce(sum(s.amount),0)::numeric, 2) FROM pettycashv2.report_sale_detail s WHERE (((CASE WHEN s.report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'''') IS NULL THEN NULL ELSE md5(''report_sale.report_id:''||s.report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.report_id::uuid WHEN NULLIF(s.report_id,'''') IS NULL THEN NULL ELSE md5(''report_sale.report_id:''||s.report_id)::uuid END)))) AND (((SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''''), (SELECT NULLIF(ess.sale_info_id,'''') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.sale_info _p WHERE _p.id = ((SELECT si2.id::uuid FROM pettycashv2.sale_info si2  WHERE si2.name = (SELECT si1.name FROM pettycashv2.sale_info si1 WHERE si1.id = (COALESCE(NULLIF(s.sale_info_id,''''), (SELECT NULLIF(ess.sale_info_id,'''') FROM pettycashv2.entity_sale_setting ess  WHERE ess.sale_id = s.sale_id LIMIT 1)))::text)  ORDER BY (si2.entity_id IS NULL) DESC, si2.created_at NULLS LAST, si2.id LIMIT 1))))','amount','report_sale','amount'), ('SELECT round(coalesce(sum(s.unit_amount),0)::numeric, 2) FROM pettycashv2.xero_bank_transaction s WHERE (((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END))))','unit_amount','xero_bank_transaction','unit_amount'), ('SELECT round(coalesce(sum(s.quantity),0)::numeric, 2) FROM pettycashv2.xero_bank_transaction s WHERE (((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END))))','quantity','xero_bank_transaction','quantity'), ('SELECT round(coalesce(sum(s.subtotal),0)::numeric, 2) FROM pettycashv2.xero_bank_transaction s WHERE (((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END))))','subtotal','xero_bank_transaction','subtotal'), ('SELECT round(coalesce(sum(s.total_tax),0)::numeric, 2) FROM pettycashv2.xero_bank_transaction s WHERE (((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END))))','total_tax','xero_bank_transaction','total_tax'), ('SELECT round(coalesce(sum(s.total),0)::numeric, 2) FROM pettycashv2.xero_bank_transaction s WHERE (((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transaction.sync_report_id:''||s.sync_report_id)::uuid END))))','total','xero_bank_transaction','total'), ('SELECT round(coalesce(sum(s.amount),0)::numeric, 2) FROM pettycashv2.xero_bank_transfer s WHERE (((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transfer.sync_report_id:''||s.sync_report_id)::uuid END)) IS NULL OR EXISTS (SELECT 1 FROM pettycash_test.report _p WHERE _p.id = ((CASE WHEN s.sync_report_id ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' THEN s.sync_report_id::uuid WHEN NULLIF(s.sync_report_id,'''') IS NULL THEN NULL ELSE md5(''xero_bank_transfer.sync_report_id:''||s.sync_report_id)::uuid END))))','amount','xero_bank_transfer','amount')) AS v(q, sc, t, c) LOOP
+    EXECUTE r.q INTO a;
+    EXECUTE format('SELECT round(coalesce(sum(%I),0), 2) FROM pettycash_test.%I', r.c, r.t) INTO b;
+    IF a <> b THEN bad := bad + 1; END IF;
+    RAISE NOTICE 'R6  %.% : src=%  dst=%   %', rpad(r.t,22), rpad(r.c,24), a, b,
+      CASE WHEN a = b THEN 'OK' ELSE '*** MOVED ***' END;
+  END LOOP;
+  IF bad > 0 THEN RAISE EXCEPTION 'R6: % money column(s) changed', bad; END IF;
+END
+$$;
+
+DO $$DECLARE a bigint; c bigint; lost_a bigint; lost_c bigint;
+BEGIN
+  SELECT count(*) INTO c FROM pettycash_test.xero_contact_sync WHERE category = 'restored';
+  SELECT count(*) INTO a FROM pettycash_test.account_info WHERE description LIKE 'restored by the schema migration%%';
+  SELECT count(*) INTO lost_a FROM pettycashv2.shop_expense se JOIN pettycash_test.report_expense d ON d.id = se.id::uuid
+   WHERE NULLIF(se.account_id,'') IS NOT NULL AND d.account_id IS NULL;
+  SELECT count(*) INTO lost_c FROM pettycashv2.shop_expense se JOIN pettycash_test.report_expense d ON d.id = se.id::uuid
+   WHERE NULLIF(se.contact_id,'') IS NOT NULL AND d.contact_id IS NULL;
+  RAISE NOTICE 'R2  restored xero_contact_sync rows : %   (expected 238)   %', c, CASE WHEN c = 238 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R2  restored account_info rows      : %   (expected 10)    %', a, CASE WHEN a = 10 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R2  expenses that lost their account : %   %', lost_a, CASE WHEN lost_a = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  RAISE NOTICE 'R2  expenses that lost their contact : %   %', lost_c, CASE WHEN lost_c = 0 THEN 'OK' ELSE '*** LOST ***' END;
+  IF lost_a > 0 OR lost_c > 0 THEN RAISE EXCEPTION 'R2: an expense lost a reference the source had'; END IF;
+  IF c <> 238 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
+END
+$$;
+
+INSERT INTO pettycash_test.report_cash_count (id, report_id, cash_id, quantity, cash_value)
+SELECT md5('zero-count:'||s.id)::uuid, d.id, ci.id, 0, ci.cash_value
+  FROM pettycashv2.report s
+  JOIN pettycash_test.report d ON d.id = NULLIF(s.id,'')::uuid
+  JOIN pettycash_test.entities e ON e.id = d.entity_id
+  JOIN LATERAL (SELECT ci.id, ci.cash_value FROM pettycash_test.cash_info ci
+                 WHERE ci.currency_id = e.currency_id ORDER BY ci.cash_value, ci.id LIMIT 1) ci ON true
+ WHERE s.actual_cash_total = 0
+   AND NOT EXISTS (SELECT 1 FROM pettycash_test.report_cash_count c WHERE c.report_id = d.id);
+
+DO $$DECLARE n bigint; still_null bigint;
+BEGIN
+  SELECT count(*) INTO n FROM pettycash_test.report_cash_count WHERE id IN
+    (SELECT md5('zero-count:'||s.id)::uuid FROM pettycashv2.report s WHERE s.actual_cash_total = 0);
+  SELECT count(*) INTO still_null FROM pettycashv2.report s
+    JOIN pettycash_test.report d ON d.id = NULLIF(s.id,'')::uuid
+    LEFT JOIN pettycash_test.report_cash_summary v ON v.report_id = d.id
+   WHERE s.actual_cash_total = 0 AND v.actual_cash_total IS NULL;
+
+  RAISE NOTICE 'R4  zero-count rows added : %   (expected 277)   %', n, CASE WHEN n = 277 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %   (expected 7)   %', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
+  IF n <> 277 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+END
+$$;
+
+DO $$DECLARE rows_moved bigint; cols_moved bigint; src_inconsistent bigint; total bigint;
+BEGIN
+  SELECT count(*) INTO total FROM pettycash_test.report;
+  SELECT count(*) INTO rows_moved FROM pettycash_test.report d JOIN pettycashv2.report s ON NULLIF(s.id,'')::uuid = d.id
+   WHERE round(COALESCE((SELECT sum(rs.amount) FROM pettycash_test.report_sale rs WHERE rs.report_id = d.id), 0), 2)
+      <> round(COALESCE((SELECT sum(x.amount) FROM pettycashv2.report_sale_detail x WHERE x.report_id = s.id), 0)::numeric, 2);
+  SELECT count(*) INTO cols_moved FROM pettycash_test.report d JOIN pettycashv2.report s ON NULLIF(s.id,'')::uuid = d.id
+   WHERE round(COALESCE(d.cashsale_total,0), 2) <> round(COALESCE(s.cash_sales,0)::numeric, 2)
+      OR round(COALESCE(d.nocashsale_total,0), 2) <> round(COALESCE(s.total_sales,0)::numeric - COALESCE(s.cash_sales,0)::numeric, 2)
+      OR round(COALESCE(d.total_sales,0), 2) <> round(COALESCE(s.total_sales,0)::numeric, 2);
+  SELECT count(*) INTO src_inconsistent FROM pettycash_test.report d
+   WHERE EXISTS (SELECT 1 FROM pettycash_test.report_sale rs WHERE rs.report_id = d.id)
+     AND round(COALESCE(d.cashsale_total,0) + COALESCE(d.nocashsale_total,0), 2)
+      <> round(COALESCE((SELECT sum(rs.amount) FROM pettycash_test.report_sale rs WHERE rs.report_id = d.id), 0), 2);
+  RAISE NOTICE 'R7  sales : % reports, rows moved on %, columns moved on %   %', total, rows_moved, cols_moved,
+    CASE WHEN rows_moved = 0 AND cols_moved = 0 THEN 'OK' ELSE '*** MOVED ***' END;
+  RAISE NOTICE 'R7  sales : % report(s) whose own columns disagree with their rows (source inconsistency, carried as-is)', src_inconsistent;
+  IF rows_moved > 0 OR cols_moved > 0 THEN RAISE EXCEPTION 'R7: sales moved during the load'; END IF;
+END
+$$;
+
+DO $$DECLARE bad bigint; counted bigint;
+BEGIN
+  SELECT count(*) INTO counted FROM pettycashv2.report WHERE actual_cash_total IS NOT NULL;
+  SELECT count(*) INTO bad
+    FROM pettycashv2.report s
+    JOIN pettycash_test.report d ON d.id = NULLIF(s.id,'')::uuid
+    LEFT JOIN pettycash_test.report_cash_summary v ON v.report_id = d.id
+   WHERE ((s.actual_cash_total IS NULL) <> (v.actual_cash_total IS NULL)
+      OR round(s.actual_cash_total::numeric, 2) <> round(v.actual_cash_total, 2))
+     AND EXISTS (SELECT 1 FROM pettycash_test.cash_info ci JOIN pettycash_test.entities e ON e.currency_id = ci.currency_id WHERE e.id = d.entity_id);
+  RAISE NOTICE 'R8  actual_cash_total via view : % counted reports, % mismatched (currencies with denominations)   %',
+    counted, bad, CASE WHEN bad = 0 THEN 'OK' ELSE '*** MISMATCH ***' END;
+  IF bad > 0 THEN RAISE EXCEPTION 'R8: % report(s) where the view disagrees with actual_cash_total', bad; END IF;
+END
+$$;
+
+ROLLBACK;

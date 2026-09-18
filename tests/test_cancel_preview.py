@@ -74,7 +74,7 @@ def _setup(monkeypatch, *, row, siblings=None, paid_through=_PAID_THROUGH):
     monkeypatch.setattr(clock_mod, "now", lambda: _NOW)
 
     rows = siblings if siblings is not None else [
-        _Row("PETTY_CASH"), _Row("BILL"),
+        _Row("PETTY_CASH"), _Row("PAYMENT_REQUEST"),
     ]
     calls = {"writes": [], "access": [], "audit": []}
 
@@ -157,7 +157,7 @@ def test_a_lone_leaver_is_quoted_its_own_price(monkeypatch):
 
     assert p["kind"] == "paid"
     assert p["currency"] == "HKD"
-    assert p["remaining"] == ["BILL"]
+    assert p["remaining"] == ["PAYMENT_REQUEST"]
     # Survivor's price, so the dialog can say what billing continues at.
     assert p["remaining_amount"] == "280.00"
     # 28000 x 11/31 — off its own price, not the 12000 margin (which would be 4258).
@@ -203,10 +203,10 @@ def test_trial_preview_keeps_the_free_days_and_owes_nothing(monkeypatch):
     """Cancelling a trial means "don't convert me", not "end it now"."""
     trial_end = _NOW + timedelta(days=9)
     checkout, _ = _setup(
-        monkeypatch, row=_Row("BILL", phase="trial", trial_end=trial_end)
+        monkeypatch, row=_Row("PAYMENT_REQUEST", phase="trial", trial_end=trial_end)
     )
 
-    p = checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+    p = checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "PAYMENT_REQUEST")
 
     assert p["kind"] == "trial"
     assert p["access_end"] == trial_end
@@ -217,10 +217,10 @@ def test_trial_preview_keeps_the_free_days_and_owes_nothing(monkeypatch):
 def test_expired_trial_preview_has_nothing_left_to_keep(monkeypatch):
     checkout, _ = _setup(
         monkeypatch,
-        row=_Row("BILL", phase="trial", trial_end=_NOW - timedelta(days=1)),
+        row=_Row("PAYMENT_REQUEST", phase="trial", trial_end=_NOW - timedelta(days=1)),
     )
 
-    p = checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+    p = checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "PAYMENT_REQUEST")
 
     assert p["kind"] == "trial_expired"
     assert p["access_end"] is None
@@ -234,7 +234,7 @@ def test_preview_of_an_unsubscribed_module_reports_rather_than_raises(monkeypatc
     """The dialog needs something to show; a 500 would just look broken."""
     checkout, _ = _setup(monkeypatch, row=None)
 
-    p = checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "BILL")
+    p = checkout.preview_cancel_module(_FakeEntity(), _FakeUser(), "PAYMENT_REQUEST")
 
     assert p["kind"] == "none"
     assert p["error"]
@@ -262,7 +262,7 @@ def test_previewing_a_PAIR_quotes_the_BUNDLE_not_two_solos(monkeypatch):
     checkout, _ = _setup(monkeypatch, row=_Row("PETTY_CASH"))
 
     p = checkout.preview_cancel_module(
-        _FakeEntity(), _FakeUser(), "PETTY_CASH", ["BILL"]
+        _FakeEntity(), _FakeUser(), "PETTY_CASH", ["PAYMENT_REQUEST"]
     )
 
     assert p["amount"] == 4258, "the 12000 step x 11/31 — PETTY_CASH sorts second"
@@ -283,12 +283,12 @@ def test_the_grouped_total_is_the_same_whichever_card_the_dialog_opened_from(mon
     """
     checkout, _ = _setup(monkeypatch, row=_Row("PETTY_CASH"))
     from_petty = checkout.preview_cancel_module(
-        _FakeEntity(), _FakeUser(), "PETTY_CASH", ["BILL"]
+        _FakeEntity(), _FakeUser(), "PETTY_CASH", ["PAYMENT_REQUEST"]
     )
 
-    checkout, _ = _setup(monkeypatch, row=_Row("BILL"))
+    checkout, _ = _setup(monkeypatch, row=_Row("PAYMENT_REQUEST"))
     from_bill = checkout.preview_cancel_module(
-        _FakeEntity(), _FakeUser(), "BILL", ["PETTY_CASH"]
+        _FakeEntity(), _FakeUser(), "PAYMENT_REQUEST", ["PETTY_CASH"]
     )
 
     assert from_petty["amount"] == 4258

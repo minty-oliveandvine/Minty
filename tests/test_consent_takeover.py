@@ -47,7 +47,7 @@ _CARD = {
 _PANEL = {
     "is_empty": False, "currency": "HK$", "lines": [], "note": None,
     "total": "HK$400", "winding_down": [], "upcoming_charges": [], "footer": "",
-    "primary_action": "subscribe_stripe", "subscribe_codes": ["PETTY_CASH", "BILL"],
+    "primary_action": "subscribe_stripe", "subscribe_codes": ["PETTY_CASH", "PAYMENT_REQUEST"],
 }
 
 
@@ -55,7 +55,7 @@ def _takeover(mode="takeover", *, can_act=True, single=True):
     lapsed = [{"code": "PETTY_CASH", "name": "Petty Cash",
                "lapsed_on": None, "lapsed_on_long": "19 Aug 2026"}]
     if not single:
-        lapsed.append({"code": "BILL", "name": "Payment Request",
+        lapsed.append({"code": "PAYMENT_REQUEST", "name": "Payment Request",
                        "lapsed_on": None, "lapsed_on_long": "2 Sep 2026"})
     return {
         "mode": mode,
@@ -91,7 +91,7 @@ def _render(app, consent_takeover, **overrides):
         org=_FakeOrg(),
         module_cards=[dict(_CARD)],
         subscription_summary={"currency": "HK$", "bundle_amount": 400,
-                              "bundle_codes": ["BILL", "PETTY_CASH"],
+                              "bundle_codes": ["PAYMENT_REQUEST", "PETTY_CASH"],
                               "bundle_name": "Super Minty"},
         subscription_panel=_PANEL,
         can_manage_modules=True,
@@ -241,7 +241,7 @@ def test_two_lapsed_modules_get_a_box_each(app):
 
     assert html.count('class="restart-code') == 2
     assert 'value="PETTY_CASH"' in html
-    assert 'value="BILL"' in html
+    assert 'value="PAYMENT_REQUEST"' in html
 
 
 def test_one_lapsed_module_is_a_fixed_line_not_a_choice(app):

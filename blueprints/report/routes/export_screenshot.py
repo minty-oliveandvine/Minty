@@ -17,9 +17,10 @@ from user_agents import parse
 from blueprints.report import report_bp
 from blueprints.report.services.cash_denominations import \
     legacy_column_counts_for_report
-from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, db)
+from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, db, SaleInfo)
 from services.helpers.docx import convert_docx_to_pdf
 from services.permission_policy import can_view_report
+from blueprints.shared.enums import SaleType
 
 
 @report_bp.route("/report/<string:id>/export", methods=["GET"])
@@ -31,8 +32,7 @@ def generate_pdf_report(id):
                 Report,
                 Entity) .join(
                 Entity,
-                Entity.id.cast(
-                    db.String) == Report.company,
+                Entity.id == Report.entity_id,  # both uuid since C2/C4; the cast is gone
                 full=True) .filter(
                 Report.id == id) .first())
         if query_result is None:
@@ -80,8 +80,8 @@ def generate_pdf_report(id):
         )
 
         report_sale_details = (
-            db.session.query(ReportSaleDetail, EntitySaleSetting)
-            .join(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+            db.session.query(ReportSaleDetail, SaleInfo)
+            .join(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
             .filter(ReportSaleDetail.report_id == id)
             .all()
         )
@@ -108,7 +108,7 @@ def generate_pdf_report(id):
 
         shop_sales = {}
         for sale in sale_info_list:
-            if sale.type in ["Electronic", "Cash"] and sale.value_name:
+            if sale.type in (SaleType.ELECTRONIC, SaleType.OTHER) and sale.value_name:
                 if sale.value_name == "deliveroo_sales":
                     continue
                 sale_value = sale_detail_amounts.get(sale.value_name)
@@ -128,7 +128,7 @@ def generate_pdf_report(id):
 
         delivery_sales = {}
         for sale in sale_info_list:
-            if sale.type == "Delivery" and sale.value_name:
+            if sale.type == SaleType.DELIVERY and sale.value_name:
                 if sale.value_name == "deliveroo_sales":
                     continue
                 sale_value = sale_detail_amounts.get(sale.value_name)
@@ -190,7 +190,7 @@ def generate_pdf_report(id):
         electronic_sales = [
             sale
             for sale in sale_info_list
-            if sale.type == "Electronic"
+            if sale.type == SaleType.ELECTRONIC
             and sale.value_name
             and sale.value_name != "deliveroo_sales"
         ]
@@ -215,7 +215,7 @@ def generate_pdf_report(id):
         delivery_sales_list = [
             sale
             for sale in sale_info_list
-            if sale.type == "Delivery"
+            if sale.type == SaleType.DELIVERY
             and sale.value_name
             and sale.value_name != "deliveroo_sales"
         ]

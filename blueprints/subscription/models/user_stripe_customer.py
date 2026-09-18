@@ -13,17 +13,21 @@ import uuid
 
 from models.db import db
 from blueprints.subscription.models.mixins import TimestampMixin
-from blueprints.subscription.models.column_types import uuid_column
+from blueprints.subscription.models.column_types import (
+    tz_datetime,
+    uuid_column,
+)
+from blueprints.shared.schema import SCHEMA
 
 
 class UserStripeCustomer(TimestampMixin, db.Model):
     __tablename__ = "user_stripe_customer"
-    __table_args__ = {"schema": "pettycashv2"}
+    __table_args__ = {"schema": SCHEMA}
 
     id = db.Column(uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.user.id"),
+        uuid_column(),
+        db.ForeignKey(f"{SCHEMA}.user.id"),
         nullable=False,
         unique=True,
     )
@@ -40,11 +44,11 @@ class UserStripeCustomer(TimestampMixin, db.Model):
     # later period — the exact bug the engine is built to avoid.
     #
     # Null until the payer's first paid module: an app-level trial has no cycle.
-    anchor_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    anchor_at = db.Column(tz_datetime(), nullable=True)
     # Billing currency, fixed at the first charge — a payer's invoices must not mix.
     currency = db.Column(
         db.CHAR(3),
-        db.ForeignKey("pettycashv2.currency_info.currency_code"),
+        db.ForeignKey(f"{SCHEMA}.currency_info.currency_code"),
         nullable=True,
     )
     # No ``paid_through``, ``dunning_started_at`` or ``dunning_attempts`` here any more,

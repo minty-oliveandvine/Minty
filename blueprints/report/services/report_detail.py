@@ -13,6 +13,7 @@ from flask_login import current_user
 from loguru import logger
 
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
+from blueprints.shared.enums import DiscrepancyType
 from models.db import Report, ShopExpense, db
 from services.helpers.xero_bridge import get_entity_account_settings
 
@@ -474,7 +475,7 @@ def download_reports_csv(entity_id):
             ):
                 discrepancy_value = (
                     -abs(discrepancy_amount)
-                    if discrepancy_type == "shortage"
+                    if DiscrepancyType.normalize(discrepancy_type) == DiscrepancyType.SHORT
                     else abs(discrepancy_amount)
                 )
                 all_rows.append(
@@ -741,7 +742,7 @@ def download_reports_csv(entity_id):
                 ):
                     discrepancy_value = (
                         -abs(discrepancy_amount)
-                        if discrepancy_type == "shortage"
+                        if DiscrepancyType.normalize(discrepancy_type) == DiscrepancyType.SHORT
                         else abs(discrepancy_amount)
                     )
                     all_rows.append(

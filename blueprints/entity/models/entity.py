@@ -1,67 +1,83 @@
 import uuid
 
-from sqlalchemy.dialects.postgresql import UUID
-
+from blueprints.shared.column_types import MintyUuid
+from blueprints.shared.enums import EntityStatus
 from models.db import db
+from blueprints.shared.schema import SCHEMA
 
 
 class Entity(db.Model):
+    """A company. Matches ``entities`` in docs/schema/01_schema_rebased.sql.
+
+    Gone with the redesign (item 15): ``minimum_qty``, ``deposit_frequency``, ``deposit_day``
+    (never read), ``xero_short_code``, and the two Xero lock dates - billing-backend, the
+    only reader, asks Xero's Organisation for them at publish time (decided 2026-09-16).
+
+    ``status`` is the ``entity_status`` enum: ``onboarding`` for the whole wizard, then
+    ``connected`` / ``disconnected`` = whether a Xero organisation is linked. The old
+    ``active`` / ``cancelled`` / ``deleted`` words no longer exist.
+    """
+
     __tablename__ = "entities"
-    __table_args__ = {"schema": "pettycashv2"}
-    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    __table_args__ = {"schema": SCHEMA}
+    id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     country_code = db.Column(
-        db.CHAR(2), db.ForeignKey("pettycashv2.country_info.country_code")
+        db.CHAR(2), db.ForeignKey(f"{SCHEMA}.country_info.country_code")
     )
     currency_id = db.Column(
-        UUID(as_uuid=False), db.ForeignKey("pettycashv2.currency_info.id")
+        MintyUuid(), db.ForeignKey(f"{SCHEMA}.currency_info.id")
     )
     name = db.Column(db.String(100), nullable=False)
-    minimum_qty = db.Column(db.Integer)
-    deposit_frequency = db.Column(db.Integer)
-    deposit_day = db.Column(db.Integer)
     # Onboarding Step 1 contact details for the company (not the signed-up
     # person -- user.email / user.user_phone are that, and one user can own
     # several entities). Both optional: the wizard marks them so, and every
     # entity created before c1a01 has NULL. The phone is stored digits-only.
-    contact_phone = db.Column(db.String(20))
+    contact_phone = db.Column(db.String(36))
     business_email = db.Column(db.String(100))
     xero_org_id = db.Column(db.String(36))
-    xero_short_code = db.Column(db.String(50))
     currency_format = db.Column(db.String(30))
     timezone = db.Column(db.String(30))
     note = db.Column(db.Text)
-    status = db.Column(db.String(20), default="active")
+    status = db.Column(
+        db.Enum(EntityStatus, name="entity_status", schema=SCHEMA, native_enum=True,
+                create_type=False, values_callable=lambda e: [m.value for m in e]),
+        nullable=False, default=EntityStatus.ONBOARDING,
+    )
     # Onboarding wizard step the user last "Saved and Exited" on. This is the
-    # frontend step id (1-9) sent verbatim by the wizard — NOT the backend's
-    # derived current_step ordering — so it is stored and returned as-is. NULL
+    # frontend step id (1-9) sent verbatim by the wizard - NOT the backend's
+    # derived current_step ordering - so it is stored and returned as-is. NULL
     # means the user never explicitly saved a step.
     onboarding_saved_step = db.Column(db.Integer, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.current_timestamp())
-    last_connected_at = db.Column(db.TIMESTAMP, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.current_timestamp())
+    updated_at = db.Column(
+        db.DateTime(timezone=True), server_default=db.func.current_timestamp(),
+        onupdate=db.func.current_timestamp(),
+    )
+    last_connected_at = db.Column(db.DateTime(timezone=True), nullable=True)
     # Team-wide "last logged in" shown on the Select Company card: when this
     # entity was last opened, and by whom. Written on entity open (see
     # blueprints.entity.routes.modules.record_entity_access). Entity-level, not
-    # per-user, so the card shows who last touched the company — including
+    # per-user, so the card shows who last touched the company - including
     # superuser visits, which have no user_entity row.
-    last_accessed_at = db.Column(db.TIMESTAMP, nullable=True)
+    last_accessed_at = db.Column(db.DateTime(timezone=True), nullable=True)
     last_accessed_by_user_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.user.id", ondelete="SET NULL"),
+        MintyUuid(),
+        db.ForeignKey(f"{SCHEMA}.user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    period_lock_date = db.Column(db.Date, nullable=True)
-    end_of_year_lock_date = db.Column(db.Date, nullable=True)
     xero_tenant_name = db.Column(db.String(255), nullable=True)
-    # NOTE: no stripe_customer_id column — the customer belongs to the PAYER, not the
+    financial_year_end_day = db.Column(db.SmallInteger, nullable=True)
+    financial_year_end_month = db.Column(db.SmallInteger, nullable=True)
+    # NOTE: no stripe_customer_id column - the customer belongs to the PAYER, not the
     # entity, so it resolves entity -> payer -> customer. Render paths read it from the
     # local tables via ``entity.services.modules._entity_customer_id``; the billing paths
     # use ``subscription.services.checkout._resolve_customer_id``, which adds a Stripe
-    # search fallback that is deliberately wrong for a render. (This note used to point at
-    # ``subscription.services.stripe_state``, deleted with the Stripe biller, and at a live
-    # Stripe lookup that no longer happens.)
+    # search fallback that is deliberately wrong for a render.
+    # The member who connected this company to Xero; their user_token row is the one a
+    # publish uses (replaces the old user.xero_entity_id, C1).
     connected_by_user_id = db.Column(
-        db.String(36),
-        db.ForeignKey("pettycashv2.user.id", ondelete="RESTRICT"),
+        MintyUuid(),
+        db.ForeignKey(f"{SCHEMA}.user.id", ondelete="RESTRICT"),
         nullable=True,
     )
     xero_contact = db.relationship(
@@ -70,15 +86,9 @@ class Entity(db.Model):
     account_info = db.relationship(
         "AccountInfo", cascade="all, delete-orphan", backref="entity", lazy=True
     )
-    # The ReportDetail relationship went with Step 3.5 — nothing writes that
-    # table any more, so there are no children for the cascade to reach. The
-    # model itself survives until the Step 4 drop.
-    # The report_v2 relationship went with Step 4a-2, alongside report_detail.
-    # ReportV2 has had no writers since r2a02; the model outlives this only
-    # until the r10a10 drop.
     sale_info = db.relationship(
         "EntitySaleSetting", cascade="all, delete-orphan", backref="entity", lazy=True
     )
-    entity_cash_detail_v2 = db.relationship(
-        "EntityCashDetailV2", cascade="all, delete-orphan", backref="entity", lazy=True
+    entity_cash_detail = db.relationship(
+        "EntityCashDetail", cascade="all, delete-orphan", backref="entity", lazy=True
     )

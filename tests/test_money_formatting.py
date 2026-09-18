@@ -37,7 +37,7 @@ class _FakeCurrency:
 
 class _FakeQuery:
     """Stands in for ``CurrencyInfo.query`` — the test app is SQLite, where the
-    ``pettycashv2`` schema the real model points at is not materialised."""
+    ``pettycashv3`` schema the real model points at is not materialised."""
 
     def __init__(self, table):
         self._table = table

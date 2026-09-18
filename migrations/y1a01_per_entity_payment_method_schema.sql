@@ -43,12 +43,17 @@
 --  quietly stop renewing with nothing raising an error.
 --
 --  ------------------------------------------------------------------
---  AFTERWARDS, RUN THE BACKFILL
+--  AFTERWARDS, RUN THE BACKFILL  (retired 2026-09-17 - see below)
 --
 --    python scripts/backfill_billing_groups.py          (report only)
 --    python scripts/backfill_billing_groups.py --write
 --
---  It reads each payer's Stripe default and gives every payer exactly one
+--  The script was removed on 2026-09-17: dev had already been backfilled and
+--  then wiped, and production holds no subscriptions, so nothing remained for
+--  it to do. Recover it from git history (last at commit 3d5fde3) if a
+--  database with live Stripe payers ever needs this revision.
+--
+--  It read each payer's Stripe default and gave every payer exactly one
 --  group holding exactly today's state. It cannot live here: the card id is
 --  not in this database, it is on the Stripe customer.
 -- =====================================================================

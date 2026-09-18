@@ -1,0 +1,369 @@
+DO $$DECLARE v record; bad text; nbad int; ntot int; total_bad int := 0;
+BEGIN
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (COALESCE((CASE s.system_role::text WHEN ''superuser'' THEN ''superadmin'' WHEN ''user'' THEN ''normal'' ELSE s.system_role::text END), ''normal''))::text AS val FROM pettycashv2."user" s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.system_role', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('user',24), rpad('system_role',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.status::text WHEN ''active'' THEN ''disconnected'' WHEN ''cancelled'' THEN ''disconnected'' ELSE s.status::text END))::text AS val FROM pettycashv2.entities s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.entity_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('entities',24), rpad('status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.status::text WHEN ''voided'' THEN ''void'' ELSE s.status::text END))::text AS val FROM pettycashv2.bill s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.bill_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('bill',24), rpad('status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.published::text WHEN ''not_published'' THEN ''draft'' ELSE s.published::text END))::text AS val FROM pettycashv2.bill s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.publish_state', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('bill',24), rpad('published',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.attachment_role)::text AS val FROM pettycashv2.bill_attachment s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.bill_attachment_role', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('bill_attachment',24), rpad('attachment_role',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.type)::text AS val FROM pettycashv2.cash_info s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.cash_type', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('cash_info',24), rpad('type',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.cash_type)::text AS val FROM pettycashv2.entity_cash_detail_v2 s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.cash_type', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('entity_cash_detail',24), rpad('cash_type',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.function_code::text WHEN ''BILL'' THEN ''PAYMENT_REQUEST'' ELSE s.function_code::text END))::text AS val FROM pettycashv2.entity_function s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.module_code', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('entity_function',24), rpad('function_code',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.function_code::text WHEN ''BILL'' THEN ''PAYMENT_REQUEST'' ELSE s.function_code::text END))::text AS val FROM pettycashv2.entity_module_subscription s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.module_code', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('entity_module_subscription',24), rpad('function_code',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.phase)::text AS val FROM pettycashv2.entity_module_subscription s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.subscription_phase', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('entity_module_subscription',24), rpad('phase',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.extension_state)::text AS val FROM pettycashv2.entity_module_subscription s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.extension_state', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('entity_module_subscription',24), rpad('extension_state',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (lower(replace(s."role"::text, '' '', ''_'')))::text AS val FROM pettycashv2.invitations s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.entity_role', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('invitation',24), rpad('role',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.status::text WHEN ''cancelled'' THEN ''revoked'' WHEN ''canceled'' THEN ''revoked'' ELSE s.status::text END))::text AS val FROM pettycashv2.invitations s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.invitation_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('invitation',24), rpad('status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.payment_status)::text AS val FROM pettycashv2.payment s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.payment_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('payment',24), rpad('payment_status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.attachment_role)::text AS val FROM pettycashv2.payment_attachment s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.payment_attachment_role', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('payment_attachment',24), rpad('attachment_role',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE WHEN (s.status = ''posted'' AND s.xero_integrated_yes IS TRUE AND EXISTS (SELECT 1 FROM pettycashv2.report_history _h WHERE _h.report_id = s.id AND _h.action = ''published'')) THEN ''published'' WHEN s.status = ''posted'' THEN ''submitted'' ELSE s.status::text END))::text AS val FROM pettycashv2.report s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.report_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('report',24), rpad('status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE WHEN (s.status = ''posted'' AND s.xero_integrated_yes IS TRUE AND EXISTS (SELECT 1 FROM pettycashv2.report_history _h WHERE _h.report_id = s.id AND _h.action = ''published'')) THEN ''completed'' WHEN s.publishing_status IN (''failed'',''partially_published'') THEN ''failed'' ELSE ''unpublished'' END))::text AS val FROM pettycashv2.report s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.publish_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('report',24), rpad('publishing_status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (COALESCE((CASE s.discrepancy_type::text WHEN ''surplus'' THEN ''over'' WHEN ''shortage'' THEN ''short'' ELSE s.discrepancy_type::text END), ''none''))::text AS val FROM pettycashv2.report s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.discrepancy_type', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('report',24), rpad('discrepancy_type',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.type::text WHEN ''Electronic'' THEN ''electronic'' WHEN ''Delivery'' THEN ''delivery'' WHEN ''Cash'' THEN ''other'' ELSE s.type::text END))::text AS val FROM pettycashv2.sale_info s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.sale_type', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('sale_info',24), rpad('type',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.function_code::text WHEN ''BILL'' THEN ''PAYMENT_REQUEST'' ELSE s.function_code::text END))::text AS val FROM pettycashv2.subscription_audit_log s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.module_code', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('subscription_audit_log',24), rpad('function_code',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.phase_before)::text AS val FROM pettycashv2.subscription_audit_log s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.subscription_phase', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('subscription_audit_log',24), rpad('phase_before',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.phase_after)::text AS val FROM pettycashv2.subscription_audit_log s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.subscription_phase', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('subscription_audit_log',24), rpad('phase_after',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.extension_state)::text AS val FROM pettycashv2.subscription_audit_log s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.extension_state', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('subscription_audit_log',24), rpad('extension_state',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.outcome)::text AS val FROM pettycashv2.subscription_audit_log s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.audit_outcome', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('subscription_audit_log',24), rpad('outcome',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.status)::text AS val FROM pettycashv2.subscription_transfer s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.transfer_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('subscription_transfer',24), rpad('status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (lower(replace(s."role"::text, '' '', ''_'')))::text AS val FROM pettycashv2.user_entity s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.entity_role', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('user_entity',24), rpad('role',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE s.sync_direction::text WHEN ''outbound'' THEN ''push'' ELSE s.sync_direction::text END))::text AS val FROM pettycashv2.xero_bill_sync s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.sync_direction', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('xero_bill_sync',24), rpad('sync_direction',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  ntot := 0; nbad := 0; bad := '';
+  FOR v IN EXECUTE 'SELECT DISTINCT (s.sync_status)::text AS val FROM pettycashv2.xero_bill_sync s' LOOP
+    ntot := ntot + 1;
+    BEGIN
+      EXECUTE format('SELECT %L::pettycash_test.sync_status', v.val);
+    EXCEPTION WHEN others THEN
+      nbad := nbad + 1; bad := bad || CASE WHEN bad = '' THEN '' ELSE ', ' END || coalesce(quote_literal(v.val),'NULL');
+    END;
+  END LOOP;
+  IF nbad > 0 THEN total_bad := total_bad + 1; END IF;
+  RAISE NOTICE '% %.%  % distinct value(s)%',
+    CASE WHEN nbad = 0 THEN 'OK      ' ELSE 'REJECTS ' END, rpad('xero_bill_sync',24), rpad('sync_status',18), ntot,
+    CASE WHEN nbad = 0 THEN '' ELSE '   -> rejected: ' || bad END;
+  IF total_bad > 0 THEN RAISE EXCEPTION '00: % column(s) hold a value their enum rejects', total_bad; END IF;
+END
+$$;

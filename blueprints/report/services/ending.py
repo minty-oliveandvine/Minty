@@ -3,7 +3,7 @@
 # Report ending routes; delegates to app implementation.
 # Ending step: report_ending transferred from app.py (single function, no
 # new functions).
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import current_app as app
 from flask import flash, jsonify, redirect, render_template, request, url_for
@@ -19,7 +19,9 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, UserEntity, db, tz)
+from blueprints.shared.enums import SaleType
+from blueprints.shared.enums import DiscrepancyType, ReportStatus
+from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission, is_superuser)
@@ -123,14 +125,13 @@ def revert_report_to_draft(report_id):
     # on it, not a delete-and-recreate — which also removes the old hazard
     # where a Report with no draft could not be reverted at all.
     #
-    # ShopExpense rows are still deleted: those belong to the submitted
-    # report, and re-submitting rebuilds them from the draft expenses.
+    # The expense lines stay (F1): since drafts and reports became one row there
+    # is no separate draft copy to rebuild them from, so deleting them here lost
+    # the report's expenses on revert.
     was_published = bool(report.xero_integrated_yes)
     prior_publishing_status = report.publishing_status
 
     try:
-        ShopExpense.query.filter(ShopExpense.report_id == report_id).delete()
-
         report.status = "draft"
         report.current_section = "opening"
         report.completed_sections = []
@@ -420,12 +421,13 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 Report.expenses,
                 Report.bank_deposit,
                 Report.closing_balance,
-                Report.receipt_files,
                 Report.uploaded_by,
                 Report.company,
                 Report.xero_integrated_yes,
+                # the column is jsonb (json on SQLite); casting to the column's own
+                # type keeps COALESCE happy on both
                 db.func.coalesce(
-                    Report.completed_sections, db.cast("[]", db.JSON)
+                    Report.completed_sections, db.cast("[]", Report.completed_sections.type)
                 ).label("completed_sections"),
                 db.func.coalesce(Report.current_section, db.null()).label(
                     "current_section"
@@ -435,7 +437,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                 # that predate the consolidation — line 637 branches on this to
                 # choose ShopExpenseDraft vs ShopExpense, so defaulting an
                 # in-progress report to "posted" would pick the wrong table.
-                db.func.coalesce(Report.status, "posted").label("status"),
+                db.func.coalesce(Report.status, "submitted").label("status"),
                 # The nine denomination columns that used to be selected here
                 # were never read — ending.html renders no cash-count grid.
                 # They went with Step 3.5 along with the join that fed them.
@@ -480,7 +482,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             if report_draft and report_draft.status:
                 report.status = report_draft.status
             else:
-                report.status = "posted"
+                report.status = ReportStatus.SUBMITTED
 
         user_entity = Entity.query.get_or_404(entity_id)
         entity_acronym, display_date = entity_badge_data(user_entity)
@@ -497,9 +499,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
         # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
+        # joined to the CATALOGUE (never deleted, only switched off per company), so a
+        # method the company later removed still names its amount
         report_sale_details = (
-            db.session.query(ReportSaleDetail, EntitySaleSetting)
-            .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+            db.session.query(ReportSaleDetail, SaleInfo)
+            .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
             .filter(ReportSaleDetail.report_id == id)
             .all()
         )
@@ -619,18 +623,16 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
         for sale_detail, sale_info_item in report_sale_details:
             amount = sale_detail.amount or 0
-            sale_type = (
-                sale_info_item.type
-                if sale_info_item and sale_info_item.type
-                else sale_detail.type
+            sale_type = SaleType.normalize(
+                sale_info_item.type if sale_info_item and sale_info_item.type else sale_detail.type
             )
 
-            if sale_type == "Electronic":
-                electronic_sales += amount
-            elif sale_type == "Delivery":
-                delivery_sales += amount
-            elif sale_type == "Cash":
+            if sale_info_item is not None and sale_info_item.is_cash:
                 cash_sales += amount
+            elif sale_type == SaleType.DELIVERY:
+                delivery_sales += amount
+            elif sale_type is not None:  # electronic, and any other non-cash method
+                electronic_sales += amount
 
         # Fallback to report.cash_sales if no cash sales found in ReportSaleDetail
         if cash_sales == 0:
@@ -972,8 +974,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # Query ReportSaleDetail with outer join to EntitySaleSetting to include deleted/disabled sale types
     # This ensures we get all sale details even if EntitySaleSetting was deleted/disabled
     report_sale_details = (
-        db.session.query(ReportSaleDetail, EntitySaleSetting)
-        .outerjoin(EntitySaleSetting, ReportSaleDetail.sale_id == EntitySaleSetting.sale_id)
+        db.session.query(ReportSaleDetail, SaleInfo)
+        .outerjoin(SaleInfo, ReportSaleDetail.sale_id == SaleInfo.id)
         .filter(ReportSaleDetail.report_id == current_draft.id)
         .all()
     )
@@ -1067,18 +1069,16 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
 
     for sale_detail, sale_info_item in report_sale_details:
         amount = sale_detail.amount or 0
-        sale_type = (
-            sale_info_item.type
-            if sale_info_item and sale_info_item.type
-            else sale_detail.type
+        sale_type = SaleType.normalize(
+            sale_info_item.type if sale_info_item and sale_info_item.type else sale_detail.type
         )
 
-        if sale_type == "Electronic":
-            electronic_sales += amount
-        elif sale_type == "Delivery":
-            delivery_sales += amount
-        elif sale_type == "Cash":
+        if sale_info_item is not None and sale_info_item.is_cash:
             cash_sales += amount
+        elif sale_type == SaleType.DELIVERY:
+            delivery_sales += amount
+        elif sale_type is not None:  # electronic, and any other non-cash method
+            electronic_sales += amount
 
     # Fallback to current_draft.cash_sales if no cash sales found in ReportSaleDetail
     if cash_sales == 0:
@@ -1328,10 +1328,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         validation_errors.append(
                             "Withdrawal type is required for Xero integration"
                         )
-                    if not current_draft.withdrawal_bank_account:
-                        validation_errors.append(
-                            "Withdrawal bank account is required for Xero integration"
-                        )
+                    # the bank account is the settings' main bank account (schema item 13)
 
             # If validation errors exist, return error response
             if validation_errors:
@@ -1416,89 +1413,19 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                                 "Expense amount must be greater than zero"
                             )
 
-                    shop_expenses = ShopExpense.query.filter(
-                        ShopExpense.report_id == current_draft.id
-                    ).all()
-                    logger.info(
-                        f"Found {len(shop_expenses)} existing shop expenses"
-                    )
-
-                    # Resolve contact_name once per contact_id for this report so a
-                    # missing name on the draft still lands on the final expense.
+                    # Drafts and reports are one row, so the expense lines already ARE the
+                    # report's (the draft-to-report copy that sat here went with C4). What
+                    # is left of it: a line whose contact has no name yet gets one from Xero.
                     entity_id = current_draft.company
                     contact_name_cache = {}
-
-                    def _contact_name_for(draft):
-                        name = draft.contact_name
-                        if name or not draft.contact_id:
-                            return name
-                        if draft.contact_id not in contact_name_cache:
-                            contact_name_cache[draft.contact_id] = resolve_contact_name(
-                                entity_id, draft.contact_id
+                    for expense_line in shop_expense_drafts:
+                        if expense_line.contact_name or not expense_line.contact_id:
+                            continue
+                        if expense_line.contact_id not in contact_name_cache:
+                            contact_name_cache[expense_line.contact_id] = resolve_contact_name(
+                                entity_id, expense_line.contact_id
                             )
-                        return contact_name_cache[draft.contact_id]
-
-                    expense_drafts = []
-                    for shop_expense_draft in shop_expense_drafts:
-                        # Check if this expense draft already exists in shop expenses
-                        existing_expense = next(
-                            (
-                                exp
-                                for exp in shop_expenses
-                                if exp.id == shop_expense_draft.id
-                            ),
-                            None,
-                        )
-
-                        if not existing_expense:
-                            # If the expense draft is not in the shop expenses, add it to the database
-                            expense_drafts.append(
-                                ShopExpense(
-                                    id=shop_expense_draft.id,
-                                    report_id=shop_expense_draft.report_draft_id,
-                                    item=shop_expense_draft.item,
-                                    amount=shop_expense_draft.amount,
-                                    remarks=shop_expense_draft.remarks,
-                                    files=shop_expense_draft.files,
-                                    # s3_key was omitted here, so a receipt
-                                    # uploaded via the multi-file path lost its
-                                    # object key on submit and the download
-                                    # link 404'd.
-                                    s3_key=shop_expense_draft.s3_key,
-                                    account_code=shop_expense_draft.account_code,
-                                    item_code=shop_expense_draft.item_code,
-                                    account_id=shop_expense_draft.account_id,
-                                    contact_id=shop_expense_draft.contact_id,
-                                    contact_name=shop_expense_draft.contact_name,
-                                )
-                            )
-                            logger.info(
-                                f"Added new expense draft: {shop_expense_draft.item}"
-                            )
-                        else:
-                            # If the expense draft is in the shop expenses, update the expense
-                            existing_expense.item = shop_expense_draft.item
-                            existing_expense.amount = shop_expense_draft.amount
-                            existing_expense.remarks = shop_expense_draft.remarks
-                            existing_expense.files = shop_expense_draft.files
-                            existing_expense.s3_key = shop_expense_draft.s3_key
-                            existing_expense.account_code = (
-                                shop_expense_draft.account_code
-                            )
-                            existing_expense.item_code = shop_expense_draft.item_code
-                            existing_expense.account_id = shop_expense_draft.account_id
-                            existing_expense.contact_id = shop_expense_draft.contact_id
-                            existing_expense.contact_name = (
-                                shop_expense_draft.contact_name
-                            )
-                            logger.info(
-                                f"Updated existing expense: {shop_expense_draft.item}"
-                            )
-
-                    db.session.add_all(expense_drafts)
-                    logger.info(
-                        f"Added {len(expense_drafts)} expense drafts to session"
-                    )
+                        expense_line.contact_name = contact_name_cache[expense_line.contact_id]
 
                     db.session.commit()
                     logger.info("Database session flushed successfully")
@@ -1565,7 +1492,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         completed_sections.append("submitted")
                         current_draft.completed_sections = completed_sections
                         current_draft.current_section = "submitted"
-                        current_draft.status = "posted"
+                        current_draft.status = ReportStatus.SUBMITTED
+                        current_draft.submitted_at = datetime.now(timezone.utc)
 
                         logger.info("Committing database changes...")
                         db.session.commit()

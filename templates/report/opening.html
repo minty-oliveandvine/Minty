@@ -497,8 +497,7 @@
         const reportId = '{{ current_draft.id }}';
         const formData = new FormData();
         formData.append('withdrawal_type', selected.value);
-        formData.append('withdrawal_bank_account',
-          selected.value === 'company' && bankAccountHidden ? bankAccountHidden.value : '');
+        // the bank account is the main bank account on the company's settings, not per report
         if (csrfToken) formData.append('csrf_token', csrfToken.value);
         fetch('/report/' + reportId + '/edit/withdrawal', {
           method: 'POST',

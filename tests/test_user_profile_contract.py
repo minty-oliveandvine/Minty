@@ -19,26 +19,14 @@ def _login(client, user_id: str) -> None:
         sess["_user_id"] = user_id
 
 
-_schema_attached = False
-
 
 @pytest.fixture
 def db_session(app):
-    global _schema_attached
     from models.db import db
 
     with app.app_context():
-        if not _schema_attached:
-            with db.engine.connect() as conn:
-                try:
-                    conn.execute(db.text("ATTACH DATABASE ':memory:' AS pettycashv2"))
-                    conn.commit()
-                except Exception:
-                    pass
-            _schema_attached = True
 
         db.session.expire_on_commit = False
-        db.create_all()
         yield db
         db.session.rollback()
         for table in reversed(db.metadata.sorted_tables):
@@ -75,8 +63,8 @@ def _make_entity(db) -> str:
     entity = Entity(
         id=entity_id,
         name="Profile Entity",
-        country_code="HK",
-        currency_code="HKD",
+        # no country: an FK to a reference row this test does not seed
+        # currency_code left entities in C2 (currency_id FK)
     )
     db.session.add(entity)
     db.session.commit()
@@ -94,7 +82,6 @@ def _add_membership(db, *, user_id: str, entity_id: str, role: str) -> None:
         role=role,
         approved=True,
         joined_at=datetime.utcnow(),
-        create_at=datetime.utcnow(),
     )
     db.session.add(membership)
     db.session.commit()
