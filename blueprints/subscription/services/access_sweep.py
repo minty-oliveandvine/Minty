@@ -24,6 +24,7 @@ from __future__ import annotations
 from loguru import logger
 
 from blueprints.shared.enums import ModuleCode
+from blueprints.shared.schema import SCHEMA
 from models.db import EntityFunction, EntityFunctionMap
 
 
@@ -43,16 +44,16 @@ def revoke_ungranted_module_access(*, dry_run: bool = True) -> list[dict]:
     from models.db import db
 
     codes = tuple(ModuleCode.values())
-    where = """
-          FROM pettycashv3.entity_function_map AS m
-          JOIN pettycashv3.entity_function AS f ON f.id = m.entity_function_id
+    where = f"""
+          FROM {SCHEMA}.entity_function_map AS m
+          JOIN {SCHEMA}.entity_function AS f ON f.id = m.entity_function_id
          WHERE f.function_code IN :codes
            AND m.is_enabled
            AND NOT EXISTS (
-               SELECT 1 FROM pettycashv3.entity_module_subscription AS s
+               SELECT 1 FROM {SCHEMA}.entity_module_subscription AS s
                 WHERE s.entity_id = m.entity_id AND s.function_code = f.function_code)
            AND NOT EXISTS (
-               SELECT 1 FROM pettycashv3.entities AS e
+               SELECT 1 FROM {SCHEMA}.entities AS e
                 WHERE e.id = m.entity_id AND e.status = 'onboarding')
     """
     rows = db.session.execute(
@@ -63,7 +64,7 @@ def revoke_ungranted_module_access(*, dry_run: bool = True) -> list[dict]:
         return found
     db.session.execute(
         db.text(f"""
-            UPDATE pettycashv3.entity_function_map AS target
+            UPDATE {SCHEMA}.entity_function_map AS target
                SET is_enabled = FALSE, disabled_at = NOW(), updated_at = NOW()
               FROM (SELECT m.entity_id, m.entity_function_id {where}) AS hit
              WHERE target.entity_id = hit.entity_id
