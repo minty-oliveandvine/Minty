@@ -5,6 +5,19 @@ Two modules can be on for a company: **Petty Cash** (this app's daily report) an
 `billing-backend`). Whether a company *has* a module, and whether anyone *pays* for it, are
 separate questions, and the second one is switched off in production today.
 
+> **Moving out (Part 2 of `docs/modernisation/modernisation_plan.md`, since 2026-09-21).** The
+> engine described in §3, the payer portal routes, the module settings page and the daily pass
+> move to two new repos: `../minty-billing-api` (Django, :8004 — `docs/features/subscriptions-api.md`
+> there is the route-by-route map) and `../minty-web` (Next.js, :3002 — `docs/features/subscriptions.md`).
+> Step 1 (the scaffolds) and step 2 (the engine: all 24 service modules ported 1:1 with 762 of
+> their tests, slices A-D on 2026-09-21; the replay golden is slice E) are done; until step 5
+> removes them, everything on this page is still the running code and the spec the port is
+> checked against - `blueprints/subscription/services/*`, `entity/services/modules.py`, the
+> models and `tests/*` are FROZEN for the duration, a bug found by the port is fixed on both
+> sides together, never on one. What Flask keeps for good: §2's
+> gate (`_is_module_enabled`), the dark toggle, `flask modules set|show`, `POST /api/onboarding/modules`,
+> the m1a01 skip, and five read-only lookups through a `store_ro.py` that step 5 introduces.
+
 ## 1. The switch: `SUBSCRIPTION_ENABLED` (off unless set)
 
 `blueprints/shared/feature_flags.py` — `subscriptions_enabled()` and
@@ -87,7 +100,17 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   (`payment-methods*`, `payment-method`), `start-trial`, `cancel`, `renew`,
   `authorize-billing`, `manage-billing` (the Stripe portal), `checkout-complete`. The
   lapsed-trial **restart screen** keys on the access gate, not on `trial_end`
-  (`subscription-restart-screen` note).
+  (`subscription-restart-screen` note). **Live, the page is minty-web's now** (Part 2 step
+  4a, `../minty-web/docs/features/subscriptions.md` §9): the route mints the company's module
+  token and redirects to `MINTY_WEB_URL/landing?next=/subscription/entities/<id>/modules`
+  (`?from=bills` travels in `next`); `MINTY_WEB_MODULE_PAGE=0` keeps the Jinja page, and the
+  test suite runs that way so the tests above still describe what they exercise
+  (`tests/test_minty_web_handoff.py`). Two more doors exist for that page:
+  `GET /handoff/minty-web?next=&entity_id=` (login-gated re-entry when minty-web's token
+  lapses - a scoped token with `entity_id`, unscoped without; `next` is a path only) and
+  `GET /entity/settings/payments/<id>` (the Payment Settings tab as a URL: the redirect
+  `billing_settings_app_url` builds, since only Flask mints the payments-app token;
+  `tests/test_settings_payments_redirect.py`).
 - The **dashboard notices** (`services/notices.py`, `/api/entity/<id>/subscription-notice`
   for the payment app's landing page): trial ending, past due, expired, cancelled — one
   popup per scenario (`subscription-dashboard-notice-coverage`).

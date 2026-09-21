@@ -13,7 +13,8 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from blueprints.entity import entity_bp
-from blueprints.entity.routes.modules import billing_settings_app_url
+from blueprints.entity.routes.modules import (billing_settings_app_url,
+                                              minty_web_module_page_url)
 from blueprints.entity.services.settings import (
     COA_INCLUDED_TYPES,
     sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
@@ -23,7 +24,8 @@ from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.entity.services.xero_account_mapping_post import (
     apply_country_currency_selection, process_xero_account_mapping_post)
 from blueprints.shared.entity_display import build_entity_acronym
-from blueprints.shared.feature_flags import (require_subscriptions_enabled,
+from blueprints.shared.feature_flags import (minty_web_module_page,
+                                             require_subscriptions_enabled,
                                              subscriptions_enabled)
 from blueprints.xero.services.settings import sync_entity_xero_status
 from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
@@ -1277,6 +1279,14 @@ def entity_settings_module(org_id):
             ),
         )
 
+    # Live, the page is minty-web's (Part 2 step 4a, built to its design): send the browser
+    # there with a token for this company. The Jinja page below stays until step 5 for a
+    # developer running Flask alone (MINTY_WEB_MODULE_PAGE=0) and for the tests that describe it.
+    if minty_web_module_page():
+        return redirect(
+            minty_web_module_page_url(org, current_user.id, from_bills=from_param == "bills")
+        )
+
     module_cards = get_module_cards(org_id)
     subscription_summary = get_subscription_summary(org_id)
     # Never shown. The anchor only answers "has this payer ever been billed", which is
@@ -1375,6 +1385,25 @@ def _nominate_if_given(org_id, payload):
     except payment_methods.PaymentMethodError as exc:
         return jsonify({"error": exc.message}), exc.status
     return None
+
+
+@entity_bp.route("/entity/settings/payments/<string:org_id>", methods=["GET"])
+@login_required
+@require_entity_access(entity_arg="org_id")
+def entity_settings_payments(org_id):
+    """The Payment Settings tab as a plain URL.
+
+    The tab's target is the payments app's settings page behind a module token that only
+    Flask mints (``billing_settings_app_url``). Flask's own settings pages compute that URL
+    into the template; a page that is not Flask's - the module settings page in minty-web
+    (Part 2 step 4) - links here instead and is sent on. ``?from=bills`` travels with it.
+    """
+    org = Entity.query.get_or_404(org_id)
+    return redirect(
+        billing_settings_app_url(
+            org_id, org, current_user.id, from_bills=request.args.get("from") == "bills"
+        )
+    )
 
 
 @entity_bp.route("/entity/settings/module/<string:org_id>/toggle", methods=["POST"])

@@ -190,6 +190,67 @@ def _safe_next(raw: str, default: str) -> str:
     return nxt if nxt.startswith("/") and not nxt.startswith("//") else default
 
 
+def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
+    """The way into minty-web: its ``/landing`` with a module token this app mints.
+
+    Scoped to ``org`` when given (the company's module settings page - the token names the
+    company and its enabled modules, as the payments-app tokens do), unscoped otherwise (the
+    payer portal). ``next_path`` is a path on minty-web's origin and travels URL-encoded, so a
+    query string of its own (``?from=bills``) survives.
+    """
+    if org is not None:
+        role = _resolve_user_entity_role(user_id, org.id)
+        token = _generate_module_token(
+            user_id,
+            org.id,
+            org.xero_org_id,
+            role,
+            billing_enabled=_is_module_enabled(org.id, MODULE_BILL),
+            petty_cash_enabled=_is_module_enabled(org.id, "PETTY_CASH"),
+        )
+        entity_id, entity_name = org.id, org.name or ""
+    else:
+        token = _generate_module_token(user_id, "", "", "")
+        entity_id, entity_name = "", ""
+    return (
+        f"{bearer_api.minty_web_origin()}/landing"
+        f"?next={quote(next_path, safe='')}"
+        f"&entity_id={entity_id}&entity_name={quote(entity_name, safe='')}&token={token}"
+    )
+
+
+def minty_web_module_page_url(org: Entity, user_id, *, from_bills: bool = False) -> str:
+    """minty-web's module settings page of ``org`` (Part 2 step 4a), through the landing."""
+    path = f"/subscription/entities/{org.id}/modules"
+    if from_bills:
+        path += "?from=bills"
+    return minty_web_landing_url(path, org, user_id)
+
+
+@entity_bp.route("/handoff/minty-web")
+@login_required
+def handoff_minty_web():
+    """Re-entry into minty-web: ``?next=<path on minty-web>&entity_id=<optional>``.
+
+    minty-web has no login and no refresh of its own - its 30-minute token comes from here, and
+    when it lapses the app sends the browser back to this route for another (lib/handoff.ts).
+    Login-gated, so a person whose Flask session also ran out logs in first and then lands
+    where they were going. ``next`` is a path only (``_safe_next``): this route hands out a
+    token, and must never be an open redirect.
+    """
+    destination = _safe_next(request.args.get("next", ""), "/subscription")
+    entity_id = (request.args.get("entity_id") or "").strip()
+    org = None
+    if entity_id:
+        from services.permission_policy import has_entity_access
+
+        org = Entity.query.filter(Entity.id == entity_id).first()
+        if org is None or not (is_superuser(current_user) or has_entity_access(current_user, entity_id)):
+            flash("Hmm, it looks like you don't have permission to look there.", "danger")
+            return redirect(url_for("entity.entity_list"))
+    return redirect(minty_web_landing_url(destination, org, current_user.id))
+
+
 @entity_bp.route("/entity/<string:entity_id>/enter")
 def module_reenter(entity_id):
     """Re-entry from Module 2. Validates the JWT, re-establishes the Flask

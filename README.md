@@ -19,8 +19,7 @@ PostgreSQL database and `pettycashv3` schema:
 | `onboarding` | Next.js. The nine-step new-company wizard | 3001 |
 | `onboarding-backend` | Django + django-ninja. The wizard's API, extracted from this repo | 8001 |
 
-The sibling repos live beside this one (`C:\dev\…`). **Note:** `CLAUDE.md` still says
-`C:\Projects\New_Repo` — that path does not exist.
+The sibling repos live beside this one (`C:\Github\…`, as `CLAUDE.md`'s folder map lists them).
 
 Two things hold them together and are easy to get wrong:
 

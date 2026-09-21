@@ -1,17 +1,19 @@
 # Folder Location
-Billing Backend=C:\dev\billing-backend
-Billing Frontend=C:\dev\billing-frontend
-Minty=C:\dev\Minty
-Onboarding=C:\dev\onboarding
-Onboarding Backend=C:\dev\onboarding-backend
-Minty Landing Page=C:\dev\daily-minty-landing-page
+Minty=C:\Github\Minty
+Minty Billing API (Django, port 8004)=C:\Github\minty-billing-api
+Minty Web (Next.js, port 3002)=C:\Github\minty-web
+Billing Backend=C:\Github\billing-backend
+Billing Frontend=C:\Github\billing-frontend
+Onboarding=C:\Github\onboarding
+Onboarding Backend=C:\Github\onboarding-backend
+Minty Landing Page=C:\Github\daily-minty-landing-page
 
 # Development Guidelines
 Stack
 Frontend: Next.js, React, TypeScript
 Backend: Django and Flask, Python
 OS: Windows
-<!-- GPU: NVIDIA RTX 2050 -->
+GPU: NVIDIA RTX 2050
 Development environment: VS Code
 
 # Resource Utilization
@@ -27,7 +29,7 @@ Keep required Next.js, Django, Flask, and database services running concurrently
 Avoid unnecessary memory duplication.
 Reduce concurrency if memory pressure affects system stability.
 # GPU
-<!-- The system has an NVIDIA RTX 2050. -->
+The system has an NVIDIA RTX 2050.
 Do not force GPU usage for normal Next.js, Django, Flask, TypeScript, or database operations.
 When Python workloads support CUDA, use the RTX 2050 when beneficial.
 Detect CUDA availability automatically.
@@ -78,6 +80,7 @@ Re-run relevant tests after fixes.
 Inspect the project before making changes.
 Update docs as you go avoid making it stale.
 Fix/Clean up stale references.
+Report if you found silent failures.
 Understand the existing architecture before modifying it.
 Identify independent tasks and perform them concurrently when safe.
 Prefer efficient commands and existing tooling.

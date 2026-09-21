@@ -5,14 +5,24 @@ node_modules/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .next/
 .vscode/
+.idea/
 .DS_Store
+Thumbs.db
+.coverage
+htmlcov/
+# Claude Code's per-checkout scratch (settings.local.json holds one machine's permission
+# rules); CLAUDE.md at the root is the shared instruction file and IS tracked.
+.claude/
 
 # --- Secrets ---------------------------------------------------------------
-# .env.example is the documented template and stays tracked.
+# .env.example is the documented template and stays tracked; every other variant
+# (.env.bak*, .env.local, .env.production...) is a machine's own.
 .env
-.env.bak*
+.env.*
+!.env.example
 
 # --- Runtime + test artifacts ----------------------------------------------
 # None of these are source, and two of them once leaked production data into

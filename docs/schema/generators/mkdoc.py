@@ -3,10 +3,12 @@
 import io, os, subprocess, sys, collections, re
 
 SP = os.path.dirname(os.path.abspath(__file__))
-OUT = r"c:\dev\Minty\docs\schema\APPLICATION_CHANGES.md"
+# docs/schema/APPLICATION_CHANGES.md, next to this generators folder (the checkout moved from
+# C:\dev to C:\Github on 2026-09-21; derive the path rather than spell it).
+OUT = os.path.join(os.path.dirname(SP), "APPLICATION_CHANGES.md")
 
 env = dict(os.environ); env["PYTHONUTF8"] = "1"
-env.setdefault("AUDIT_DB", "minty_cleanse"); env.setdefault("AUDIT_SCHEMA", "pettycashv3")
+env.setdefault("AUDIT_DB", "postgres"); env.setdefault("AUDIT_SCHEMA", "pettycashv3")
 raw = subprocess.run([sys.executable, os.path.join(SP, "audit_models.py")],
                      capture_output=True, text=True, env=env, encoding="utf-8").stdout
 
@@ -38,7 +40,7 @@ w("")
 w("Generated, not hand-written. Regenerate after any schema or model change:")
 w("")
 w("```")
-w("python docs/schema/generators/audit_models.py     # the raw findings (AUDIT_DB=minty_cleanse, AUDIT_SCHEMA=pettycashv3 by default)")
+w("python docs/schema/generators/audit_models.py     # the raw findings (AUDIT_DB=postgres, AUDIT_SCHEMA=pettycashv3 by default)")
 w("python docs/schema/generators/mkdoc.py            # this document")
 w("```")
 w("")

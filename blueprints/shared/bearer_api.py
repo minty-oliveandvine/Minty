@@ -34,6 +34,8 @@ from flask import current_app, request
 FRONTEND_APP_URL_DEFAULT = "http://localhost:3000"
 #: Where the onboarding wizard is served from -- a different app on a different port.
 ONBOARDING_APP_URL_DEFAULT = "http://localhost:3001"
+#: Where minty-web (the hub: subscriptions, a company's module settings page) is served from.
+MINTY_WEB_URL_DEFAULT = "http://localhost:3002"
 
 #: What every one of these responses allows a caller to send. Not parametrised: a bearer
 #: token and a JSON body is the whole contract, and a surface needing more is a decision
@@ -59,6 +61,11 @@ def frontend_origin() -> str:
 def onboarding_origin() -> str:
     """Origin of the onboarding app."""
     return _origin("ONBOARDING_APP_URL", ONBOARDING_APP_URL_DEFAULT)
+
+
+def minty_web_origin() -> str:
+    """Origin of minty-web (Part 2): the module settings page and the payer portal."""
+    return _origin("MINTY_WEB_URL", MINTY_WEB_URL_DEFAULT)
 
 
 def cors(resp, origin: str, *, methods: str = "GET, POST, OPTIONS"):

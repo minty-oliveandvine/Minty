@@ -1,16 +1,20 @@
 # Minty — the whole system, one command.
 #
-# Starts all four repos plus their shared PostgreSQL:
+# Starts all seven repos plus their shared PostgreSQL:
 #
-#   db                 PostgreSQL 15                   localhost:5432
-#   minty              Module 1 — Flask (this repo)    localhost:5001
-#   billing-backend    Module 2 — Django API           localhost:8000
-#   billing-frontend   Module 2 — Next.js UI           localhost:3000
-#   onboarding         Onboarding — Next.js UI         localhost:3001
+#   db                  PostgreSQL 15                          localhost:5432
+#   minty               Module 1 — Flask (this repo)           localhost:5001
+#   billing-backend     Module 2 — Django API                  localhost:8000
+#   billing-frontend    Module 2 — Next.js UI                  localhost:3000
+#   onboarding-backend  Onboarding — Django API                localhost:8001
+#   onboarding          Onboarding — Next.js UI                localhost:3001
+#   billing-api         Subscriptions — Django API (Part 2)    localhost:8004
+#   minty-web           The hub — Next.js UI (Part 2)          localhost:3002
 #
-# The four repos are checked out side by side under a common parent
-# (C:\Projects\New_Repo\...). Build contexts below reach out of this repo into
-# the siblings; override the *_PATH variables in .env if your layout differs.
+# The repos are checked out side by side under a common parent (C:\Github\...).
+# Build contexts below reach out of this repo into the siblings; override the
+# *_PATH variables in .env if your layout differs. Ports follow the plan's rule 6:
+# 800d for a Django API, 300d for its Next.js UI, one digit per domain.
 #
 # Run it from THIS directory so docker-compose.override.yml (hot-reload for the
 # two Python services) and .env are picked up automatically:
@@ -319,6 +323,108 @@ services:
       - "${ONBOARDING_HOST_PORT:-3001}:3001"
     volumes:
       - ${ONBOARDING_PATH:-../../../onboarding}:/app
+      - /app/node_modules
+      - /app/.next
+
+  # ---------------------------------------------------------------------------
+  # Subscriptions API — minty-billing-api (Part 2 of the modernisation plan).
+  # Django + django-ninja on Python 3.13 against the SAME schema, managed = False
+  # models and no migrations of its own. The single Stripe writer once the engine
+  # is ported; verifies Flask's token, never mints one. Dark unless
+  # SUBSCRIPTION_ENABLED=1 (every route 404s, the in-process scheduler stays off).
+  # ---------------------------------------------------------------------------
+  billing-api:
+    build:
+      context: ${BILLING_API_PATH:-../../../minty-billing-api}
+      dockerfile: Dockerfile
+    container_name: minty-stack-billing-api
+    restart: unless-stopped
+    env_file:
+      - path: ${BILLING_API_PATH:-../../../minty-billing-api}/.env
+        required: false
+      - path: ./.env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+      minty:
+        # Waits for the pettycashv3 schema and the Flask tables to exist.
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      PYTHONUNBUFFERED: "1"
+      MINTY_DB_SCHEMA: ${MINTY_DB_SCHEMA:-pettycashv3}
+      # Same key as Flask: Flask mints the module JWT, this service only verifies it.
+      SECRET_KEY: ${SECRET_KEY:-minty_stack_shared_secret_key}
+      DEBUG: ${DJANGO_DEBUG:-True}
+      ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      POSTGRES_DB: ${POSTGRES_DB:-minty_ref}
+      POSTGRES_USER: ${POSTGRES_USER:-minty_ref_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minty_ref_pass}
+      DB_HOST: db
+      DB_PORT: "5432"
+      # The two switches, deployed with the same value as Minty's (see .env.example).
+      SUBSCRIPTION_ENABLED: ${SUBSCRIPTION_ENABLED:-0}
+      SUBSCRIPTION_SCHEDULER_ENABLED: ${SUBSCRIPTION_SCHEDULER_ENABLED:-0}
+      # Server-to-server: the one forwarded call (invite-admin). Internal name.
+      FLASK_APP_URL: http://minty:5001
+      # The address a PERSON reaches Minty at - every link in a subscription email goes
+      # through Flask's re-handoff there. Never the internal name above.
+      MINTY_PUBLIC_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      # Browser origins that call this API: minty-web and the payment-request UI (the notice).
+      MINTY_WEB_URL: ${MINTY_WEB_PUBLIC_URL:-http://localhost:3002}
+      PAYMENTS_WEB_URL: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${MINTY_WEB_PUBLIC_URL:-http://localhost:3002},${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      # Stripe test keys — the ONLY service that holds them (rule 9). From this .env or the repo's.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+    ports:
+      - "${BILLING_API_HOST_PORT:-8004}:8004"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    command:
+      # Two workers, two in-process schedulers: the pass's advisory lock lets one run.
+      - "gunicorn"
+      - "-w"
+      - "2"
+      - "-b"
+      - "0.0.0.0:8004"
+      - "config.wsgi:application"
+
+  # ---------------------------------------------------------------------------
+  # The hub — minty-web (Part 2). Next.js on 3002; subscriptions is its only
+  # feature until Part 3 brings login, dashboard, profile and settings here.
+  # Talks to billing-api from the browser, and to Flask only through redirects.
+  # ---------------------------------------------------------------------------
+  minty-web:
+    build:
+      context: ${MINTY_WEB_PATH:-../../../minty-web}
+      dockerfile: docker/Dockerfile
+    container_name: minty-stack-minty-web
+    restart: unless-stopped
+    depends_on:
+      - minty
+      - billing-api
+    environment:
+      # Everything below is fetched by the *browser* or used in a redirect, so host URLs.
+      NEXT_PUBLIC_BILLING_API_URL: ${BILLING_API_PUBLIC_URL:-http://localhost:8004}
+      NEXT_PUBLIC_MINTY_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
+      NEXT_PUBLIC_PAYMENTS_WEB_URL: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      # ON unless 0 (the app's default is the opposite of the backends' - README §6).
+      NEXT_PUBLIC_SUBSCRIPTION_ENABLED: ${NEXT_PUBLIC_SUBSCRIPTION_ENABLED:-1}
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${MINTY_WEB_HOST_PORT:-3002}:3002"
+    volumes:
+      - ${MINTY_WEB_PATH:-../../../minty-web}:/app
       - /app/node_modules
       - /app/.next
 

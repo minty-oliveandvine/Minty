@@ -9,13 +9,13 @@
         <mxCell id="WEB" value="Frontends — Next.js 16 · TypeScript 5 strict · Vercel" style="swimlane;html=1;startSize=30;fillColor=#eff6ff;strokeColor=#1d4ed8;fontColor=#1e3a8a;fontStyle=1;rounded=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="20" width="1360" height="130" as="geometry"/>
         </mxCell>
-        <mxCell id="W0" value="&lt;b&gt;minty-web&lt;/b&gt; :3000&lt;br&gt;login · dashboard · profile · settings · subscription" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+        <mxCell id="W0" value="&lt;b&gt;minty-web&lt;/b&gt; :3002 · Part 2&lt;br&gt;subscription first · login · dashboard · profile · settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
           <mxGeometry x="20" y="45" width="260" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="W1" value="&lt;b&gt;minty-pettycash-web&lt;/b&gt; :3002&lt;br&gt;reports · cash count · history · exports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+        <mxCell id="W1" value="&lt;b&gt;minty-pettycash-web&lt;/b&gt; :3003&lt;br&gt;reports · cash count · history · exports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
           <mxGeometry x="300" y="45" width="250" height="65" as="geometry"/>
         </mxCell>
-        <mxCell id="W2" value="&lt;b&gt;minty-payments-web&lt;/b&gt; :3003&lt;br&gt;← billing-frontend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+        <mxCell id="W2" value="&lt;b&gt;minty-payments-web&lt;/b&gt; :3000&lt;br&gt;← billing-frontend (unchanged)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
           <mxGeometry x="570" y="45" width="250" height="65" as="geometry"/>
         </mxCell>
         <mxCell id="W3" value="&lt;b&gt;minty-onboarding-web&lt;/b&gt; :3001&lt;br&gt;← onboarding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
@@ -29,19 +29,19 @@
         <mxCell id="API" value="Services — Django 5.2 LTS · django-ninja · Python 3.13 · Render" style="swimlane;html=1;startSize=30;fillColor=#f0fdf4;strokeColor=#15803d;fontColor=#14532d;fontStyle=1;rounded=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="200" width="1360" height="140" as="geometry"/>
         </mxCell>
-        <mxCell id="A0" value="&lt;b&gt;minty-accounts-api&lt;/b&gt; :8000&lt;br&gt;JWT minter · users · roles · invitations · legal · companies" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+        <mxCell id="A0" value="&lt;b&gt;minty-accounts-api&lt;/b&gt; :8002&lt;br&gt;JWT minter · users · roles · invitations · legal · companies" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="20" y="45" width="210" height="75" as="geometry"/>
         </mxCell>
-        <mxCell id="A1" value="&lt;b&gt;minty-xero-api&lt;/b&gt; :8004&lt;br&gt;sole Xero token refresher · publish" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+        <mxCell id="A1" value="&lt;b&gt;minty-xero-api&lt;/b&gt; :8003&lt;br&gt;sole Xero token refresher · publish" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="245" y="45" width="210" height="75" as="geometry"/>
         </mxCell>
-        <mxCell id="A2" value="&lt;b&gt;minty-billing-api&lt;/b&gt; :8005&lt;br&gt;Stripe · plans · invoices · dunning · scheduler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+        <mxCell id="A2" value="&lt;b&gt;minty-billing-api&lt;/b&gt; :8004 · Part 2&lt;br&gt;Stripe · plans · invoices · dunning · scheduler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="470" y="45" width="210" height="75" as="geometry"/>
         </mxCell>
-        <mxCell id="A3" value="&lt;b&gt;minty-pettycash-api&lt;/b&gt; :8002&lt;br&gt;reports · expenses (+AI) · deposits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+        <mxCell id="A3" value="&lt;b&gt;minty-pettycash-api&lt;/b&gt; :8005&lt;br&gt;reports · expenses (+AI) · deposits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="695" y="45" width="210" height="75" as="geometry"/>
         </mxCell>
-        <mxCell id="A4" value="&lt;b&gt;minty-payments-api&lt;/b&gt; :8003&lt;br&gt;← billing-backend · bills · payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+        <mxCell id="A4" value="&lt;b&gt;minty-payments-api&lt;/b&gt; :8000&lt;br&gt;← billing-backend (unchanged) · bills · payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="920" y="45" width="210" height="75" as="geometry"/>
         </mxCell>
         <mxCell id="A5" value="&lt;b&gt;minty-onboarding-api&lt;/b&gt; :8001&lt;br&gt;← onboarding-backend · proxies shrink" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
@@ -71,7 +71,7 @@
         <mxCell id="DATA" value="Data" style="swimlane;html=1;startSize=30;fillColor=#faf5ff;strokeColor=#7e22ce;fontColor=#581c87;fontStyle=1;rounded=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="570" width="1360" height="130" as="geometry"/>
         </mxCell>
-        <mxCell id="DB" value="PostgreSQL · schema pettycashv2&lt;br&gt;Supabase" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
+        <mxCell id="DB" value="PostgreSQL · schema pettycashv3&lt;br&gt;Supabase" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
           <mxGeometry x="380" y="35" width="280" height="85" as="geometry"/>
         </mxCell>
         <mxCell id="B2" value="Backblaze B2&lt;br&gt;attachments · exports" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">

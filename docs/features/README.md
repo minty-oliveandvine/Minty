@@ -5,11 +5,13 @@ rules that are easy to break, and which tests pin it. Written for someone new to
 codebase; the deeper records (the schema decision register, the modernisation plan, the
 notes in `docs/code_cleanse/`) are linked, not repeated.
 
-Minty is the Flask hub of a five-app system. It owns identity, the companies, the daily
-petty-cash report and the Xero connection, and it launches two Next.js apps with a
-short-lived token: the onboarding wizard (`../onboarding` + `../onboarding-backend`) and
-the payment-request module (`../billing-frontend` + `../billing-backend`). Each of those
-repos has its own `docs/features/` folder in the same shape.
+Minty is the Flask hub of a seven-app system. It owns identity, the companies, the daily
+petty-cash report and the Xero connection, and it launches the Next.js apps with a
+short-lived token: the onboarding wizard (`../onboarding` + `../onboarding-backend`), the
+payment-request module (`../billing-frontend` + `../billing-backend`) and, since Part 2 of
+the modernisation plan (scaffolded 2026-09-21, dark until launch), the subscription pages of
+the new hub (`../minty-web` + `../minty-billing-api`). Each of those repos has its own
+`docs/features/` folder in the same shape.
 
 | Feature | Document |
 |---|---|
