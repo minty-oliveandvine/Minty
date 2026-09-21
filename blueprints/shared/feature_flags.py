@@ -45,6 +45,15 @@ def subscriptions_enabled() -> bool:
     return _flag("SUBSCRIPTION_ENABLED", False)
 
 
+def minty_web_module_page() -> bool:
+    """Whether the LIVE module settings page is minty-web's (Part 2 step 4a) rather than
+    the Jinja one. On by default: the Jinja page is what the dark switch keeps, and the
+    redesigned page lives in the hub. ``MINTY_WEB_MODULE_PAGE=0`` keeps the Jinja page for a
+    developer running Flask alone; the test suite sets it so the Jinja tests still describe
+    what they exercise. Gone at step 5 with the Jinja page itself."""
+    return _flag("MINTY_WEB_MODULE_PAGE", True)
+
+
 def require_subscriptions_enabled(view):
     """A route that exists only while subscriptions are live: 404 when they are dark.
 

@@ -52,16 +52,17 @@ Minty, billing-backend and onboarding-backend onto this schema with the schema a
 authority: every model follows `01`, the enum vocabulary lives in one module per repo
 (`blueprints/shared/enums.py`, the two `shared_models/enums.py`, checked against `01` by
 `tests/test_enums_match_schema.py`), Alembic is frozen and `billing-backend/bills/migrations/`
-is gone. The apps run against `minty_cleanse` locally (production data on this schema, built by
-`rehearse.py`); Minty's tests build their own database from `01` per run (`tests/pg_harness.py`,
+is gone. The apps run against the local `postgres` database (schema `pettycashv3`, built from `01`
+plus the catalogue rows; `minty_cleanse`, the phase C copy of production data, was dropped on
+2026-09-21); Minty's tests build their own database from `01` per run (`tests/pg_harness.py`,
 Postgres only, one database per xdist worker) — 1677 tests, ~2 min on all cores.
 
 ## Changing the schema
 
 **Ask first** — the schema is the contract all three applications now follow. Then edit
 `01_schema_rebased.sql` (and its decision register), rebuild it into the scratch
-database, run `gen.py`, run `rehearse.py --skip-restore --db <same db>`, rebuild
-`minty_cleanse`, and let `tests/test_zz_schema_audit.py` name every model that has to follow. The header's
+database, run `gen.py`, run `rehearse.py --skip-restore --db <same db>`, rebuild the local
+`postgres` database from it, and let `tests/test_zz_schema_audit.py` name every model that has to follow. The header's
 WHAT WAS ADDED counts are re-measured with the query under HOW TO BUILD IT, never
 adjusted by hand.
 

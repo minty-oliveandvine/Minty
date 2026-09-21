@@ -1125,22 +1125,32 @@ def _needs_stripe_clock(run: dict, day: datetime, event_days: set) -> bool:
     mapping = store.customer_mapping_for_user(run["user_id"])
     if mapping is None:
         return False
-    # Mid-dunning: a retry can charge on any of the offset days, and working out which
-    # from here would duplicate the schedule. Cheaper to advance for the whole episode.
-    if mapping.dunning_started_at is not None:
+    # THE CARDS, not the account. ``paid_through`` and the dunning clock moved from
+    # ``user_stripe_customer`` to ``payer_billing_group`` with per-entity cards (2026-08-25):
+    # a payer with two cards has two cycles, and either one coming due is a Stripe write.
+    # This read them off the mapping until 2026-09-21, raising AttributeError on every
+    # non-event day - which the caller logged as ``!! test clock: ...`` and treated as "do
+    # not advance", so for a month every renewal after the last scripted event was stamped
+    # by Stripe with that event's date.
+    groups = store.billing_groups_for_payer(run["user_id"])
+    # Mid-dunning on any card: a retry can charge on any of the offset days, and working
+    # out which from here would duplicate the schedule. Cheaper to advance for the whole
+    # episode.
+    if any(group.dunning_started_at is not None for group in groups):
         return True
-    # The renewal is due AND has something to raise. Both halves matter: `paid_through`
-    # only moves when a renewal SUCCEEDS, so on an account that has stopped paying it
-    # freezes and "due" stays true every day for the rest of the replay — which is how
-    # the first version of this skipped almost nothing on exactly the runs it was meant
-    # to speed up. `due_renewals` asks the same second question, and when the answer is
-    # no it returns without creating an invoice, so there is nothing to stamp.
-    if mapping.paid_through is not None and mapping.paid_through <= day:
-        from blueprints.subscription.services import renewals
+    # A card's renewal is due AND has something to raise. Both halves matter:
+    # `paid_through` only moves when a renewal SUCCEEDS, so on a card that has stopped
+    # paying it freezes and "due" stays true every day for the rest of the replay — which
+    # is how the first version of this skipped almost nothing on exactly the runs it was
+    # meant to speed up. `due_renewals` asks the same second question, and when the
+    # answer is no it returns without creating an invoice, so there is nothing to stamp.
+    for group in groups:
+        if group.paid_through is not None and group.paid_through <= day:
+            from blueprints.subscription.services import renewals
 
-        if renewals.billable_codes_by_entity(run["user_id"]) or \
-                store.pending_extensions_for_payer(run["user_id"]):
-            return True
+            if renewals.billable_codes_by_entity(run["user_id"], group_id=group.id) or \
+                    store.pending_extensions_for_payer(run["user_id"]):
+                return True
     # A trial ending today CONVERTS, and a conversion bills.
     for row in store.module_rows_for_payer(run["user_id"]):
         if row.phase == "trial" and row.trial_end is not None and row.trial_end <= day:

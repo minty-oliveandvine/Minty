@@ -201,6 +201,10 @@ def app(built_database) -> Iterator:
         # the subscription feature is ON for the suite (its default is off - production cut
         # over dark); tests/test_char_subscription_dark.py flips it per test
         "SUBSCRIPTION_ENABLED": "1",
+        # live, the module page is minty-web's and Flask redirects there (Part 2 step 4a);
+        # the suite keeps the Jinja page its tests describe, and
+        # tests/test_minty_web_handoff.py flips this to pin the redirect
+        "MINTY_WEB_MODULE_PAGE": "0",
     }
 
     old_env = {key: os.environ.get(key) for key in env}

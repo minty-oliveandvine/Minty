@@ -146,7 +146,9 @@ set on Minty, billing-backend and onboarding-backend; a mismatch 401s every call
 The browser is sent to `billing-frontend` `/landing?token=…&entity_id=…&entity_name=…`,
 which stores the token in the `billing_token` cookie (8 hours; billing-backend
 `POST /api/auth/token/refresh` re-mints it before it lapses) and to the onboarding app
-with `?token=…`. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
+with `?token=…`. minty-web (the hub, Part 2) is entered the same way through its `/landing`,
+and comes back for a fresh token through `GET /handoff/minty-web?next=&entity_id=` (login-gated,
+`entity/routes/modules.py`). Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
 re-establishes the Flask session) — `billing-relogin` is the legacy "my token ran out"
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).

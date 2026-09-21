@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS = r"C:\dev\Minty\blueprints\entity\routes\settings.py"
+SETTINGS = r"C:\Github\Minty\blueprints\entity\routes\settings.py"
 
 # Every module-subscription route that spends or commits money, or opens the portal that
 # can. If you add one, add it here — this list is the point of the structural test.

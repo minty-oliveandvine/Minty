@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Diff every model in Minty, billing-backend and onboarding-backend against the schema.
+"""Diff every model in Minty, billing-backend, onboarding-backend and minty-billing-api against
+the schema.
 
 Reports, with file:line:
   * a model whose table does not exist under the new name
@@ -7,29 +8,44 @@ Reports, with file:line:
   * a declared type that no longer matches the column
 
 Which database it reads is taken from the environment, so the same script audits the
-phase C database (minty_cleanse, the default - production data on the new schema), the
+dev database (postgres/pettycashv3, the default since 2026-09-21; minty_cleanse, the phase C
+database with production data, was dropped that day), the
 test harness's build (tests/pg_harness.py -> minty_test_<worker>, schema pettycashv3) or
-production. Since phase C closed (2026-09-17) it reports 0 findings for all three repos;
-tests/test_char_schema_audit.py keeps it that way.
+production. Since phase C closed (2026-09-17) it reports 0 findings for the three original
+repos; tests/test_zz_schema_audit.py keeps it that way, and a repo that is not checked out is
+a finding (a missing path used to read as 0 findings).
 
     AUDIT_URI      full postgres URI            default: localhost/AUDIT_DB as the .env user
-    AUDIT_DB       database name                default minty_cleanse   (ignored if AUDIT_URI)
+    AUDIT_DB       database name                default postgres        (ignored if AUDIT_URI)
     AUDIT_SCHEMA   schema to read               default pettycashv3
-    AUDIT_REPOS    comma list of repo names     default Minty,billing-backend,onboarding-backend
+    AUDIT_REPOS    comma list of repo names     default Minty,billing-backend,onboarding-backend,minty-billing-api
+    MINTY_REPOS_ROOT  the folder the repos sit in   default: this checkout's parent (C:\\Github)
     AUDIT_STRICT=1 exit 1 when there is any finding (for use as a test)
     PG_BIN         directory holding psql       default: PATH
 
 onboarding-backend was NOT in the original audit; its shared_models (585 lines) mirror the
-same tables and drift the same way. Do not remove it from the default list.
+same tables and drift the same way. minty-billing-api (Part 2, 2026-09-21) mirrors the 13
+subscription tables and the read-only rows it needs. Do not remove either from the default list.
 """
 import ast, glob, io, os, re, shutil, subprocess, sys
 
-DB = os.environ.get("AUDIT_DB", "minty_cleanse")
+DB = os.environ.get("AUDIT_DB", "postgres")
 SCHEMA = os.environ.get("AUDIT_SCHEMA", "pettycashv3")
-ALL_REPOS = {"Minty": r"c:\dev\Minty", "billing-backend": r"c:\dev\billing-backend",
-             "onboarding-backend": r"c:\dev\onboarding-backend"}
+# The repos live side by side (C:\Github since the 2026-09-21 move; the old C:\dev is dead).
+# MINTY_REPOS_ROOT overrides the parent; this file's own location is the fallback, so the
+# audit follows the checkout wherever it is.
+ROOT = os.environ.get("MINTY_REPOS_ROOT") or os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+# minty-billing-api (Part 2 of the modernisation plan) mirrors the 13 subscription tables and
+# the read-only rows it needs; it drifts the same way the other two Django repos do.
+ALL_REPOS = {name: os.path.join(ROOT, name) for name in
+             ("Minty", "billing-backend", "onboarding-backend", "minty-billing-api")}
 REPOS = {k: ALL_REPOS[k] for k in
          os.environ.get("AUDIT_REPOS", ",".join(ALL_REPOS)).split(",") if k}
+# A repo that is not checked out is a finding, not a silent pass: os.walk on a missing path
+# yields nothing, which is how a stale path once made the audit report 0 for a repo it never
+# read.
+MISSING_REPOS = [k for k, root in REPOS.items() if not os.path.isdir(root)]
 SKIP = ("\\.venv\\", "/.venv/", "site-packages", "__pycache__", "\\migrations\\", "/migrations/",
         "\\tests\\", "/tests/", "\\node_modules\\")
 
@@ -50,7 +66,7 @@ def _target():
     if uri:
         return [uri]
     pw = re.match(r".*://[^:]+:([^@]+)@",
-                  [l for l in io.open(r"c:\dev\Minty\.env", encoding="utf-8")
+                  [l for l in io.open(os.path.join(ALL_REPOS["Minty"], ".env"), encoding="utf-8")
                    if l.startswith("LOCAL_DATABASE_URI=")][0]).group(1)
     os.environ["PGPASSWORD"] = pw
     return ["-h", "localhost", "-U", "postgres", "-d", DB]
@@ -90,6 +106,9 @@ DJ = {
     "DecimalField": "numeric", "DateField": "date", "UUIDField": "uuid",
     "JSONField": "jsonb", "BinaryField": "bytea", "AutoField": "integer",
     "BigAutoField": "bigint",
+    # minty-billing-api's uuid column whose Python value is str (shared_models/fields.py);
+    # without this entry an unknown class is skipped by the type check, silently.
+    "MintyUUIDField": "uuid",
 }
 
 
@@ -237,8 +256,14 @@ if unparsed:
     print("!!! %d FILE(S) COULD NOT BE PARSED - the audit does not cover them:" % len(unparsed))
     for u in unparsed:
         print("   ", u)
+if MISSING_REPOS:
+    print()
+    print("!!! %d REPO(S) NOT FOUND - the audit did not read them (set MINTY_REPOS_ROOT or AUDIT_REPOS):"
+          % len(MISSING_REPOS))
+    for k in MISSING_REPOS:
+        print("   ", k, "->", REPOS[k])
 print("TOTAL %d  (table %d, missing-column %d, type %d)  repos=%s  schema=%s" % (
     len(findings), *(sum(1 for f in findings if f[4] == k) for k in ("TABLE", "MISSING", "TYPE")),
     ",".join(REPOS), SCHEMA))
-if os.environ.get("AUDIT_STRICT") == "1" and (findings or unparsed):
+if os.environ.get("AUDIT_STRICT") == "1" and (findings or unparsed or MISSING_REPOS):
     sys.exit(1)

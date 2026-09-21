@@ -32,7 +32,7 @@
         <mxCell id="W4" value="&lt;b&gt;minty-www&lt;/b&gt;&lt;br&gt;← landing page" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
           <mxGeometry x="692" y="44" width="200" height="90" as="geometry"/>
         </mxCell>
-        <mxCell id="W0" value="&lt;b&gt;minty-web&lt;/b&gt; :3002&lt;br&gt;login · dashboard · profile · settings · subscription" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
+        <mxCell id="W0" value="&lt;b&gt;minty-web&lt;/b&gt; :3002 · Part 2&lt;br&gt;subscription first · login · dashboard · profile · settings" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#dbeafe;strokeColor=#1d4ed8;fontColor=#1e3a8a;" vertex="1" parent="WEB">
           <mxGeometry x="916" y="44" width="200" height="90" as="geometry"/>
         </mxCell>
         <mxCell id="API" value="Services — Django 5.2 LTS · django-ninja · Python 3.13" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=14;spacingTop=4;fontStyle=1;fontSize=15;strokeWidth=1.5;fillColor=#f0fdf4;strokeColor=#86efac;fontColor=#14532d;" vertex="1" parent="1">
@@ -53,7 +53,7 @@
         <mxCell id="A0" value="&lt;b&gt;minty-accounts-api&lt;/b&gt; :8002&lt;br&gt;JWT minter · users · roles · companies" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="916" y="44" width="200" height="90" as="geometry"/>
         </mxCell>
-        <mxCell id="A2" value="&lt;b&gt;minty-billing-api&lt;/b&gt; :8004&lt;br&gt;Stripe · plans · dunning · scheduler" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
+        <mxCell id="A2" value="&lt;b&gt;minty-billing-api&lt;/b&gt; :8004 · Part 2&lt;br&gt;Stripe · plans · dunning · scheduler" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#dcfce7;strokeColor=#15803d;fontColor=#14532d;" vertex="1" parent="API">
           <mxGeometry x="1140" y="44" width="200" height="90" as="geometry"/>
         </mxCell>
         <mxCell id="PKG" value="Shared packages — pinned git tags" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=14;spacingTop=4;fontStyle=1;fontSize=15;strokeWidth=1.5;fillColor=#fefce8;strokeColor=#fde047;fontColor=#713f12;" vertex="1" parent="1">
@@ -74,7 +74,7 @@
         <mxCell id="S3" value="&lt;b&gt;Backblaze B2&lt;/b&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fontSize=12;strokeWidth=1.5;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
           <mxGeometry x="20" y="44" width="200" height="100" as="geometry"/>
         </mxCell>
-        <mxCell id="DB" value="&lt;b&gt;PostgreSQL&lt;/b&gt; · pettycashv2&lt;br&gt;Supabase" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fontSize=12;strokeWidth=1.5;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
+        <mxCell id="DB" value="&lt;b&gt;PostgreSQL&lt;/b&gt; · pettycashv3&lt;br&gt;Supabase" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fontSize=12;strokeWidth=1.5;fillColor=#f3e8ff;strokeColor=#7e22ce;fontColor=#581c87;" vertex="1" parent="DATA">
           <mxGeometry x="244" y="44" width="260" height="100" as="geometry"/>
         </mxCell>
         <mxCell id="L" value="&lt;b&gt;minty-legacy&lt;/b&gt; :5001 — Flask · Python 3.11&lt;br&gt;← Minty · shrinks to zero" style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;strokeWidth=1.5;fillColor=#fee2e2;strokeColor=#b91c1c;fontColor=#7f1d1d;dashed=1;dashPattern=5 3;" vertex="1" parent="1">

@@ -1,6 +1,6 @@
 # 🐳 Run the whole Minty system
 
-One command starts all four repos and their shared database. If you only want
+One command starts all seven repos and their shared database. If you only want
 the Flask app and its database, use [`../README.md`](../README.md) instead —
 that setup covers this repo alone.
 
@@ -11,7 +11,12 @@ that setup covers this repo alone.
 | `billing-frontend` | `billing-frontend` | <http://localhost:3000> | Module 2 — Next.js UI |
 | `onboarding-backend` | `onboarding-backend` | <http://localhost:8001> | Onboarding API — Django, extracted from Minty |
 | `onboarding` | `onboarding` | <http://localhost:3001> | Onboarding — Next.js UI |
-| `db` | — | `localhost:5432` | PostgreSQL 15, shared by both backends |
+| `billing-api` | `minty-billing-api` | <http://localhost:8004> | Subscriptions API — Django, Part 2 of the modernisation plan (dark unless `SUBSCRIPTION_ENABLED=1`) |
+| `minty-web` | `minty-web` | <http://localhost:3002> | The hub — Next.js, Part 2; subscriptions is its only feature until Part 3 |
+| `db` | — | `localhost:5432` | PostgreSQL 15, shared by every backend |
+
+Ports follow the plan's rule 6 — one digit per domain, `800d` for a Django API and `300d`
+for its Next.js UI (`docs/modernisation/modernisation_plan.md`, Part 3 § cross-cutting rules).
 
 ---
 
@@ -19,14 +24,17 @@ that setup covers this repo alone.
 
 - **Docker Desktop** installed and running (whale icon in the tray).
   Compose **v2.24 or newer** — check with `docker compose version`.
-- **All four repos checked out side by side**, e.g.
+- **All seven repos checked out side by side**, e.g.
 
   ```
-  C:\Projects\New_Repo\
+  C:\Github\
     ├── Minty\              ← you are here
     ├── billing-backend\
     ├── billing-frontend\
-    └── onboarding\
+    ├── onboarding\
+    ├── onboarding-backend\
+    ├── minty-billing-api\  ← Part 2
+    └── minty-web\          ← Part 2
   ```
 
   If your layout differs, set the `*_PATH` variables in `.env` (step 2).
@@ -73,9 +81,10 @@ Startup is ordered, and that order matters:
 
 1. `db` comes up and passes its health check.
 2. `minty` creates the `pettycashv3` schema, then starts serving.
-3. `billing-backend` waits for `minty` to be **healthy** — it is a tenant of
-   Flask's schema and must never get there first.
-4. The two frontends start.
+3. `billing-backend`, `onboarding-backend` and `billing-api` wait for `minty` to
+   be **healthy** — they are tenants of Flask's schema and must never get there
+   first.
+4. The three frontends start.
 
 You're ready when the logs settle. Open <http://localhost:5001>.
 
@@ -107,7 +116,7 @@ docker compose exec db pg_restore -U minty_ref_user -d minty_ref /tmp/your.dump
 Then restart the backends so they pick it up:
 
 ```bash
-docker compose restart minty billing-backend
+docker compose restart minty billing-backend onboarding-backend billing-api
 ```
 
 Once you're on a database that is already past the broken revisions, you can set
@@ -126,7 +135,7 @@ you pick the repair up:
 
 ## 4. Editing code while it runs
 
-All four services bind-mount their repo, so **save a file and it reloads.** No
+All seven services bind-mount their repo, so **save a file and it reloads.** No
 rebuild needed for ordinary code changes.
 
 Rebuild only when *dependencies* change:
@@ -191,6 +200,14 @@ its own `XERO_CLIENT_ID`/`SECRET` — Xero invalidates a refresh token the momen
 it is used, so a second refresher breaks the connection until someone
 reconnects by hand.
 
+**Subscriptions (Part 2):** `billing-api` and `minty-web` ship **dark**. Three
+backends read `SUBSCRIPTION_ENABLED` (`minty`, `onboarding-backend`, `billing-api`)
+and must carry the same value; the two web apps read
+`NEXT_PUBLIC_SUBSCRIPTION_ENABLED`, which is on unless `0`. Dark, every
+`billing-api` route answers 404 (with CORS headers) and its scheduler never
+starts. Stripe keys are read by `minty` today and by `billing-api`; from Part 2
+step 5 only `billing-api` holds them.
+
 ---
 
 ## 7. Note on the database volume
@@ -208,7 +225,7 @@ tables in it. Use one or the other consistently.
 → Docker Desktop isn't running. Start it and wait for the whale icon.
 
 **"port is already allocated"**
-→ Something on your machine already uses 5432/5001/8000/8001/3000/3001. Either stop
+→ Something on your machine already uses 5432/5001/8000/8001/8004/3000/3001/3002. Either stop
 it, or change the matching `*_HOST_PORT` in `.env` (and the `*_PUBLIC_URL` that
 goes with it).
 
@@ -256,13 +273,15 @@ docker compose up --build
 
 # the database starts EMPTY — load a schema into it:
 docker compose exec -T db psql -U minty_ref_user -d minty_ref < your_dump.sql
-docker compose restart minty billing-backend
+docker compose restart minty billing-backend onboarding-backend billing-api
 
-# Minty            http://localhost:5001
-# Billing API      http://localhost:8000
-# Onboarding API   http://localhost:8001
-# Billing UI       http://localhost:3000
-# Onboarding UI    http://localhost:3001
+# Minty              http://localhost:5001
+# Billing API        http://localhost:8000
+# Onboarding API     http://localhost:8001
+# Subscriptions API  http://localhost:8004   (every route 404 while dark)
+# Billing UI         http://localhost:3000
+# Onboarding UI      http://localhost:3001
+# Minty hub          http://localhost:3002
 
 docker compose down           # stop
 ```
