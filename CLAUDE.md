@@ -82,6 +82,7 @@ Update docs as you go avoid making it stale.
 Fix/Clean up stale references.
 Report if you found silent failures.
 Understand the existing architecture before modifying it.
+Follow clean code and avoid duplications.
 Identify independent tasks and perform them concurrently when safe.
 Prefer efficient commands and existing tooling.
 Avoid unnecessary file changes.

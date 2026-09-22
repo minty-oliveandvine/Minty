@@ -45,6 +45,12 @@ The seed goes through the app's own models, so it works against whichever schema
 currently matches. It only ever touches the rows it created (`e2e@minty.test`,
 `E2E Petty Cash Shop` and that entity's reports/settings) — safe against `minty_cleanse`.
 
+Since 2026-09-22 it also creates and RESETS a second company for minty-web's live subscription
+journeys, `E2E Subscription Shop` (printed as `E2E_MINTY_SUBSCRIPTION_ENTITY`): both modules off
+and no subscription rows, so a card-free trial can be started on a module it has never held on
+every run. The Petty Cash shop keeps both modules ON for this suite and the sibling apps' - a
+module already on is not trial-eligible, which is why the journeys need a company of their own.
+
 To run the C0.9 **baseline** against the old-schema database while `.env` points elsewhere,
 override the URIs for both the seed and Flask:
 

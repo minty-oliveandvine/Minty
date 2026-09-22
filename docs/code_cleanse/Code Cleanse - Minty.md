@@ -322,7 +322,7 @@ Unchanged, and re-verified: all 24 orphans are still orphaned, 2.7 MB of the 3.5
 | P4 | static/img/error.svg | DELETE - orphaned (re-verified) |
 | P4 | static/img/info.svg | DELETE - orphaned (re-verified) |
 | P4 | static/img/info.webp | DELETE - orphaned (re-verified) |
-| P4 | static/img/logo_v2.svg | DELETE - orphaned (re-verified) |
+| P4 | static/img/logo_v2.svg | DELETED 2026-09-22 with the rest of the old wordmark (logo_v2.webp/png, minty-logo.png, logo.png, minty_newlogo_word.png) - every page now uses img/minty-mark.png + img/favicon.ico |
 | P4 | static/img/minty_important_update_bk.png | DELETE - orphaned (re-verified) |
 | P4 | static/img/ov-logo.svg | DELETE - orphaned (re-verified) |
 | P4 | static/img/success.svg | DELETE - orphaned (re-verified) |

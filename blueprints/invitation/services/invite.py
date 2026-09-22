@@ -236,8 +236,7 @@ def send_invitation_email(
         base_url = public_url or url_for("static", filename="", _external=True).rstrip(
             "/"
         )
-        logo_url = _asset_url(base_url, "img/minty_newlogo_word.png")
-        mascot_url = _asset_url(base_url, "img/new_logo.png")
+        logo_url = _asset_url(base_url, "img/minty-mark.png")
 
         msg = Message(
             subject=f"You've been invited to {entity_name} on Minty",
@@ -249,7 +248,6 @@ def send_invitation_email(
                 inviter_name=inviter_name,
                 accept_url=accept_url,
                 logo_url=logo_url,
-                mascot_url=mascot_url,
             ),
         )
         mail.send(msg)
@@ -538,7 +536,6 @@ def _build_invitation_html(
     inviter_name: str,
     accept_url: str,
     logo_url: str = "",
-    mascot_url: str = "",
 ) -> str:
     role_display = role.replace("_", " ").title()
     return f"""\
@@ -586,25 +583,12 @@ def _build_invitation_html(
              style="width:100%;max-width:520px;background:#ffffff;border-radius:16px;
                     overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
-        <!-- Header with logo and mascot side by side -->
+        <!-- Header: the Minty mark -->
         <tr><td class="m-header"
                 style="background:#ffffff;
                        padding:24px 40px;text-align:center;">
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
-            <tr>
-              <td style="vertical-align:middle;padding-right:0;">
-                <img src="{logo_url}" alt="Minty" width="130"
-                     style="display:block;border:0;width:130px;max-width:130px;height:auto;" />
-              </td>
-              <!-- The wordmark's leaf sits above the letterforms, pulling the logo's
-                   centre 6.3px above the word itself. A middle-aligned cell shifts by
-                   half its padding, so 13px drops the cat onto the letterform centre. -->
-              <td style="vertical-align:middle;padding-top:13px;">
-                <img src="{mascot_url}" alt="Minty Cat" width="60"
-                     style="display:block;border:0;width:60px;max-width:60px;height:auto;" />
-              </td>
-            </tr>
-          </table>
+          <img src="{logo_url}" alt="Minty" width="72"
+               style="display:block;border:0;width:72px;max-width:72px;height:auto;margin:0 auto;" />
         </td></tr>
 
         <!-- Body -->

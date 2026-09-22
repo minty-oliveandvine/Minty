@@ -20,9 +20,9 @@
            class="w-8 h-8 rounded-full bg-white flex items-center justify-center"
          >
            <img
-             src="{{ url_for('static', filename='img/logo_v2.webp') }}"
+             src="{{ url_for('static', filename='img/minty-mark.png') }}"
              alt="Logo"
-             class="h-8"
+             class="h-8 w-8 object-contain"
            />
          </a>
       {% elif right == 'menu' %}
@@ -47,7 +47,7 @@
 {% macro logo(url='#', size=60) %}
   <a href="{{ url }}" class="logo flex justify-center">
     <img
-      src="{{ url_for('static', filename='img/logo_v2.webp') }}"
+      src="{{ url_for('static', filename='img/minty-mark.png') }}"
       alt="Olive and Vine"
       width="{{ size }}"
     />

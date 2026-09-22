@@ -47,7 +47,7 @@
 <body>
     {% include 'components/flash_messages.html' %}
     <div class="container mt-5 text-center">
-        <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo" alt="Logo">
+        <img src="{{ url_for('static', filename='img/minty-mark.png') }}" class="logo" alt="Logo">
         <h1 class="text-center">Create New Passwords / 새 비밀번호 만들기</h1>
         <!-- Build form fields -->
         <form action="{{url_for('auth.reset_token', token=token)}}" method="post">

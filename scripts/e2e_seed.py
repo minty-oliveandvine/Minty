@@ -17,7 +17,12 @@ Each run:
 * creates the entity if missing (HKD, HK, Petty Cash module on) with the user as admin,
   seeds the sales methods through the real service (``replace_sales_methods``);
 * deletes the entity's reports, expenses, sale detail rows and cash counts so the wizard
-  can start from an empty history on every run.
+  can start from an empty history on every run;
+* creates a SECOND company for the subscription journeys (``E2E Subscription Shop``, the same
+  user as admin) and resets it every run: both modules OFF and no subscription rows at all
+  (module rows, consent, card nominations, transfers, audit) - so minty-web's live-API specs
+  can start a card-free trial on a module the company has never held, every time. The Petty
+  Cash shop keeps both modules ON for the other suites and is never touched here.
 
 Goes through the app's own models, so it works on whichever schema the code currently
 matches - it is re-run at the end of every phase C unit (docs/modernisation/modernisation_plan.md).
@@ -40,6 +45,50 @@ from blueprints.shared.schema import SCHEMA  # noqa: E402
 
 E2E_EMAIL = "e2e@minty.test"
 E2E_ENTITY_NAME = "E2E Petty Cash Shop"
+E2E_SUBSCRIPTION_ENTITY_NAME = "E2E Subscription Shop"
+
+
+def reset_subscription_shop(db, user, hkd, modules):
+    """The company minty-web's live subscription journeys run against, reset to "never held
+    anything": both modules off, no subscription rows. Returns the entity.
+
+    Its own company, not the Petty Cash shop: that one keeps both modules ON for the Minty,
+    onboarding and payment-request suites, and a module already on is not trial-eligible
+    (``cards.py``: access with no row disqualifies it). Everything deleted here is the
+    company's own subscription state; the user's account-level rows (Stripe customer, billing
+    groups, cards) are left alone - a card-free trial needs none of them.
+    """
+    from blueprints.subscription.models.entity_billing_consent import EntityBillingConsent
+    from blueprints.subscription.models.entity_billing_group import EntityBillingGroup
+    from blueprints.subscription.models.entity_module_subscription import EntityModuleSubscription
+    from blueprints.subscription.models.subscription_audit_log import SubscriptionAuditLog
+    from blueprints.subscription.models.subscription_transfer import SubscriptionTransfer
+    from models.db import Entity, EntityFunctionMap, UserEntity
+
+    entity = Entity.query.filter_by(name=E2E_SUBSCRIPTION_ENTITY_NAME).first()
+    if entity is None:
+        entity = Entity(id=str(uuid.uuid4()), name=E2E_SUBSCRIPTION_ENTITY_NAME, status="disconnected",
+                        currency_id=hkd.id, country_code="HK")
+        db.session.add(entity)
+        db.session.flush()
+    if UserEntity.query.filter_by(user_id=user.id, entity_id=entity.id).first() is None:
+        db.session.add(UserEntity(user_id=user.id, entity_id=entity.id, role="admin", approved=True))
+
+    for model in (SubscriptionTransfer, SubscriptionAuditLog, EntityBillingConsent, EntityBillingGroup,
+                  EntityModuleSubscription):
+        model.query.filter_by(entity_id=entity.id).delete(synchronize_session=False)
+
+    now = datetime.now(timezone.utc)
+    for fn in modules:
+        row = EntityFunctionMap.query.filter_by(entity_id=entity.id, entity_function_id=fn.id).first()
+        if row is None:
+            db.session.add(EntityFunctionMap(entity_id=entity.id, entity_function_id=fn.id, is_enabled=False,
+                                             created_by=user.id, disabled_at=now, created_at=now, updated_at=now))
+        elif row.is_enabled:
+            row.is_enabled = False
+            row.disabled_at = now
+    db.session.commit()
+    return entity
 
 
 def main() -> int:
@@ -232,12 +281,17 @@ def main() -> int:
             print("sales methods:", payload, file=sys.stderr)
             return 1
 
+        # --- the subscription journeys' own company, reset to "never held anything" ---
+        subscription_shop = reset_subscription_shop(db, user, hkd, (petty, bill))
+
         print(f"user    {user.id}  {E2E_EMAIL}")
         print(f"entity  {entity.id}  {E2E_ENTITY_NAME}  (reports wiped: {len(report_ids)})")
+        print(f"entity  {subscription_shop.id}  {E2E_SUBSCRIPTION_ENTITY_NAME}  (modules off, subscription rows wiped)")
         if args.print:
             print()
             print("export E2E_MINTY_USER=" + user.id)
             print("export E2E_MINTY_ENTITY=" + entity.id)
+            print("export E2E_MINTY_SUBSCRIPTION_ENTITY=" + subscription_shop.id)
             print("export E2E_MINTY_EMAIL=" + E2E_EMAIL)
             print("export E2E_MINTY_PASSWORD=<the value you seeded with>")
     return 0

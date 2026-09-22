@@ -4,7 +4,8 @@ import os
 import time
 
 from flask import (flash, has_request_context, jsonify, redirect,
-                   render_template, request, session, url_for)
+                   render_template, request, send_from_directory, session,
+                   url_for)
 from flask_login import current_user, user_logged_in, user_logged_out
 from flask_wtf.csrf import CSRFError
 from loguru import logger
@@ -121,6 +122,17 @@ def init_app(app, db):
     def health_check():
         """Health check endpoint for Render"""
         return jsonify({"status": "healthy"}), 200
+
+    @app.route("/favicon.ico")
+    def favicon():
+        """The tab icon for the legacy pages that declare no ``<link rel="icon">`` (and for
+        error pages): browsers fall back to this path. The same file the templates link."""
+        return send_from_directory(
+            os.path.join(app.static_folder, "img"),
+            "favicon.ico",
+            mimetype="image/x-icon",
+            max_age=86400,
+        )
 
     @app.context_processor
     def inject_globals():
