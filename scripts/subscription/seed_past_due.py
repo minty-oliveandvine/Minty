@@ -61,10 +61,14 @@ PASSWORD = "ReplayScenarios!2026"  # the replay harness password, same everywher
 # switching accounts. As a NON-payer this login gets the "Billing for this company is
 # managed by ..." variant of the modal, with no action button — the payer login above is
 # the one that sees the button.
-ALSO_MEMBER = "d81c1b8d-a56c-4c70-acaa-f4839eb9704a"
+#
+# These two ids are PER DATABASE (a rebuild reseeds the catalogue with fresh uuids) and a
+# stale ALSO_MEMBER fails the membership insert on user_entity's FK. Last refreshed
+# 2026-09-22 for the rebuilt pettycashv3: the +catalogue payer, and its Scenario 8.
+ALSO_MEMBER = "88888888-9999-0000-1111-222222222222"  # angelika.tardaguela+catalogue
 
 ENTITY_NAME = "Scenario 13 - Past Due (Payment Failed)"
-CLONE_FROM = "4370fe27-df64-4a70-a9dc-56131b40098b"  # Scenario 8 - Both Active
+CLONE_FROM = "4a42a915-94af-49b1-bd56-5cf9665e3638"  # Ang - Scenario 8 - Both Active
 
 # Renewal failed this many days ago. Access ends at the end of the past-due window, read
 # from billing_policy rather than hard-coded: that window is tunable, and a fixture that

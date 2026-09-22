@@ -375,6 +375,9 @@ services:
       MINTY_WEB_URL: ${MINTY_WEB_PUBLIC_URL:-http://localhost:3002}
       PAYMENTS_WEB_URL: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${MINTY_WEB_PUBLIC_URL:-http://localhost:3002},${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      # Where a setup Checkout opened from the wizard returns the browser (not a CORS origin:
+      # onboarding-backend proxies the wizard's money routes here server-side).
+      ONBOARDING_WEB_URL: ${ONBOARDING_PUBLIC_URL:-http://localhost:3001}
       # Stripe test keys — the ONLY service that holds them (rule 9). From this .env or the repo's.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}

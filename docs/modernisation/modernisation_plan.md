@@ -515,7 +515,8 @@ first row — the JSON-meta-in-`files` convention of `upload_files` is gone), `R
 `processing → publishing`, `partially_published` is `failed` with the history's reasons (the
 publish-status endpoint already served them; the history page and the header badge show
 "Publish failed" with the reasons on hover, and the poller treats `failed` + reasons as the
-partial case), `shortage / surplus → short / over`. **Findings closed:** F1 (revert no longer
+partial case — the "Partially published" badge itself returns at Part 3 step 6, derived from
+the history, see the Part 3 decisions table), `shortage / surplus → short / over`. **Findings closed:** F1 (revert no longer
 deletes the expense lines — drafts and reports are one row, there was nothing to rebuild them
 from), F2 (`delete_expense_with_receipts` in `s3_storage.py`: report delete, single-line
 delete and the edit-report rewrite all remove the S3 objects and the orphaned `attachment`
@@ -1164,12 +1165,14 @@ replay_scenarios` (the script's port) ran the eight Angelika keys against the de
 same day as the Flask script, cloned to fresh payers; `scripts/replay_diff.py` (Stripe ids, the
 clone tag, the anchor's timezone, same-day invoice order and set-order job lines normalised)
 reports all eight IDENTICAL (the logs are not kept, by decision; the feature doc says how to regenerate a run).
-Two Minty findings for
-step 5, both left as they are (Flask is frozen): `tests/test_char_subscription.py`'s no-card
-trial test makes a real Stripe `Customer.search` (nothing stubs `get_stripe` and the app loads
-`.env`), and `replay_scenarios.py::_needs_stripe_clock` still reads `dunning_started_at` /
-`paid_through` off `UserStripeCustomer` (moved to the group in the per-entity-cards cutover),
-so the Stripe test clock only advances on scripted-event days.
+Two Minty findings: `tests/test_char_subscription.py`'s
+no-card trial test makes a real Stripe `Customer.search` (nothing stubs `get_stripe` and the app
+loads `.env`) - left for step 5, Flask's tests are frozen; and
+`replay_scenarios.py::_needs_stripe_clock` read `dunning_started_at` / `paid_through` off
+`UserStripeCustomer` (moved to the group in the per-entity-cards cutover), so since 2026-08-25
+the Stripe test clock advanced only on scripted-event days and renewals carried stale Stripe
+stamps - FIXED in both scripts the same day by the user's decision, both sides re-run and
+diffed identical again (the logs are not kept).
 
 ### 3. The API surface
 
@@ -1196,6 +1199,58 @@ so the Stripe test clock only advances on scripted-event days.
 
 **Done when** a contract test per path replays the matching Flask test's request and response,
 and `/api/openapi.json` is committed as `docs/openapi.json` (Part 3's type generation starts there).
+
+*Status 2026-09-21 — IN PROGRESS, slice A done.* The `me` router is live
+(`minty-billing-api/billing/api/me.py`): the fifteen portal routes are the port of Flask's
+views with the same shell - `400 "<field> is required"`, `404` for a company the caller does not
+pay for, `422` with the service's sentence for a refusal, each route's own 500 copy - and
+`billing/api/_json.py` stands in for `jsonify` (RFC 822 datetimes, `Decimal` as text, a non-JSON
+body read as `{}`). The invitation forwards the caller's own bearer to Flask's
+`POST /api/onboarding/invite` (`send=lambda invite: flask_client.forward(request, path,
+json=invite)` - a `functools.partial` would have passed the body positionally into a
+keyword-only parameter; the route test caught it). The HTTP halves of `test_payer_portal_api`
+(22) and `test_billing_payment_methods` (6) are ported to `billing/tests/api/` against Django's
+test client, importing the engine tests' stubs, plus twelve route tests with no Flask twin (the
+empty-table 200, the not-JSON body, the RFC 822 rendering, the forward's five cases, the shells'
+500s). Differences from Flask's client written into that folder's `conftest.py`: the token names
+a real user row, a preflight carries `Origin` + `Access-Control-Request-Method` and gets 200
+(`corsheaders`) where Flask-CORS gave 204, `Vary: origin`. Suite after slice A: 983 passed + 2
+skipped on SQLite (00:07), 985 on the harness build of `01` (00:10), `ruff` clean. The step-1
+pins moved with it (`test_dark`, `test_auth`: the portal 200, the module page still 501 until
+slice B). *Slice B done the same day:* the `modules` router (`billing/api/modules.py`) - the
+page model minty-web's `ModuleCard`/`ModulePage` types were written against (Flask's card dict
+key for key, `period_end` ISO and `access_end_date` as `YYYY-MM-DD` since the client counts
+days from them, `payer`, `viewer`, `consent_takeover`) and the nineteen actions behind ONE gate
+(path company = token company, the permission, the payer rule for everything but Stripe's
+return leg). Three deliberate differences from Flask, each written where it happens: Stripe
+returns the browser to minty-web's page; `checkout-complete` answers JSON where Flask redirected
+with `?checkout_error=`; dates render ISO. Flask's regex-over-route-source tests
+(`test_subscription_payer_permission`, `test_restart_billing_guard`) became behaviour tests -
+every action called as a co-admin and as a cashier holding the card, the restart route's four
+refusals in order - 84 tests in `billing/tests/api/test_module_settings_api.py`. A ninja trap
+for the record: a GET-only path declared after the `{path:action}` POST catch-all answers 405,
+because Django resolves patterns in order and does not try the next on a method mismatch - the
+two GET-capable actions are declared first with both methods on one path. Suite after slice B:
+1069 + 2 skipped on SQLite (00:14), 1071 on Postgres (00:18), `ruff` clean. *Slices C and D
+done 2026-09-22 — step 3 DONE.* `notice` (`billing/api/notice.py`): `NoticeBearerAuth` =
+`EntityBearerAuth` plus Flask's fallback for a token that names no company (billing-frontend
+sends only the bearer; a claimless token is held to membership of the PATH company), 403
+`entity_mismatch` for another company's path, `{"items": []}` on a builder failure.
+`onboarding` (`billing/api/onboarding.py`): the nine wizard routes with Flask's membership
+check and sentences, the setup Checkout returning to `ONBOARDING_WEB_URL` (new setting, in the
+stack compose), and `POST /trials/start` - `start_trials_for_enabled_modules` then the earliest
+`trial_end` read back; a failure FAILS (CheckoutError with its status, else 502) where Flask's
+finalize swallowed it. Flask's `/api/onboarding/plans` is not here (onboarding-backend serves
+the catalogue natively). `docs/openapi.json` is committed, generated by the new
+`manage.py export_openapi` and held current by `test_contract.py`. The step-1 stub helper is
+gone. Route tests: 173 in `billing/tests/api/` (32 portal + 7 wallet, 84 module page, 12 notice,
+38 onboarding; Flask's `test_onboarding_plans` judged not applicable). Suite: 1122 + 2 skipped on
+SQLite (00:09), 1124 on Postgres (00:14), `ruff` clean; `pytest e2e` live against `runserver` on the dev database as the C1
+replay payer: 8 passed + 3 dark-only skipped (00:05), the page model / notice / portal /
+invoices read back with real data (ISO dates on the cards, `created_at` on the portal rows).
+**Done when** met: a behaviour test per path replays Flask's request and response;
+`/api/openapi.json` is committed as `docs/openapi.json`. Next: step 4 (minty-web's remaining
+screens against the live API), step 5 (the Flask cut).
 
 ### 4. `minty-web` (:3002) — shell scaffolded 2026-09-21
 
@@ -1324,6 +1379,94 @@ transfer-request cards, the four non-list states, billing-frontend's header on t
 `/api/me/subscriptions` row. Still in step 4: the row's expanded state (the M-frames), the
 confirm flows (section 06), change-subscriber / incoming transfers (07), billing and invoices,
 the payment-method screen (08-K), and the live-API journeys once step 3 fills the routers.
+
+*Status 2026-09-22 — step 4c begun: the live-API journeys.* `features/subscription/e2e/
+04_live_api.spec.ts` runs the two built pages over step 3's routers with no stubs: the module
+page renders the seeded shop's real cards; _Start Free Trial_ opens a card-free trial through
+the API and the card comes back counting the term down (the API reads `trialing`, Flask's gate
+- `entity_function_map` - is on); the Manage Subscriptions list shows the company. The seed
+(`Minty/scripts/e2e_seed.py`) gained a second company for it, `E2E Subscription Shop`, reset to
+"never held anything" on every run (a module already on is not trial-eligible, so the Petty
+Cash shop - both modules on for the other suites - could not be the target). Two things the
+first live run found and fixed: the fixtures' `TODAY` was pinned to 2026-09-21, so every
+"N days remaining" in the `page.route` specs drifted by one at midnight (now the real UTC day);
+and the re-export guard read files raw, so a `core.autocrlf=true` checkout (CRLF) failed it.
+minty-web after: typecheck, lint, Vitest 114 (00:10), Playwright 20 passed + 3 dark-only skipped
+(00:33) live against `next dev` :3002 + `runserver` :8004 on the dev database.
+
+*Same day — the open row (the design's M-frames), from Figma section 05·A "Subscription Summary —
+all 36 module-status combinations" (`1521:1292`, the user's link; 36 M-frames + 12 N-frames).*
+A list row's chevron now opens the company in place — the two module cards with a checkbox or
+Start Free Trial under each, the summary panel and the footer — and the module page's *Manage
+Subscription* (`?entity=`) lands on that company open. `minty-web/docs/features/subscriptions.md`
+§11 has the rules as read off the frames and the section's description: a card is ticked when
+the module is ACTIVE or its trial is confirmed and only a ticked card is drawn live; billable =
+ACTIVE or CANCELLATION_PENDING, the bundle only when both are, a trial at HK$0; a pending
+cancellation or a converting trial splits the panel into Current (until the period end, the
+singles' sum struck where the bundle applies) and Future (from the day after); the nominated
+card shows as "Visa 4121 / Change". Built as `hooks/useEntitySummary` (the page model with
+`X-Entity-Id` + `/api/me/billing/entity-payment-method`, fetched on open), the pure
+`lib/subscriptionSummary` and `components/SubscriptionSummaryRow`. Decisions taken: the
+bundle's name is the API's (`Super Minty`); the card brand is a datum (`brand_label`), not the
+design's Visa artwork; the renewal sentence appears only when something bills. Verified:
+typecheck, lint, Vitest 146 (00:11), Playwright 21 passed + 3 dark-only skipped (00:37) live,
+the seeded shop's row opening on its real trial.
+
+*Same day — every tick and untick, from Figma section 05·B "Subscription to be updated as"
+(`1529:1424`, the user's link; 108 frames, one per box pressed on a 05·A row).* A press is now a
+change pending on the row, not a request: the box flips in place, the card takes or loses the
+live fill, a chip names the change (Adding / Restoring / Removing; none for a confirmed trial
+unticked), the panel splits into Current and Future at once, and a *Confirm Subscription Change*
+button appears — a second press undoes it, and closing the row or reloading drops every pending
+tick (`useEntitySummary` keeps them keyed to the answer they change; `buildSummaryView` takes
+them as its fifth argument). Nothing is posted from the row: the confirm button is the seam to
+the change's flow, `moduleRoutes(id).{confirm,activate,cancel,resume,reactivate}(code)` for the
+first module changed, until section 06's modals are built. Two readings off the frames (§11 of
+the feature doc): a module with no period running changes today, so its row names no date (the
+frames repeat one template date on all 108); and no Future card is drawn when nothing bills now
+and nothing will. One safety net restored on the way: the view is built in render now, so an
+answer that is not a page model is caught there and the row shows its retry rather than the
+screen coming down. Verified: typecheck, lint, Vitest 158 (00:11), Playwright 21 passed + 3
+dark-only skipped (00:38) live, build (00:24); V44, V31 and NX21a screenshot-matched to their
+frames.
+
+*Same day — the change applied, and where it lands, from Figma section 05·C "After Confirm — the
+result screens" (`1626:2031`, the user's link; six base screens + 108 generated on the U/V/W
+grid).* *Confirm Subscription Change* now applies the change - `api/moduleChanges.ts`, one API
+action per module from the card's state (cancel / renew / authorize-billing / retry-payment /
+restart-billing, the calls that cannot leave the app first, Stripe's card form when there is no
+card or the saved one is refused) - reads the page model again and lands on the result
+(`lib/changeResult.ts`, `components/ChangeResultView.tsx`, §12 of the feature doc): the
+cancellation pages ("Thank you for being part of Minty" when nothing is left billing, "<Module>
+Cancellation Confirmed" when the other paid module keeps running - winding down counts), or the
+row ("Subscription updated" for a removal with an addition, "Congratulations!" for what was
+added, confirmed, restored or started, with the generated frames' lines and a line of money that
+is the panel's own forecast in a sentence). The list's Start Trial lands on that row too. The
+lines are read off the difference between the two page models, not the ticks asked for: consent
+is per company, so confirming one trial confirms both, and the row says so. Section 06's
+confirmation modals go between the button and the actions when their frames arrive. Readings
+taken (§12): the generated grid over the base frames where they differ (05·C-4 unused; "is
+active. Your card has been charged."; "Congratulations!" spelled right), the NX unticks landing
+on the cancellation pages. Verified: typecheck, lint, Vitest 184 (00:13), Playwright 22 passed +
+3 dark-only skipped (00:45) live, build (00:30); RU22, RU24, RV44 screenshot-matched to their
+frames.
+
+*Same day — the confirmation, from Figma section 06 "Confirm modals — every button that costs
+money asks first, and names the module" (`1410:1588`, the user's link; two template frames + 108
+generated on the same U/V/W grid).* *Confirm Subscription Change* now asks first: `lib/
+changeModal.ts` reduces the grid to seven shapes read off the ticks (Subscription Changes for a
+removal beside an addition; Cancel Subscription? when nothing is left ticked, in red; Remove
+<Module>? when the other stays, in orange; You have unlocked <bundle> when both end up ticked;
+Activate / Continue / Reactivating for one addition), `components/ConfirmDialog.tsx` is the
+shell the 04-G dialog already had (`StartTrialDialog` now uses it - the design's B-02) and
+`ChangeDialog.tsx` draws them with Minty in the mood the change calls for (the surprised and sad
+cats cropped from the design's assets). Confirmed there, the change is applied and lands on its
+05·C result; Go back keeps the ticks. Readings (§13 of the feature doc): "another 30 days" is
+the design's fixed figure and the prorated rule's floor, so `cancel-preview` is not called for
+the modal; the NX unticks (undrawn in 06) ask with the removal modals. Verified: typecheck, lint,
+Vitest 201 (00:22), Playwright 22 passed + 3 dark-only skipped (00:47) live, build (00:20); the
+Remove and Subscription Changes modals screenshot-matched to 06-A and PU45. Next: the K-frames
+(the open row's ⋮), then 07, 08-K, billing and invoices - links needed.
 
 ### 5. The Flask cut, link-outs and repoints
 
@@ -1503,7 +1646,15 @@ Cutover day repeats steps 3–8 with the window's backup.
    reads the schema name from `MINTY_DB_SCHEMA` (default `pettycashv3` — `blueprints/shared/schema.py`,
    `config.settings.DB_SCHEMA` in the three Django services), so no config changes anywhere:
    leave the variable unset. Drop `pettycashv2.alembic_version`; delete `bills` rows from
-   `django_migrations` (`minty-billing-api` writes none).
+   `django_migrations` (`minty-billing-api` writes none). **Then the module copy** (added
+   2026-09-22): the pipeline copies `entity_function` from the old host, whose descriptions are
+   the 2026-06 seed's ("Petty cash module - track and reimburse..."); the module settings page
+   (minty-web, Figma 03-A) shows the catalogue's `description` verbatim and its design copy is
+   different, with a real newline in Petty Cash's. Run on `pettycashv3` (already applied to the
+   local `postgres` on 2026-09-22; the `updated_at` trigger stamps the rows):
+   `UPDATE pettycashv3.entity_function SET description = E'Track sales, expenses,\ncash counts and daily closing.' WHERE function_code = 'PETTY_CASH';`
+   `UPDATE pettycashv3.entity_function SET description = 'Track supplier invoices, approvals and payments' WHERE function_code = 'PAYMENT_REQUEST';`
+   (2 rows each; `cutover_checks.py` does not cover it — check the page in step 7.)
 6. Deploy the phase-C builds of Minty, `billing-backend`, `onboarding-backend` (Render, from the
    branches green on Postgres since phase C), **`minty-billing-api`**, and the frontends
    (`billing-frontend`, `onboarding`, **`minty-web`**) — seven apps, all with the switch off
@@ -1591,7 +1742,11 @@ Cutover day repeats steps 3–8 with the window's backup.
 10. **Token claims**: the module page reached from the portal (an unscoped token) must send
     `X-Entity-Id`; `SelfBearerAuth` for `/api/me/*`.
 11. **Timezones**: `clock.now()` is the database's `now()`; `USE_TZ = True` yields aware datetimes
-    against `timestamptz` — the port must never reintroduce a naive datetime.
+    against `timestamptz` — the port must never reintroduce a naive datetime. Display is Part 3's
+    rule 11 (the entity's zone on the screen, the viewer's on hover — section "Time" there, added
+    2026-09-22); until then the Django API pre-formats its date strings in **UTC**
+    (`billing/services/display.py`, `cards.py:258,285`), which is why a trial ending after
+    00:00 HKT reads one day early on the module page — known, accepted, fixed at Part 3 step 4.
 12. **The finalize split**: a failed trial start fails `finalize` — never a silent
     `trial_end: null` while live; both halves idempotent so the wizard's *Try again* is safe; the
     Flask copy keeps starting no trial while dark.
@@ -1695,6 +1850,8 @@ Rules that follow from it:
 | Renames | **Map now, rename at each service's cutover** | Renaming touches Render, Vercel, `docker/stack` defaults and CLAUDE.md for no gain until that repo is being redeployed anyway. GitHub redirects old URLs. |
 | Xero tokens | **`minty-xero-api` is the only refresher**, extracted early | Both Django services already call Flask over one env var (`XERO_TOKEN_SERVICE_URL` today, `XERO_API_URL` under rule 10); repointing it is the whole cutover for consumers. |
 | Links between services (added 2026-09-21) | **One shape** — a service id, `<ID>_URL` / `NEXT_PUBLIC_<ID>_URL` per side, one links module per repo, entry points declared in the table below, localhost the only default in code; **canonical names, hard cut** per repo at its own deploy step; the master copy is this document, not a shared file (until the shared packages lift the modules) | The inventory of 2026-09-21 found seven spellings for Minty's origin, five copies of one localhost default in Minty alone, ~20 remote paths spelled by their callers, an apex production default in billing-frontend that 307s on a CORS preflight, and three URL variables nobody reads. Rule 7 covered API bases only; without a shape the shared packages would lift the mess as-is. |
+| Time (added 2026-09-22) | **UTC on the server, the entity's zone on the screen, the viewer's zone on hover** (section "Time" below, rule 11). Storage and logic stay UTC; the entity's zone enters server code only for prose written for a person (emails, Stripe line descriptions) and for a calendar day of that business (the report's "today"). **The API never formats a date**: ISO instants with offset, plus a resolved `timezone` on every entity-bearing payload; the pre-formatted UTC strings are dropped. Every date a `-web` renders is a `<time>` in the entity's zone whose hover title is the same instant in the browser's zone. The zone comes from **the onboarding wizard (step 1 select, pre-selected to the browser's zone) and the entity settings page**; `NULL` falls back to `Asia/Hong_Kong`, so every existing entity behaves as today. No schema change (`entities.timezone VARCHAR(30)` fits every canonical IANA name). Code lands at Part 3 steps 2/4/5/6 in the six repos, none of it earlier. Rejected: reading Xero's `Organisation.Timezone` (Windows ids, a mapping table to maintain); a country→zone default table; keeping the formatted strings and computing them in the entity's zone (the hover time needs the instant on every field anyway). | On 2026-09-22 the inventory found `Asia/Hong_Kong` hard-coded in four Flask modules, onboarding-backend's `DISPLAY_TIMEZONE`, three billing-backend sites and billing-frontend's `BILLING_TIME_ZONE`; two portal components silently rendering in the browser's zone; the Django API formatting `"05 Oct 2026"` / `"October 05, 2026"` / `access_end_date` on the UTC day, so a trial ending at 02:00 HKT shows the previous date; and `entities.timezone` NULL in all 82 production rows with no writer and no reader. Six repos and the shared packages were about to inherit one constant and three conventions. |
+| "Partially published" badge (decided 2026-09-22) | **Comes back at step 6, as a derived state, not a stored one.** `publish_status` keeps its three members (`completed` / `failed` / `unpublished`); the `publish_failed` history row gains `succeeded` / `failed` counts, and `minty-pettycash-api` serves `partial: true` when the latest failed publish landed at least one transaction. `minty-pettycash-web` renders that as **Partially published** (with the reasons on hover) and `failed` + `succeeded = 0` as **Publish failed**. Adding `partially_published` to the enum is the alternative, and is NOT taken unless the owner says so (`01_schema_rebased.sql` item 18 dropped it on purpose). | Part 1 folded the 3 production `partially_published` rows into `failed` and Flask now says "Publish failed" for every failed publish; the only "Partially published" left is the transient overlay, which decides partial by "reasons present", so a total failure with reasons is announced as partial too. Users lost the distinction that mattered: *some* of the day is already in Xero and a republish is a selective retry, not a re-send. A derived flag restores it without a fourth status and without re-opening the enum cut. |
 
 ## Target tree (GitHub org `minty-oliveandvine`)
 
@@ -2172,6 +2329,190 @@ same one-variable cutover, canonical name); `minty-infra`'s Terraform outputs fe
 `scripts/subscription/preview_billing_emails.py` `app.dailyminty.com` literal goes with Part 2
 step 5's deletions.
 
+## Time — UTC on the server, the entity's zone on the screen (rule 11, added 2026-09-22)
+
+**Why.** Every stamp in `pettycashv3` is a `timestamptz` and every service reasons in UTC — that
+part is right and stays. What is wrong is everything after: the zone a person *sees* is a constant,
+and each repo chose it differently. `Asia/Hong_Kong` is spelled in four Flask modules
+(`models/db.py:9` — the canonical `tz` that `utils/entity.py`, the report routes, the entity list
+and the invitation TTLs import; `services/app_runtime/scheduler.py:49`;
+`services/auth/token_service.py:42-45`; `blueprints/xero/services/integration.py:153`), in
+onboarding-backend's `DISPLAY_TIMEZONE` (`config/settings.py:123`, the `server-time` cap on the
+opening-balance date), in three billing-backend sites (`bills/services/bill_reference_generator.py:15`
+for the MBI reference's `DDMMYY`, `xero_publish_service.py:370-382` for Xero lock dates,
+`core/api_session.py:277-282` writing a naive HK stamp into a column that has been `timestamptz`
+since Part 1) and in billing-frontend's `BILLING_TIME_ZONE` (`lib/dateDisplayFormat.ts:50`). Two
+billing-frontend components render in whatever zone the browser is in
+(`components/payment-request/ActivityHistoryAccordion.tsx:63-64`, `lib/payerPortalFormat.ts:24-34`).
+`minty-billing-api` formats dates *on the server, on the UTC day*: `display.py`'s three helpers,
+`cards.py:258,285` (`"October 05, 2026"`), `portal.py:111-118` (`"05 Oct 2026"` + an ISO twin),
+`modules.py:157-176` (`access_end_date: "2026-10-05"`, the only day-only value on the wire),
+`notices.py:149,193`, `panel.py:427,486`, `payment_methods.py:257`; raw datetimes left in a dict go
+out as RFC 822 (`_json.py:33-39`, `Tue, 21 Sep 2026 12:00:00 GMT`). Since `trial_end` is
+`now + N days` — an arbitrary second, not a midnight (`checkout.py:970`) — the calendar day
+genuinely depends on the zone, and a trial ending at 02:00 HKT shows the previous date.
+`minty-web` counts "N days remaining" by slicing the ISO prefix, i.e. on UTC days
+(`features/subscription/lib/moduleState.ts:71-92`, pinned by `moduleState.test.ts:106-116`).
+And the one place a per-entity zone could live, `entities.timezone VARCHAR(30)`, is NULL in all 82
+production rows: no wizard step collects it, nothing reads Xero's `Organisation.Timezone`,
+`country_info` carries no zone, and no code reads the column
+(`docs/schema/archive/pettycash_test_v2_schema.sql:1439-1442` recorded it as dead on
+2026-09-03).
+
+**Decision** (2026-09-22): three layers, one rule each.
+
+| Layer | Rule |
+|---|---|
+| Server | **UTC.** Storage, `clock.now()`, every comparison and every period/anchor/grace/dunning computation. The entity's zone is used in exactly two kinds of server code: *prose written for a person* (emails, Stripe invoice line descriptions and memos, PDFs) and *a calendar day of that business* (the report's "today", the no-future-date rule, the onboarding opening-balance cap). Nothing else. |
+| Wire | **ISO instants + `timezone`.** The API never formats a date. Every date/time field is an ISO-8601 instant with its offset; every payload that describes an entity carries `timezone`, resolved (the stored value or the fallback — never `null`). |
+| Screen | **The entity's zone, with the viewer's on hover.** Every rendered date is a `<time>` in the entity's zone; its `title` is the same instant in the browser's zone with that zone's name. |
+
+The zone is **collected in the onboarding wizard and editable in entity settings**; `NULL` means
+`Asia/Hong_Kong`, so every existing entity behaves exactly as today until someone sets it.
+Rejected, and why: reading Xero's `Organisation.Timezone` at connect (Windows ids such as
+`CHINASTANDARDTIME` — a mapping table to maintain, and it is unset for the entities that never
+connect); a country→default-zone table (a data file for one pre-selection the browser already
+knows); keeping the formatted strings and computing them in the entity's zone (the hover time
+needs the instant on every field regardless, so the strings would be a second copy of every date).
+"Backend keeps UTC" was the user's rule; that emails and Stripe lines format in the entity's zone
+is the plan's recommendation — say so if they should stay UTC-dated.
+
+### Server
+
+- Today's Part 2 rule 11 stands verbatim: `USE_TZ = True`, `TIME_ZONE = "UTC"`, aware datetimes
+  against `timestamptz`, a naive datetime is a bug. Subscription arithmetic (`billing.py`
+  anchor clamping, `access.py` grace, `dunning.py` offsets, the trial-ending-soon window that
+  tiles on UTC midnight — `checkout.py:1160-1199`) is **not** re-tiled on the entity's day.
+- **One helper, one constant.** `minty-shared-py` (`minty_shared/time.py`, born at step 2)
+  exports `DEFAULT_ENTITY_TIMEZONE = "Asia/Hong_Kong"`, `entity_zone(entity) -> ZoneInfo`
+  (the column or the default), `today_for(entity) -> date` (`clock.now().astimezone(zone).date()`),
+  `format_for_person(dt, entity, style)` (the only `strftime` of a date in any `-api`) and
+  `validate_timezone(name)` (`ZoneInfo(name)`, length ≤ 30). Until step 2 exists nothing is
+  written — the code lands with the shared package, not before it.
+- **Prose** goes through `format_for_person`: `notify._day` / `_days_until`
+  (`billing/services/notify.py:122-129,360-375`), `billing.line_description` and the memos
+  (`billing.py:372-416`), billing-backend's bill reference `DDMMYY`/`HHMMSS`.
+- **A business day** goes through `today_for`: onboarding-backend's `server-time`
+  (`onboarding/api_reference.py:56-62`) and `opening_balance.py:109` (`DISPLAY_TIMEZONE` is
+  deleted); at step 6 `minty-pettycash-api`'s "today" and the no-future-date rule
+  (`report/services/shared.py:196,284`, `report/routes/opening.py:176,703,746,947`,
+  `entity/routes/list.py:409`, `entity/routes/create.py:307` in Flask). Flask itself keeps its
+  `tz` until it is retired at step 7.
+- **The scheduler cron** keeps `SUBSCRIPTION_SCHEDULER_TZ` (an operations choice, not a data
+  one) until step 1 moves the pass to a Render Cron Job with a UTC expression.
+
+### Wire
+
+- `minty-billing-api` gets **one JSON encoder** (`_json.py`): datetimes → `isoformat()` with
+  offset; `FlaskJSONEncoder` / `http_date` and the RFC 822 shape go. Removed from payloads:
+  `date`, `formatted_period_end`, `period_end_short`, `period_end_long`, `access_end_date`,
+  `access_end_long`, `lapsed_long`, `next_payment_date` (string), panel row `date`, notice
+  `deadline` (string), `added`, `anchor` / `paid_through` (strings), resume-preview
+  `trial_end` / `covers_from` / `covers_to` and cancel `access_until` (strings), invoice
+  `period_start` / `period_end` (strings). The `*_iso` twins become the field under the plain
+  name (`date_iso` → `date`, `added_iso` → `added`, …); fields that were only strings gain the
+  instant. `docs/openapi.json` and its drift test move with it; the field list above is the
+  diff to expect.
+- `timezone` is added to: the module page's `entity` (`GET /api/entities/{id}/modules`), every
+  `entities[]` row of the portal (`/api/me/subscriptions`, `/api/me/invoices`, the transfer
+  candidates), the subscription notice (`/api/entities/{id}/subscription-notice`) and the
+  onboarding trial payload (`/api/onboarding/trials/start`); billing-backend's bill and
+  payment-request payloads (the entity they belong to); onboarding-backend's entity read. It is
+  **not** added to the handoff envelope or the `minty_entity_*` cookies: the API that serves a
+  screen is the source of the zone that screen renders in.
+- **No day-only value exists in the subscription API** — the tables have no `DateField`, so every
+  "date" is an instant and its day is the reader's to compute. billing-backend's real
+  `DateField`s (`invoice_date`, `due_date`, `payment_date`, `request_invoice_date`,
+  `request_due_date`) stay `YYYY-MM-DD` and are rendered as written, in no zone.
+
+### Client
+
+- **One module, one component.** `minty-shared-ts` (`lib/time.ts`, lifted from `minty-web/lib/time.ts`
+  at step 4) exports `browserZone()` (`Intl.DateTimeFormat().resolvedOptions().timeZone`),
+  `dayIn(iso, tz)` → `YYYY-MM-DD` (`Intl.DateTimeFormat("en-CA", { timeZone })`),
+  `formatIn(iso, tz, style)` for the `short` (`5 Oct`), `day` (`5 Oct 2026`) and `long`
+  (`5 Oct 2026, 09:00`) styles the screens use today, and `daysBetween(fromIso, toIso, tz)` (the
+  difference of the two `dayIn` days, floored at 0). No date library: `Intl` in the browser and
+  Node 22's full ICU cover it.
+- `<ZonedTime iso tz style />` is the only way a date reaches the DOM:
+
+  ```html
+  <time dateTime="2026-10-04T18:00:00+00:00"
+        title="Your time: 4 Oct 2026, 11:00 (America/Los_Angeles)"
+        aria-label="5 Oct 2026, 02:00 Asia/Hong_Kong; your time 4 Oct 2026, 11:00 America/Los_Angeles">
+    5 Oct 2026
+  </time>
+  ```
+
+  The visible text is the entity's zone; the `title` is rendered from `browserZone()` at mount
+  (always present, also when the two zones coincide — the contract is uniform and testable);
+  `aria-label` carries both so a screen reader hears what a hover shows.
+- **Day counting** — "N days remaining", "Cancels 5 Oct", the trial badge — uses
+  `daysBetween(nowIso, period_end, tz)`; `moduleState.ts`'s `isoDay` / `utcMidnight` / `daysUntil`
+  and `portalRows.ts`'s `shortDate` (a regex over the server's UTC string) are deleted and their
+  tests rewritten against `dayIn`. `useModulePage.ts:191` and `useSubscriptionsList.ts:185` keep
+  injecting `today` for the fixtures, as an ISO instant.
+- **Guard test per `-web`** (`lib/time.guard.test.ts`, the `links.guard.test.ts` pattern): no
+  `toLocaleDateString` / `toLocaleString` / `toLocaleTimeString` / `Intl.DateTimeFormat` /
+  `timeZone:` outside `lib/time.ts`; no `<time` outside `ZonedTime`; no `Asia/Hong_Kong` literal
+  anywhere. Per `-api`: `tests/test_zz_time.py` — no `strftime` with a date directive, no
+  `ZoneInfo(` / `pytz` and no `Asia/Hong_Kong` outside `minty_shared.time`.
+- **Tests pin their zones.** Playwright `timezoneId: "America/Los_Angeles"` — a zone that is not
+  the fallback, so a green tooltip assertion proves the title is the browser's, not the entity's;
+  vitest `process.env.TZ = "UTC"` at the top of `vitest.config.ts`; fixtures keep building `TODAY`
+  in UTC (the Part 2 drift trap) and assert through `dayIn(…, tz)`.
+
+### The column and its writers
+
+- `entities.timezone VARCHAR(30)` is the store, unchanged. The value is an IANA name;
+  `validate_timezone` rejects anything `ZoneInfo` does not know and anything over 30 characters.
+  Every canonical name fits — `America/Argentina/Buenos_Aires` and `America/North_Dakota/New_Salem`
+  are exactly 30 — and the only longer names are backward-compatibility links
+  (`America/Argentina/ComodRivadavia`, 32) that `Intl.supportedValuesOf("timeZone")` never
+  offers. **The column is not widened**; if a future tzdata release breaks the bound, that is a
+  schema decision for `minty-db`, asked, not assumed.
+- **Writer 1 — the wizard** (step 4): onboarding step 1 gains a *Timezone* select beside country and
+  currency, its options `Intl.supportedValuesOf("timeZone")`, pre-selected to `browserZone()`
+  (the person onboarding is usually at the business); `create_entity_for_user(user_id,
+  entity_name, country_code, currency_id, timezone)` (`onboarding-backend/onboarding/services/entity_create.py:209-252`)
+  writes it. The wizard's `e2e` gets the field; the dedicated E2E entity is re-seeded with a zone
+  that is not `Asia/Hong_Kong`.
+- **Writer 2 — entity settings** (step 5): `minty-accounts-api` exposes `timezone` on the entity
+  read and `PATCH`; the `minty-web` settings page (the hub's port of `/entity/settings/entity/<id>`)
+  shows the select with the stored value, or the fallback with a "not set — defaults to
+  Asia/Hong_Kong" hint.
+- Existing rows stay NULL; nothing is backfilled. The 82 production entities are Hong Kong
+  businesses today and the fallback says so.
+
+### Traps
+
+- **Xero's `/Date(ms)/` date-only values are UTC-midnight instants.** Read them as UTC dates
+  (`.astimezone(UTC).date()`), never in the entity's zone: Hong Kong only worked because +8 lands
+  on the same day, and any zone west of UTC would show the day before. Applies to lock dates
+  (`integration.py:153-165`, `xero_publish_service.py:370-382`) and to any Xero date the
+  petty-cash port reads.
+- **`core/api_session.py:277-282`** (billing-backend) still writes a naive Hong Kong wall time
+  "to match Minty" — a convention Part 1 ended. It writes aware UTC at step 4.
+- **The one-day-early card** on the module page (Part 2 risk 11) is the symptom to re-test after
+  step 4: a trial ending at 02:00 HKT must read the HKT date on the screen and the previous date
+  in the tooltip when the browser is west of UTC.
+- **`Intl.supportedValuesOf`** is a browser call (Node has it too); it is never sent to the server
+  as a list — the server validates with `ZoneInfo`, so the two catalogues can differ by a release
+  without breaking a save (an unknown name is a 400 with the message naming the zone).
+- **The RFC 822 shape had one consumer**: billing-frontend's `payerPortalFormat.day()` parses
+  `since` / `expires_at` with `new Date(...)`. It moves to `<ZonedTime>` at step 4 with the rest
+  of that repo, in the same step the API stops emitting it.
+
+### Where it lands
+
+| Step | Repos | What |
+|---|---|---|
+| 2 | `minty-shared-py` | `minty_shared/time.py` (the constant, `entity_zone`, `today_for`, `format_for_person`, `validate_timezone`) and `test_zz_time.py`'s shape; `minty-db` unchanged |
+| 4 | `minty-shared-ts`, `minty-web`, `minty-billing-api`, `onboarding`, `onboarding-backend`, billing-backend → `minty-payments-api`, billing-frontend → `minty-payments-web` | `lib/time.ts` + `<ZonedTime>` + the guard; the API's one encoder, the field list above, `timezone` on every entity payload, `openapi.json`; the wizard select + `create_entity_for_user`; `server-time` via `today_for`; payments payloads carry `timezone`, the three HK sites and the two browser-zone leaks replaced; every `-web`'s e2e pins `timezoneId` |
+| 5 | `minty-accounts-api`, `minty-web` | `timezone` on the entity read/`PATCH`; the settings select |
+| 6 | `minty-pettycash-api`, `minty-pettycash-web` | the report's "today" and the no-future-date rule via `today_for`; report dates rendered through `<ZonedTime>` (`transaction_date` is a `DATE` — rendered as written) |
+| 7 | `minty-legacy` | the four `Asia/Hong_Kong` copies go with Flask |
+
 ## End-to-end testing — the gate for every cutover
 
 Unit tests exist in the Python repos and (since the onboarding cleanse) in `onboarding`; nothing
@@ -2367,6 +2708,7 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 8. `MAINTENANCE_MODE` is honoured by every `-api` and every `-web` (from the shared packages, step 2); a cutover window is held by that switch, never by improvisation.
 9. Only `minty-billing-api` holds `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` (since Part 2); Flask has none, and a guard test in Minty keeps it that way.
 10. **Links between services have one shape** (section above, added 2026-09-21): every other service is a service id with one origin variable per side — `<ID>_URL` on servers, `NEXT_PUBLIC_<ID>_URL` in browsers, `<ID>_INTERNAL_URL` only for server-to-server inside `docker/stack`; one links module per repo (`blueprints/shared/links.py`, `core/links.py`, `lib/links.ts`) is the only reader of those variables and the only place another service's path is spelled; the paths it may spell are the entry-point table in this plan; `localhost:<port>` is the only default in code and no hosted hostname ever is; the three landings take the one handoff envelope. A guard test per repo (`test_zz_links.py` / `links.guard.test.ts`) fails on any other origin read, localhost literal or hosted hostname. Renames are hard cuts at the repo's own deploy step — no alias is read.
+11. **Time has three layers** (section "Time" above, added 2026-09-22): the server stores and reasons in **UTC** (`timestamptz`, `USE_TZ = True`, `clock.now()` aware, a naive datetime is a bug) and uses the entity's zone only for prose written for a person and for a calendar day of that business, through `minty_shared.time` (`entity_zone`, `today_for`, `format_for_person`, the one `DEFAULT_ENTITY_TIMEZONE = "Asia/Hong_Kong"`); the wire carries **ISO instants with offset and a resolved `timezone`** on every entity-bearing payload and never a formatted date; every `-web` renders every date through `<ZonedTime>` from `minty-shared-ts`'s `lib/time.ts` — visible text in the **entity's zone**, the hover `title` the same instant in the **browser's zone**. The zone is written by the onboarding wizard and the entity settings page into `entities.timezone`; `NULL` is Hong Kong. A guard test per repo (`test_zz_time.py` / `lib/time.guard.test.ts`) fails on any other `strftime`, `ZoneInfo`, `toLocale*`, `Intl.DateTimeFormat` or `Asia/Hong_Kong` literal.
 
 ## Sequencing
 
@@ -2377,9 +2719,9 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 | 1 | Housekeeping + CI + infra | `.github`, `minty-infra` | every trunk protected with a green CI run; `terraform plan` no-op; the subscription pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`) by Terraform |
 | 2 | **`minty-db` adopts Part 1's schema** + shared-py + e2e scaffold (requires Part 2 shipped) | `minty-db`, `minty-shared-py`, `minty-e2e` | `--fake-initial` on every environment; all three Django services on `minty_db.models`; cold start from empty works; first two E2E journeys green |
 | 3 | `minty-xero-api` | `minty-xero-api` | `XERO_API_URL` repointed; Xero E2E journey + `onboarding/e2e/xero.spec.ts` green |
-| 4 | `minty-web` grows login / dashboard / profile / settings + `minty-shared-ts` + renames | `minty-shared-ts` | both frontends build on `@minty/shared`; the payments pair renamed; every repo on the canonical `*_URL` names with its rule-10 guard green; app-local E2E green |
+| 4 | `minty-web` grows login / dashboard / profile / settings + `minty-shared-ts` + renames | `minty-shared-ts` | both frontends build on `@minty/shared`; the payments pair renamed; every repo on the canonical `*_URL` names with its rule-10 guard green; every date on every `-web` is a `<ZonedTime>` and the APIs emit no formatted date (rule 11 guards green); app-local E2E green |
 | 5 | `minty-accounts-api` (single JWT minter) | `minty-accounts-api` | every E2E journey green from a cold-started DB |
-| 6 | Petty cash API + web | `minty-pettycash-api`, `minty-pettycash-web` | Xero → report → publish journey green |
+| 6 | Petty cash API + web | `minty-pettycash-api`, `minty-pettycash-web` | Xero → report → publish journey green, including its partial-publish leg (one line rejected by Xero → badge reads **Partially published**, republish retries only that line) |
 | 7 | Retire Flask | — | nothing routes to :5001 |
 
 Steps 3–6 are independent cutovers, each with its own plan file. Order is by blast radius and
@@ -2406,16 +2748,20 @@ orders anything here.
 
 ### The steps in detail
 
-1. **Archive the duplicates** (`OliveAndVineHK` ×4, `Minty-old`) and **stand up CI + infra**: the org `.github` repo with `python-api.yml` and `next-web.yml`, called from the five live repos; `minty-infra` with the GitHub resources (branch protection on each trunk, environments, org-level `SECRET_KEY`); the three dead workflows deleted; production secrets rotated through Terraform; the subscription daily pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`, Part 2's decision deferred to here). Zero product-code risk, and every later step is gated by it.
+1. **Archive the duplicates** (`OliveAndVineHK` ×4, `Minty-old`) and **stand up CI + infra**: the org `.github` repo with `python-api.yml` and `next-web.yml`, called from the five live repos; `minty-infra` with the GitHub resources (branch protection on each trunk, environments, org-level `SECRET_KEY`); the three dead workflows deleted; production secrets rotated through Terraform; the subscription daily pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`, Part 2's decision deferred to here; the cron expression is UTC — `SUBSCRIPTION_SCHEDULER_TZ` retires with the timer). Zero product-code risk, and every later step is gated by it.
 2. **Foundations, before any new service** — the biggest step, and the one that removes the most risk from every later one:
    - `minty-db` adopts the schema **Part 1 already put in production**: `0001_initial` = `01_schema_rebased.sql` via `SeparateDatabaseAndState`, `migrate --fake-initial` on every environment, all three Django services (billing-backend, onboarding-backend, `minty-billing-api`) import `minty_db.models`, `docker/stack` cold start switches to the `minty-db` init container. (The redesign, the application changes and the rehearsals are Part 1; the cutover is Part 2's last step — if Part 2 has not shipped, this step cannot start.)
-   - `minty-shared-py` from `minty-billing-api/core/` (the newest copy, including `core/links.py` — rule 10) reconciled with onboarding-backend's; all three Django services repoint at it and at `minty-db`; their `shared_models/` directories go.
+   - `minty-shared-py` from `minty-billing-api/core/` (the newest copy, including `core/links.py` — rule 10) reconciled with onboarding-backend's; all three Django services repoint at it and at `minty-db`; their `shared_models/` directories go. It is born with `minty_shared/time.py` (rule 11: the one `Asia/Hong_Kong` constant, `entity_zone`, `today_for`, `format_for_person`, `validate_timezone`) and the `test_zz_time.py` guard every `-api` copies.
    - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a `minty-e2e` journey (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
    - `minty-e2e`: Playwright scaffold + the stack CI workflow (cold-started from empty, since that now works) + the first two journeys (sign-up→finalize, connect Xero→publish report), which are the ones steps 3 and 5 will break if they go wrong. Contract-type generation into `minty-shared-ts` starts here too.
 3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_API_URL` (rule 10's name for today's `XERO_TOKEN_SERVICE_URL`; the `/api/internal/xero/token` entry moves to the `xero-api` row), then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: `minty-e2e` Xero journey + `onboarding/e2e/xero.spec.ts`.
-4. **`minty-shared-ts` + `minty-web` grows the hub** — `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test.
-5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. Gate: every `minty-e2e` journey, from a cold-started DB.
-6. **`minty-pettycash-api` + `minty-pettycash-web`** — largest (15.5k) but self-contained once entities live in accounts.
+4. **`minty-shared-ts` + `minty-web` grows the hub** — `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`.
+5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. The entity read and `PATCH` expose `timezone` (validated by `minty_shared.time`), and `minty-web`'s entity settings page gets the select — rule 11's second writer. Gate: every `minty-e2e` journey, from a cold-started DB.
+6. **`minty-pettycash-api` + `minty-pettycash-web`** — largest (15.5k) but self-contained once entities live in accounts. Carries the **"Partially published" badge** (decision above) — the one piece of report UI that is a change, not a port:
+   - *Today (Flask):* `publish.py:2525-2532` writes `publishing_status = 'failed'` whether 1 or all transactions failed, and only the log level differs; the `publish_failed` history row (`publish.py:2547-2553`) stores the reason items but not the counts. `report_history.html:513` and `report_draft_header_badge.html:25` render every `failed` as "Publish failed"; the overlay poller (`report_history.html:1567-1575`) shows "Partially published" when `failed` has any reasons — a total failure with reasons is announced as partial. The three `# show "Partially Published"` comments (`ending.py:763`, `ending.py:1755`, `shared.py:39`) describe a badge that no longer exists.
+   - *Port:* the publish orchestrator already returns `succeeded` / `failed` (`publish.py:1919`); write both into the `publish_failed` history row's JSON alongside the reason items. `minty-pettycash-api`'s report list and publish-status endpoints derive `partial = status is failed and latest publish_failed.succeeded > 0` (legacy rows without counts: `partial = False`, they read "Publish failed" as today). `minty-pettycash-web` renders the three states — **Published** / **Partially published** (reasons on hover, republish = selective retry, no duplicate warning) / **Publish failed** — on the report list, the report header badge and the overlay, from the same flag. No schema change; the enum stays at three members.
+   - *Gate:* the E2E publish journey gets a partial leg (the Xero fake rejects one expense line): badge and overlay say "Partially published", the republish posts only the rejected line, then the badge says "Published".
+   - *Rule 11 here:* the report's "today" and the no-future-date rule (Flask's `report/services/shared.py:196,284`, `report/routes/opening.py`, `entity/routes/list.py:409`, `entity/routes/create.py:307`) become `today_for(entity)`; Xero `/Date(ms)/` values are read as UTC dates; `transaction_date` stays a `DATE` rendered as written, every stamp goes through `<ZonedTime>`.
 7. **Retire Flask**: `minty-legacy` archived once its last template is served by a `-web` repo and its last route by an `-api`. Its SQLAlchemy models — including the 13 subscription models kept for Alembic through Part 2 — go with it; `minty_db.models` is already the only schema definition.
 
 Each of steps 3–6 gets its own plan file before it starts, in the shape of the onboarding one:
@@ -2436,6 +2782,8 @@ route groups, a cutover map on the frontend, models from `minty-db`, and "verifi
 - Flipping `MAINTENANCE_MODE` in `minty-infra` puts every app on its maintenance page and makes every API refuse writes, and `minty-e2e` has a journey that proves it.
 - Each service's README states the ten cross-cutting rules; `grep -rn XERO_CLIENT_SECRET` across the org hits only `minty-xero-api` (and `minty-legacy` until step 3); `grep -rn STRIPE_SECRET_KEY` hits only `minty-billing-api`.
 - Rule 10 holds across the org: every repo's links guard test is green; `grep -rn "onrender.com\|vercel.app\|oliveandvinehk.com\|dailyminty.com"` over application code (not docs, not `minty-infra`) hits nothing; `grep -rn "localhost:[0-9]"` outside links modules, tests and `.env.example` hits nothing; `grep -rn "FLASK_APP_URL\|FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MINTY_WEB_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|XERO_TOKEN_SERVICE_URL\|MINTY_PUBLIC_URL\|WAITLIST_URL"` hits nothing outside this document; every `*_URL` in every `.env.example` is a row of the service table.
+- Rule 11 holds across the org (from step 4): `grep -rn "Asia/Hong_Kong"` over application code hits only `minty_shared/time.py` and `minty-shared-ts/lib/time.ts` (and `minty-legacy` until step 7); every `-web`'s `time.guard.test.ts` and every `-api`'s `test_zz_time.py` is green; `grep -rn "http_date\|strftime" minty-billing-api/billing/api minty-billing-api/billing/services` hits nothing outside the shared helper's callers; `docs/openapi.json` carries no `"05 Oct 2026"`-shaped example.
+- Rule 11 is visible: with Playwright's `timezoneId: "America/Los_Angeles"` and an entity whose `timezone` is `Asia/Hong_Kong`, a trial ending at `2026-10-04T18:00:00Z` reads **5 Oct 2026** on the module page, "N days remaining" counts from the Hong Kong day, and the `<time>`'s `title` reads **4 Oct 2026, 11:00 (America/Los_Angeles)**; an entity created through the wizard in that browser has `entities.timezone = 'America/Los_Angeles'`, and the same trial reads **4 Oct 2026** for it.
 
 ---
 
