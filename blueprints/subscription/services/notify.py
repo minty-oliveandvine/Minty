@@ -214,7 +214,7 @@ def billing_sender() -> str | None:
 
 
 def settings_url(entity_id) -> str:
-    """The Module & Subscription page for an entity — where every action actually is."""
+    """The Module page for an entity — where every action actually is."""
     root = base_url()
     if not root or not entity_id:
         return root

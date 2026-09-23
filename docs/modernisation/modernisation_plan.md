@@ -1465,8 +1465,152 @@ cats cropped from the design's assets). Confirmed there, the change is applied a
 the design's fixed figure and the prorated rule's floor, so `cancel-preview` is not called for
 the modal; the NX unticks (undrawn in 06) ask with the removal modals. Verified: typecheck, lint,
 Vitest 201 (00:22), Playwright 22 passed + 3 dark-only skipped (00:47) live, build (00:20); the
-Remove and Subscription Changes modals screenshot-matched to 06-A and PU45. Next: the K-frames
-(the open row's ⋮), then 07, 08-K, billing and invoices - links needed.
+Remove and Subscription Changes modals screenshot-matched to 06-A and PU45.
+
+*Same day — the "Calculating…" beat, from Figma section 05·B-C "Calculating… — one per
+destination, auto-advances after 1.2s" (`2370:2739`, the user's link; 144 frames, one per M/U/V/W
+destination).* Where the panel goes, a card says "Calculating…" over Minty at a calculator:
+while the row's page model loads (the cards are drawn at once from what the list already knows
+of the company - `pageFromList` in `lib/subscriptionSummary.ts` - with the boxes waiting for the
+page model) and for 1.2 s after every tick (`CALCULATING_MS` in `useEntitySummary`; the cards
+flip and take their chip at once, the panel and its button follow). Verified: typecheck, lint,
+Vitest 206 (00:22), Playwright 22 passed + 3 dark-only skipped (00:41) live, build (00:17);
+CALC-V44 screenshot-matched.
+
+*Same day — the ⋮'s items, from Figma section 05·D "Other options — the row and panel kebab,
+one per entity" (`1795:3165`, the user's link; K44/K45/K66, the three shapes of 04·M opened
+from the panel).* The menu was already the list's `RowMenu`; the section pins what its items DO:
+"Cancel subscription … unticks every ACTIVE module … Reactivate … ticks every one of them …
+Each item lands on the confirm modal in 06 for exactly that change". So they are ticks now
+(`menuCodes` / `ticksFor` in `lib/changeModal.ts`): from a closed row the hook reads the page
+model, opens the row, sets the ticks (`useEntitySummary.setTicksFor`) and asks with the modal
+built from that page model (`changePrompt.page`); from the open row the loaded one serves; Go
+back leaves the ticks pending. The two route seams (`cancelAll` / `reactivateAll`) are gone;
+Request transfer stays one (07). Reading (§13): a module never started cannot be "ticked" by
+Reactivate - its trial is started from its button. Verified: typecheck, lint, Vitest 212
+(00:22), Playwright 22 passed + 3 dark-only skipped (00:46) live, build (00:12).
+
+*Same day — when it fails or gets interrupted, from Figma section 06·B (`1670:2116`, the user's
+link; four modals).* Two belong to this page and are built on the same shell
+(`components/InterruptedDialogs.tsx`): A-05 "Payment could not be processed" when the bank
+declines a charge (`api/moduleChanges.ts` now answers `declined` - `retry-payment`'s
+`status: "failed"`, or a 402 from `restart-billing` / `renew` that is not "Choose a card …" -
+with the nominated card named, the "we'll automatically retry" sentence only where the dunning
+retries really follow, Try again now re-applying the same change, Done leaving the ticks
+pending), and A-11 "Leave without saving?" when the open row has ticks pending and the person
+closes it, opens another company, goes back or takes another company's ⋮ (Discard changes drops
+the ticks and goes; Go Back stays; a reload gets the browser's own warning). A-07 / A-08 (a
+transfer declined or expired) are drawn on the Subscription & Billing dashboard, section 07's
+page, and wait for it. Verified: typecheck, lint, Vitest 217 (00:24), Playwright 23 passed + 3
+dark-only skipped (00:50) live, build (00:12); both modals screenshot-matched.
+
+*Same day — handing the subscription over, both sides, from Figma section 07 (`1410:1737`, the
+user's link).* The payer's side at `/subscription/subscriptions/subscriber?entity=` (the ⋮'s
+_Request transfer_ is a page now, not a seam): `hooks/useTransferSubscription` over
+`subscriber-options` - the responsibility sentence with the paid-through day, the admins as
+radios with the current payer tagged and each pick's OWN quote under it (07-A), the API's
+blockers in amber disabling the request, "Invite someone new" → `invite-admin`, _Request
+transfer_ → "Transfer requested" (07-B), and the request already waiting with _Withdraw
+request_ → the 07-K modal → the screen read again (07-C). The recipient's side at
+`/subscription/subscriptions/incoming[?transfer=]`: `hooks/useSubscriptionRequests` over
+`transfers` - "No requests waiting" (07-F), the request under review with the company's cards
+drawn from its own page model (`X-Entity-Id`), the summary panel, the card the charge goes to,
+what accepting costs today or "Nothing to pay today" with the trials that carry over, _Confirm
+Subscription Transfer_ / _Decline_ (07-D), the saved-card picker made the default on Confirm
+(07-E), and accepting landing on the list's row "Subscription Transfer Completed"
+(`?entity=&transferred=1`, 07-M). `lib/transfer.ts` holds both sides' rules (the transfer routes
+answer in MINOR units, unlike the cards; converted once). `components/TransferOutcomeDialog`
+has the four endings as kinds - withdrawn (07-K, triggered), accepted (07-L), declined (07-I /
+A-07), expired (A-08) - the last three with nothing to open them: the API tells the payer by
+email and has no read for an outgoing request's end; they wait for that read and the dashboard
+(08). Readings recorded in the feature doc §14: the cards are drawn, not ticked (the API moves a
+company's billing whole, so 07-D's "Choose Modules" hotspots are not honoured); a _Decline_ the
+design lacks; _Add New Card_ a seam to 08-K. Verified: typecheck, lint, Vitest 253 (00:27),
+Playwright 27 passed + 3 dark-only skipped (00:55) live (the new `05_transfers.spec.ts` walks
+both sides over stubbed routes), build (00:30 alongside the other checks); 07-A/C/D/E/F
+screenshot-matched.
+
+*Status 2026-09-23 — the billing area, from Figma section 08 (`1410:1806`, the user's link; 17
+frames).* Two pages and two screens over step 3's live routes. **08-A "Subscription & Billing"
+is the portal's landing now** (`/subscription`, where Flask's handoff already defaults): who the
+bill goes to and when, Active subscriptions and Trial ending counted in COMPANIES, the update
+lines (failures first, five printed and the rest counted) and *Manage Subscription* - so the
+Manage Subscriptions list moved to `/subscription/subscriptions` (the design's own flow: 08-A's
+button points at 04-A). **The billing page** (`/subscription/billing`, `hooks/useBillingPage`
+over `payment-methods` + `/api/me/subscriptions` + `/api/me/invoices`, a failure in either of the
+last two leaving its own block quiet rather than taking the page down): the next bill, amber with
+"Due Immediately" when a company is past due (08-K); the saved cards with the default pinned
+first and chipped, "Show more (6)" for the rest (08-J), the empty (08-H) and expired (08-I)
+states; "Update card" IS the menu (08-W/08-X) - promote, edit, remove - with the default card's
+removal refused by the page itself (08-R) and any other card asked about first; and the invoices
+already paid, each opening Stripe's hosted page. **The card screens**: 08-Y adds one on Stripe's
+own `PaymentElement` (SetupIntent → `confirmSetup` → `/payment-methods/confirm`, the number never
+touching this app), landing back with `?added=` for 08-N/08-S; 08-D edits only what Stripe allows
+- the name and the expiry. Readings recorded in the feature doc §15: "Bill to" is the PAYER (the
+billing company and its address live only on the onboarding surface, so 08-C is not built); no
+"Amount (estimated)" figure, because the API has no payer-level forecast and money is not a thing
+to guess; a card expires in a month, not on a day; the csv column is section 09's. Verified:
+typecheck (00:06), lint (00:10), Vitest 300 (00:18, and the RTL async timeout raised to 2.5s -
+the list screen's renders were flaking at the default second), Playwright 34 passed + 3 dark-only
+skipped (01:04) live with the new `06_billing.spec.ts`, build (00:13); 08-A/B/D/J/R
+screenshot-matched. Next: the invoices page (section 09) - link needed; an outgoing-transfer read
+in the API for the three outcome modals; `billing.next_amount` if the next bill's figure is
+wanted.
+
+*Noted 2026-09-23, nothing built — what the invoices page needs from the API, from Figma section
+09 (`1410:2042`, the user's link; four frames).* 09-B / 09-C are the billing page with an Invoice
+History block beneath it (both carry `▶ Back → 08-B`), so section 09 extends
+`/subscription/billing` rather than adding a page; 09-A is the invoice itself at 794×1123 — A4,
+a DailyMinty letterhead, a bill-to block, line items and the debit notice — and 09-D is the
+per-invoice CSV `Inv-<reference> Breakdown by Entity`. **The history table** is nearly served by
+`GET /api/me/invoices`: `reference` and `amount` already answer Inv# and Amount, but the design
+prints the PAID date ("26 June 2026", "Failed 26 Jul") and `portal.build_payer_invoices` returns
+only `date` / `date_iso` = `issued_at` — `SubscriptionInvoice.paid_at` exists on the model and is
+simply not exposed. **The row's _Retry payment_** wants a decision: `retry-payment` is a MODULE
+action (`/api/modules/{entity_id}/retry-payment`) while an invoice is payer-level and its lines
+can span several companies, so either the page resolves a failed invoice back to one entity
+(wrong the moment that invoice is multi-entity) or the API gains
+`POST /api/me/invoices/{id}/retry`. **The PDF is the largest item:** today there is only
+`hosted_invoice_url`, Stripe's hosted page, which does not render as this document — a branded
+render is new work, and it needs the billing company and address that 08-C also waits on.
+**The CSV** exposes nothing today, `build_payer_invoices` having collapsed the lines to their
+`entities` names and one aggregate `amount`: `entity_name`, `product_name` and `amount` are on
+`SubscriptionInvoiceLine` and need only serialising, but the sheet's *Monthly amount* and
+*Period start* / *Period end* are not stored per line — its row 4 (Petty Cash, monthly 280,
+26-Jul-26 → 5-Aug-26, charged 90.32) is a proration, so the full rate differs from what was
+charged and the line's period differs from the invoice's own. The rate is derivable from the
+catalogue (`plan.amount`) by mapping `product_name` back to a `function_code`, which is lossy;
+the period would have to come from `kind` (`full` / `remaining` / `unused` / `credit`) plus `at`,
+or from new columns. Line money is minor units, and the CSV prints two decimals where 09-A prints
+none.
+
+*Noted 2026-09-23, nothing built — what the state library needs from the API, from Figma section
+11 (`1498:1377`, the user's link; three parts).* Section 11 is a rules spec rather than screens —
+"the code should not hard-code those 36 screens ... it should draw one screen from the rules
+here" — which is already how `lib/subscriptionSummary.ts` works, so **C, the status → UI mapping,
+asks for nothing**: all six statuses are on the page model, and *Super Minty is not a status* (the
+name the panel applies the moment both modules are billable, ACTIVE or CANCELLATION_PENDING, and
+not while one side is still on TRIAL) is the rule already implemented. **A, the seven summary
+panels,** is served by `panel.py` — the state, the footer sentence, the trial conversions and the
+totals — and its card line by `/api/me/billing/entity-payment-method`, with one gap: 03's "Saving
+HK$160 a month". `cards.get_module_plan_catalog()` holds each module's standalone price beside
+`bundle_amount` ("The bundle IS the discount") but sits on no route in this API — it was written
+for the onboarding wizard. Better computed into the panel than exposed raw, so the frontend never
+re-derives money. **B, the eight banners, is the work.** The notice feed emits five kinds —
+`past_due`, `needs_card`, `needs_consent`, `pending_cancel`, `trial_ending` — and already carries
+`severity` (`critical` / `warning` / `info`), so the frames' `!` versus `i` needs nothing new.
+Missing: the **trial ladder**, where `trial_ending` is one kind that deliberately "runs the whole
+trial" (`notices.py`) and the design wants four rungs at Day 10 / 20 / 25 / 30 with their own copy
+and tone; a **`trial_expired`** kind ("once, right after Day 30"); and a **`suspended`** kind,
+which the design keeps apart from Payment failed (grey, "not urgent, it has already stopped")
+along the progression `Payment failed → Suspended`. The transfer-request banner needs no API
+change — section 07's incoming read already serves it — though it could join the feed for
+consistency. Two things to weigh before adding kinds: Day 10's copy quotes a USAGE count ("You've
+already processed 12 payment requests") and nothing in `billing/services/` counts anything, that
+number being the pettycash side of the boundary Part 2 is drawing — so it is a cross-domain read
+or a change of copy; and `NoticeKind` is a CLOSED union in billing-frontend (`notices.py` records
+that `needs_card` was reused rather than a kind invented, for exactly this reason), so three new
+kinds is a two-consumer change, billing-frontend and minty-web together.
 
 ### 5. The Flask cut, link-outs and repoints
 
