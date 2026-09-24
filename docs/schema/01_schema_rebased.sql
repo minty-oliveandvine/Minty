@@ -2287,6 +2287,17 @@ CREATE TABLE pettycash_test.subscription_transfer (
   charge_attempt          INTEGER                         NOT NULL DEFAULT 0,
   charge_key              VARCHAR(120)                    NULL,
   charge_invoice_id       VARCHAR(64)                     NULL,
+  -- NOT NULL = this handover's first charge has not been collected, and becomes
+  -- collectable at this instant (the day the outgoing payer's money runs out). An
+  -- accept takes no money; the daily pass charges on the day and CLEARS this, which
+  -- is the only marker of settled. NULL on every handover that charged at accept and
+  -- on every trial-only one, which charge nothing by design.
+  collect_at              TIMESTAMPTZ                     NULL,
+  -- NOT NULL = the payer who ASKED has been shown how this offer ended (declined,
+  -- expired or accepted), so the modal that says so never opens again on any device.
+  -- Stamped when they press Done, not when the email went out: an email records that
+  -- it was sent, which is not the same as a person having seen it.
+  outcome_seen_at         TIMESTAMPTZ                     NULL,
   note                    VARCHAR(500)                    NULL,
   CONSTRAINT subscription_transfer_pkey PRIMARY KEY (id),
   CONSTRAINT fk_st_entity FOREIGN KEY (entity_id)    REFERENCES pettycash_test.entities (id) ON DELETE CASCADE,
@@ -2461,6 +2472,14 @@ CREATE UNIQUE INDEX uq_bapm_one_default
 -- cancelled, expired - does not block the next one.
 CREATE UNIQUE INDEX idx_st_entity_open    ON pettycash_test.subscription_transfer (entity_id)
   WHERE status IN ('pending','charging','charged');
+
+-- The handovers whose first charge has not been collected yet. Partial for the same
+-- reason as the one above: in steady state this is a handful of rows out of every
+-- handover ever made, and a full index on a column that is NULL for nearly all of
+-- them is mostly a copy of the table. The daily pass reads exactly this set.
+CREATE INDEX ix_subscription_transfer_collect
+    ON pettycash_test.subscription_transfer (collect_at)
+ WHERE collect_at IS NOT NULL;
 
 -- The other half of the same finding. See the note on subscription_invoice.idempotency_key.
 CREATE UNIQUE INDEX idx_si_idempotency_key

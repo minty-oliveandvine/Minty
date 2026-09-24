@@ -1028,6 +1028,10 @@ CREATE TABLE pettycashv3.subscription_transfer (
   charge_attempt          INTEGER                         NOT NULL DEFAULT 0,
   charge_key              VARCHAR(120)                    NULL,
   charge_invoice_id       VARCHAR(64)                     NULL,
+
+  collect_at              TIMESTAMPTZ                     NULL,
+
+  outcome_seen_at         TIMESTAMPTZ                     NULL,
   note                    VARCHAR(500)                    NULL,
   CONSTRAINT subscription_transfer_pkey PRIMARY KEY (id),
   CONSTRAINT fk_st_entity FOREIGN KEY (entity_id)    REFERENCES pettycashv3.entities (id) ON DELETE CASCADE,
@@ -1173,6 +1177,10 @@ CREATE UNIQUE INDEX uq_bapm_one_default
 
 CREATE UNIQUE INDEX idx_st_entity_open    ON pettycashv3.subscription_transfer (entity_id)
   WHERE status IN ('pending','charging','charged');
+
+CREATE INDEX ix_subscription_transfer_collect
+    ON pettycashv3.subscription_transfer (collect_at)
+ WHERE collect_at IS NOT NULL;
 
 CREATE UNIQUE INDEX idx_si_idempotency_key
   ON pettycashv3.subscription_invoice (idempotency_key);
