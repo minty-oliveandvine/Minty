@@ -1006,6 +1006,10 @@ CREATE TABLE pettycashv3.subscription_invoice_line (
   amount       INTEGER      NOT NULL,
   kind         VARCHAR(20)  NOT NULL DEFAULT 'full',
   at           TIMESTAMPTZ  NULL,
+
+  period_start TIMESTAMPTZ  NULL,
+  period_end   TIMESTAMPTZ  NULL,
+  unit_amount  INTEGER      NULL,
   created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
   CONSTRAINT subscription_invoice_line_pkey PRIMARY KEY (id),
   CONSTRAINT fk_sil_invoice FOREIGN KEY (invoice_id) REFERENCES pettycashv3.subscription_invoice (id) ON DELETE CASCADE,

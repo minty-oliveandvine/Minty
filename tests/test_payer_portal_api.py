@@ -143,9 +143,36 @@ def test_lapsed_paid_module_reads_ended_not_not_subscribed(app):
     )
     assert state["status"] == portal.STATUS_ENDED
     assert state["date_label"] == "Ended"
+    # The day it really stopped: the paid period it ran out of, already behind us.
+    assert state["date"] == NOW - timedelta(days=30)
     # The mirror image of the test below: a module that was PAID for must never be
     # described as an expired trial, which would deny the purchase outright.
     assert state["status"] != portal.STATUS_TRIAL_EXPIRED
+
+
+def test_a_module_cut_off_early_prints_no_date_rather_than_the_accounts(app):
+    """Terminated on the spot: ``cancelled``, access cut, no ``app_access_until`` of its own.
+    The last date to fall back on was the billing ACCOUNT's paid-through - still ahead,
+    because the account renews for its other companies - so the list read "Ended 18 Oct
+    2026", a date to come under a word that says it is past. It prints none instead."""
+    from blueprints.subscription.services import portal
+
+    state = _state(
+        _row("PETTY_CASH", "cancelled", first_billed_at=NOW - timedelta(days=60)),
+        paid_through=NOW + timedelta(days=23),
+    )
+    assert state["status"] == portal.STATUS_ENDED
+    assert state["date"] is None
+    assert state["date_label"] is None
+
+    # Its own access end, once passed, is still printed.
+    until = NOW - timedelta(days=4)
+    ran_out = _state(
+        _row("PETTY_CASH", "cancelled", first_billed_at=NOW - timedelta(days=60),
+             app_access_until=until),
+        paid_through=NOW + timedelta(days=23),
+    )
+    assert (ran_out["date_label"], ran_out["date"]) == ("Ended", until)
 
 
 def test_a_trial_that_ran_out_says_so_rather_than_just_ended(app):

@@ -145,6 +145,14 @@ class SubscriptionInvoiceLine(CreatedAtMixin, db.Model):
     kind = db.Column(db.String(20), nullable=False, server_default="full")
     # The instant a proration was measured from. NULL for a whole-period line.
     at = db.Column(tz_datetime(), nullable=True)
+    # What the line PAID FOR, written at issue (schema item 23): the days, half-open like
+    # the invoice's period, and the price per period they were charged at (positive on a
+    # credit too - ``amount`` carries the sign). NULL on lines issued before 2026-09-25,
+    # and ``unit_amount`` NULL on an extension that had no single rate - see
+    # ``billing.Line``.
+    period_start = db.Column(tz_datetime(), nullable=True)
+    period_end = db.Column(tz_datetime(), nullable=True)
+    unit_amount = db.Column(db.Integer, nullable=True)
 
     invoice = db.relationship("SubscriptionInvoice", back_populates="lines")
 

@@ -620,13 +620,28 @@
 --     xero_report_sync.created_at <- reported_at, updated_at <- completed_at
 --     (then reported_at, then now()); xero_bank_transfer <- transfer_date.
 --
+-- 23. subscription_invoice_line RECORDS WHAT EACH LINE PAID FOR. Decided
+--     2026-09-25. period_start / period_end / unit_amount, all NULL-able. A line
+--     held only its amount, kind and `at`, so the payer portal's billing breakdown
+--     (08-B "Download csv", a row per company per line) had to work each line's
+--     days and monthly rate back out of how that kind is priced - and could not,
+--     for an access extension, once a resume had cleared the module's
+--     app_access_until. Both billing engines (Minty's subscription services and
+--     minty-billing-api) now write all three when an invoice is issued; the
+--     breakdown reads them and derives only where they are NULL (every line issued
+--     before, and the rate of an extension priced at more than one rate). No load
+--     change: pettycashv2 has no such columns and 03 leaves them NULL. pettycashv3
+--     only; a database already up gets the guarded ALTER in migration
+--     x1a01_invoice_line_span.
+--
 -- ---------------------------------------------------------------------------
 -- HOW TO BUILD IT
 --
 --     psql "$URL" -v ON_ERROR_STOP=1 -f docs/schema/01_schema_rebased.sql
 --
--- Builds clean on an empty database: 59 tables, 2 views, 618 columns, 21 enums,
--- 88 foreign keys. Every __tablename__ in Minty (44) and every db_table in
+-- Builds clean on an empty database: 59 tables, 2 views, 623 columns, 22 enums,
+-- 88 foreign keys (measured 2026-09-25 at 620 columns and 22 enums before item 23
+-- added its three columns - the line had still read 618 / 21). Every __tablename__ in Minty (44) and every db_table in
 -- billing-backend (22) resolves to a table here, the nine renames included.
 --
 -- Then it is FILLED, in this order:
@@ -2262,6 +2277,18 @@ CREATE TABLE pettycash_test.subscription_invoice_line (
   amount       INTEGER      NOT NULL,   -- cents
   kind         VARCHAR(20)  NOT NULL DEFAULT 'full',
   at           TIMESTAMPTZ  NULL,
+  -- What the line PAID FOR, written by the biller when the invoice is issued (item 23):
+  -- the days, half-open [period_start, period_end) like the invoice's own period, and
+  -- the price per billing period they were charged at (cents; positive on a credit
+  -- too - amount carries the sign). A renewal is the whole period at its plan's price;
+  -- a mid-period start, upgrade or the credit for the plan it replaced runs from the
+  -- change to the period's end; an access extension runs from what the company was
+  -- paid through to its access end. NULL on every line issued before these existed,
+  -- and unit_amount NULL on an extension whose rate stepped part-way (a bundle
+  -- winding down, its modules ending on different days) - it had no single rate.
+  period_start TIMESTAMPTZ  NULL,
+  period_end   TIMESTAMPTZ  NULL,
+  unit_amount  INTEGER      NULL,   -- cents
   created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
   CONSTRAINT subscription_invoice_line_pkey PRIMARY KEY (id),
   CONSTRAINT fk_sil_invoice FOREIGN KEY (invoice_id) REFERENCES pettycash_test.subscription_invoice (id) ON DELETE CASCADE,
