@@ -272,7 +272,13 @@ def _pending_extension_lines(
     the company was never nominated) rides the payer's FIRST group, so the charge is not
     silently lost. It is money already promised in exchange for access already granted;
     dropping it because a pointer is missing would give those days away.
+
+    Each line carries the days it pays for and the rate they were priced at
+    (``checkout.pending_extension_terms``), so the invoice keeps them after the row moves
+    on — a resume clears the module's access end.
     """
+    from blueprints.subscription.services import checkout
+
     if group_id:
         in_group = store.entity_ids_in_group(group_id)
         groups = store.billing_groups_for_payer(user_id)
@@ -286,6 +292,7 @@ def _pending_extension_lines(
                 if not (homeless and is_first_group):
                     continue
         name = names.get(entity_id) or _entity_names({entity_id}).get(entity_id, entity_id)
+        start, end, rate = checkout.pending_extension_terms(row)
         lines.append(
             Line(
                 entity_id=entity_id,
@@ -293,6 +300,9 @@ def _pending_extension_lines(
                 product_name=f"{_extension_product(row.function_code)} "
                              "(access after cancellation)",
                 amount=int(row.extension_amount or 0),
+                period_start=start,
+                period_end=end,
+                unit_amount=rate,
             )
         )
     return lines

@@ -70,10 +70,17 @@ owns every state. Models in `blueprints/subscription/models/`:
 - `billing_plan` (prices), `billing_policy` (the tunable windows), `subscription_invoice`
   and `subscription_audit_log`, `subscription_email_log` (each notice sent once),
   `subscription_transfer` (handing a company's bill to another admin).
-- Who pays: `user_stripe_customer` (the payer's Stripe customer),
-  `payer_billing_group` / `entity_billing_group` (a payer's companies grouped so a card
-  can be chosen per company — `billing_account_payment_method`), `entity_billing_consent`
-  (the payer's consent to be billed for this company; recorded before any charge).
+- Who pays: `user_stripe_customer` (the payer's Stripe customer and their one billing
+  anchor), `payer_billing_group` — a **billing account**: a name (`billing_company`, the
+  invoice's "Bill to") and `billing_email`, the ONE card it charges, its other cards on
+  `billing_account_payment_method`, its own `paid_through` and dunning clock; a payer may
+  hold several, all renewing on the payer's anchor — `entity_billing_group` (which account
+  pays for a company; `source` says how it got there, `moved` for the payer portal's
+  "Change billing account"), `entity_billing_consent` (the payer's consent to be billed
+  for this company; recorded before any charge). Since 2026-09-25 the accounts are read,
+  renamed, re-carded and given companies from minty-web's payer portal, served by
+  minty-billing-api; Flask's copy of the services is not mirrored (subscriptions are dark
+  here, and Django replaces them).
 
 The rules the user chose deliberately (`subscription-pricing-decisions`,
 `subscription-tunable-windows` in the notes): a **30-day** card-free trial per module

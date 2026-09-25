@@ -1453,6 +1453,10 @@ def reserve_invoice(
                 amount=int(line.amount),
                 kind=line.kind,
                 at=line.at,
+                # What the line paid for, as whatever priced it said (``billing.Line``).
+                period_start=line.period_start,
+                period_end=line.period_end,
+                unit_amount=line.unit_amount,
             )
         )
     db.session.add(record)

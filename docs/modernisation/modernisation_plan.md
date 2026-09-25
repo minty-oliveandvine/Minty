@@ -1557,6 +1557,33 @@ screenshot-matched. Next: the invoices page (section 09) - link needed; an outgo
 in the API for the three outcome modals; `billing.next_amount` if the next bill's figure is
 wanted.
 
+*Superseded 2026-09-25 — the billing area re-cut around BILLING ACCOUNTS.* The readings "Bill to
+is the PAYER" and "08-C is not built" above no longer hold. A billing account is
+`payer_billing_group` (named by `billing_company`, with `billing_email`, its cards on
+`billing_account_payment_method`, the one card it charges, its companies and its dunning clock);
+minty-billing-api now serves it on `/api/me` (`GET /billing/accounts`, `POST
+/billing/accounts/{update,default-card,move}`, the account fields on `confirm`, `account` on
+`invoices` and `remove`, `next_billing` on `subscriptions`). In minty-web, 08-A shows ONE account
+("Bill to" = its name; clicking the card picks which, carried as `?account=`), _Change billing
+account_ moves a company between accounts (nothing charged, paid days carried), 08-B is one
+account's profile, 08-C is built, and a new account opens in onboarding's `BillingSheet` in place
+(list → form → "New Card added Successfully"; the separate page went the same day, when the account's
+name also took over _Change billing account_ and 08-B gained the next bill's estimated amount, priced
+by the renewal runner, and 10 / 50 / 100 invoice paging; then each invoice's billing breakdown
+as a CSV, exact because `subscription_invoice_line` now records what each line paid for -
+`01` item 23, written by BOTH engines, migration `x1a01_invoice_line_span` for a database
+already up). Decisions the user took that day:
+every account renews on the payer's ONE anchor, so there is one Next Billing Date — and it is the
+boundary ahead, not the anchor, which the landing had been printing (a date in the past from the
+second month on); an account's address is the Stripe billing address of the card it charges (NO
+schema change); 08-C uses Stripe's address fields in the frame's look; the Subscription Overview
+stays payer-wide. Five silent failures were fixed on the way (the anchor-as-next-date, the removal
+guard stopping at the first account on a shared card, card-keyed nomination raising on a shared
+card, a company moved onto an emptied account losing access, a blanked address field dropped by
+the Stripe SDK). The branded PDF (09-A) can now take its bill-to block from the account.
+Recorded in minty-web `docs/features/subscriptions.md` §15 and minty-billing-api
+`docs/features/subscriptions-api.md` §2 / §9.
+
 *Noted 2026-09-23, nothing built — what the invoices page needs from the API, from Figma section
 09 (`1410:2042`, the user's link; four frames).* 09-B / 09-C are the billing page with an Invoice
 History block beneath it (both carry `▶ Back → 08-B`), so section 09 extends

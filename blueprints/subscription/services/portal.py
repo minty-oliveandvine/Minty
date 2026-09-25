@@ -239,8 +239,20 @@ def _module_state(row, *, now, paid_through, grace_days) -> dict:
             "date_label": "Trial ended",
         }
 
-    stopped = app_access_until or trial_end or paid_through
-    return {"status": STATUS_ENDED, "date": stopped, "date_label": "Ended"}
+    # The date it STOPPED, and only that: the row's own end (its access end, its trial's),
+    # else when its access ran out - a paid period that lapsed - once that has passed. Never a
+    # date still ahead. The old last resort was ``paid_through``, the billing ACCOUNT's, which
+    # keeps moving while the account renews for its other companies: a module terminated on
+    # the spot (access cut, nothing of its own kept) read "Ended 18 Oct 2026" - a date to come,
+    # under a word that says it is past. With no date of its own it now prints none.
+    stopped = app_access_until or trial_end or ends
+    if stopped is not None and stopped > now:
+        stopped = None
+    return {
+        "status": STATUS_ENDED,
+        "date": stopped,
+        "date_label": "Ended" if stopped is not None else None,
+    }
 
 
 def _next_date(modules) -> datetime | None:

@@ -801,6 +801,9 @@ BEGIN
 END $$;
 """ % {"S": SRC, "D": DST}
 
+# Re-measured 2026-09-25 on production-backup_20260925.dump (16:16): 241 restored contacts - one
+# more than the day before (an EMBASSY contact on a 2026-09-24 report); accounts still 10 and
+# neither "lost their ..." check moved off 0. History below.
 # Re-measured 2026-09-24 on production-backup_20260924.dump (16:09): 240 restored contacts - the
 # 09-18 dump needed 238, and the two added are one entity's expenses of 2026-09-22 naming contacts
 # the sync table does not hold (same mechanism, nothing lost: both "lost their ..." checks stayed 0).
@@ -821,15 +824,17 @@ BEGIN
    WHERE NULLIF(se.account_id,'') IS NOT NULL AND d.account_id IS NULL;
   SELECT count(*) INTO lost_c FROM %(S)s.shop_expense se JOIN %(D)s.report_expense d ON d.id = se.id::uuid
    WHERE NULLIF(se.contact_id,'') IS NOT NULL AND d.contact_id IS NULL;
-  RAISE NOTICE 'R2  restored xero_contact_sync rows : %%   (expected 240)   %%', c, CASE WHEN c = 240 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R2  restored xero_contact_sync rows : %%   (expected 241)   %%', c, CASE WHEN c = 241 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  restored account_info rows      : %%   (expected 10)    %%', a, CASE WHEN a = 10 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  expenses that lost their account : %%   %%', lost_a, CASE WHEN lost_a = 0 THEN 'OK' ELSE '*** LOST ***' END;
   RAISE NOTICE 'R2  expenses that lost their contact : %%   %%', lost_c, CASE WHEN lost_c = 0 THEN 'OK' ELSE '*** LOST ***' END;
   IF lost_a > 0 OR lost_c > 0 THEN RAISE EXCEPTION 'R2: an expense lost a reference the source had'; END IF;
-  IF c <> 240 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
+  IF c <> 241 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 
+# Re-measured 2026-09-25 on production-backup_20260925.dump: 299 zero-count rows (+2 in a day);
+# the 7 that still read NULL did not move. History below.
 # Re-measured 2026-09-24 on production-backup_20260924.dump: 297 zero-count rows (282 on the 09-18
 # dump, 277 on 09-16 - the class grows with every dump as more all-zero reports are posted; the
 # 09-24 additions are dated 09-17..09-22 plus a few back-dated ones, all posted). The number that
@@ -873,9 +878,9 @@ BEGIN
   -- 7 of the 284 are Test_1 (PHP): the catalogue has no PHP denominations, so
   -- there is no row to carry the zero on and the app could never have counted
   -- them either. Reported and asserted, not carried.
-  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 297)   %%', n, CASE WHEN n = 297 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 299)   %%', n, CASE WHEN n = 299 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %%   (expected 7)   %%', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
-  IF n <> 297 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+  IF n <> 299 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 
