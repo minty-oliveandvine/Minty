@@ -88,6 +88,16 @@ The rules the user chose deliberately (`subscription-pricing-decisions`,
 retries on days **1…13** after a failed renewal (`RETRY_OFFSETS_DAYS`), a cancelled paid
 module keeps access to the end of what was paid (`DEFAULT_PAID_CANCEL_ACCESS_DAYS`).
 
+**An invoice Stripe will no longer collect is re-issued** (2026-09-28, both engines). Stripe
+cancels an invoice's payment once it has been confirmed too many times (ten declines in our test
+account; its docs give no number), after which no retry or Retry-payment press can succeed.
+`billing_gateway.retry_invoice` detects it (before paying, and after the failed call that
+crossed the limit) and `dunning._charge` re-issues the invoice with `billing_gateway.
+refresh_invoice` — its recorded lines and Stripe items copied, the period key moved over by
+`store.supersede_invoice`, the original voided only once the replacement is open — and charges
+the replacement in the same attempt. The whole mechanism, its crash windows and the `L2` replay
+that proves it are in minty-billing-api `docs/features/subscriptions-api.md` §6 and §8.
+
 ### The passes
 `services/daily.run_daily` runs five jobs in this order — `notify-trial-ending` →
 `close-trials` → `run-renewals` → `retry-dunning` → `sweep-access` — as a **full** pass once
