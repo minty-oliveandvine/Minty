@@ -47,6 +47,12 @@ NOT COPIED, deliberately: `billing_plan`, `billing_policy`, `entity_function`,
 `currency_info`. Those are reference data owned by migrations, and the destination has its
 own. If RDS is behind on a migration the insert fails loudly here rather than seeding a
 price row nobody meant to ship.
+
+`payer_billing_group` / `entity_billing_group` (the billing accounts from the per-entity-cards
+cutover) ARE copied — added 2026-09-28, having been missing since that cutover, which meant
+any run with a paid or cancelled module (an invoice on it) failed on `fk_si_group` the moment
+`copy()` reached `subscription_invoice`. Both are plain uuids (`gen_random_uuid()`), so unlike
+`entity_function_map` they need no remap.
 """
 from __future__ import annotations
 
@@ -90,6 +96,15 @@ TABLES = [
     {"table": "entity_module_subscription", "where": "payer_user_id = :payer", "params": ()},
     {"table": "entity_billing_consent",
      "where": "entity_id = ANY(:eids)", "params": ("eids",)},
+    # The two billing-account tables from the per-entity-cards cutover — missing here since
+    # that cutover, which is why a run with an invoice on it (any catalogue frame past
+    # NOT_STARTED) failed on `fk_si_group` the moment it reached `subscription_invoice`.
+    # BOTH before it: the invoice's `billing_group_id` references `payer_billing_group`
+    # directly, and `entity_billing_group` (which entity is on which account) needs the
+    # group to exist too, even though nothing else FKs to it.
+    {"table": "payer_billing_group", "where": "payer_user_id = :payer", "params": ()},
+    {"table": "entity_billing_group",
+     "where": "payer_user_id = :payer AND entity_id = ANY(:eids)", "params": ("eids",)},
     {"table": "subscription_invoice", "where": "payer_user_id = :payer", "params": ()},
     {"table": "subscription_invoice_line",
      "where": "invoice_id = ANY(:invoices)", "params": ("invoices",)},
