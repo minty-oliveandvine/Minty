@@ -6,9 +6,8 @@
 | `generators/gen.py` | **The only place the transformation is written.** Reads both catalogues from `information_schema` and emits the three files below. Dictionaries, not statements: `TABLE_SRC`, `OVERRIDE`, `EXPR`, `ENUM_MAP`, `USER_REFS`, `DISTINCT_ON`, `PRE`, `EXPECT_SKIP`. Regenerate after any change to `01`: `python docs/schema/generators/gen.py` (`GEN_DB` names a database holding both schemas; `GEN_PLAN=1` prints the per-column plan and writes nothing). |
 | `00_enum_coverage_check.sql` | Generated. Every distinct source value, through its mapping, against the enum that receives it. All OK or it exits non-zero. |
 | `02_data_foundation_rebased.sql` | Generated. 25 foundation tables, `pettycashv2` at alembic head → `pettycash_test`, in one database. Checks B1–B6. Ends in `ROLLBACK`. |
-| `03_data_reports_rebased.sql` | Generated. 33 report / xero / billing / subscription tables. Checks R1–R8. Ends in `ROLLBACK`. |
-| `../../scripts/schema_migration/04_data_attachments.py` | Expense receipts: `shop_expense.files` → `attachment` + `report_expense_attachment`, through the app's own parser. |
-| `../../scripts/schema_migration/rehearse.py` | **Runs the whole thing** and is the only supported way to: restore → alembic upgrade → build → 00 → 02 → 03 → 04 → manifest, timed, non-zero on the first check that is not green. |
+| `03_data_reports_rebased.sql` | Generated. 33 report / xero / billing / subscription tables, then the expense receipts: `shop_expense.files` → `attachment` + `report_expense_attachment`, split on the app's own key boundary (`receipt_keys._KEY_BOUNDARY`, read by `gen.py`). Checks R1–R9. Ends in `ROLLBACK`. |
+| `../../scripts/schema_migration/rehearse.py` | **Runs the whole thing** and is the only supported way to: restore → snapshot → alembic upgrade → upgrade check (U1/U2) → build → 00 → 02 → 03 → manifest, timed, non-zero on the first check that is not green. |
 | `generators/audit_models.py`, `mkdoc.py` | Diff every model in the three repos against the built schema; `APPLICATION_CHANGES.md` is its output. **0 findings since 2026-09-17** (phase C closed; it was 287) — `tests/test_zz_schema_audit.py` runs it against the harness build on every test run, and `mkdoc.py` now renders the close-out record. |
 | `pettycashv2_schema.sql` | DDL snapshot of the **current** production schema (see below). |
 | `supabase/` | Comment-free copies from `generators/strip_comments.py`: `pettycashv3.sql` (= `01` with the schema named `pettycashv3`), `00`, `02`, `03`. Its README says which may be pasted into a SQL editor (`pettycashv3.sql` and `00`) and why `02`/`03` are psql-only. |
@@ -20,11 +19,13 @@
 old production (pettycashv2 @ f3a1c2b4d6e8)
    │  pg_dump -Fc -n pettycashv2
    ▼
-scratch database ── flask db upgrade ──▶ pettycashv2 @ v1a01 (36 revisions, ~20 s)
+scratch database ── flask db upgrade ──▶ pettycashv2 @ alembic head (~20 s)
    │                                        the app's own report/sales/cash redesign
+   │  U1/U2 against a snapshot taken before it: no posted report's total needs an
+   │  expense row the upgrade dropped, and no stored total moved
    ▼
 01_schema_rebased.sql ──▶ pettycash_test, same database
-   │  00 → 02 → 03 → 04
+   │  00 → 02 → 03   (03 ends with the expense receipts)
    ▼
 checks: parity with expected skips · enum mapping counts · key survival · money sums to the cent
         · sales breakdown · cash-count view · restored references · <db>_not_carried.md
@@ -37,13 +38,17 @@ types, the enum vocabulary (01 header item 18), nine renames, the token split, a
 handful of things item 19 lists. One run on the production dataset:
 
 ```
-python scripts/schema_migration/rehearse.py --dump backups/production-backup_20260916.dump --db pcreh_20260916 --attachments
-    restore 3.7s · upgrade 27.6s · build 1.2s · 00 0.2s · 02 2.3s · 03 196.1s · 04 1.9s · 04+ 3.5s · manifest 0.9s
-    total ~237s  → maintenance window 8 min          ALL GREEN   (4,959 reports; the August dump: 159s)
+SUBSCRIPTION_ENABLED=0 PYTHONUTF8=1 python scripts/schema_migration/rehearse.py --from-db production-backup --db pcreh_github7d_upcheck
+    restore 4.6s · snapshot 0.1s · upgrade 20.4s · upgrade-check 0.6s · build 0.5s · 00 0.1s · 02 1.6s · 03 218.4s · manifest 0.9s
+    total 247s  → maintenance window 8 min          ALL GREEN   (2026-09-28, the 09-25 data: 5,078 of 5,176 reports,
+                                                    13,866 receipt links, 485 expense rows dropped by the upgrade and
+                                                    none of them in a posted total; the August dump: 159s)
 ```
 
-`backups/<db>_rehearsal.log` has every check line; `backups/<db>_not_carried.md` lists
-every source row that has no target row, by reason, with ids.
+`rehearse.py` drops `--db` before restoring into it, so give each run a name no other
+session is using - on 2026-09-28 a second session picked the same `pcreh_<date>` name
+and dropped the first one's database between its load and its checks. `backups/<db>_rehearsal.log` has every check line;
+`backups/<db>_not_carried.md` lists every source row that has no target row, by reason, with ids.
 
 ## The applications run on it
 

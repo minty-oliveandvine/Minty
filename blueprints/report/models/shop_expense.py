@@ -66,7 +66,7 @@ class Attachment(db.Model):
     def for_key(cls, key: str, *, display_name: str | None = None, mime_type: str | None = None,
                 uploaded_by=None) -> "Attachment":
         """The row for an S3 key - reused if one exists (the loader does the same), else
-        built the way 04_data_attachments.py builds them."""
+        built the way the migration's receipt load (end of 03_data_reports_rebased.sql) builds them."""
         row = cls.query.filter_by(file_path=key).first()
         if row is not None:
             return row

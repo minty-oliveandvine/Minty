@@ -27,7 +27,7 @@ def test_rehearsal_is_all_green(tmp_path: Path) -> None:
     dbname = os.environ.get("MINTY_REHEARSAL_DB", "pcreh_pytest")
     proc = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "schema_migration" / "rehearse.py"),
-         "--dump", DUMP, "--db", dbname, "--attachments", "--log-dir", str(tmp_path)],
+         "--dump", DUMP, "--db", dbname, "--log-dir", str(tmp_path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(REPO),
         env=dict(os.environ, PYTHONUTF8="1"),
     )

@@ -2213,6 +2213,28 @@ def entity_settings_module_cancel_preview(org_id):
     )
 
 
+_GENERIC_DECLINE = "your card was declined"
+
+
+def declined_message(reason) -> str:
+    """A decline, in the processor's words where they add something: "insufficient funds" and
+    "card expired" need different things from the customer, and collapsing both into
+    "declined" tells them to do the same thing twice.
+
+    Stripe's generic "Your card was declined." adds nothing to our own sentence - prefixed, it
+    read "That card was declined: Your card was declined." (the user, 2026-09-28: don't repeat
+    it). So only what Stripe says AFTER that phrase is kept, and with nothing after it the
+    customer gets the next step instead. minty-billing-api's ``api/_retry.py`` says the same.
+    """
+    reason = (reason or "").strip()
+    if reason.lower().startswith(_GENERIC_DECLINE):
+        rest = reason[len(_GENERIC_DECLINE):].lstrip(" .:;,-")
+        return (f"That card was declined. {rest}" if rest
+                else "That card was declined. Try a different payment method.")
+    return (f"That card was declined: {reason}" if reason
+            else "That card was declined. Try a different payment method.")
+
+
 @entity_bp.route("/entity/settings/module/<string:org_id>/retry-payment", methods=["POST"])
 @login_required
 @require_subscriptions_enabled
@@ -2268,14 +2290,7 @@ def entity_settings_module_retry_payment(org_id):
         ),
     }
     if status == "failed":
-        # The processor's own words when there are any: "insufficient funds" and "card
-        # expired" need different things from the customer, and collapsing both into
-        # "declined" tells them to do the same thing twice.
-        reason = (result.get("reason") or "").strip()
-        message = (
-            f"That card was declined: {reason}" if reason
-            else "That card was declined. Try a different payment method."
-        )
+        message = declined_message(result.get("reason"))
     else:
         message = messages.get(status, "Payment could not be completed.")
 
