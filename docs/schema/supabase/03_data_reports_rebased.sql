@@ -1468,4 +1468,90 @@ BEGIN
 END
 $$;
 
+DO $$DECLARE n bigint;
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+              WHERE table_schema = 'pettycashv2' AND table_name = 'report_expense_detail') THEN
+    RAISE EXCEPTION 'R9: pettycashv2.report_expense_detail exists - the source is not at alembic head (r10a10 drops that table)';
+  END IF;
+  SELECT count(*) INTO n FROM pettycashv2.shop_expense s
+   WHERE left(regexp_replace(s.files, '^\s+', ''), 1) IN ('{', '[');
+  IF n > 0 THEN
+    RAISE EXCEPTION 'R9: % shop_expense.files value(s) are JSON (normalize_expense_files formats B/C) - never seen in production; port that branch before loading', n;
+  END IF;
+END
+$$;
+
+CREATE TEMP TABLE _receipt_src ON COMMIT DROP AS
+SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN s.id::uuid WHEN NULLIF(s.id,'') IS NULL THEN NULL ELSE md5('report_expense.id:'||s.id)::uuid END) AS report_expense_id, k.file_path, k.ord
+  FROM pettycashv2.shop_expense s
+ CROSS JOIN LATERAL (
+       SELECT regexp_replace(x, '^\s+|\s+$', '', 'g') AS file_path, o AS ord
+         FROM regexp_split_to_table(regexp_replace(s.files, '^\s+|\s+$', '', 'g'), ',(?=\s*(?:expenses/|attachments/|uploads/|https?://))')
+              WITH ORDINALITY AS t(x, o)) k
+ WHERE k.file_path <> '';
+
+CREATE TEMP TABLE _receipt ON COMMIT DROP AS
+SELECT f.report_expense_id, f.file_path,
+       (row_number() OVER (PARTITION BY f.report_expense_id ORDER BY f.ord) - 1)::int AS sort_order,
+       n.name, left(e.ext, 20) AS file_extension,
+       CASE WHEN e.ext = 'pdf' THEN 'application/pdf'
+            WHEN e.ext = 'jpg' THEN 'image/jpeg'
+            WHEN e.ext IN ('jpeg', 'png', 'gif', 'webp') THEN 'image/' || e.ext
+            ELSE 'application/octet-stream' END AS mime_type
+  FROM (SELECT DISTINCT ON (r.report_expense_id, r.file_path) r.*
+          FROM _receipt_src r
+          JOIN pettycash_test.report_expense d ON d.id = r.report_expense_id
+         ORDER BY r.report_expense_id, r.file_path, r.ord) f
+ CROSS JOIN LATERAL (SELECT regexp_replace(f.file_path, '^.*/', '') AS base) b
+ CROSS JOIN LATERAL (SELECT COALESCE(NULLIF(b.base, ''), f.file_path) AS name) n
+ CROSS JOIN LATERAL (SELECT lower(COALESCE(substring(ltrim(b.base, '.') from '\.([^.]*)$'), '')) AS ext) e;
+
+INSERT INTO pettycash_test.attachment
+  (id, original_name, stored_name, file_path, file_extension, mime_type,
+   file_size, storage_provider, checksum_sha256, uploaded_by)
+SELECT DISTINCT ON (r.file_path)
+       md5('receipt:' || r.file_path)::uuid, r.name, r.name, r.file_path, r.file_extension, r.mime_type,
+       NULL, 's3', '', NULL
+  FROM _receipt r
+ WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.attachment a WHERE a.file_path = r.file_path)
+ ORDER BY r.file_path;
+
+INSERT INTO pettycash_test.report_expense_attachment
+  (id, report_expense_id, attachment_id, attachment_role, sort_order, xero_attachment_id)
+SELECT md5('receipt-link:' || r.report_expense_id || ':' || r.file_path)::uuid,
+       r.report_expense_id, a.id, 'receipt', r.sort_order, ''
+  FROM _receipt r
+
+  JOIN (SELECT DISTINCT ON (file_path) file_path, id
+          FROM pettycash_test.attachment ORDER BY file_path, id) a ON a.file_path = r.file_path;
+
+DO $$DECLARE expenses bigint; orphans bigint; repeats bigint; pairs bigint; links bigint;
+        files bigint; made bigint; shared bigint; multi bigint; most bigint; frag bigint;
+BEGIN
+  SELECT count(DISTINCT report_expense_id) INTO expenses FROM _receipt_src;
+  SELECT count(DISTINCT r.report_expense_id) INTO orphans FROM _receipt_src r
+   WHERE NOT EXISTS (SELECT 1 FROM pettycash_test.report_expense d WHERE d.id = r.report_expense_id);
+  SELECT count(*) - count(DISTINCT (report_expense_id, file_path)) INTO repeats FROM _receipt_src;
+  SELECT count(*), count(DISTINCT file_path) INTO pairs, files FROM _receipt;
+  SELECT count(*) INTO links FROM pettycash_test.report_expense_attachment;
+  SELECT count(*) INTO made FROM pettycash_test.attachment
+   WHERE id IN (SELECT md5('receipt:' || file_path)::uuid FROM _receipt);
+  SELECT count(*) INTO shared FROM (SELECT 1 FROM _receipt GROUP BY file_path HAVING count(*) > 1) x;
+  SELECT count(*) FILTER (WHERE n > 1), COALESCE(max(n), 0) INTO multi, most
+    FROM (SELECT count(*) AS n FROM _receipt GROUP BY report_expense_id) x;
+  SELECT count(*) INTO frag FROM _receipt
+   WHERE file_path !~ '^(expenses/|attachments/|uploads/|https?://)';
+  RAISE NOTICE 'R9  expenses with receipts : %   (% not carried - their report was dropped)', expenses, orphans;
+  RAISE NOTICE 'R9  receipt links : % of % (expense, key) pairs   %', links, pairs,
+    CASE WHEN links = pairs THEN 'OK' ELSE '*** LOST ***' END;
+  RAISE NOTICE 'R9  attachments : % files, % new, % reused from a bill attachment; % shared by 2+ expenses',
+    files, made, files - made, shared;
+  RAISE NOTICE 'R9  expenses with 2+ receipts : % (most %); key repeated inside one field : %', multi, most, repeats;
+  RAISE NOTICE 'R9  keys that are not a whole key : %   %', frag, CASE WHEN frag = 0 THEN 'OK' ELSE '*** FRAGMENT ***' END;
+  IF links <> pairs THEN RAISE EXCEPTION 'R9: % receipt(s) got no link', pairs - links; END IF;
+  IF frag > 0 THEN RAISE EXCEPTION 'R9: % key(s) do not start like a key - a split went wrong, or a new key shape needs adding to receipt_keys._KEY_BOUNDARY', frag; END IF;
+END
+$$;
+
 ROLLBACK;

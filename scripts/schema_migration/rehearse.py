@@ -2,31 +2,38 @@
 """Rehearse the production migration into 01_schema_rebased.sql, end to end.
 
     python scripts/schema_migration/rehearse.py --dump backups/oldprod_YYYYMMDD.dump --db pcreh_YYYYMMDD
-    python scripts/schema_migration/rehearse.py --from-db production-backup --db pcreh_YYYYMMDD --attachments
+    python scripts/schema_migration/rehearse.py --from-db production-backup --db pcreh_YYYYMMDD
 
 One command, exits non-zero on the first check that is not green. The steps, each
 timed (the maintenance window is the total x 2):
 
     1. restore     drop/create the scratch database, pg_restore the dump's pettycashv2
                    (or pg_dump a local database into it with --from-db)
-    2. upgrade     flask db upgrade to alembic head, IN A SUBPROCESS whose
+    2. snapshot    copy every expense row and every report's stored expense total
+                   aside (schema rehearse_pre_upgrade) - the upgrade drops two of
+                   the three tables that hold expenses
+    3. upgrade     flask db upgrade to alembic head, IN A SUBPROCESS whose
                    RDS_DATABASE_URI is the scratch database, with the engine URL
                    asserted inside the app context before anything runs
-    3. build       01_schema_rebased.sql into the same database (pettycash_test)
-    4. 00          enum coverage: every mapped value lands
-    5. 02          foundation loader, COMMITTED into the scratch database
-    6. 03          reports/xero/billing loader, COMMITTED (it needs 02 committed)
+    4. upgrade-check  U1/U2 against the snapshot: no posted report's total needs an
+                   expense row the upgrade dropped, and no posted total moved
+    5. build       01_schema_rebased.sql into the same database (pettycash_test)
+    6. 00          enum coverage: every mapped value lands
+    7. 02          foundation loader, COMMITTED into the scratch database
+    8. 03          reports/xero/billing loader, COMMITTED (it needs 02 committed),
+                   the expense receipts last (attachment + report_expense_attachment)
                    - the files themselves end in ROLLBACK for hand use with psql;
                    this script flips the last statement, the file is untouched
-    7. 04          attachments, --dry-run; then --commit when --attachments
-    8. manifest    <db>_not_carried.md - every source row the load did not
-                   carry, by reason, with ids; plus the columns and tables not
-                   carried (Markdown only since 2026-09-18; the .docx twin is gone)
+    9. manifest    <db>_not_carried.md - every source row the load did not
+                   carry, by reason, with ids, the expense rows the UPGRADE dropped
+                   included; plus the columns and tables not carried. A green run
+                   then drops the snapshot schema.
 
 Nothing here reads .env for the database: the scratch URI is built from
 --admin-uri (default postgresql://postgres:***@localhost:5432/postgres, password
 from LOCAL_DATABASE_URI in .env) and --db. The app's own database is never
-touched: step 2 checks its alembic_version before and after and stops if it moved.
+touched: step 3 checks its alembic_version before and after and stops if it moved.
+--db is DROPPED first: give each run a name no other session is using.
 
 Exit codes: 0 all green; 1 a step failed; 2 usage.
 """
@@ -148,6 +155,17 @@ def query(db_uri: str, sql: str):
         conn.close()
 
 
+def execute(db_uri: str, sql: str) -> None:
+    """query() never commits - it reads. This one is for a statement that must stick."""
+    import psycopg2
+    conn = psycopg2.connect(db_uri)
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(sql)
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 def step_restore(args, admin_uri, db_uri, log):
     pg_harness._drop_database(admin_uri, args.db)
@@ -235,7 +253,9 @@ def step_upgrade(args, admin_uri, db_uri, log):
     proc = subprocess.run([str(python), "-c", UPGRADE_DRIVER, db_uri, str(REPO)],
                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=str(REPO))
     for l in proc.stdout.splitlines():
-        if l.startswith("ALEMBIC ") or ": " in l and ("revoked" in l or "dropped" in l or "P" in l[:4]):
+        # WARNING lines too: r5a05 announces the draft expenses it skips that way, and
+        # before 2026-09-28 this filter swallowed them
+        if l.startswith(("ALEMBIC ", "WARNING")) or ": " in l and ("revoked" in l or "dropped" in l or "P" in l[:4]):
             log.line("    " + l)
     if proc.returncode != 0:
         raise RuntimeError(f"flask db upgrade exit {proc.returncode}\n{proc.stderr[-4000:]}")
@@ -247,24 +267,113 @@ def step_upgrade(args, admin_uri, db_uri, log):
     log.line(f"    {SRC} now at alembic {ver}")
 
 
+# ---------------------------------------------------------------------------
+# THE UPGRADE CHECK. 00/02/03 and the manifest compare pettycash_test with pettycashv2 AT
+# HEAD, so what the alembic upgrade itself drops was invisible: r10a10 drops
+# report_expense_detail and shop_expense_draft outright. The snapshot step copies every
+# expense row and every report's stored total aside first; U1/U2 run right after the
+# upgrade, before anything is loaded. A dropped row can be a leftover - on the 2026-09-25
+# data the old app had kept 485 report_v2 detail rows, none of them in what was posted - so
+# the rule is the posted total, not a row count: a POSTED report that lost a row must still
+# add up without it. Rows on reports never posted are counted and not carried (drafts; the
+# user's decision of 2026-09-28).
+SNAPSHOT = "rehearse_pre_upgrade"
+EXPENSE_SOURCES = [  # (table, id column, report column), whichever the source has
+    ("shop_expense", "id", "report_id"),
+    ("shop_expense_draft", "id", "report_draft_id"),
+    ("report_expense_detail", "expense_id", "report_id"),
+]
+# distinct dropped expenses (an id can sit in two source tables), with their head report
+DROPPED_SQL = f"""
+    SELECT DISTINCT ON (x.id) x.src, x.id, x.report_id, x.amount, r.status AS head_status,
+           (x.report_id IN (SELECT id FROM {SNAPSHOT}.report_total)) AS in_source_report
+      FROM {SNAPSHOT}.expense x LEFT JOIN {SRC}.report r ON r.id = x.report_id
+     WHERE NOT EXISTS (SELECT 1 FROM {SRC}.shop_expense e WHERE e.id = x.id)
+     ORDER BY x.id, x.src"""
+
+
+def _snapshot_exists(db_uri) -> bool:
+    return bool(query(db_uri, f"SELECT 1 FROM information_schema.schemata WHERE schema_name = '{SNAPSHOT}'"))
+
+
+def step_snapshot(args, db_uri, log):
+    present = {t for (t,) in query(db_uri, f"SELECT table_name FROM information_schema.tables "
+                                            f"WHERE table_schema = '{SRC}'")}
+    parts = [f"SELECT '{t}'::text AS src, {i}::text AS id, {r}::text AS report_id, amount FROM {SRC}.{t}"
+             for t, i, r in EXPENSE_SOURCES if t in present]
+    import psycopg2
+    conn = psycopg2.connect(db_uri)
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(f"DROP SCHEMA IF EXISTS {SNAPSHOT} CASCADE; CREATE SCHEMA {SNAPSHOT};"
+                        f"CREATE TABLE {SNAPSHOT}.expense AS {' UNION ALL '.join(parts)};"
+                        f"CREATE TABLE {SNAPSHOT}.report_total AS SELECT id::text AS id, expenses FROM {SRC}.report;")
+            cur.execute(f"SELECT src, count(*) FROM {SNAPSHOT}.expense GROUP BY 1 ORDER BY 1")
+            by_src = cur.fetchall()
+            cur.execute(f"SELECT count(*) FROM {SNAPSHOT}.report_total")
+            (n_reports,), = cur.fetchall()
+    finally:
+        conn.close()
+    log.line(f"    {SNAPSHOT}: expense rows " + ", ".join(f"{t} {n}" for t, n in by_src)
+             + f"; {n_reports} report totals")
+
+
+def step_upgrade_check(args, db_uri, log):
+    if not _snapshot_exists(db_uri):
+        log.line(f"    U   skipped: no {SNAPSHOT} schema (the snapshot step takes it before the upgrade; "
+                 "--skip-restore after a green run has nothing to compare)")
+        return
+    failures = []
+    by_src = query(db_uri, f"""
+        SELECT x.src, count(*), round(sum(coalesce(x.amount, 0))::numeric, 2) FROM {SNAPSHOT}.expense x
+         WHERE NOT EXISTS (SELECT 1 FROM {SRC}.shop_expense e WHERE e.id = x.id) GROUP BY 1 ORDER BY 1""") or []
+    log.line("    U1  expense rows the upgrade dropped : "
+             + (", ".join(f"{t} {n} (HKD {a:,})" for t, n, a in by_src) if by_src else "none"))
+    # one row per report that lost at least one expense
+    per_report = query(db_uri, f"""
+        WITH dropped AS ({DROPPED_SQL})
+        SELECT d.report_id, d.head_status, bool_or(d.in_source_report), count(*),
+               round(sum(coalesce(d.amount, 0))::numeric, 2),
+               round(coalesce(r.expenses, 0)::numeric, 2),
+               round(coalesce((SELECT sum(e.amount) FROM {SRC}.shop_expense e WHERE e.report_id = d.report_id), 0)::numeric, 2)
+          FROM dropped d LEFT JOIN {SRC}.report r ON r.id = d.report_id
+         GROUP BY d.report_id, d.head_status, r.expenses""") or []
+    posted = [p for p in per_report if p[1] == "posted"]
+    bad = [p for p in posted if p[5] != p[6]]
+    log.line(f"    U1  on posted reports : {sum(p[3] for p in posted)} row(s) on {len(posted)} report(s); "
+             f"the total adds up without them on {len(posted) - len(bad)} of {len(posted)}   "
+             + ("OK" if not bad else "*** A POSTED TOTAL NEEDS A DROPPED ROW ***"))
+    for rid, _st, _src, n, amt, total, carried in bad[:20]:
+        log.line(f"    U1    report {rid}: posted total {total}, carried expenses {carried}, "
+                 f"dropped {amt} in {n} row(s)")
+    if bad:
+        failures.append(f"U1: {len(bad)} posted report(s) whose total needs an expense row the upgrade dropped")
+    drafts = [p for p in per_report if p[1] is not None and p[1] != "posted"]
+    log.line(f"    U1  on reports never posted : {sum(p[3] for p in drafts)} row(s) on {len(drafts)} report(s) "
+             "(drafts - not carried, the user's decision of 2026-09-28)")
+    gone = [p for p in per_report if p[1] is None]
+    gone_posted = [p for p in gone if p[2]]
+    log.line(f"    U1  on reports with no row at head : {sum(p[3] for p in gone)} row(s) on {len(gone)} report(s), "
+             f"{len(gone_posted)} of them a report the source held   "
+             + ("OK" if not gone_posted else "*** A SOURCE REPORT VANISHED ***"))
+    if gone_posted:
+        failures.append(f"U1: {len(gone_posted)} source report(s) with expenses have no row at head")
+    (moved,), = query(db_uri, f"""
+        SELECT count(*) FROM {SNAPSHOT}.report_total s JOIN {SRC}.report r ON r.id = s.id
+         WHERE round(coalesce(s.expenses, 0)::numeric, 2) <> round(coalesce(r.expenses, 0)::numeric, 2)""")
+    (vanished,), = query(db_uri, f"""
+        SELECT count(*) FROM {SNAPSHOT}.report_total s WHERE NOT EXISTS (SELECT 1 FROM {SRC}.report r WHERE r.id = s.id)""")
+    log.line(f"    U2  source reports whose stored expense total the upgrade changed : {moved}, "
+             f"that have no row at head : {vanished}   " + ("OK" if moved == 0 and vanished == 0 else "*** MOVED ***"))
+    if moved or vanished:
+        failures.append(f"U2: the upgrade changed {moved} report total(s) and lost {vanished} report(s)")
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+
 def step_build(args, admin_uri, db_uri, log):
     n = pg_harness.build_schema(db_uri, SCHEMA_DIR / "01_schema_rebased.sql")
     log.line(f"    built {DST}: {n} tables")
-
-
-def step_04(args, db_uri, log, commit: bool):
-    python = REPO / ".venv" / "Scripts" / "python.exe"
-    if not python.exists():
-        python = Path(sys.executable)
-    env = dict(os.environ, PYTHONUTF8="1", RDS_DATABASE_URI=db_uri, SOURCE_SCHEMA=SRC, TARGET_SCHEMA=DST)
-    proc = subprocess.run([str(python), str(REPO / "scripts" / "schema_migration" / "04_data_attachments.py"),
-                           "--commit" if commit else "--dry-run"],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=str(REPO))
-    for l in proc.stdout.splitlines():
-        if l.strip() and not l.startswith("    expenses/"):
-            log.line("    " + l)
-    if proc.returncode != 0:
-        raise RuntimeError(f"04_data_attachments exit {proc.returncode}\n{proc.stderr[-3000:]}")
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +429,7 @@ Source columns with no target column (dropped by the redesign; see 01 header):
                    period_lock_date, end_of_year_lock_date (item 15)
   report:          actual_cash_total (-> view report_cash_summary, item 12), receipt_files,
                    withdrawal_bank_account (item 13), shop_sales / delivery_sales (rolled up)
-  shop_expense:    files, s3_key (-> report_expense_attachment via 04, item 11), item_code (item 11),
+  shop_expense:    files, s3_key (-> report_expense_attachment, end of 03, item 11), item_code (item 11),
                    account_code, contact_name (used to resolve / restore the references, then dropped)
   report_history:  company (report_id suffices)
   sale_info:       code, entity_id, legacy_column (global catalogue)
@@ -341,6 +450,17 @@ def step_manifest(args, db_uri, log, path: Path):
         for r in rows:
             out.write("- " + " | ".join("" if v is None else str(v) for v in r) + "\n")
         log.line(f"    {len(rows):>5}  {title}")
+    title = ("Expense rows the alembic upgrade dropped (no row at head; U1 proves none of them was in "
+             "a posted report's total) - source table | expense id | report id | amount | report status at head")
+    if _snapshot_exists(db_uri):
+        rows = query(db_uri, DROPPED_SQL) or []
+        out.write(f"\n## {title} - {len(rows)} row(s)\n\n")
+        for src_t, eid, rid, amount, status, _in_src in rows:
+            out.write(f"- {src_t} | {eid} | {rid} | {amount} | {status or '(no report at head)'}\n")
+        log.line(f"    {len(rows):>5}  Expense rows the alembic upgrade dropped")
+    else:
+        out.write(f"\n## {title} - not available: no {SNAPSHOT} schema (--skip-restore)\n")
+        log.line("        -  Expense rows the alembic upgrade dropped (no snapshot, not listed)")
     out.write("\n## Columns\n" + DROPPED_COLUMNS)
     out.close()
     log.line(f"    manifest: {path}")
@@ -354,7 +474,6 @@ def main() -> int:
     src.add_argument("--from-db", help="name of a local database to copy pettycashv2 from")
     ap.add_argument("--db", required=True, help="scratch database to create (dropped first)")
     ap.add_argument("--admin-uri", default=_default_admin_uri(), help="superuser URI to the server")
-    ap.add_argument("--attachments", action="store_true", help="run 04 --commit after its dry run")
     ap.add_argument("--skip-restore", action="store_true", help="reuse the scratch database as it stands (skips restore and upgrade)")
     ap.add_argument("--log-dir", type=Path, default=REPO / "backups", help="where the log and manifest go")
     args = ap.parse_args()
@@ -362,20 +481,24 @@ def main() -> int:
     db_uri = _with_database(args.admin_uri, args.db)
     args.log_dir.mkdir(parents=True, exist_ok=True)
     log = Log(args.log_dir / f"{args.db}_rehearsal.log")
-    log.line(f"rehearse.py  db={args.db}  source={args.dump or args.from_db}  attachments={args.attachments}")
+    log.line(f"rehearse.py  db={args.db}  source={args.dump or args.from_db}")
     steps = Step(log)
 
     if not args.skip_restore:
         steps.run("restore", lambda: step_restore(args, args.admin_uri, db_uri, log))
+        steps.run("snapshot", lambda: step_snapshot(args, db_uri, log))
         steps.run("upgrade", lambda: step_upgrade(args, args.admin_uri, db_uri, log))
+    steps.run("upgrade-check", lambda: step_upgrade_check(args, db_uri, log))
     steps.run("build", lambda: step_build(args, args.admin_uri, db_uri, log))
     steps.run("00", lambda: psql_file(db_uri, SCHEMA_DIR / "00_enum_coverage_check.sql", log))
     steps.run("02", lambda: psql_file(db_uri, SCHEMA_DIR / "02_data_foundation_rebased.sql", log, commit=True))
     steps.run("03", lambda: psql_file(db_uri, SCHEMA_DIR / "03_data_reports_rebased.sql", log, commit=True))
-    steps.run("04", lambda: step_04(args, db_uri, log, commit=False))
-    if args.attachments:
-        steps.run("04+", lambda: step_04(args, db_uri, log, commit=True))
     steps.run("manifest", lambda: step_manifest(args, db_uri, log, args.log_dir / f"{args.db}_not_carried.md"))
+    # Green: the snapshot has served U1/U2 and the manifest. A failed run keeps it, so a
+    # --skip-restore re-run can check the upgrade again.
+    if _snapshot_exists(db_uri):
+        execute(db_uri, f"DROP SCHEMA {SNAPSHOT} CASCADE")
+        log.line(f"    {SNAPSHOT} dropped")
     steps.table()
     log.line("\nALL GREEN" if all(s == "ok" for _, _, s in steps.times) else "\nFAILED")
     return 0

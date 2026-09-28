@@ -284,14 +284,6 @@
 --     of each expense and dropped the rest. The link table is not a refinement
 --     of that design; it is the design that matches the data.
 --
---     What unblocked it is a parser, not a table. scripts/schema_migration/
---     04_data_attachments.py reads the legacy paths through the APPLICATION's
---     own normalize_expense_files (report/services/shared.py:140), so there is
---     exactly one implementation of "what does a files value mean" and the
---     migration cannot disagree with the running app about it. A PL/pgSQL
---     re-implementation was the obvious alternative and is the reason this step
---     stayed unbuilt for three passes: three formats, two of them JSON.
---
 --     item_code goes with them for a different reason - it is a Xero item code
 --     on a petty-cash expense line, backfilled from the account when absent
 --     (report/routes/api.py:375-394), and account_id already carries the
@@ -649,22 +641,17 @@
 --   00_enum_coverage_check.sql          read-only; proves every mapped value lands
 --   02_data_foundation_rebased.sql      foundation tables from pettycashv2 at HEAD
 --   03_data_reports_rebased.sql         reports and billing; needs 02 committed
---   scripts/schema_migration/04_data_attachments.py --dry-run
---                                       then --commit, then optionally
---                                       --commit --backfill-size
 --
--- ONE HOP. The source is pettycashv2 at alembic head (v1a01_billing_account),
--- in the same database, and the loaders are generated from information_schema
+-- ONE HOP. The source is pettycashv2 at alembic head, in the same database,
+-- and the loaders are generated from information_schema
 -- by generators/gen.py. The redesign's own hard parts - the report/draft/v2
 -- merge, the sales normalisation, the cash-count rows - are done by the
 -- application's alembic chain (r1a01..r10a10, s1a01..s5a05, c1a01/c2a02) on the
 -- way to head, which joins on the shared primary key rather than guessing a
 -- winner by (entity, date). scripts/schema_migration/rehearse.py runs the whole
--- thing - restore, upgrade, build, 00, 02, 03, 04 - and exits non-zero on any
--- check. The schema-2 hop and its loaders are in docs/schema/archive/.
---
--- 04 is Python rather than SQL so that it can call the application's own
--- files-value parser; see ERA 3 item 11.
+-- thing - restore, snapshot, upgrade, upgrade check, build, 00, 02, 03 - and
+-- exits non-zero on any check. The schema-2 hop and its loaders are in
+-- docs/schema/archive/.
 --
 -- The counts in this file are measured, never estimated:
 --
@@ -980,7 +967,7 @@ CREATE TYPE pettycash_test.payment_attachment_role AS ENUM
 -- billing-backend's - report_expense_attachment is a Minty table. Decision 1
 -- makes it an enum for exactly that reason.
 --
--- 'receipt' is the only value the migration writes (04_data_attachments.py:292);
+-- 'receipt' is the only value the migration writes;
 -- every path that produces one of these rows today is a receipt upload. The
 -- other two are declared because an expense can legitimately carry a supplier
 -- invoice or a stray document, and adding a value to a live enum is the one
@@ -1569,16 +1556,14 @@ CREATE TABLE pettycash_test.attachment (
   file_extension   VARCHAR(20)  NOT NULL DEFAULT '',
   mime_type        VARCHAR(100) NOT NULL,
   -- Nullable, unlike the rest of this table. A row created by an upload always
-  -- knows its size; a row RECOVERED FROM A PATH does not, and
-  -- 04_data_attachments.py creates thousands of those. Its --backfill-size pass
-  -- fills them in from S3 one head_object at a time, so NULL means "not asked
-  -- yet" - which 0 could not say.
+  -- knows its size; a row RECOVERED FROM A PATH does not, so NULL means "not
+  -- asked yet" - which 0 could not say.
   file_size        BIGINT       NULL,
   storage_provider VARCHAR(50)  NOT NULL DEFAULT 's3',
   -- Stays NOT NULL: the empty string is the honest value for a migrated row.
   -- S3's ETag is an MD5 unless the object was uploaded multipart, and putting a
   -- value from the wrong algorithm into a column named sha256 is worse than
-  -- leaving it blank - 04_data_attachments.py:182-185 makes the same call.
+  -- leaving it blank.
   checksum_sha256  VARCHAR(128) NOT NULL DEFAULT '',
   uploaded_by      UUID         NULL,  -- no FK: see 7. THE SERVICE BOUNDARY
   is_deleted       BOOLEAN      NOT NULL DEFAULT FALSE,
@@ -1706,16 +1691,6 @@ CREATE TABLE pettycash_test.report_expense (
 --   The table report_expense.files / s3_key were standing in for. One expense,
 --   many receipts, ordered - which is what the source data actually holds and
 --   what a single attachment_id could not express.
---
---   Filled by scripts/schema_migration/04_data_attachments.py, which parses the
---   legacy paths with the APPLICATION's own parser
---   (report/services/shared.py normalize_expense_files) rather than a second
---   implementation in SQL, so the migration and the running app cannot disagree
---   about what a `files` value means.
---
---   The column names, the role vocabulary and the (report_expense_id,
---   attachment_id) unique key are what that script writes and conflicts on -
---   changing any of them means changing it too.
 CREATE TABLE pettycash_test.report_expense_attachment (
   id                 UUID    NOT NULL DEFAULT gen_random_uuid(),
   report_expense_id  UUID    NOT NULL,
@@ -1727,8 +1702,6 @@ CREATE TABLE pettycash_test.report_expense_attachment (
   xero_attachment_id VARCHAR(36) NOT NULL DEFAULT '',
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT report_expense_attachment_pkey PRIMARY KEY (id),
-  -- The migration is re-runnable because of this key: it inserts
-  -- ON CONFLICT (report_expense_id, attachment_id) DO NOTHING.
   CONSTRAINT uq_rea_expense_attachment UNIQUE (report_expense_id, attachment_id),
   CONSTRAINT fk_rea_expense    FOREIGN KEY (report_expense_id)
       REFERENCES pettycash_test.report_expense (id) ON DELETE CASCADE,

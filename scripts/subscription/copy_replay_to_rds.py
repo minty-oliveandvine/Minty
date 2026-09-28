@@ -32,8 +32,8 @@ That table cannot simply be left out: it is where module ACCESS lives, so withou
 entities arrive on RDS with subscriptions and invoices attached and every module dark.
 
 TARGETING. Entities are matched by NAME, built from the run's `tag` exactly as
-`replay_scenarios._entities` does — so this reaches the eleven "Replay - Scenario N"
-companies and cannot reach a real one. Everything else hangs off the payer id, which is a
+`replay_scenarios._entities` does — so this reaches the run's own companies ("Ang - M44
+Nexora Health Limited" and the rest) and cannot reach a real one. Everything else hangs off the payer id, which is a
 constant in `RUNS`.
 
 `--replace` clears the run's rows on the destination first, so a re-copy after a re-replay

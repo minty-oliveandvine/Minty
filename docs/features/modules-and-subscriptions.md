@@ -131,8 +131,11 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
 
 ### Tooling
 `scripts/subscription/replay_scenarios.py` seeds scenarios by living them (a test clock);
-`scripts/subscription/copy_replay_to_rds.py`; the numbered dev scenarios are in the
-`subscription-scenario-catalogue` note.
+`scripts/subscription/copy_replay_to_rds.py`. Its catalogue is Figma 05·A: one company per
+module-status combination, named for its frame ("M44 Nexora Health Limited"). The table, the ten
+frames it cannot live and why, and its shelf life are in minty-billing-api
+`docs/features/subscriptions-api.md` §8, "The replay catalogue". The Django port there runs the
+same shapes.
 
 ## Tests
 

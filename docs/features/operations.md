@@ -71,6 +71,5 @@ user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
 ## Scripts
 
 `scripts/e2e_seed.py` (the e2e identity and shop, idempotent, leaves a Xero-connected
-shop's mapping alone), `scripts/schema_migration/` (`rehearse.py`, `cutover_checks.py`,
-`04_data_attachments.py`), `scripts/subscription/` (scenario replay),
+shop's mapping alone), `scripts/schema_migration/` (`rehearse.py`, `cutover_checks.py`), `scripts/subscription/` (scenario replay),
 `docs/schema/generators/` (`gen.py`, `audit_models.py`, `mkdoc.py`).

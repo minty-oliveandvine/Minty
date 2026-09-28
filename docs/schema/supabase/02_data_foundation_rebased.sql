@@ -665,7 +665,7 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM pettycashv2.user_token t WHERE t.user_id = u.id);
   RAISE NOTICE 'B4  user.access_token without a user_token row : % (dead, not carried)', n;
   FOR n IN SELECT count(*) FROM pettycash_test.report_expense_attachment LOOP
-    RAISE NOTICE 'B4  report_expense_attachment : % (filled by 04)', n;
+    RAISE NOTICE 'B4  report_expense_attachment : % (filled by 03, EXPENSE RECEIPTS)', n;
   END LOOP;
 END
 $$;

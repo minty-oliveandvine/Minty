@@ -1584,60 +1584,51 @@ the Stripe SDK). The branded PDF (09-A) can now take its bill-to block from the 
 Recorded in minty-web `docs/features/subscriptions.md` §15 and minty-billing-api
 `docs/features/subscriptions-api.md` §2 / §9.
 
-*Noted 2026-09-23, nothing built — what the invoices page needs from the API, from Figma section
-09 (`1410:2042`, the user's link; four frames).* 09-B / 09-C are the billing page with an Invoice
-History block beneath it (both carry `▶ Back → 08-B`), so section 09 extends
-`/subscription/billing` rather than adding a page; 09-A is the invoice itself at 794×1123 — A4,
-a DailyMinty letterhead, a bill-to block, line items and the debit notice — and 09-D is the
-per-invoice CSV `Inv-<reference> Breakdown by Entity`. **The history table** is nearly served by
-`GET /api/me/invoices`: `reference` and `amount` already answer Inv# and Amount, but the design
-prints the PAID date ("26 June 2026", "Failed 26 Jul") and `portal.build_payer_invoices` returns
-only `date` / `date_iso` = `issued_at` — `SubscriptionInvoice.paid_at` exists on the model and is
-simply not exposed. **The row's _Retry payment_** wants a decision: `retry-payment` is a MODULE
-action (`/api/modules/{entity_id}/retry-payment`) while an invoice is payer-level and its lines
-can span several companies, so either the page resolves a failed invoice back to one entity
-(wrong the moment that invoice is multi-entity) or the API gains
-`POST /api/me/invoices/{id}/retry`. **The PDF is the largest item:** today there is only
-`hosted_invoice_url`, Stripe's hosted page, which does not render as this document — a branded
-render is new work, and it needs the billing company and address that 08-C also waits on.
-**The CSV** exposes nothing today, `build_payer_invoices` having collapsed the lines to their
-`entities` names and one aggregate `amount`: `entity_name`, `product_name` and `amount` are on
-`SubscriptionInvoiceLine` and need only serialising, but the sheet's *Monthly amount* and
-*Period start* / *Period end* are not stored per line — its row 4 (Petty Cash, monthly 280,
-26-Jul-26 → 5-Aug-26, charged 90.32) is a proration, so the full rate differs from what was
-charged and the line's period differs from the invoice's own. The rate is derivable from the
-catalogue (`plan.amount`) by mapping `product_name` back to a `function_code`, which is lossy;
-the period would have to come from `kind` (`full` / `remaining` / `unused` / `credit`) plus `at`,
-or from new columns. Line money is minor units, and the CSV prints two decimals where 09-A prints
-none.
+*Noted 2026-09-23, RECHECKED 2026-09-28 — the invoices page, from Figma section 09 (`1410:2042`,
+the user's link; four frames).* Most of what this entry first recorded as owed shipped on
+2026-09-25, and on the BILLING page rather than a page of its own: 09-B / 09-C's invoice history
+is 08-B's table (`components/BillingPanels.tsx`, paging 10/50/100 through
+`lib/billing.ts::INVOICE_PAGE_SIZES`), and **09-D's CSV is built** — `lib/breakdown.ts` writes the
+user's sample column for column over the new `GET /api/me/invoices/{invoice_id}/breakdown`, which
+Flask never had. The two columns that could not be answered then are answered now by **schema item
+23**: `subscription_invoice_line` gained `period_start`, `period_end` and `unit_amount` — the
+half-open span and the price per billing period, `NULL` on an extension whose rate stepped
+part-way — in `docs/schema/01_schema_rebased.sql` and in both engines. **Supabase was deliberately
+not altered**, so production's `pettycashv2` has none of the three; harmless while subscriptions
+are dark there, but step 6's rehearsal and step 7 are where it has to be true, and a missing
+column breaks SELECTs quietly. **`paid_at` fixed 2026-09-28:** `build_payer_invoices` now answers
+`paid` / `paid_iso` off `SubscriptionInvoice.paid_at` and `lib/billing.ts::invoiceLines` reads it.
+It had been reading `date` — the day the invoice was RAISED — under a column headed "Paid date",
+so every row printed a plausible wrong day rather than failing; an unsettled invoice answers null
+now and the grid prints a dash. **Still owed:** the standalone `/invoices` page is a `NotBuiltYet`
+placeholder (`routes/NotBuiltYet.tsx::FLOWS`, alongside `/modules/cancel` and
+`/modules/payment-method`); and **09-A's branded PDF** — "Invoice PDF" is still Stripe's hosted
+page, a capability URL, not the DailyMinty A4 document the frame draws. **Still undecided:**
+whether that PDF is worth rendering against Stripe's own page. **Built 2026-09-28 on 08-B (the
+user's 08-K design):** 09-C's "Failed <date>" state - the declined invoice's whole row red, "Failed
+26 Jul" under Paid date - and its *Retry payment*, over a new payer-level
+`POST /api/me/invoices/{id}/retry` keyed by the invoice's billing account rather than a company
+(`dunning.retry_now(group_id=…, expect_invoice=…)`, both engines), offered only on the invoice a
+retry would charge (`retryable` on each row).
 
-*Noted 2026-09-23, nothing built — what the state library needs from the API, from Figma section
-11 (`1498:1377`, the user's link; three parts).* Section 11 is a rules spec rather than screens —
-"the code should not hard-code those 36 screens ... it should draw one screen from the rules
-here" — which is already how `lib/subscriptionSummary.ts` works, so **C, the status → UI mapping,
-asks for nothing**: all six statuses are on the page model, and *Super Minty is not a status* (the
-name the panel applies the moment both modules are billable, ACTIVE or CANCELLATION_PENDING, and
-not while one side is still on TRIAL) is the rule already implemented. **A, the seven summary
-panels,** is served by `panel.py` — the state, the footer sentence, the trial conversions and the
-totals — and its card line by `/api/me/billing/entity-payment-method`, with one gap: 03's "Saving
-HK$160 a month". `cards.get_module_plan_catalog()` holds each module's standalone price beside
-`bundle_amount` ("The bundle IS the discount") but sits on no route in this API — it was written
-for the onboarding wizard. Better computed into the panel than exposed raw, so the frontend never
-re-derives money. **B, the eight banners, is the work.** The notice feed emits five kinds —
-`past_due`, `needs_card`, `needs_consent`, `pending_cancel`, `trial_ending` — and already carries
-`severity` (`critical` / `warning` / `info`), so the frames' `!` versus `i` needs nothing new.
-Missing: the **trial ladder**, where `trial_ending` is one kind that deliberately "runs the whole
-trial" (`notices.py`) and the design wants four rungs at Day 10 / 20 / 25 / 30 with their own copy
-and tone; a **`trial_expired`** kind ("once, right after Day 30"); and a **`suspended`** kind,
-which the design keeps apart from Payment failed (grey, "not urgent, it has already stopped")
-along the progression `Payment failed → Suspended`. The transfer-request banner needs no API
-change — section 07's incoming read already serves it — though it could join the feed for
-consistency. Two things to weigh before adding kinds: Day 10's copy quotes a USAGE count ("You've
-already processed 12 payment requests") and nothing in `billing/services/` counts anything, that
-number being the pettycash side of the boundary Part 2 is drawing — so it is a cross-domain read
-or a change of copy; and `NoticeKind` is a CLOSED union in billing-frontend (`notices.py` records
-that `needs_card` was reused rather than a kind invented, for exactly this reason), so three new
-kinds is a two-consumer change, billing-frontend and minty-web together.
+*Noted 2026-09-23, RECHECKED 2026-09-28 — the state library, from Figma section 11 (`1498:1377`,
+the user's link; three parts).* C, the status → UI mapping, still asks for nothing. **A's one gap
+is closed:** panel state 03's "Saving HK$160 a month" is served — `panel.py` computes
+`bulk_discount` as the difference between the standalone subtotal and the bundle price ("The
+bundle IS the discount. There is no coupon.") and puts it in the payload beside `has_discount`, so
+the frontend never re-derives money. 08-B's next-bill figure, recorded here as unanswerable, is
+answered too, by `portal.next_bill_for_account`. **B, the eight banners, is untouched, and is now
+the whole of section 11.** The notice feed still emits five kinds — `past_due`, `needs_card`,
+`needs_consent`, `pending_cancel`, `trial_ending` — and already carries `severity` (`critical` /
+`warning` / `info`), so the frames' `!` versus `i` needs nothing new. Missing: the **trial ladder**
+at Day 10 / 20 / 25 / 30, where `trial_ending` is one kind that deliberately runs the whole trial;
+a **`trial_expired`** kind fired once after Day 30; and a **`suspended`** kind kept apart from
+Payment failed along the progression `Payment failed → Suspended`. The transfer-request banner
+needs no API change — section 07's read serves it. Two things to weigh before any of it: Day 10's
+copy quotes a USAGE count ("You've already processed 12 payment requests") and nothing in
+`billing/services/` counts anything, that number being the pettycash side of the boundary Part 2
+is drawing; and `NoticeKind` is a CLOSED union in billing-frontend, so three new kinds is a
+two-consumer change.
 
 *Noted 2026-09-24, RECHECKED the same day — section 07's gaps, two closed and two still open,
 from Figma section 07 (`1410:1737`, the user's link; ten frames).* A parallel session finished the
@@ -1678,6 +1669,23 @@ inherits:** Flask was deliberately NOT mirrored, so `blueprints/subscription/ser
 is still on disk and now DIVERGES — no `collect_at`, no `outcome_seen_at`, no module choice at
 accept. That is fine by design because this step deletes it, but for as long as the dark/live
 switch can still reach Flask's copy the two behave differently.
+
+*Noted 2026-09-28 — `minty-billing-api` becomes `minty-subscription-api`, and before this step.*
+The user overruled the `billing` decision of 2026-09-21: `billing` and `payments` named two
+different domains while one was the other's homonym, which is the very confusion the Part 3
+naming convention exists to prevent. The rename is WHOLE — the GitHub repository and the working
+folder, the rule-10 service id (`billing-api` → `subscription-api`), both variables
+(`BILLING_API_URL` → `SUBSCRIPTION_API_URL`, `NEXT_PUBLIC_BILLING_API_URL` →
+`NEXT_PUBLIC_SUBSCRIPTION_API_URL`), the `docker/stack` service name, the Render service, and
+`E2E_BILLING_API_URL` in minty-web's Playwright environment. **The port does not move** (rule 6):
+it stays :8004. **It happens BEFORE this step rather than at Part 3 step 4 with the other
+renames,** and the timing is the whole point: step 5 is where rule 10's `links.py` is written into
+five repositories and where the hard env-name cut introduces `BILLING_API_URL` everywhere.
+Renaming first writes the right name once; renaming afterwards writes the wrong one into five
+repositories and then cuts it over again. The naming convention and the service-id table are
+updated to the new name. The DATED ENTRIES above, and the prose of steps 5-7 and Part 3, still
+read `minty-billing-api` and mean this repository — bringing those across is a mechanical pass to
+run WITH the rename, not a rewrite of what was true on the day.
 
 ### 5. The Flask cut, link-outs and repoints
 
@@ -1846,7 +1854,8 @@ Cutover day repeats steps 3–8 with the window's backup.
    dashboard can be deleted, nothing depends on it.
 3. `pg_dump` Supabase (custom format) to two places. Verify it restores.
 4. Run the pipeline on the staging Postgres from a fresh dump of the old production host
-   (**`SUBSCRIPTION_ENABLED=0 rehearse.py --dump … --db <name> --attachments`** — the flag is
+   (**`SUBSCRIPTION_ENABLED=0 rehearse.py --dump … --db <name>`** — the expense receipts load
+   at the end of 03 since 2026-09-28, so there is no `--attachments` step any more; the flag is
    what makes `m1a01` skip its revocation; the log must say `m1a01: skipped` — then
    `ALTER SCHEMA pettycash_test RENAME TO pettycashv3`). All checks OK or **stop and reopen on
    the old schema** — nothing has changed yet. Supabase's own `pettycashv2` is not the source
@@ -2011,9 +2020,13 @@ Render and Vercel where nothing else says whose repo it is, and it separates the
 and `-service` says nothing. The domain word matches the subdomain where one exists
 (`pettycash.`, `payment.`, `onboarding.dailyminty.com`).
 
-**`billing`** for the Stripe/subscription service is a decision since 2026-09-21 — the repository
-`minty-billing-api` exists (it is the real billing domain; the short overlap with today's misnamed
-`billing-backend` ends when that one becomes `minty-payments-api`). **`accounts`** for auth +
+**`subscription`** for the Stripe/subscription service, taken 2026-09-28 and REPLACING the
+`billing` of 2026-09-21: the repository is `minty-subscription-api`, its rule-10 id is
+`subscription-api`, its variables are `SUBSCRIPTION_API_URL` / `NEXT_PUBLIC_SUBSCRIPTION_API_URL`.
+`billing` was ambiguous beside `payments` — two different domains, one of them the other's
+homonym, which is the confusion this convention exists to prevent (today's misnamed
+`billing-backend` becomes `minty-payments-api`). The rename lands BEFORE Part 2 step 5; see that
+step's entry for why. **`accounts`** for auth +
 users + companies is still a recommendation (alternative `identity`) — say so if you want the
 alternative.
 
@@ -2430,7 +2443,7 @@ PRESTAGING,STAGING,PROD}` family go).
 |---|---|---|---|---|
 | `minty` | Minty (Flask) — the person-facing hub host; `minty-web` / `minty-accounts-api` inherit the id at Part 3 steps 4–5 | `MINTY_URL` | `NEXT_PUBLIC_MINTY_URL` | `http://localhost:5001` |
 | `hub-web` | minty-web | `HUB_WEB_URL` | `NEXT_PUBLIC_HUB_WEB_URL` | `http://localhost:3002` |
-| `billing-api` | minty-billing-api | `BILLING_API_URL` | `NEXT_PUBLIC_BILLING_API_URL` | `http://localhost:8004` |
+| `subscription-api` | minty-billing-api → minty-subscription-api (renamed before Part 2 step 5) | `SUBSCRIPTION_API_URL` | `NEXT_PUBLIC_SUBSCRIPTION_API_URL` | `http://localhost:8004` |
 | `payments-web` | billing-frontend → minty-payments-web | `PAYMENTS_WEB_URL` | `NEXT_PUBLIC_PAYMENTS_WEB_URL` | `http://localhost:3000` |
 | `payments-api` | billing-backend → minty-payments-api | `PAYMENTS_API_URL` | `NEXT_PUBLIC_PAYMENTS_API_URL` | `http://localhost:8000` |
 | `onboarding-web` | onboarding | `ONBOARDING_WEB_URL` | `NEXT_PUBLIC_ONBOARDING_WEB_URL` | `http://localhost:3001` |

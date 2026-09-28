@@ -557,7 +557,6 @@ CREATE TABLE pettycashv3.report_expense_attachment (
   xero_attachment_id VARCHAR(36) NOT NULL DEFAULT '',
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT report_expense_attachment_pkey PRIMARY KEY (id),
-
   CONSTRAINT uq_rea_expense_attachment UNIQUE (report_expense_id, attachment_id),
   CONSTRAINT fk_rea_expense    FOREIGN KEY (report_expense_id)
       REFERENCES pettycashv3.report_expense (id) ON DELETE CASCADE,
