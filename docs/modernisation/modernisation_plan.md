@@ -1543,7 +1543,8 @@ last two leaving its own block quiet rather than taking the page down): the next
 first and chipped, "Show more (6)" for the rest (08-J), the empty (08-H) and expired (08-I)
 states; "Update card" IS the menu (08-W/08-X) - promote, edit, remove - with the default card's
 removal refused by the page itself (08-R) and any other card asked about first; and the invoices
-already paid, each opening Stripe's hosted page. **The card screens**: 08-Y adds one on Stripe's
+already paid, each opening Stripe's hosted page (since 2026-09-29, downloading our own 09-A PDF
+instead - below). **The card screens**: 08-Y adds one on Stripe's
 own `PaymentElement` (SetupIntent → `confirmSetup` → `/payment-methods/confirm`, the number never
 touching this app), landing back with `?added=` for 08-N/08-S; 08-D edits only what Stripe allows
 - the name and the expiry. Readings recorded in the feature doc §15: "Bill to" is the PAYER (the
@@ -1609,9 +1610,13 @@ failed" banner on the module page opens the company's billing account (`BILLING.
 08-B — the user's call, matching the list's banner: the failed card is the ACCOUNT's), the open
 row's _Change_ opens the Billing Accounts sheet in place, and the "Not built yet" page with its two
 catch-all routes was deleted the same day at the user's word (a stray path is Next's not-found).
-**Still owed:** only **09-A's branded PDF** — "Invoice PDF" is still Stripe's hosted
-page, a capability URL, not the DailyMinty A4 document the frame draws. **Still undecided:**
-whether that PDF is worth rendering against Stripe's own page. **Built 2026-09-28 on 08-B (the
+**09-A's branded PDF: BUILT 2026-09-29** (the user asked whether Stripe's invoices could be
+made to look like it; they cannot - Stripe's PDF layout is fixed and its Bill to is the Stripe
+customer, one per payer). "Invoice PDF" on 08-B now downloads `GET /api/me/invoices/{id}/pdf`
+(minty-billing-api, fpdf2): Bill to = the invoice's billing account as 08-B prints it; 09-A's plan
+lines each listing their companies, one row per Stripe item in Stripe's words; footer = the
+Terms' K11 Atelier address with billing@dailyminty.com; the note says "bill date" (09-A prints
+no due date). **Built 2026-09-28 on 08-B (the
 user's 08-K design):** 09-C's "Failed <date>" state - the declined invoice's whole row red, "Failed
 26 Jul" under Paid date - and its *Retry payment*, over a new payer-level
 `POST /api/me/invoices/{id}/retry` keyed by the invoice's billing account rather than a company

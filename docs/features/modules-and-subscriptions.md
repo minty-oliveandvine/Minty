@@ -94,6 +94,17 @@ group, so the invoice carried no `billing_group_id` and went to the account defa
 resolves the company's group and refuses (409, "Choose a payment method for this company
 before restoring this module.") when there is none.
 
+**A refused purchase leaves no open invoice** (2026-09-29, both engines). A declined card raises
+out of `Invoice.pay` with the invoice finalized and OPEN, and dunning chases the payer's oldest
+open invoice. A trial conversion and a handover already voided theirs; a declined reinstatement
+did not, so a customer could later pay for a restore that never happened. All three now void
+through `checkout._void_unpaid_invoice` on both failure paths. **Each Stripe item carries its
+own days** (same day, both engines): `billing_gateway._item_period` sends the line's recorded
+span (`billing.Line.period_start` / `period_end`) instead of the invoice's whole period, so
+Stripe's PDF no longer dates a prorated start, a credit or an access extension as a full month.
+Minty's own invoice PDF (Figma 09-A) is served by minty-billing-api
+(`GET /api/me/invoices/{id}/pdf`); Flask has no copy of it.
+
 The rules the user chose deliberately (`subscription-pricing-decisions`,
 `subscription-tunable-windows` in the notes): a **30-day** card-free trial per module
 (`DEFAULT_TRIAL_DAYS`), **15 days** of past-due access (`PAST_DUE_GRACE_DAYS`), dunning
