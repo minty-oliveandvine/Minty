@@ -102,9 +102,13 @@ only reset at login. What "still here" means for the Users tab is section 8.
 ## 4. The terms gate
 
 `blueprints/legal/routes/gate.py::require_terms_acceptance` runs on every request: a
-signed-in user who has not accepted the current terms version is redirected to
-`/legal/accept` (JSON callers get a JSON 403 instead of a redirect). The allow-list is
-keyed on **endpoint names**, not paths: the legal blueprint, the login/OTP endpoints,
+signed-in user who has not accepted the current terms version is redirected to `/entity`,
+whose acceptance panel is a modal over the Select Company list (JSON callers get a JSON 403
+instead of a redirect; `/legal/accept` is the standalone fallback). With `MINTY_WEB_HUB` on,
+`/entity` hands the browser to minty-web whether or not terms are owed, and minty-web's own
+gate draws the same panel over every page of that app, recording through
+`POST /api/me/terms/accept` (bearer, `source = "hub"`). The allow-list is keyed on **endpoint
+names**, not paths: the legal routes (minty-web's two included), the login/OTP endpoints,
 logout and `leave-entity`, static files. Versions, pinning and consent records are in
 [legal-terms.md](legal-terms.md).
 
@@ -148,7 +152,13 @@ which stores the token in the `billing_token` cookie (8 hours; billing-backend
 `POST /api/auth/token/refresh` re-mints it before it lapses) and to the onboarding app
 with `?token=…`. minty-web (the hub, Part 2) is entered the same way through its `/landing`,
 and comes back for a fresh token through `GET /handoff/minty-web?next=&entity_id=` (login-gated,
-`entity/routes/modules.py`). Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
+`entity/routes/modules.py`). Its entity list and My Profile read Flask's **hub surface**
+(`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`) with that
+token — bearer only, CORS for `MINTY_WEB_URL`, and a token naming an unknown or switched-off
+(`approved` false) account is refused like a bad one. **Every "open my profile" link** (the
+avatar in ~20 page headers, the payments app's badge) goes through `GET /profile?entity_id=&from=`
+(`modules.py::open_profile`), which mints the token at the click and picks the profile:
+minty-web's while `MINTY_WEB_HUB` is on, billing-frontend's otherwise. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
 re-establishes the Flask session) — `billing-relogin` is the legacy "my token ran out"
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).

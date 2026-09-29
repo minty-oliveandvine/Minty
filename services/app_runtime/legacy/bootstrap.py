@@ -315,6 +315,15 @@ def create_app():
     csrf.exempt(my_transfer_initiate_api)
     csrf.exempt(my_transfer_respond_api)
     csrf.exempt(my_transfer_cancel_api)
+    # minty-web's My Profile saves the person's own name and email with the module JWT and no
+    # session cookie (blueprints/shared/hub_api.py). The write can only ever touch the
+    # token's own user row - there is no id in the request to forge.
+    from blueprints.user_management.routes.me_api import my_profile_api
+    csrf.exempt(my_profile_api)
+    # minty-web's Terms modal records the acceptance the same way: bearer only, and the row
+    # can only ever be the token's own user's (blueprints/legal/routes/hub.py).
+    from blueprints.legal.routes.hub import hub_terms_accept
+    csrf.exempt(hub_terms_accept)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,

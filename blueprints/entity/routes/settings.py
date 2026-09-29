@@ -795,14 +795,15 @@ def entity_settings_users(org_id):
                                      for word in words if word])
 
         # Assignable roles, mirroring the onboarding invite step
-        # (onboarding/components/OnboardingSteps.jsx ROLES). Hardcoded to the
-        # canonical four so the dropdown never shows redundant/near-duplicate
-        # rows from the roles table.
+        # (onboarding/components/OnboardingSteps.jsx ROLES). The canonical four
+        # (enums.ASSIGNABLE_ENTITY_ROLES) so the dropdown never shows
+        # redundant/near-duplicate rows from the roles table; their names are the
+        # ones the profile's role pill uses too.
+        from blueprints.shared.enums import ASSIGNABLE_ENTITY_ROLES, ENTITY_ROLE_LABELS
+
         entity_user_role_options = [
-            {"value": "admin", "name": "Admin"},
-            {"value": "accountant", "name": "Accountant"},
-            {"value": "shop_manager", "name": "Shop Manager"},
-            {"value": "cashier", "name": "Cashier"},
+            {"value": role.value, "name": ENTITY_ROLE_LABELS[role]}
+            for role in ASSIGNABLE_ENTITY_ROLES
         ]
         roles = entity_user_role_options
 

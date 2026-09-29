@@ -150,7 +150,9 @@ def init_app(app, db):
             return billing_app_home_url(entity_id, org, current_user.id)
 
         def bills_app_profile_url(entity_id, *, from_bills: bool = False):
-            """Module 2 (Bills) profile page — JWT landing with ``next=/profile``.
+            """The profile, opened from inside ``entity_id`` - through ``entity.open_profile``,
+            which decides whether that is minty-web's (``MINTY_WEB_HUB``) or the payments
+            app's, and mints the token at the click rather than at this page's render.
 
             ``from_bills`` records WHICH MODULE the user left, so the profile's back link
             can return them to it. It defaults to False because twelve of the sixteen
@@ -164,28 +166,15 @@ def init_app(app, db):
             """
             if not entity_id:
                 return url_for("entity.entity_list")
-            if not current_user.is_authenticated:
-                return url_for("auth.home")
-            org = Entity.query.get(entity_id)
-            if not org:
-                return url_for("entity.module_selector", entity_id=entity_id)
-            from blueprints.entity.routes.modules import billing_app_profile_url
-
-            return billing_app_profile_url(
-                entity_id, org, current_user.id, from_bills=from_bills
-            )
+            params = {"entity_id": entity_id}
+            if from_bills:
+                params["from"] = "bills"
+            return url_for("entity.open_profile", **params)
 
         def bills_app_profile_unscoped_url(*, from_bills: bool = False):
-            """Module 2 profile with no selected entity (e.g. Select Company header icon)."""
-            if not current_user.is_authenticated:
-                return url_for("auth.home")
-            from blueprints.entity.routes.modules import (
-                billing_app_profile_unscoped_url,
-            )
-
-            return billing_app_profile_unscoped_url(
-                str(current_user.id), from_bills=from_bills
-            )
+            """The profile with no company in context (the Select Company header) - through
+            ``entity.open_profile``, as ``bills_app_profile_url``."""
+            return url_for("entity.open_profile", **({"from": "bills"} if from_bills else {}))
 
         def onboarding_launch_url():
             """Launch URL into the onboarding wizard (Step 1) for the current user.

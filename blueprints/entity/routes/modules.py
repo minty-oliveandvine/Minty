@@ -51,22 +51,15 @@ def record_entity_access(entity_id: str, user_id: str) -> None:
     try:
         updated = Entity.query.filter(Entity.id == entity_id).update(
             {
-                # UTC, AND NAIVE, DELIBERATELY. ``_format_last_accessed`` converts to
-                # Hong Kong for display; this end only has to be consistent.
-                #
-                # It used to write ``datetime.now(tz)`` — an AWARE +08:00 value — meaning
-                # to store Hong Kong wall time. That is not what a naive
-                # ``timestamp without time zone`` column does with an offset: Postgres
-                # CONVERTS the value using the session ``TimeZone`` (UTC here) instead of
-                # keeping its wall clock, so 5:36 PM landed as 09:36 and the card read 8
-                # hours behind — the very thing the old comment said it was preventing.
-                #
-                # ``.replace(tzinfo=None)`` is what makes this immune rather than merely
-                # correct today: passing an aware UTC value would land as UTC only while
-                # the session ``TimeZone`` stays UTC, and would silently start storing
-                # Hong Kong digits the day somebody set it to Asia/Hong_Kong. A naive
-                # value is stored exactly as written, whatever the session says.
-                "last_accessed_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                # AN AWARE UTC INSTANT, because the column is ``TIMESTAMPTZ``
+                # (01_schema_rebased.sql). A timestamptz stores the instant an aware value
+                # names, whatever the session ``TimeZone`` says; a NAIVE value it reads IN
+                # the session's zone. This used to write naive UTC - right for the old
+                # ``timestamp without time zone`` column, wrong since the rebase: on a
+                # session that is not UTC (a local Postgres set to UTC+8, for one) every
+                # stamp landed 8 hours early and the card said so. Correct in production
+                # only while its sessions happened to run in UTC.
+                "last_accessed_at": datetime.now(timezone.utc),
                 "last_accessed_by_user_id": user_id,
             },
             synchronize_session=False,
@@ -227,6 +220,27 @@ def minty_web_module_page_url(org: Entity, user_id, *, from_bills: bool = False)
     return minty_web_landing_url(path, org, user_id)
 
 
+#: minty-web's hub pages (``MINTY_WEB_HUB``): the entity list and My Profile.
+MINTY_WEB_ENTITIES_PATH = "/entities"
+MINTY_WEB_PROFILE_PATH = "/profile"
+
+
+def minty_web_entity_list_url(user_id, *, notices: str | None = None) -> str:
+    """minty-web's entity list, with an unscoped token - a person choosing a company is in
+    none yet. ``notices`` is a signed flash hand-over (``services.entity_list.sign_notices``)
+    for the list to show, so a message flashed on the way here is not lost."""
+    path = MINTY_WEB_ENTITIES_PATH + (f"?flash={notices}" if notices else "")
+    return minty_web_landing_url(path, None, user_id)
+
+
+def minty_web_profile_url(org: Entity | None, user_id, *, from_bills: bool = False) -> str:
+    """minty-web's My Profile: scoped to ``org`` when opened from inside a company (the
+    profile names it and the person's role there), unscoped from the entity list.
+    ``?from=bills`` sends its back arrow to the payments app rather than to Petty Cash."""
+    path = MINTY_WEB_PROFILE_PATH + ("?from=bills" if from_bills else "")
+    return minty_web_landing_url(path, org, user_id)
+
+
 @entity_bp.route("/handoff/minty-web")
 @login_required
 def handoff_minty_web():
@@ -249,6 +263,37 @@ def handoff_minty_web():
             flash("Hmm, it looks like you don't have permission to look there.", "danger")
             return redirect(url_for("entity.entity_list"))
     return redirect(minty_web_landing_url(destination, org, current_user.id))
+
+
+@entity_bp.route("/profile")
+@login_required
+def open_profile():
+    """Every "open my profile" link in Minty and the payments app comes here:
+    ``?entity_id=<company it was opened from>&from=bills``.
+
+    One place decides WHICH profile opens: minty-web's when ``MINTY_WEB_HUB`` is on,
+    billing-frontend's otherwise. Minted here, at the click, rather than when the page that
+    carries the link renders - a link minted at render time held a 30-minute token, and a
+    page left open longer than that sent its avatar to an expired landing.
+    """
+    from blueprints.shared.feature_flags import minty_web_hub
+
+    from_bills = request.args.get("from") == "bills"
+    entity_id = (request.args.get("entity_id") or "").strip()
+    org = None
+    if entity_id:
+        from services.permission_policy import has_entity_access
+
+        org = Entity.query.filter(Entity.id == entity_id).first()
+        if org is None or not (is_superuser(current_user) or has_entity_access(current_user, entity_id)):
+            flash("Hmm, it looks like you don't have permission to look there.", "danger")
+            return redirect(url_for("entity.entity_list"))
+
+    if minty_web_hub():
+        return redirect(minty_web_profile_url(org, current_user.id, from_bills=from_bills))
+    if org is not None:
+        return redirect(billing_app_profile_url(org.id, org, current_user.id, from_bills=from_bills))
+    return redirect(billing_app_profile_unscoped_url(str(current_user.id), from_bills=from_bills))
 
 
 @entity_bp.route("/entity/<string:entity_id>/enter")

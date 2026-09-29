@@ -310,16 +310,19 @@ def deactivate_my_account():
 @user_management_bp.route("/minty/api/users/me", methods=["PATCH"])
 @login_required
 def update_my_profile():
+    # Saved through the same service as minty-web's My Profile (services/profile.py), so the
+    # names are trimmed the same way whichever door they come in by. No email here - that
+    # is the profile's, with the rules that keep sign-in and reset pointing at one address.
+    from blueprints.user_management.services.profile import ProfileError, update_profile
+
     payload = request.get_json(silent=True) or {}
-    allowed_fields = ("first_name", "last_name", "user_phone")
-    updated = False
+    fields = {
+        field: payload.get(field)
+        for field in ("first_name", "last_name", "user_phone")
+        if field in payload
+    }
 
-    for field in allowed_fields:
-        if field in payload:
-            setattr(current_user, field, payload.get(field))
-            updated = True
-
-    if not updated:
+    if not fields:
         return (
             jsonify(
                 {
@@ -330,7 +333,10 @@ def update_my_profile():
             400,
         )
 
-    db.session.commit()
+    try:
+        update_profile(current_user, **fields)
+    except ProfileError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     return (
         jsonify(
             {

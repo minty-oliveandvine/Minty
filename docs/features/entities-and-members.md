@@ -9,7 +9,23 @@ methods), `blueprints/user_management/` (the superuser's admin), `blueprints/inv
 
 `GET /entity` lists the companies the signed-in person belongs to, with who last opened
 each one and when (`entities.last_accessed_by_user_id` / `last_accessed_at`; the how and
-its traps are in [entity_last_accessed.md](entity_last_accessed.md)). Opening one
+its traps are in [entity_last_accessed.md](entity_last_accessed.md)). The list is built once,
+in `blueprints/entity/services/entity_list.py::build_entity_list`, for two readers:
+
+- **minty-web's list** (`/entities`, the hub's "Select Company", 2026-09-29) — with
+  `MINTY_WEB_HUB` on, `/entity` mints an unscoped token and sends the browser there
+  (`routes/list.py::_to_minty_web_list`), which reads `GET /api/me/entities`
+  (`routes/me_api.py`, bearer + CORS for minty-web through `blueprints/shared/hub_api.py`,
+  not behind `SUBSCRIPTION_ENABLED`). **Whether or not Terms are owed** (since 2026-09-29):
+  minty-web's own Terms gate takes the acceptance ([legal-terms.md](legal-terms.md), minty-web's
+  panel). Seventy-odd routes flash a message
+  and redirect to `/entity`; the redirect drains those flashes, signs them (`itsdangerous`,
+  salt `hub-flash`, five minutes) into `?flash=`, and the API hands them back as `notices`, so
+  none is lost on the way. `MINTY_WEB_HUB` is **off unless set** — `/entity` is the first page
+  after every login, so it is switched on only where minty-web is deployed.
+- **the Jinja page** (`templates/entity/index.html`), everywhere else.
+
+Opening one
 (`GET /entity/<id>`) is the **dashboard**: today's report state, the module cards and — when
 subscriptions are on — the subscription notices ([modules-and-subscriptions.md](modules-and-subscriptions.md)).
 A person with no company is sent to create one.

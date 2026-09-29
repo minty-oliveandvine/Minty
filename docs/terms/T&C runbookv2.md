@@ -32,7 +32,9 @@ The work has three parts:
    the current version, they see this screen and cannot use Minty until they do.
    It renders as a **modal over the Select Company list** (`/entity`), not as a
    separate page — see §2 Flow B. `/legal/accept` still exists as the fallback
-   route and as the canonical URL for the flow.
+   route and as the canonical URL for the flow. **Since 2026-09-29, with
+   `MINTY_WEB_HUB` on**, `/entity` hands the browser to minty-web's list, and
+   minty-web draws the same panel over every page of its own — see §4.8.
 
 Part 3 sounds like a backup plan. It is not. It is the only part that covers
 people who are already using Minty today, and it is the only part that works
@@ -259,7 +261,7 @@ CREATE INDEX ix_terms_consent_user
 | `terms_version` | text, 32 | Which version, e.g. `beta-1`. |
 | `document_hash` | text, 64 | A fingerprint of the exact wording shown. Explained below. |
 | `accepted_at` | timestamp | When. Stored with the time zone. |
-| `source` | text, 32 | How they agreed. One of: `signup_otp`, `signup_invite`, `signup_token`, `gate`. |
+| `source` | text, 32 | How they agreed. One of: `signup_otp`, `signup_invite`, `signup_token`, `gate`, `hub` (minty-web's panel, since 2026-09-29). |
 | `ip_address` | text, 45 | Their internet address. Long enough for the newer IPv6 format. |
 | `user_agent` | text, 512 | Which browser they used. |
 
@@ -476,6 +478,26 @@ users in that business.
 ```
 
 ---
+
+### 4.8 `GET /api/me/terms` and `POST /api/me/terms/accept` *(minty-web's panel, 2026-09-29)*
+
+With `MINTY_WEB_HUB` on, Flask's `/entity` sends the browser to minty-web whether or
+not an acceptance is owed, and minty-web draws the panel (a port of
+`_terms_panel.html`) over every page of its own. These two routes are what it reads
+and posts (`blueprints/legal/routes/hub.py`). Bearer token, not the session; CORS for
+minty-web; CSRF-exempt.
+
+- `GET /api/me/terms` → `{"owed": false}`, or `{"owed": true, "document": {version,
+  effective_date, html, show_draft_notice}, "is_update", "previous_version", "links":
+  {terms, privacy, previous}}`.
+- `POST /api/me/terms/accept` `{"accepted": true, "terms_version": "beta-1"}` → the
+  same checks as §4.4 (one function, `accept_current_terms`): `400` not ticked, `409`
+  `{"error": "version_changed", "terms_version": <live>}`, `500` no document, else the
+  record with `source = "hub"` and `200 {"ok": true, "terms_version": <live>}`.
+
+Both are on the gate's allowed list (§5.2), and an agreement given there is honoured
+by the gate on the next Flask page — it falls back to the database when the session
+has no answer.
 
 ### 4.7 What every other endpoint does now
 
