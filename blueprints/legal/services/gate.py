@@ -101,14 +101,43 @@ def take_intended_destination() -> str | None:
     return safe_internal_path(session.pop(TERMS_NEXT_SESSION_KEY, None))
 
 
+def terms_owed(user_id) -> dict | None:
+    """What `user_id` still has to agree to, or None when nothing is owed.
+
+    No session involved - the one answer to "does this person owe an acceptance, and of
+    what", for every place that asks: the panel over the Select Company list and the
+    standalone /legal/accept page (through `outstanding_terms_context`, which adds the
+    session cache), and minty-web's Terms modal (`routes/hub.py`, bearer, no session).
+
+    None also when there is no current document: nobody can be asked to agree to
+    something that does not exist (see the gate's fail-open reasoning).
+    """
+    from blueprints.legal.services.consent import consents_for_user, has_consent
+
+    document = registry.get_current(registry.TERMS)
+    if document is None or has_consent(user_id):
+        return None
+
+    # "Out of date" and "never agreed" are both blocked, but they read very
+    # differently to the person: one is being asked again, the other for the
+    # first time. Only the former gets the "what changed" note.
+    previous = consents_for_user(user_id)
+    return {
+        "document": document,
+        "privacy_version": registry.current_version(registry.PRIVACY),
+        "is_update": bool(previous),
+        "previous_version": previous[0].terms_version if previous else None,
+    }
+
+
 def outstanding_terms_context() -> dict | None:
     """Context for rendering the acceptance panel, or None if nothing is due.
 
     The panel is drawn in two places — the standalone /legal/accept page and
     the modal over the Select Company list — and both need exactly this set of
-    values. Building it here means the two can never disagree about whether
-    somebody still owes an acceptance, or about which version they last agreed
-    to.
+    values (`terms_owed`, which minty-web's Terms modal reads too). Building it
+    there means none of them can disagree about whether somebody still owes an
+    acceptance, or about which version they last agreed to.
 
     Returns None when there is nothing to ask for: not logged in, no current
     document (see the gate's fail-open reasoning), or already agreed. As a side
@@ -121,29 +150,16 @@ def outstanding_terms_context() -> dict | None:
     """
     from flask_login import current_user
 
-    from blueprints.legal.services.consent import consents_for_user, has_consent
-
     if not getattr(current_user, "is_authenticated", False):
         return None
 
-    document = registry.get_current(registry.TERMS)
-    if document is None:
+    if registry.get_current(registry.TERMS) is None:
         return None
 
     if session_agreed_to_current():
         return None
 
-    if has_consent(current_user.id):
+    owed = terms_owed(current_user.id)
+    if owed is None:
         mark_session_agreed()
-        return None
-
-    # "Out of date" and "never agreed" are both blocked, but they read very
-    # differently to the person: one is being asked again, the other for the
-    # first time. Only the former gets the "what changed" note.
-    previous = consents_for_user(current_user.id)
-    return {
-        "document": document,
-        "privacy_version": registry.current_version(registry.PRIVACY),
-        "is_update": bool(previous),
-        "previous_version": previous[0].terms_version if previous else None,
-    }
+    return owed

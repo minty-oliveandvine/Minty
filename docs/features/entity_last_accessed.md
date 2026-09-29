@@ -12,6 +12,30 @@ no shared git history with this one, so this was a manual port, not a
 cherry-pick. Four things were changed on the way across — see
 [What we did differently](#8-what-we-did-differently-from-the-original-pr).
 
+> **Current state (2026-09-29) — read this before sections 5a and 5b, which describe the
+> original port.** Since the schema rebase `entities.last_accessed_at` is a **`TIMESTAMPTZ`**,
+> and `record_entity_access` writes an **aware UTC instant** (`datetime.now(timezone.utc)`): a
+> timestamptz reads a NAIVE value in the session's zone, so the naive write it used to make
+> landed 8 hours early on any session not running in UTC (`tests/test_hub_entity_list.py`
+> pins the fix). The list's query lives in `blueprints/entity/services/entity_list.py::
+> build_entity_list` — no `status != "deleted"` filter (`entity_status` has no such value) and
+> the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has two readers: the Jinja
+> page, and `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the
+> browser to while `MINTY_WEB_HUB` is on ([entities-and-members.md](entities-and-members.md)).
+> The API sends the instant as ISO; minty-web renders it in the viewer's zone.
+
+> **Current state (2026-09-29) — read this before sections 5a and 5b, which describe the
+> original port.** Since the schema rebase `entities.last_accessed_at` is a **`TIMESTAMPTZ`**,
+> and `record_entity_access` writes an **aware UTC instant** (`datetime.now(timezone.utc)`): a
+> timestamptz reads a NAIVE value in the session's zone, so the naive write it used to make
+> landed 8 hours early on any session not running in UTC (`tests/test_hub_entity_list.py`
+> pins the fix). The list's query lives in `blueprints/entity/services/entity_list.py::
+> build_entity_list` — no `status != "deleted"` filter (`entity_status` has no such value) and
+> the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has two readers: the Jinja
+> page, and `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the
+> browser to while `MINTY_WEB_HUB` is on ([entities-and-members.md](entities-and-members.md)).
+> The API sends the instant as ISO; minty-web renders it in the viewer's zone.
+
 ---
 
 ## 1. What the user sees

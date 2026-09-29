@@ -54,6 +54,18 @@ def minty_web_module_page() -> bool:
     return _flag("MINTY_WEB_MODULE_PAGE", True)
 
 
+def minty_web_hub() -> bool:
+    """Whether the entity list and My Profile are minty-web's pages rather than the Jinja list
+    and billing-frontend's profile. With it on, ``/entity`` and every "open my profile" link go
+    to minty-web (its ``/entities`` and ``/profile``); with it off everything is as it was.
+
+    **Off unless set**, unlike ``MINTY_WEB_MODULE_PAGE``: that one fires only while
+    subscriptions are live, but ``/entity`` is the first page after every login, so switching
+    this on in an environment where minty-web is not deployed would strand every sign-in.
+    Turn it on per environment once minty-web answers there."""
+    return _flag("MINTY_WEB_HUB", False)
+
+
 def require_subscriptions_enabled(view):
     """A route that exists only while subscriptions are live: 404 when they are dark.
 

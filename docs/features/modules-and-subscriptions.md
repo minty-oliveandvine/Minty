@@ -82,6 +82,18 @@ owns every state. Models in `blueprints/subscription/models/`:
   minty-billing-api; Flask's copy of the services is not mirrored (subscriptions are dark
   here, and Django replaces them).
 
+**Every charge names the billing account's card, and there is no fallback** (the
+per-entity-cards decision of 2026-08-25). A renewal, a mid-period change, a trial conversion,
+a transfer's first charge, a dunning retry and a re-issued invoice all hand the company's
+`payer_billing_group` (and so its `stripe_payment_method_id`) to `billing_gateway`. An invoice
+raised with no card named is charged by Stripe to the customer's account default, which is a
+bug, not a fallback: a company with no nomination is refused or skipped, never billed
+elsewhere. Fixed 2026-09-29 in both engines: undoing a cancellation after its extension was
+invoiced (`checkout._bill_reinstatement_in_house`) charged the uncovered remainder with no
+group, so the invoice carried no `billing_group_id` and went to the account default; it now
+resolves the company's group and refuses (409, "Choose a payment method for this company
+before restoring this module.") when there is none.
+
 The rules the user chose deliberately (`subscription-pricing-decisions`,
 `subscription-tunable-windows` in the notes): a **30-day** card-free trial per module
 (`DEFAULT_TRIAL_DAYS`), **15 days** of past-due access (`PAST_DUE_GRACE_DAYS`), dunning

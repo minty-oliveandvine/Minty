@@ -31,6 +31,7 @@ from blueprints.shared.schema import SCHEMA
 SOURCE_SIGNUP_OTP = "signup_otp"      # self-serve sign-up, tick box
 SOURCE_SIGNUP_INVITE = "signup_invite"  # invited user, tick box
 SOURCE_GATE = "gate"                   # the post-login blocking screen
+SOURCE_HUB = "hub"                     # the same gate drawn by minty-web (its Terms modal)
 
 # NOTE: an earlier draft of the design listed a fourth source, `signup_token`,
 # for the "choose a username" flow behind POST /auth/email/complete. That route
@@ -38,7 +39,7 @@ SOURCE_GATE = "gate"                   # the post-login blocking screen
 # `choose_username` result to the browser, so no signup_token is ever minted for
 # a real user. It is deliberately absent here; adding a constant for a path that
 # cannot run would invite someone to wire consent capture into dead code.
-CONSENT_SOURCES = (SOURCE_SIGNUP_OTP, SOURCE_SIGNUP_INVITE, SOURCE_GATE)
+CONSENT_SOURCES = (SOURCE_SIGNUP_OTP, SOURCE_SIGNUP_INVITE, SOURCE_GATE, SOURCE_HUB)
 
 
 class TermsConsent(db.Model):

@@ -3,20 +3,17 @@
 
 from datetime import datetime, timezone
 
-from flask import (current_app, flash, redirect, render_template, request,
-                   session, url_for)
+from flask import (current_app, flash, get_flashed_messages, redirect,
+                   render_template, request, session, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
 from sqlalchemy import func, or_
-from sqlalchemy.orm import aliased
 
 from blueprints.entity import entity_bp
-from blueprints.shared.feature_flags import subscriptions_enabled
+from blueprints.shared.feature_flags import minty_web_hub, subscriptions_enabled
+from blueprints.entity.services.entity_list import build_entity_list, sign_notices
 from blueprints.entity.services.modules import (build_subscription_notices,
-                                                claim_subscription_notice,
-                                                get_enabled_modules_for_entities,
-                                                get_trial_modules_for_entities,
-                                                module_display_names)
+                                                claim_subscription_notice)
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
 from blueprints.legal.services.gate import outstanding_terms_context
@@ -36,21 +33,10 @@ from services.permission_policy import Permission, has_permission, is_superuser
 def _format_last_accessed(dt):
     """Render a last-login timestamp like "9 Jun 5:42 PM", in Hong Kong time.
 
-    STORED AS UTC, CONVERTED HERE. ``last_accessed_at`` is a naive
-    ``timestamp without time zone`` holding UTC — see ``record_entity_access``, which
-    writes it that way deliberately. A naive column has no opinion about which zone its
-    digits belong to, so the only thing that makes them meaningful is the pair of
-    conventions at the two ends: write UTC, read UTC, convert once, here.
-
-    It used to render the digits verbatim, which was correct only if they were already
-    Hong Kong wall time. They were not: the write handed Postgres an aware +08:00 value,
-    and a naive column CONVERTS an aware value using the session ``TimeZone`` (UTC on the
-    server) rather than keeping its wall clock. So every card was 8 hours behind — a login
-    at 5:36 PM read "9:36 AM" — which is exactly the failure the old comment on the write
-    said it was avoiding.
-
-    Rows written before this are already UTC for that same reason, so they read correctly
-    now without being touched.
+    AN INSTANT, CONVERTED HERE. ``last_accessed_at`` is a ``TIMESTAMPTZ``
+    (``record_entity_access`` writes an aware UTC instant) and arrives here as the aware,
+    UTC value ``services.entity_list`` normalises it to; this converts it to Hong Kong once.
+    A naive value is still read as UTC, so a caller holding one gets the same answer.
 
     Built without strftime's %-d / %-I, which are glibc extensions and raise on
     Windows, so this renders identically on a dev box and on the server.
@@ -71,37 +57,12 @@ def _format_last_accessed(dt):
 @entity_bp.route("/entity")
 @login_required
 def entity_list():
-    # Who last opened each entity — outer-joined so entities that have never
-    # been opened (last_accessed_by_user_id IS NULL) still come back.
-    accessor = aliased(User)
-    base_query = (
-        db.session.query(
-            Entity.id,
-            Entity.name,
-            Entity.status,
-            Entity.last_accessed_at,
-            accessor.first_name,
-            accessor.last_name,
-        )
-        .outerjoin(accessor, Entity.last_accessed_by_user_id == accessor.id)
-        # "Setup in progress" floats to the top so a half-finished entity is
-        # the first thing seen, then most-recently-opened first. Never-opened
-        # entities sort last rather than first, which is what NULLS LAST buys.
-        .order_by(
-            (Entity.status == "onboarding").desc(),
-            Entity.last_accessed_at.desc().nulls_last(),
-        )
-    )
-    if is_superuser(current_user):
-        # Superusers see every entity, even those they have no
-        # user_entity row on (they enter read-only on those).
-        rows = base_query.all()
-    else:
-        rows = (
-            base_query.join(UserEntity, UserEntity.entity_id == Entity.id)
-            .filter(UserEntity.user_id == current_user.id)
-            .all()
-        )
+    # With the hub on, the list is minty-web's (its /entities) - Terms owed or not: minty-web
+    # draws the acceptance panel itself, over every page (its TermsGate, over
+    # legal/routes/hub.py), so the gate's redirect to here carries on to it.
+    if minty_web_hub():
+        return _to_minty_web_list()
+
     # The Terms panel renders as a modal over this page — it is where the gate
     # sends anyone who has not agreed. None means nothing is outstanding.
     # Resolved before the empty-list branch on purpose: a brand-new user with
@@ -109,49 +70,31 @@ def entity_list():
     # they never reach index.html.
     terms = outstanding_terms_context()
 
-    if not rows:
+    # The list itself (services/entity_list.py) - the same builder minty-web's list reads,
+    # so the two can never disagree about which companies there are or what badges they carry.
+    entries = build_entity_list(current_user)
+    if not entries:
         logger.info("Entity list is empty")
         return render_template("entity/entity_list_empty.html", terms=terms)
 
-    # Which module icons each card shows. This resolver is fail-closed (no
-    # entity_function_map row means OFF), which is what we want here — a module
-    # icon is a claim that the module is paid for and usable.
-    modules_by_entity = get_enabled_modules_for_entities([r.id for r in rows])
-
-    # Which of those modules are running on a free trial — one query for the list.
-    # Intersected with the enabled set below so the badge can never claim a trial on
-    # a module whose icon isn't there: the two come from different tables, and the
-    # entitlement resolver is the one the request gate actually obeys.
-    trials_by_entity = get_trial_modules_for_entities([r.id for r in rows])
-    trial_labels = module_display_names(
-        {code for codes in trials_by_entity.values() for code in codes}
-    )
-
-    organizations = []
-    for r in rows:
-        modules = modules_by_entity.get(r.id, set())
-        trial_modules = trials_by_entity.get(r.id, set()) & modules
-        organizations.append(
-            {
-                "id": r.id,
-                "name": r.name,
-                "status": r.status,
-                "modules": modules,
-                "trial_modules": trial_modules,
-                # Named in the badge tooltip so a card showing two module icons and
-                # one badge says WHICH module the free trial belongs to.
-                "trial_module_names": sorted(
-                    trial_labels.get(code, code) for code in trial_modules
-                ),
-                "last_accessed_display": _format_last_accessed(r.last_accessed_at),
-                "last_accessed_by": (
-                    f"{r.first_name or ''} {r.last_name or ''}".strip() or None
-                ),
-            }
-        )
+    organizations = [
+        {**entry, "last_accessed_display": _format_last_accessed(entry["last_accessed_at"])}
+        for entry in entries
+    ]
     return render_template(
         "entity/index.html", organizations=organizations, terms=terms
     )
+
+
+def _to_minty_web_list():
+    """On to minty-web's list, carrying what the redirect that brought the person here
+    flashed. Seventy-odd routes flash a message ("couldn't find that one", "no permission to
+    look there") and redirect to /entity; minty-web cannot read this session, so the
+    messages are drained here and signed into the URL, and minty-web's list shows them."""
+    from blueprints.entity.routes.modules import minty_web_entity_list_url
+
+    notices = sign_notices(get_flashed_messages(with_categories=True))
+    return redirect(minty_web_entity_list_url(current_user.id, notices=notices))
 
 
 @entity_bp.route("/entity/<string:id>")

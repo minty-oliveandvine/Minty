@@ -1600,9 +1600,16 @@ column breaks SELECTs quietly. **`paid_at` fixed 2026-09-28:** `build_payer_invo
 `paid` / `paid_iso` off `SubscriptionInvoice.paid_at` and `lib/billing.ts::invoiceLines` reads it.
 It had been reading `date` — the day the invoice was RAISED — under a column headed "Paid date",
 so every row printed a plausible wrong day rather than failing; an unsettled invoice answers null
-now and the grid prints a dash. **Still owed:** the standalone `/invoices` page is a `NotBuiltYet`
-placeholder (`routes/NotBuiltYet.tsx::FLOWS`, alongside `/modules/cancel` and
-`/modules/payment-method`); and **09-A's branded PDF** — "Invoice PDF" is still Stripe's hosted
+now and the grid prints a dash. **No standalone `/invoices` page (decided 2026-09-28, minty-web
+6db4a87):** the history lives on 08-B only; the route and its tab are gone. **Cancel is built**
+(2026-09-29 recheck): an untick on the open row or the ⋮'s _Cancel subscription_ → 06's modal →
+`cancel` → 05·C's result; the `/modules/cancel` entry left in `routes/NotBuiltYet.tsx::FLOWS` is
+dead (its `cancelAll` seam went on 2026-09-23). **No seam is left unbuilt (2026-09-29):** 03-F's "Payment
+failed" banner on the module page opens the company's billing account (`BILLING.account({entity})`,
+08-B — the user's call, matching the list's banner: the failed card is the ACCOUNT's), the open
+row's _Change_ opens the Billing Accounts sheet in place, and the "Not built yet" page with its two
+catch-all routes was deleted the same day at the user's word (a stray path is Next's not-found).
+**Still owed:** only **09-A's branded PDF** — "Invoice PDF" is still Stripe's hosted
 page, a capability URL, not the DailyMinty A4 document the frame draws. **Still undecided:**
 whether that PDF is worth rendering against Stripe's own page. **Built 2026-09-28 on 08-B (the
 user's 08-K design):** 09-C's "Failed <date>" state - the declined invoice's whole row red, "Failed
@@ -1628,7 +1635,11 @@ needs no API change — section 07's read serves it. Two things to weigh before 
 copy quotes a USAGE count ("You've already processed 12 payment requests") and nothing in
 `billing/services/` counts anything, that number being the pettycash side of the boundary Part 2
 is drawing; and `NoticeKind` is a CLOSED union in billing-frontend, so three new kinds is a
-two-consumer change.
+two-consumer change. **DEFERRED 2026-09-29 (the user): B is not Part 2 work.** The banner ladder
+waits until profile moves into `minty-web` (Part 3 step 4), and is built there with it; Part 2
+closes without it. *(Later the same day the entity list and My Profile DID move into
+`minty-web` — see Part 3 step 4 — and the user put the ladder, with the handover popups' move
+onto the entity list, into the next plan of its own.)*
 
 *Noted 2026-09-24, RECHECKED the same day — section 07's gaps, two closed and two still open,
 from Figma section 07 (`1410:1737`, the user's link; ten frames).* A parallel session finished the
@@ -1766,7 +1777,12 @@ apex production default that 307s on a CORS preflight — go; `NEXT_PUBLIC_MODUL
 and `app/maintenance`'s hardcoded `www` link; +`NEXT_PUBLIC_HUB_WEB_URL`,
 +`NEXT_PUBLIC_BILLING_API_URL`; the Vercel project's variables cut over in step 7's window;
 `ProfilePortalLinks` hrefs → `links.minty.handoff("/subscription/…")` (external links, still
-hidden when dark); `middleware.ts` drops the portal redirect; `lib/subscriptionNotice.ts` reads
+hidden when dark); **the old `/profile` page goes with them** (`app/profile/page.tsx`,
+`MyProfileContent`, `ProfilePortalLinks` — My Profile is minty-web's since 2026-09-29, and every
+"My Profile" link here already goes through Minty's `/profile`, `lib/mintyUrls.ts::
+buildMintyProfileUrl`); billing-backend's `PUT /api/v1/profile/me` then has no caller, while
+its `DELETE` stays by the user's decision (deactivation left the UI, not the API);
+`middleware.ts` drops the portal redirect; `lib/subscriptionNotice.ts` reads
 `links.origin("billing-api")`; `03_payer_portal.spec.ts` shrinks to "links present when live /
 none when dark"; `links.guard.test.ts` added. **billing-backend: zero changes** (its
 `FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` cut over at Part 3 step 4).
@@ -2979,7 +2995,7 @@ orders anything here.
    - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a `minty-e2e` journey (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
    - `minty-e2e`: Playwright scaffold + the stack CI workflow (cold-started from empty, since that now works) + the first two journeys (sign-up→finalize, connect Xero→publish report), which are the ones steps 3 and 5 will break if they go wrong. Contract-type generation into `minty-shared-ts` starts here too.
 3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_API_URL` (rule 10's name for today's `XERO_TOKEN_SERVICE_URL`; the `/api/internal/xero/token` entry moves to the `xero-api` row), then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: `minty-e2e` Xero journey + `onboarding/e2e/xero.spec.ts`.
-4. **`minty-shared-ts` + `minty-web` grows the hub** — `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
+4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over behind `MINTY_WEB_HUB` (off unless set); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
    notification moves with the entity list** (decided 2026-09-24): 07-I / A-07 (declined), A-08
    (expired) and 07-L (accepted) fire today over `/subscription` (Subscription & Billing) only
    because that is the one page a payer owns that `minty-web` serves — a handover is news about
@@ -2987,7 +3003,12 @@ orders anything here.
    about the mechanism changes: `/api/me/subscriptions` already carries `transfer_outcomes`, and
    `POST /api/me/subscriptions/transfer/seen` stamps `subscription_transfer.outcome_seen_at` so
    each one is shown once, ever. What moves is where `TransferOutcomeDialog` is mounted, and
-   whether the outcome names the company in the list beneath it.
+   whether the outcome names the company in the list beneath it. **The subscription banner
+   ladder lands here too** (deferred from Part 2 on 2026-09-29, the user's call — Figma section
+   11 part B): the trial ladder at Day 10 / 20 / 25 / 30, a `trial_expired` kind fired once, and
+   a `suspended` kind kept apart from Payment failed. Settle first where Day 10's usage count
+   comes from (the pettycash side of the boundary) and that `NoticeKind` is a closed union in
+   the payments app as well.
 5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. The entity read and `PATCH` expose `timezone` (validated by `minty_shared.time`), and `minty-web`'s entity settings page gets the select — rule 11's second writer. Gate: every `minty-e2e` journey, from a cold-started DB.
 6. **`minty-pettycash-api` + `minty-pettycash-web`** — largest (15.5k) but self-contained once entities live in accounts. Carries the **"Partially published" badge** (decision above) — the one piece of report UI that is a change, not a port:
    - *Today (Flask):* `publish.py:2525-2532` writes `publishing_status = 'failed'` whether 1 or all transactions failed, and only the log level differs; the `publish_failed` history row (`publish.py:2547-2553`) stores the reason items but not the counts. `report_history.html:513` and `report_draft_header_badge.html:25` render every `failed` as "Publish failed"; the overlay poller (`report_history.html:1567-1575`) shows "Partially published" when `failed` has any reasons — a total failure with reasons is announced as partial. The three `# show "Partially Published"` comments (`ending.py:763`, `ending.py:1755`, `shared.py:39`) describe a badge that no longer exists.

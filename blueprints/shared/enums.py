@@ -65,6 +65,35 @@ class EntityRole(_DbEnum):
     SUPER_ADMIN = "super_admin"
 
 
+#: How each role reads on screen - the users settings dropdown and the profile's role pill.
+#: Outside the enum body on purpose: anything assigned inside an Enum becomes a member.
+ENTITY_ROLE_LABELS: dict[EntityRole, str] = {
+    EntityRole.ENTITY_BASE: "Member",
+    EntityRole.CASHIER: "Cashier",
+    EntityRole.SHOP_MANAGER: "Shop Manager",
+    EntityRole.ACCOUNTANT: "Accountant",
+    EntityRole.ADMIN: "Admin",
+    EntityRole.SUPER_ADMIN: "Super Admin",
+}
+
+#: The roles a person may be given on the users settings page, in the dropdown's order
+#: (the onboarding invite step offers the same four).
+ASSIGNABLE_ENTITY_ROLES: tuple[EntityRole, ...] = (
+    EntityRole.ADMIN,
+    EntityRole.ACCOUNTANT,
+    EntityRole.SHOP_MANAGER,
+    EntityRole.CASHIER,
+)
+
+
+def entity_role_label(role: str | None) -> str | None:
+    """The on-screen name of a stored role, or None for no role or one this app does not know."""
+    try:
+        return ENTITY_ROLE_LABELS[EntityRole(role)] if role else None
+    except ValueError:
+        return None
+
+
 class EntityStatus(_DbEnum):
     """``entity_status`` — where a company stands: still in the wizard, or live with /
     without a Xero organisation linked (decided 2026-09-15; the old ``active``,

@@ -205,6 +205,10 @@ def app(built_database) -> Iterator:
         # the suite keeps the Jinja page its tests describe, and
         # tests/test_minty_web_handoff.py flips this to pin the redirect
         "MINTY_WEB_MODULE_PAGE": "0",
+        # the entity list and the profile hand over to minty-web when this is on - a developer's
+        # .env may say so (load_dotenv never overrides what is set here); the suite keeps the
+        # Jinja list its tests describe, and tests/test_hub_*.py flip it per test
+        "MINTY_WEB_HUB": "0",
     }
 
     old_env = {key: os.environ.get(key) for key in env}

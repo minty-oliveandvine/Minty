@@ -15,8 +15,11 @@ from loguru import logger
 
 from blueprints.legal import legal_bp
 from blueprints.legal.models.terms_consent import SOURCE_GATE
-from blueprints.legal.services.consent import (consents_for_user, has_consent,
-                                               record_consent)
+from blueprints.legal.services.consent import (ACCEPT_FAILED,
+                                               ACCEPT_NOT_TICKED,
+                                               ACCEPT_VERSION_CHANGED,
+                                               accept_current_terms,
+                                               consents_for_user, has_consent)
 from blueprints.legal.services.gate import (mark_session_agreed,
                                             take_intended_destination)
 from legal import registry
@@ -83,11 +86,16 @@ def accept_submit():
     `accepted` true and a version that is still live.
     """
     payload = request.get_json(silent=True) or {}
-    accepted = payload.get("accepted") is True
-    submitted_version = (payload.get("terms_version") or "").strip()
-    live_version = registry.current_version(registry.TERMS)
+    # The checks are services/consent.accept_current_terms's - shared with minty-web's
+    # Terms modal (routes/hub.py), so the two screens cannot disagree about what counts.
+    outcome, live_version = accept_current_terms(
+        current_user.id,
+        accepted=payload.get("accepted") is True,
+        submitted_version=payload.get("terms_version") or "",
+        source=SOURCE_GATE,
+    )
 
-    if not accepted:
+    if outcome == ACCEPT_NOT_TICKED:
         return (
             jsonify(
                 {
@@ -98,14 +106,8 @@ def accept_submit():
             400,
         )
 
-    # The Terms changed while this page sat open. Recording the agreement now
-    # would file it against wording that is no longer live — an accurate record
-    # of the wrong thing. Send the page back for a reload instead.
-    if submitted_version != live_version:
-        logger.info(
-            f"Terms version changed under user {current_user.id}: submitted "
-            f"{submitted_version!r}, live {live_version!r}. Asking them to reload."
-        )
+    # The Terms changed while this page sat open: send the page back for a reload.
+    if outcome == ACCEPT_VERSION_CHANGED:
         return (
             jsonify(
                 {
@@ -117,9 +119,8 @@ def accept_submit():
             409,
         )
 
-    consent = record_consent(current_user.id, source=SOURCE_GATE)
-    if consent is None:
-        # Only reachable if the document vanished between the two checks above.
+    if outcome == ACCEPT_FAILED:
+        # Only reachable if the document vanished between the checks.
         return (
             jsonify(
                 {

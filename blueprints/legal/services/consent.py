@@ -131,6 +131,47 @@ def record_consent(
         ).first()
 
 
+#: What `accept_current_terms` concluded. `recorded` is the only one that wrote anything.
+ACCEPT_RECORDED = "recorded"
+ACCEPT_NOT_TICKED = "not_ticked"
+ACCEPT_VERSION_CHANGED = "version_changed"
+ACCEPT_FAILED = "failed"
+
+
+def accept_current_terms(
+    user_id: str, *, accepted: bool, submitted_version: str, source: str
+) -> tuple[str, str]:
+    """The person's "Accept & Continue", wherever the panel was drawn: ``(outcome, live_version)``.
+
+    ONE place for the checks both acceptance screens make - Minty's own (``POST
+    /legal/accept``, the panel over its Select Company list) and minty-web's modal
+    (``POST /api/me/terms/accept``). The tick box on screen is a convenience; THIS is the
+    check, since a client can send whatever it likes:
+
+      * not ticked -> ``not_ticked``;
+      * the Terms changed while the panel sat open -> ``version_changed``: recording now
+        would file the agreement against wording that is no longer live, an accurate record
+        of the wrong thing - the client re-reads and asks again;
+      * the version has no document behind it -> ``failed`` (a misconfiguration);
+      * otherwise the consent is recorded (idempotently) -> ``recorded``.
+
+    Does NOT commit, like ``record_consent``: each route owns its transaction.
+    """
+    live_version = registry.current_version(registry.TERMS)
+    if not accepted:
+        return ACCEPT_NOT_TICKED, live_version
+    if (submitted_version or "").strip() != live_version:
+        logger.info(
+            f"Terms version changed under user {user_id}: submitted "
+            f"{submitted_version!r}, live {live_version!r}. Asking them to reload."
+        )
+        return ACCEPT_VERSION_CHANGED, live_version
+    if record_consent(user_id, source=source) is None:
+        # Only reachable if the document vanished between the two checks above.
+        return ACCEPT_FAILED, live_version
+    return ACCEPT_RECORDED, live_version
+
+
 def has_consent(user_id: str, version: str | None = None) -> bool:
     """Whether `user_id` has agreed to `version` (default: the live version).
 

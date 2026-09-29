@@ -114,6 +114,13 @@ ALLOWED_ENDPOINTS = frozenset(
         # Asked by the sign-in screen before anyone is logged in, to decide
         # whether an invitee still needs the tick box at all.
         "legal.invite_terms_status",
+        # minty-web's Terms modal (routes/hub.py) - the same acceptance flow drawn by
+        # another app, so load-bearing for the same reason as accept_submit. Its calls are
+        # bearer-only and normally carry no session, so the gate never sees them; but a
+        # client that sends the session cookie too (a same-origin deployment, a fetch with
+        # credentials) would otherwise be refused the very route that lets it agree.
+        "legal.hub_terms_status",
+        "legal.hub_terms_accept",
     }
 )
 
