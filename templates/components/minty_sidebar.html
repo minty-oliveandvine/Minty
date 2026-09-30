@@ -1,0 +1,232 @@
+{#
+  The sidebar - minty-web's one drawer with two views, ported (blueprints/shared/sidebar.py says
+  why and what decides it): the MENU (Figma 02) and MY PROFILE (Figma 10-A).
+
+  Include it ONCE per page, anywhere in the page's body; static/js/minty_sidebar.js moves it to
+  the end of the body (as minty-web's portal does), so no ancestor's transform, overflow or
+  stacking context can clip it. Not a page itself: the page includes the flash drain. Whatever opens it says so: data-sidebar-open="menu" on the header's ≡,
+  data-sidebar-open="profile" on the header's initials (whose href - the profile router - stays
+  the way in when scripts are off).
+
+  Expects `org` or `entity_id` for the company the page is about (neither on the entity list),
+  and `sidebar_from_bills` on the Payment Request settings pages.
+#}
+{% set _sb_entity = entity_id if entity_id is defined and entity_id else (org.id if org is defined and org else None) %}
+{% set sb = sidebar_context(_sb_entity, from_bills=(sidebar_from_bills is defined and sidebar_from_bills)) %}
+{% set _img = 'img/sidebar/' %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/minty_sidebar.css') }}">
+
+<div id="minty-sidebar" aria-hidden="true" inert
+     data-token-url="{{ sb.api.token }}"
+     data-profile-url="{{ sb.api.profile }}"
+     data-billing-api="{{ sb.api.billing }}"
+     data-subscriptions-url="{{ sb.links.subscriptions }}"
+     data-logout-url="{{ sb.links.logout }}"
+     data-entity-id="{{ sb.entity_id }}"
+     data-viewer-name="{{ sb.viewer.name }}">
+  {# Figma "Rectangle 398": the page behind washes out; a click on it closes the sidebar #}
+  <button type="button" class="msb-backdrop" data-sidebar-close tabindex="-1" aria-label="Close menu"></button>
+
+  <div class="msb-panel" id="minty-sidebar-panel" data-view="menu">
+
+    {# ---- THE MENU (Figma 02 / 10-C; minty-web components/ui/SideMenu.tsx) ---- #}
+    <nav class="msb-menu" aria-label="Main navigation" data-sidebar-view="menu">
+      <img class="msb-logo" src="{{ url_for('static', filename=_img ~ 'minty-logo.svg') }}" alt="Minty" width="99" height="71">
+
+      <button type="button" class="msb-person" data-sidebar-show="profile" aria-label="{{ sb.viewer.name }}, My Profile">
+        <span class="msb-avatar" aria-hidden="true" data-viewer-initials>{{ sb.viewer.initials }}</span>
+        <span class="msb-person-name" aria-hidden="true" data-viewer-name>{{ sb.viewer.name }}</span>
+      </button>
+
+      <div class="msb-sep-after-person"><div class="msb-sep" role="presentation"></div></div>
+      <div class="msb-links">
+        <a href="{{ sb.links.entities }}" class="msb-row msb-idle msb-row-select"{% if sb.current == 'entities' %} aria-current="page"{% endif %}>
+          <span class="msb-icon-28" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'select-entity.svg') }}" alt="" width="22" height="20"></span>
+          Select Entity
+        </a>
+        {% if subscriptions_enabled %}
+        <a href="{{ sb.links.subscriptions }}" class="msb-row msb-idle msb-row-subscriptions">
+          <span class="msb-subs-icon" aria-hidden="true">
+            <img class="msb-subs-ring" src="{{ url_for('static', filename=_img ~ 'subscriptions-ring.svg') }}" alt="" width="22" height="23">
+            <img class="msb-subs-dot-large" src="{{ url_for('static', filename=_img ~ 'subscriptions-dot-large.svg') }}" alt="" width="16" height="16">
+            <img class="msb-subs-dot-small" src="{{ url_for('static', filename=_img ~ 'subscriptions-dot-small.svg') }}" alt="" width="8" height="8">
+            <img class="msb-subs-dot-medium" src="{{ url_for('static', filename=_img ~ 'subscriptions-dot-medium.svg') }}" alt="" width="10" height="10">
+          </span>
+          <span class="msb-label-narrow">Manage subscriptions</span>
+        </a>
+        {% endif %}
+      </div>
+      <div class="msb-sep-after-links"><div class="msb-sep" role="presentation"></div></div>
+
+      {% if sb.in_company %}
+      {# Always in the page, hidden (an inline style - a utility's display outranks [hidden]) when
+         the module is off: the module settings page shows and hides these from its Save answer
+         (data-module-nav) without a reload. #}
+      <div class="msb-modules">
+        <div class="msb-group msb-group-petty" role="group" aria-label="Petty Cash" data-module-nav="PETTY_CASH"{% if not is_petty_cash_enabled(sb.entity_id) %} style="display:none"{% endif %}>
+          <div class="msb-module-heading">
+            <p class="msb-module-title msb-tone-petty">Petty Cash</p>
+            <span class="msb-module-icon msb-module-icon-petty" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'petty-cash.svg') }}" alt="" width="42" height="45"></span>
+          </div>
+          <a href="{{ sb.links.dashboard }}" class="msb-row msb-idle msb-row-module msb-row-first"{% if sb.current == 'dashboard' %} aria-current="page"{% endif %}>
+            <img src="{{ url_for('static', filename=_img ~ 'dashboard.svg') }}" alt="" width="23" height="23" aria-hidden="true">
+            Dashboard
+          </a>
+          <a href="{{ sb.links.reports }}" class="msb-row msb-idle msb-row-module"{% if sb.current == 'reports' %} aria-current="page"{% endif %}>
+            <img src="{{ url_for('static', filename=_img ~ 'reports.svg') }}" alt="" width="23" height="23" aria-hidden="true">
+            Reports
+          </a>
+        </div>
+        <div class="msb-group msb-group-payments" role="group" aria-label="Payment Request" data-module-nav="PAYMENT_REQUEST"{% if not is_billing_enabled(sb.entity_id) %} style="display:none"{% endif %}>
+          {# the rule between the two groups - only while Petty Cash shows too (minty_sidebar.css) #}
+          <div class="msb-between"><div class="msb-sep" role="presentation"></div></div>
+          <div class="msb-module-heading msb-module-heading-payments">
+            <p class="msb-module-title msb-tone-payments">Payment<br aria-hidden="true"> Request</p>
+            <span class="msb-module-icon" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'payment-request.svg') }}" alt="" width="76" height="76"></span>
+          </div>
+          <a href="{{ sb.links.bills }}" class="msb-row msb-tinted msb-row-bills">
+            <img src="{{ url_for('static', filename=_img ~ 'bills.svg') }}" alt="" width="27" height="20" aria-hidden="true">
+            Bills
+          </a>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="msb-spacer" aria-hidden="true"></div>
+      {# The cat sits above Settings and Logout on every page (the user's rule) - decoration #}
+      <div class="msb-cat">
+        <img src="{{ url_for('static', filename='img/sidepanel_cat.webp') }}" alt="" width="1370" height="1101" draggable="false">
+      </div>
+      <div class="msb-sep" role="presentation"></div>
+      <div class="msb-footer">
+        {% if sb.in_company %}
+        <a href="{{ sb.links.settings }}" class="msb-row msb-idle msb-row-footer msb-row-settings"{% if sb.current == 'settings' %} aria-current="page"{% endif %}>
+          <span class="msb-icon-31" aria-hidden="true"><img class="msb-flip-y" src="{{ url_for('static', filename=_img ~ 'settings.svg') }}" alt="" width="27" height="27"></span>
+          Settings
+        </a>
+        {% endif %}
+        {# Ends the session everywhere (the user's call, 2026-09-30) - minty-web's Logout #}
+        <a href="{{ sb.links.logout }}" class="msb-row msb-idle msb-row-footer msb-row-logout">
+          <span class="msb-icon-31" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'logout.svg') }}" alt="" width="23" height="23"></span>
+          Logout
+        </a>
+      </div>
+    </nav>
+
+    {# ---- MY PROFILE (Figma 10-A / 10-B; minty-web features/profile) - drawn by the script ---- #}
+    <section class="msb-profile" aria-label="My Profile" data-sidebar-view="profile" hidden>
+      <header class="msb-profile-bar">
+        <button type="button" class="msb-icon-button" data-sidebar-show="menu" aria-label="Back to the menu">
+          <img class="msb-flip-x" src="{{ url_for('static', filename=_img ~ 'back.svg') }}" alt="" width="24" height="24">
+        </button>
+        <h2 class="msb-profile-title">My Profile</h2>
+        <button type="button" class="msb-icon-button msb-close" data-sidebar-close aria-label="Close My Profile">
+          <svg viewBox="0 -960 960 960" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
+        </button>
+      </header>
+
+      <div class="msb-profile-body">
+        <div class="msb-loading" data-profile-state="loading" role="status" aria-label="Loading your profile">
+          <span class="msb-skel msb-skel-avatar"></span>
+          <span class="msb-skel msb-skel-name"></span>
+          <span class="msb-skel msb-skel-card"></span>
+        </div>
+
+        <div class="msb-failed" data-profile-state="error" role="alert" hidden>
+          <p data-profile-error></p>
+          <button type="button" class="msb-button" data-profile-retry>Try again</button>
+        </div>
+
+        <div data-profile-state="ready" hidden>
+          <section class="msb-hero" aria-label="Who you are">
+            <div class="msb-company" data-profile-company hidden>
+              <p class="msb-company-name" data-profile-company-name></p>
+              <p class="msb-plan" data-profile-plan hidden></p>
+              <img class="msb-plan-cat" src="{{ url_for('static', filename=_img ~ 'super-minty.png') }}" alt="" width="240" height="240" data-profile-plan-cat hidden>
+            </div>
+            <span class="msb-hero-avatar" aria-hidden="true" data-profile-initials></span>
+            <h2 class="msb-hero-name" data-profile-name></h2>
+            <p class="msb-role" data-profile-role hidden></p>
+          </section>
+
+          <section class="msb-details" aria-label="Your details">
+            <button type="button" class="msb-edit" data-profile-edit>Edit</button>
+            <form class="msb-details-form" data-profile-form novalidate>
+              <div class="msb-detail-row">
+                <span class="msb-tile" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'person.svg') }}" alt="" width="18" height="18"></span>
+                <div class="msb-detail-names">
+                  <div>
+                    <p class="msb-detail-label" id="msb-first-name">FIRST NAME</p>
+                    <p class="msb-detail-value" data-profile-value="first_name"></p>
+                    <input class="msb-field" aria-labelledby="msb-first-name" autocomplete="given-name" maxlength="255" data-profile-field="first_name" hidden>
+                  </div>
+                  <div>
+                    <p class="msb-detail-label" id="msb-last-name">LAST NAME</p>
+                    <p class="msb-detail-value" data-profile-value="last_name"></p>
+                    <input class="msb-field" aria-labelledby="msb-last-name" autocomplete="family-name" maxlength="255" data-profile-field="last_name" hidden>
+                  </div>
+                </div>
+              </div>
+              <div class="msb-detail-row msb-detail-email">
+                <span class="msb-tile" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'mail.svg') }}" alt="" width="16" height="13"></span>
+                <div class="msb-detail-main">
+                  <p class="msb-detail-value"><span class="msb-sr-only">Email </span><span data-profile-value="email"></span></p>
+                  <input class="msb-field" type="email" aria-label="Email" autocomplete="email" maxlength="255" data-profile-field="email" hidden>
+                </div>
+              </div>
+              <div class="msb-detail-row msb-detail-password">
+                <span class="msb-tile" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'lock.svg') }}" alt="" width="19" height="19"></span>
+                <div class="msb-detail-main">
+                  <p class="msb-detail-label">PASSWORD <a href="https://identity.xero.com/account" target="_blank" rel="noopener noreferrer" class="msb-link" aria-label="Change password (opens your Xero account)">Change</a></p>
+                </div>
+              </div>
+              <div class="msb-save-row" data-profile-editing hidden>
+                <p class="msb-save-error" role="alert" data-profile-save-error hidden></p>
+                <button type="submit" class="msb-button msb-save" data-profile-save>Save</button>
+              </div>
+            </form>
+          </section>
+
+          {# The subscription feature's "Subscriptions Overview" - not even drawn while subscriptions are dark #}
+          {% if subscriptions_enabled %}
+          <section class="msb-subs" aria-labelledby="msb-subs-title" data-subs hidden>
+            <h2 class="msb-subs-title" id="msb-subs-title">Subscriptions Overview</h2>
+            <div class="msb-subs-card">
+              <div class="msb-skel msb-skel-subs" role="status" aria-label="Loading your subscriptions" data-subs-state="loading"></div>
+              <div class="msb-subs-failed" role="alert" data-subs-state="error" hidden>
+                <p>Your subscriptions didn't load. Mind trying again?</p>
+                <button type="button" class="msb-button msb-button-small" data-subs-retry>Try again</button>
+              </div>
+              <p class="msb-subs-quiet" data-subs-state="empty" hidden>It looks a little quiet here. No entity subscriptions yet.</p>
+              <div class="msb-subs-ready" data-subs-state="ready" hidden>
+                <div class="msb-figures">
+                  <div class="msb-figure">
+                    <p class="msb-figure-label">Active subscriptions</p>
+                    <p class="msb-figure-value msb-figure-active" data-subs-active></p>
+                    <p class="msb-figure-unit" data-subs-active-unit></p>
+                  </div>
+                  <div class="msb-figure">
+                    <p class="msb-figure-label">Trial ending</p>
+                    <p class="msb-figure-value msb-figure-trial" data-subs-trial></p>
+                    <p class="msb-figure-unit" data-subs-trial-unit></p>
+                  </div>
+                </div>
+                <a href="{{ sb.links.subscriptions }}" class="msb-manage">Manage Subscription</a>
+              </div>
+            </div>
+          </section>
+          {% endif %}
+        </div>
+
+        <a href="{{ sb.links.logout }}" class="msb-logout-link">
+          <img src="{{ url_for('static', filename=_img ~ 'profile-logout.svg') }}" alt="" width="13" height="13" aria-hidden="true">
+          Log Out
+        </a>
+      </div>
+    </section>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/minty_sidebar.js') }}" defer></script>

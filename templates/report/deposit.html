@@ -150,11 +150,11 @@
             {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
             <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
               class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
-              aria-label="Open profile in Payments"
+              data-sidebar-open="profile" aria-label="My Profile"
               title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
               <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
             </a>
-            <button onclick="toggleMenu()" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
+            <button type="button" data-sidebar-open="menu" aria-label="Open navigation menu" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
                 <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
               </svg>
@@ -275,8 +275,8 @@
        <!-- Loading Overlay -->
        {% include 'components/loading_overlay.html' %}
 
-       <!-- Include reusable sidepanel component -->
-       {% include 'components/sidepanel.html' %} 
+       <!-- The sidebar: the menu and My Profile (components/minty_sidebar.html) -->
+       {% include 'components/minty_sidebar.html' %} 
      </div>
    </div>
 

@@ -1,0 +1,810 @@
+/*
+ * The sidebar on this app's pages (templates/components/minty_sidebar.html) - minty-web's one
+ * drawer with two views, ported: the MENU (Figma 02, minty-web components/ui/SideMenu.tsx) and
+ * MY PROFILE (Figma 10-A / 10-B, minty-web features/profile). Every size, colour and gap below is
+ * the TSX's Tailwind value, written out - change minty-web and this together.
+ *
+ * Plain CSS scoped under #minty-sidebar, not CDN Tailwind classes: the pages load Tailwind from
+ * its CDN (some with the forms plugin, which restyles every input), and an id outranks both, so
+ * nothing on a page can restyle the sidebar and the sidebar restyles nothing on the page.
+ */
+
+#minty-sidebar {
+  --msb-avatar-bg: #ffe6b1;
+  --msb-avatar-fg: #6b3a12;
+  --msb-teal: #54d3da;
+  --msb-teal-strong: #18c4c7;
+  --msb-accent: #f15a24;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  pointer-events: none;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  text-align: left;
+}
+#minty-sidebar[data-open] {
+  pointer-events: auto;
+}
+#minty-sidebar *,
+#minty-sidebar *::before,
+#minty-sidebar *::after {
+  box-sizing: border-box;
+}
+#minty-sidebar p,
+#minty-sidebar h2 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+#minty-sidebar img {
+  display: block;
+  max-width: none;
+}
+#minty-sidebar a {
+  text-decoration: none;
+  color: inherit;
+}
+#minty-sidebar button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+#minty-sidebar [hidden] {
+  display: none !important;
+}
+#minty-sidebar :focus-visible {
+  outline: 2px solid var(--msb-teal);
+  outline-offset: 2px;
+}
+#minty-sidebar .msb-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- the drawer ------------------------------------------------------------------------- */
+
+/* Figma "Rectangle 398": the page behind washes out */
+#minty-sidebar .msb-backdrop {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: rgba(217, 217, 217, 0.7);
+  opacity: 0;
+  transition: opacity 300ms ease-out;
+}
+#minty-sidebar[data-open] .msb-backdrop {
+  opacity: 1;
+}
+#minty-sidebar .msb-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: min(100%, 353px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #ededed;
+  background: #fff;
+  box-shadow: -6px 4px 18px 0 rgba(15, 23, 42, 0.1);
+  transform: translateX(100%);
+  transition: transform 300ms ease-out, width 300ms ease-out;
+}
+#minty-sidebar[data-open] .msb-panel {
+  transform: translateX(0);
+}
+/* My Profile: the whole screen on a phone, 440 px from 640 px up (10-A is drawn at 375; the
+   user asked for the room, so an ordinary email shows whole) */
+#minty-sidebar .msb-panel[data-view="profile"] {
+  width: 100%;
+  background: #f9fafb;
+}
+@media (min-width: 640px) {
+  #minty-sidebar .msb-panel[data-view="profile"] {
+    width: 440px;
+  }
+}
+
+/* --- the menu (SideMenu.tsx) ---------------------------------------------------------------- */
+
+#minty-sidebar .msb-menu {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  padding: max(49px, env(safe-area-inset-top, 0px)) 53px max(42px, env(safe-area-inset-bottom, 0px)) 49px;
+}
+#minty-sidebar .msb-logo {
+  margin-left: 89px;
+  width: 99px;
+  height: auto;
+  flex-shrink: 0;
+}
+#minty-sidebar .msb-person {
+  margin-top: 30px;
+  display: flex;
+  width: 100%;
+  cursor: pointer;
+  align-items: center;
+  gap: 40px;
+  border-radius: 12px;
+  padding: 3px 0 3px 35px;
+  text-align: left;
+}
+#minty-sidebar .msb-person:hover {
+  background: #f5f5f5;
+}
+#minty-sidebar .msb-avatar {
+  display: flex;
+  height: 57px;
+  width: 56px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 91px;
+  background: var(--msb-avatar-bg);
+  font-size: 30px;
+  font-weight: 500;
+  color: var(--msb-avatar-fg);
+}
+#minty-sidebar .msb-person-name {
+  max-width: 130px;
+  overflow-wrap: break-word;
+  font-size: 18px;
+  line-height: 22px;
+  color: #1f2937;
+}
+#minty-sidebar .msb-sep {
+  height: 1px;
+  width: 100%;
+  flex-shrink: 0;
+  background: #ededed;
+}
+#minty-sidebar .msb-sep-after-person {
+  margin-top: 32px;
+}
+#minty-sidebar .msb-sep-after-links {
+  margin-top: 16px;
+}
+#minty-sidebar .msb-links {
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* A row: Inter 500 18px. The page being shown is NOT drawn differently (02-A keeps Select
+   Entity grey) - it is marked for assistive technology only (aria-current). The one tinted row
+   is Bills, which the design draws as a button. */
+#minty-sidebar .msb-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 22px;
+  cursor: pointer;
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+#minty-sidebar .msb-idle {
+  color: #8f8f8f;
+}
+#minty-sidebar .msb-idle:hover {
+  background: #f5f5f5;
+}
+#minty-sidebar .msb-tinted {
+  background: rgba(202, 241, 244, 0.5);
+  color: var(--msb-teal);
+}
+#minty-sidebar .msb-tinted:hover {
+  background: rgba(202, 241, 244, 0.8);
+}
+#minty-sidebar .msb-row-select {
+  min-height: 52px;
+  gap: 21px;
+  padding-left: 32px;
+}
+#minty-sidebar .msb-icon-28 {
+  display: flex;
+  width: 28px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+#minty-sidebar .msb-row-subscriptions {
+  min-height: 66px;
+  gap: 21px;
+  padding-left: 32px;
+}
+#minty-sidebar .msb-label-narrow {
+  max-width: 130px;
+}
+/* Figma "Manage subscriptions": four outlined rings, placed as the design places them */
+#minty-sidebar .msb-subs-icon {
+  position: relative;
+  display: block;
+  height: 31px;
+  width: 28px;
+  flex-shrink: 0;
+}
+#minty-sidebar .msb-subs-icon img {
+  position: absolute;
+}
+#minty-sidebar .msb-subs-ring {
+  left: 3px;
+  top: 4px;
+}
+#minty-sidebar .msb-subs-dot-large {
+  left: 0;
+  top: 0;
+}
+#minty-sidebar .msb-subs-dot-small {
+  left: 20px;
+  top: 6px;
+}
+#minty-sidebar .msb-subs-dot-medium {
+  left: 6px;
+  top: 21px;
+}
+
+#minty-sidebar .msb-modules {
+  display: flex;
+  flex-direction: column;
+}
+#minty-sidebar .msb-group {
+  display: flex;
+  flex-direction: column;
+}
+#minty-sidebar .msb-group-petty {
+  margin-top: 25px;
+}
+/* The rule between Petty Cash and Payment Request - only while BOTH show. The module settings
+   page hides a group with an inline display:none (data-module-nav), so that is what is read. */
+#minty-sidebar .msb-between {
+  margin-top: 26px;
+}
+#minty-sidebar [data-module-nav="PETTY_CASH"][style*="none"] + [data-module-nav="PAYMENT_REQUEST"] .msb-between {
+  display: none;
+}
+#minty-sidebar .msb-module-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 19px;
+}
+#minty-sidebar .msb-module-heading-payments {
+  margin-top: 30px;
+}
+#minty-sidebar .msb-module-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 22px;
+}
+#minty-sidebar .msb-tone-petty {
+  color: #16202e;
+}
+#minty-sidebar .msb-tone-payments {
+  color: #2374f2;
+}
+#minty-sidebar .msb-module-icon {
+  display: flex;
+  height: 76px;
+  width: 76px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+}
+#minty-sidebar .msb-module-icon-petty {
+  background: #f7efd9;
+}
+#minty-sidebar .msb-row-module {
+  min-height: 44px;
+  gap: 24px;
+  padding-left: 19px;
+}
+#minty-sidebar .msb-row-first {
+  margin-top: 14px;
+}
+#minty-sidebar .msb-row-bills {
+  margin-top: 28px;
+  min-height: 41px;
+  gap: 25px;
+  padding-left: 17px;
+}
+
+#minty-sidebar .msb-spacer {
+  min-height: 24px;
+  flex: 1 1 0%;
+}
+#minty-sidebar .msb-cat {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  padding-bottom: 16px;
+}
+#minty-sidebar .msb-cat img {
+  height: auto;
+  width: min(100%, 10rem);
+  object-fit: contain;
+  user-select: none;
+}
+#minty-sidebar .msb-footer {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+#minty-sidebar .msb-row-footer {
+  gap: 16px;
+  padding-left: 14px;
+}
+#minty-sidebar .msb-row-settings {
+  min-height: 52px;
+}
+#minty-sidebar .msb-row-logout {
+  min-height: 44px;
+}
+#minty-sidebar .msb-icon-31 {
+  display: flex;
+  height: 31px;
+  width: 31px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+#minty-sidebar .msb-flip-y {
+  transform: scaleY(-1);
+}
+#minty-sidebar .msb-flip-x {
+  transform: scaleX(-1);
+}
+
+/* --- My Profile (ProfileParts.tsx, DetailsCard.tsx) ------------------------------------------ */
+
+#minty-sidebar .msb-profile {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  background: #f9fafb;
+}
+#minty-sidebar .msb-profile-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  height: 56px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  background: #f9fafb;
+  padding: 6px 16px;
+}
+#minty-sidebar .msb-icon-button {
+  display: flex;
+  height: 40px;
+  width: 40px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+#minty-sidebar .msb-icon-button:hover {
+  background: rgba(101, 101, 101, 0.1);
+}
+#minty-sidebar .msb-close {
+  color: #767676;
+}
+#minty-sidebar .msb-profile-title {
+  padding: 10px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #767676;
+}
+#minty-sidebar .msb-profile-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px max(2.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+@keyframes msb-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+#minty-sidebar .msb-skel {
+  display: block;
+  animation: msb-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+#minty-sidebar .msb-loading {
+  margin-top: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+#minty-sidebar .msb-skel-avatar {
+  height: 75px;
+  width: 74px;
+  border-radius: 9999px;
+  background: #eef0f3;
+}
+#minty-sidebar .msb-skel-name {
+  height: 32px;
+  width: 224px;
+  border-radius: 8px;
+  background: #eef0f3;
+}
+#minty-sidebar .msb-skel-card {
+  margin-top: 24px;
+  height: 184px;
+  width: 100%;
+  border-radius: 12px;
+  background: #fff;
+}
+#minty-sidebar .msb-failed {
+  margin-top: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+#minty-sidebar .msb-failed p {
+  font-size: 14px;
+  line-height: 20px;
+  color: #4b5563;
+}
+#minty-sidebar .msb-button {
+  cursor: pointer;
+  border-radius: 12px;
+  background: var(--msb-teal);
+  padding: 8px 20px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: #fff;
+}
+#minty-sidebar .msb-button:hover {
+  background: rgba(84, 211, 218, 0.8);
+}
+#minty-sidebar .msb-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+#minty-sidebar .msb-button-small {
+  padding: 6px 20px;
+}
+
+#minty-sidebar .msb-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+/* The caped cat hangs 74 px off the name's right (10-B), so beside it the name keeps 74 px clear
+   on BOTH sides - still centred, and wrapping before the cat can reach past the edge */
+#minty-sidebar .msb-company {
+  position: relative;
+  margin-top: 21px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+}
+#minty-sidebar .msb-company[data-cat] {
+  max-width: calc(100% - 148px);
+}
+#minty-sidebar .msb-company-name {
+  font-size: 14px;
+  line-height: 20px;
+  color: #6b7280;
+}
+#minty-sidebar .msb-plan {
+  margin-top: 10px;
+  font-size: 10px;
+  line-height: 12px;
+}
+#minty-sidebar .msb-plan[data-plan="superminty"] {
+  font-weight: 700;
+  color: var(--msb-teal-strong);
+}
+#minty-sidebar .msb-plan[data-plan="payments"] {
+  color: #2e6ff2;
+}
+#minty-sidebar .msb-plan[data-plan="petty"] {
+  color: #ea9713;
+}
+#minty-sidebar .msb-plan-cat {
+  position: absolute;
+  right: -74px;
+  top: -16px;
+  height: 56px;
+  width: 60px;
+  object-fit: contain;
+}
+#minty-sidebar .msb-hero-avatar {
+  margin-top: 42px;
+  display: flex;
+  height: 75px;
+  width: 74px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 91px;
+  background: var(--msb-avatar-bg);
+  font-size: 30px;
+  font-weight: 500;
+  color: var(--msb-avatar-fg);
+}
+#minty-sidebar .msb-company:not([hidden]) + .msb-hero-avatar {
+  margin-top: 23px;
+}
+#minty-sidebar .msb-hero-name {
+  margin-top: 15px;
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 700;
+  color: #1f2937;
+  overflow-wrap: anywhere;
+}
+#minty-sidebar .msb-role {
+  margin-top: 9px;
+  border-radius: 25px;
+  background: #e9f8f8;
+  padding: 0 15px;
+  font-size: 10px;
+  line-height: 20px;
+  color: #757575;
+}
+
+#minty-sidebar .msb-details {
+  position: relative;
+  margin-top: 32px;
+  border-radius: 12px;
+  background: #fff;
+  padding: 35px 19px 15px;
+}
+#minty-sidebar .msb-edit {
+  position: absolute;
+  right: 12px;
+  top: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 20px;
+  color: var(--msb-teal);
+}
+#minty-sidebar .msb-edit:hover {
+  text-decoration: underline;
+}
+#minty-sidebar .msb-edit:disabled {
+  cursor: default;
+}
+#minty-sidebar .msb-details-form {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+#minty-sidebar .msb-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+#minty-sidebar .msb-detail-email {
+  margin-top: 12px;
+}
+#minty-sidebar .msb-detail-password {
+  margin-top: 16px;
+}
+#minty-sidebar .msb-tile {
+  display: flex;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(84, 211, 218, 0.1);
+}
+#minty-sidebar .msb-detail-names {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 0%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+#minty-sidebar .msb-detail-main {
+  min-width: 0;
+  flex: 1 1 0%;
+}
+#minty-sidebar .msb-detail-label {
+  font-size: 10px;
+  line-height: 20px;
+  color: #4b5563;
+}
+#minty-sidebar .msb-detail-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  color: #6b7280;
+}
+#minty-sidebar .msb-link {
+  color: var(--msb-teal);
+}
+#minty-sidebar .msb-link:hover {
+  text-decoration: underline;
+}
+#minty-sidebar .msb-field {
+  margin: 2px 0 0;
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid #d9dde3;
+  background: #fff;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  color: #374151;
+  box-shadow: none;
+  outline: none;
+}
+#minty-sidebar .msb-field:focus {
+  border-color: var(--msb-teal);
+  box-shadow: 0 0 0 1px var(--msb-teal);
+  outline: none;
+}
+#minty-sidebar .msb-save-row {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+#minty-sidebar .msb-save-error {
+  width: 100%;
+  font-size: 12px;
+  line-height: 16px;
+  color: #b42318;
+}
+#minty-sidebar .msb-save {
+  padding: 8px 24px;
+}
+
+#minty-sidebar .msb-subs {
+  margin-top: 27px;
+  display: flex;
+  flex-direction: column;
+}
+#minty-sidebar .msb-subs-title {
+  padding-left: 9px;
+  font-size: 10px;
+  line-height: 20px;
+  font-weight: 700;
+  color: #475467;
+}
+#minty-sidebar .msb-subs-card {
+  margin-top: 10px;
+  display: flex;
+  min-height: 165px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #fff;
+  padding: 18px 16px;
+}
+#minty-sidebar .msb-skel-subs {
+  height: 120px;
+  width: 100%;
+  border-radius: 8px;
+  background: #f4f5f7;
+}
+#minty-sidebar .msb-subs-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+#minty-sidebar .msb-subs-failed p {
+  font-size: 12px;
+  line-height: 16px;
+  color: #4b5563;
+}
+#minty-sidebar .msb-subs-quiet {
+  text-align: center;
+  font-size: 10px;
+  line-height: 20px;
+  color: #4b5563;
+}
+#minty-sidebar .msb-subs-ready {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#minty-sidebar .msb-figures {
+  display: flex;
+  justify-content: center;
+  gap: 39px;
+}
+#minty-sidebar .msb-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+#minty-sidebar .msb-figure-label,
+#minty-sidebar .msb-figure-unit {
+  font-size: 10px;
+  line-height: 20px;
+  color: #4b5563;
+}
+#minty-sidebar .msb-figure-unit {
+  color: #6b7280;
+}
+#minty-sidebar .msb-figure-value {
+  margin-top: 10px;
+  font-size: 20px;
+  line-height: 20px;
+  font-weight: 700;
+}
+#minty-sidebar .msb-figure-active {
+  color: #737a87;
+}
+#minty-sidebar .msb-figure-trial {
+  color: var(--msb-accent);
+}
+#minty-sidebar .msb-manage {
+  margin-top: 19px;
+  display: flex;
+  height: 38px;
+  width: 242px;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--msb-teal);
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 500;
+  color: #fff;
+}
+#minty-sidebar .msb-manage:hover {
+  background: rgba(84, 211, 218, 0.85);
+}
+
+#minty-sidebar .msb-logout-link {
+  margin: 74px auto 0;
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  gap: 10px;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  line-height: 21px;
+  color: #737a87;
+}
+#minty-sidebar .msb-logout-link:hover {
+  background: #eef0f3;
+}

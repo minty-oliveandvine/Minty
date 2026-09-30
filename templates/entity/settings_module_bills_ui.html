@@ -52,19 +52,6 @@
       width: 100%;
       max-width: 100%;
     }
-
-    #nav-drawer-overlay {
-      transition: opacity 0.3s ease-out;
-    }
-    #nav-drawer-panel {
-      transition: transform 0.3s ease-out;
-    }
-    #nav-drawer-panel.open {
-      transform: translateX(0);
-    }
-    #nav-drawer-panel.closed {
-      transform: translateX(100%);
-    }
   </style>
 </head>
 <body class="antialiased">
@@ -97,12 +84,12 @@
         {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
         <a href="{{ bills_app_profile_url(org.id, from_bills=True) }}"
            class="relative inline-flex shrink-0 cursor-pointer items-center pl-0.5 sm:pl-2 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54d3da]"
-           aria-label="Open profile in Payments"
+           data-sidebar-open="profile" aria-label="My Profile"
            title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
           <span class="inline-flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
         </a>
         <div class="flex shrink-0 items-center">
-          <button type="button" id="nav-menu-open-btn"
+          <button type="button" id="nav-menu-open-btn" data-sidebar-open="menu"
             class="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[rgba(101,101,101,0.1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]"
             aria-label="Open navigation menu">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
@@ -163,53 +150,11 @@
 
   </main>
 
-  <div id="nav-drawer" class="fixed inset-0 z-[200] overflow-x-hidden pointer-events-none" aria-hidden="true">
-    <button type="button" id="nav-drawer-overlay"
-      class="absolute inset-0 cursor-pointer bg-black/40 opacity-0"
-      onclick="closeNavDrawer()" tabindex="-1" aria-label="Close menu"></button>
-
-    <nav id="nav-drawer-panel"
-      class="absolute right-0 top-0 flex h-full w-[min(100%,14rem)] flex-col overflow-y-auto bg-white shadow-xl closed"
-      style="padding-top: env(safe-area-inset-top, 0px)"
-      aria-label="Main navigation">
-      {% include 'entity/partials/bills_nav_drawer_panel_body.html' %}
-    </nav>
-  </div>
+  {% with sidebar_from_bills=True %}
+  {% include 'components/minty_sidebar.html' %}
+  {% endwith %}
 
 </div>
-
-<script>
-  function openNavDrawer() {
-    var drawer = document.getElementById('nav-drawer');
-    var overlay = document.getElementById('nav-drawer-overlay');
-    var panel = document.getElementById('nav-drawer-panel');
-    drawer.classList.remove('pointer-events-none');
-    drawer.setAttribute('aria-hidden', 'false');
-    overlay.style.opacity = '1';
-    overlay.style.pointerEvents = 'auto';
-    panel.classList.remove('closed');
-    panel.classList.add('open');
-    document.body.style.overflow = 'hidden';
-  }
-  function closeNavDrawer() {
-    var drawer = document.getElementById('nav-drawer');
-    var overlay = document.getElementById('nav-drawer-overlay');
-    var panel = document.getElementById('nav-drawer-panel');
-    overlay.style.opacity = '0';
-    overlay.style.pointerEvents = 'none';
-    panel.classList.remove('open');
-    panel.classList.add('closed');
-    setTimeout(function() {
-      drawer.classList.add('pointer-events-none');
-      drawer.setAttribute('aria-hidden', 'true');
-    }, 300);
-    document.body.style.overflow = '';
-  }
-  document.getElementById('nav-menu-open-btn').addEventListener('click', openNavDrawer);
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closeNavDrawer();
-  });
-</script>
 
 </body>
 </html>

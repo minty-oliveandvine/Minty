@@ -25,8 +25,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import jwt
-from flask import (current_app, flash, has_request_context, redirect, request,
-                   session, url_for)
+from flask import (current_app, flash, has_request_context, jsonify, make_response,
+                   redirect, request, session, url_for)
 from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
@@ -38,6 +38,9 @@ from services.permission_policy import Role, is_superuser
 from services.user_presence import resume_presence
 from blueprints.shared.enums import ModuleCode
 from blueprints.shared.feature_flags import subscriptions_enabled
+
+#: How long every module token this app mints lives (``_generate_module_token``).
+MODULE_TOKEN_MINUTES = 30
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -265,6 +268,37 @@ def handoff_minty_web():
     return redirect(minty_web_landing_url(destination, org, current_user.id))
 
 
+@entity_bp.route("/me/sidebar-token")
+def sidebar_token():
+    """The bearer token Flask's own pages hand their sidebar (``static/js/minty_sidebar.js``).
+
+    The sidebar's My Profile and its Subscriptions Overview are drawn in the browser over the
+    SAME reads minty-web makes - this app's ``/api/me/profile`` and minty-billing-api's
+    ``/api/me/subscriptions`` - and both take a bearer token, not this app's session. So the
+    page asks for one here: unscoped (the profile names its company as ``?entity=``; the
+    subscriptions are the person's), ``MODULE_TOKEN_MINUTES`` like every other one.
+
+    Not ``@login_required``: that answers with a redirect to the sign-in page, which a fetch
+    follows and then fails on as HTML - a signed-out caller gets a 401 it can read instead.
+    ``no-store`` so no cache keeps the token. The app-wide ``CORS(app)`` stamps ``*`` here as
+    everywhere, which exposes nothing: this route reads the session cookie, and a browser
+    never shows another origin a credentialed answer that does not name it and allow
+    credentials - without the cookie the answer is the 401.
+    """
+    if not current_user.is_authenticated:
+        return jsonify({"error": "unauthorized"}), 401
+    resp = make_response(
+        jsonify(
+            {
+                "token": _generate_module_token(current_user.id, "", "", ""),
+                "valid_for_seconds": MODULE_TOKEN_MINUTES * 60,
+            }
+        )
+    )
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @entity_bp.route("/profile")
 @login_required
 def open_profile():
@@ -415,7 +449,7 @@ def _generate_module_token(
         # Module 2 nav's Petty Cash section visibility. Defaults True so old
         # call sites (e.g. unscoped profile handoff) don't silently hide nav.
         "petty_cash_enabled": petty_cash_enabled,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=MODULE_TOKEN_MINUTES),
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, secret, algorithm="HS256")

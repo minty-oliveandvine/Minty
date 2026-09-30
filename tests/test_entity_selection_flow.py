@@ -461,7 +461,7 @@ def test_find_user_looks_up_membership_by_entity_id(monkeypatch):
 @pytest.mark.parametrize(
     "relative_path",
     [
-        "templates/components/sidepanel.html",
+        "templates/components/minty_sidebar.html",
         "templates/index.html",
         "templates/admin_dashboard.html",
         "templates/user approval.html",

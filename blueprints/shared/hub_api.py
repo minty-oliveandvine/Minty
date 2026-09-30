@@ -3,8 +3,8 @@
 modal (``legal.routes.hub``).
 
 The same transport as the other bearer surfaces (``bearer_api``: an explicit origin,
-``Vary: Origin``, a JWT in the ``Authorization`` header and no session cookie), with
-minty-web's origin, and three differences worth knowing:
+``Vary: Origin``, a JWT in the ``Authorization`` header and no session cookie), and three
+differences worth knowing:
 
 * NOT behind ``SUBSCRIPTION_ENABLED``. The entity list and the profile exist whether or not
   subscriptions do; only the payer portal's routes go dark.
@@ -18,6 +18,13 @@ minty-web's origin, and three differences worth knowing:
 Every refusal goes back through ``cors``: a bare 401 without the headers reads to the
 browser as a CORS failure rather than a lapsed token, and minty-web's client only
 re-authenticates on a 401 it can see.
+
+WHO may call it cross-origin: minty-web, and - since the sidebar (menu + My Profile) was
+copied into it on 2026-09-30 - billing-frontend, whose My Profile reads and saves the same
+``/api/me/profile``. A browser allows one origin per response, so the request's own
+``Origin`` is echoed when it is one of the two, and minty-web's named otherwise (the
+browser then refuses the stranger, which is the point). Flask's own pages call these routes
+same-origin with the token ``GET /me/sidebar-token`` hands them - no CORS involved.
 """
 
 from __future__ import annotations
@@ -31,8 +38,15 @@ from blueprints.shared import bearer_api
 METHODS = "GET, POST, PATCH, OPTIONS"
 
 
+def allowed_origins() -> tuple[str, ...]:
+    """The front ends that may call the hub routes from another origin; minty-web first."""
+    return (bearer_api.minty_web_origin(), bearer_api.frontend_origin())
+
+
 def cors(resp):
-    return bearer_api.cors(resp, bearer_api.minty_web_origin(), methods=METHODS)
+    allowed = allowed_origins()
+    origin = (request.headers.get("Origin") or "").rstrip("/")
+    return bearer_api.cors(resp, origin if origin in allowed else allowed[0], methods=METHODS)
 
 
 def respond(payload, status: int = 200):

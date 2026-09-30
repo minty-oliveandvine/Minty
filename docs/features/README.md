@@ -24,6 +24,7 @@ the new hub (`../minty-web` + `../minty-billing-api`). Each of those repos has i
 | Connecting a company to Xero, syncing, publishing and republishing a day | [xero-integration.md](xero-integration.md) |
 | Modules, the `SUBSCRIPTION_ENABLED` switch, the subscription engine, the scheduler | [modules-and-subscriptions.md](modules-and-subscriptions.md) |
 | Launching the wizard and the payment module; `/api/onboarding/*` | [onboarding-and-module-handoff.md](onboarding-and-module-handoff.md) |
+| The sidebar on every page with a header - the menu and My Profile (minty-web's, ported) | [sidebar.md](sidebar.md) |
 | Terms of Use versions, the consent record, the gate | [legal-terms.md](legal-terms.md) |
 | Reading a receipt with Gemini | [expense-ai.md](expense-ai.md) |
 | Configuration, storage, mail, logging, the test suites, scripts | [operations.md](operations.md) |

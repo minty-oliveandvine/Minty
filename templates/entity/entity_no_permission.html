@@ -65,8 +65,8 @@
             {% set fn = (current_user.first_name or '')[:1] %}
             {% set ln = (current_user.last_name or '')[:1] %}
             {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
-            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold shrink-0" style="background-color:#FFE6B1; color:#6B3A12" title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">{{ user_abbrev }}</span>
-            <button onclick="toggleMenu()" class="hover-rotate text-[#474747]">
+            <button type="button" data-sidebar-open="profile" aria-label="My Profile" class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50" title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}"><span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span></button>
+            <button type="button" data-sidebar-open="menu" aria-label="Open navigation menu" class="hover-rotate text-[#474747]">
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M9 10H23V11.625H9V10ZM9 15.6875H23V17.3125H9V15.6875ZM9 21.375H23V23H9V21.375Z" fill="#474747"/>
               </svg>
@@ -140,7 +140,7 @@
         </div>
       </div>
 
-      {% include 'components/sidepanel.html' %}
+      {% include 'components/minty_sidebar.html' %}
     </div>
   </div>
 
