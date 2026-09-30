@@ -74,10 +74,14 @@ PURPOSE = "scenario-replay"
 def _stripe():
     import stripe
 
+    from blueprints.subscription.services.stripe_client import STRIPE_API_VERSION
+
     key = os.environ.get("STRIPE_SECRET_KEY", "")
     if not key.startswith("sk_test_"):
         raise SystemExit("refusing to run: STRIPE_SECRET_KEY is not a test key")
     stripe.api_key = key
+    # The app's pinned version, not whatever the installed SDK defaults to (see the pin).
+    stripe.api_version = STRIPE_API_VERSION
     return stripe
 
 

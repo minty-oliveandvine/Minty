@@ -267,18 +267,26 @@ def test_backlog_is_reported_when_a_payer_is_still_due(app, daily, monkeypatch):
     class _Account:
         user_id = "payer-behind"
 
+    class _Group:
+        id = "g-behind"
+
     from blueprints.subscription.services import renewals
 
-    monkeypatch.setattr(renewals, "due_renewals", lambda now: [(_Account(), NOW)])
+    # The REAL shape: one entry per card. A stub of the old ``(account, paid_through)`` pair
+    # is what let the report crash on every due card unnoticed.
+    monkeypatch.setattr(renewals, "due_renewals", lambda now: [(_Account(), _Group(), NOW)])
 
     with app.app_context():
-        assert daily._log_renewal_backlog(NOW, {"failed": []}) == ["payer-behind"]
-
-        # A payer whose charge FAILED is still due for the obvious reason. They are
-        # already reported as a failure and are dunning's problem; naming them as
-        # "behind" too would make every decline look like a billing backlog.
         assert daily._log_renewal_backlog(
-            NOW, {"failed": [{"user_id": "payer-behind"}]}
+            NOW, {"issued": [{"user_id": "payer-behind", "billing_group_id": "g-behind"}]}
+        ) == ["payer-behind"]
+
+        # A card whose charge FAILED is still due for the obvious reason. It is already
+        # reported as a failure and is dunning's problem; naming it as "behind" too would
+        # make every decline look like a billing backlog.
+        assert daily._log_renewal_backlog(
+            NOW, {"issued": [], "failed": [{"user_id": "payer-behind",
+                                            "billing_group_id": "g-behind"}]}
         ) == []
 
 

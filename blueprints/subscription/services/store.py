@@ -1395,6 +1395,24 @@ def invoice_for_external_id(external_id) -> SubscriptionInvoice | None:
     )
 
 
+def open_invoices_for_group(group_id) -> list[SubscriptionInvoice]:
+    """This card's invoices whose LOCAL row still reads "open" - the rows to re-read when
+    the processor says nothing is open, because each was then settled somewhere this code
+    cannot see (there is no webhook) and would go on showing as failed."""
+    if not group_id:
+        return []
+    return (
+        SubscriptionInvoice.query.filter(
+            SubscriptionInvoice.billing_group_id == str(group_id),
+            SubscriptionInvoice.status == "open",
+            SubscriptionInvoice.external_id.isnot(None),
+            SubscriptionInvoice.external_id != "",
+        )
+        .order_by(SubscriptionInvoice.created_at)
+        .all()
+    )
+
+
 def reserve_invoice(
     *,
     payer_user_id,

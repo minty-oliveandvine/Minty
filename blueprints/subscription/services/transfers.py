@@ -715,7 +715,7 @@ def repair_stranded(now=None, *, limit=None) -> dict:
     it, so without a sweep a request nobody ever opened stays ``pending`` for ever and the
     payer who sent it is never told it ran out.
     """
-    from blueprints.subscription.services import renewals
+    from blueprints.subscription.services import billing_gateway, renewals
 
     now = now or clock.now()
     rows = (
@@ -756,6 +756,13 @@ def repair_stranded(now=None, *, limit=None) -> dict:
             else:
                 # Raised and unpaid. Leave it — the customer can still settle it, and
                 # forcing it either way here would either bill twice or give it away.
+                # Except that a DRAFT cannot be settled by anybody: it was never
+                # finalized, so it is not in any list a customer or dunning pays from.
+                if status == "draft":
+                    billing_gateway.stranded_draft(
+                        getattr(store.invoice_for_key(offer.charge_key), "external_id", None),
+                        offer.charge_key, "transfer", billing_gateway.NOT_RETRIED,
+                    )
                 result["waiting"].append(offer.id)
         except Exception:
             db.session.rollback()
