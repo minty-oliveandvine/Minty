@@ -20,7 +20,8 @@ SQLALCHEMY_RDS_DATABASE_URI = os.environ.get('RDS_DATABASE_URI')
 
 BREVO_EMAIL = os.environ.get('BREVO_EMAIL')
 
-# The From address for BILLING email only — trial warnings, receipts, dunning, handovers.
+# The From address for BILLING email only — trial warnings, payment failures and
+# recoveries, handovers.
 # Everything else (OTP, password reset, invitations) keeps BREVO_EMAIL.
 #
 # Split because the two are different conversations: an invitation comes from a colleague

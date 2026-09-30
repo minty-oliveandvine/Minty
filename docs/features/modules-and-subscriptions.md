@@ -189,11 +189,16 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   (`blueprints/subscription/routes/portal.py`): the companies the caller pays for with
   each module's state, invoices, saved cards and the card per company, inviting an admin
   and **transferring** a company's bill to another admin (offer / respond / cancel).
-- Emails: `services/notify.py` — ten events (trial ending / expired, renewal paid (a receipt)
-  / failed, dunning retry failed, payment recovered, the four transfer notices), each sent
-  once per `dedupe_key` and logged in `subscription_email_log`. The four about money go to the
-  billing account's `billing_email` when it has one (`notify.address_for`); the rest go to the
-  person.
+- Emails: `services/notify.py` — eight events, exactly the approved Figma designs (trial
+  ending, renewal failed, dunning retry failed, payment recovered, the four transfer notices),
+  each sent once per `dedupe_key` and logged in `subscription_email_log`. The receipt
+  (`renewal_paid`) and `trial_expired` were retired on 2026-09-30, so a successful charge and a
+  lapsed trial are silent. Who gets them (`notify.address_for`): the three about money go to
+  the billing account's address — its `billing_email`, else the business email every company
+  on it shares, else the payer (`store.account_email`, the same rule as the invoice's Bill to);
+  trial ending goes to the company's business email, else the payer; the transfer notices go
+  to the person. Dates are written in the company's time zone (`entities.timezone`, Hong Kong
+  when unset).
 
 ### Tooling
 `scripts/subscription/replay_scenarios.py` seeds scenarios by living them (a test clock);

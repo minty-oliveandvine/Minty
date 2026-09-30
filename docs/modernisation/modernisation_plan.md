@@ -1115,8 +1115,9 @@ dunning → transfers → notices → panel → portal → notify → access_swe
 `entity_modules.py` — the Django copy of the map writer (`set_entity_module`, `_enabled_state`,
 `get_enabled_modules_for_entities`, the "a paid module cannot be switched off by hand" guard)
 producing byte-identical rows. Mail: Django `EMAIL_*` on the same Brevo SMTP, `SUBSCRIPTION_EMAIL`
-as sender, the Jinja2 template backend so `templates/email/subscription_{notice,receipt}.html`
-move verbatim; dedup stays in `subscription_email_log`. Stripe: the single writer moves whole;
+as sender, the Jinja2 template backend so `templates/email/subscription_notice.html` moves
+verbatim (its receipt sibling went with the receipt, 2026-09-30); dedup stays in
+`subscription_email_log`. Stripe: the single writer moves whole;
 the setup-Checkout `success_url` and the billing-portal `return_url` become **`minty-web` pages**.
 Scheduler: `billing/scheduler.py` = the port of `services/app_runtime/scheduler.py` (started
 from the app's `ready()` under the two env gates, skipping the autoreloader parent; the advisory
@@ -1676,11 +1677,11 @@ named in this step's Keep list.** 07-A's *Invite someone new* still runs `POST
 `entity/routes/create.py::onboarding_invite` (`INVITE_PATH`), at create.py 1725 — outside the
 757-1247 billing block this step deletes, so it survives as written, but the Keep list does not
 name it and an unqualified sweep of `create.py` takes 07-A's invite with it. Add it and
-`/api/onboarding/invite/cancel` (1779). **STILL OPEN — the handover emails point nowhere until
-this step lands.** `notify.portal_url` → `handoff_url` →
-`{MINTY_PUBLIC_URL}/handoff/minty-web?next=` at `/subscription/subscriptions[/incoming]`, and that
-handoff route is itself a step-5 deliverable; the screens exist now, so this is the last thing
-standing between a payer and learning that a handover ended. **One more thing this step
+`/api/onboarding/invite/cancel` (1779). **CLOSED 2026-09-30 — the handover emails' links
+work.** `notify.portal_url` → `handoff_url` → `{MINTY_PUBLIC_URL}/handoff/minty-web?next=` at
+`/subscription/subscriptions[/incoming]`; Flask's `GET /handoff/minty-web`
+(`blueprints/entity/routes/modules.py`) exists and minty-web is live, so a payer can follow a
+handover email to its screen. **One more thing this step
 inherits:** Flask was deliberately NOT mirrored, so `blueprints/subscription/services/transfers.py`
 is still on disk and now DIVERGES — no `collect_at`, no `outcome_seen_at`, no module choice at
 accept. That is fine by design because this step deletes it, but for as long as the dark/live
@@ -1964,7 +1965,8 @@ Cutover day repeats steps 3–8 with the window's backup.
    that day's full pass (documented in the service README; `tick` exists for Part 3's cron).
 4. **Stripe single writer**: after step 5 Flask holds no key (`test_zz_no_stripe.py`); the
    Checkout `success_url` and the portal `return_url` become `minty-web` pages; the transfer
-   emails link to `FLASK/handoff/minty-web?next=…` (login-gated) — re-walk the cold-recipient flow.
+   emails link to `FLASK/handoff/minty-web?next=…` (login-gated; the route exists and minty-web
+   is live since 2026-09-30) — re-walk the cold-recipient flow at cutover.
 5. **CORS**: Flask stamps one origin per surface (`links.origin("onboarding-web")` on
    `/api/onboarding/*`, `links.origin("payments-web")` on the notice and the portal — today's
    `bearer_api.{onboarding,frontend}_origin()`); `minty-billing-api` uses `django-cors-headers` with a list, and its
@@ -2635,8 +2637,14 @@ Rejected, and why: reading Xero's `Organisation.Timezone` at connect (Windows id
 connect); a country→default-zone table (a data file for one pre-selection the browser already
 knows); keeping the formatted strings and computing them in the entity's zone (the hover time
 needs the instant on every field regardless, so the strings would be a second copy of every date).
-"Backend keeps UTC" was the user's rule; that emails and Stripe lines format in the entity's zone
-is the plan's recommendation — say so if they should stay UTC-dated.
+"Backend keeps UTC" was the user's rule; that Stripe lines format in the entity's zone is the
+plan's recommendation — say so if they should stay UTC-dated. **Emails: decided and BUILT
+2026-09-30, ahead of Part 3** — the user chose the company's zone. Both engines' `notify.py`
+(`entity_zone`, `in_zone`, `day(value, zone)`, `_days_until(value, zone)`) date the trial-ending
+email on its company's calendar, NULL or an unknown name → Asia/Hong_Kong; pytz, no new
+dependency. The account-level (money) emails carry no date today; the rule decided for when one
+does is the zone every company on the account shares, else Asia/Hong_Kong. All of it folds into
+`format_for_person` when `minty-shared-py` lands.
 
 ### Server
 
@@ -2650,8 +2658,8 @@ is the plan's recommendation — say so if they should stay UTC-dated.
   `format_for_person(dt, entity, style)` (the only `strftime` of a date in any `-api`) and
   `validate_timezone(name)` (`ZoneInfo(name)`, length ≤ 30). Until step 2 exists nothing is
   written — the code lands with the shared package, not before it.
-- **Prose** goes through `format_for_person`: `notify._day` / `_days_until`
-  (`billing/services/notify.py:122-129,360-375`), `billing.line_description` and the memos
+- **Prose** goes through `format_for_person`: `notify.day` / `_days_until` / `in_zone`
+  (`billing/services/notify.py`, zoned since 2026-09-30), `billing.line_description` and the memos
   (`billing.py:372-416`), billing-backend's bill reference `DDMMYY`/`HHMMSS`.
 - **A business day** goes through `today_for`: onboarding-backend's `server-time`
   (`onboarding/api_reference.py:56-62`) and `opening_balance.py:109` (`DISPLAY_TIMEZONE` is
