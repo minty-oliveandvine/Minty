@@ -121,11 +121,42 @@ refresh_invoice` — its recorded lines and Stripe items copied, the period key 
 the replacement in the same attempt. The whole mechanism, its crash windows and the `L2` replay
 that proves it are in minty-billing-api `docs/features/subscriptions-api.md` §6 and §8.
 
+**Invoices after the fact, drafts, the API version and money mail (2026-09-30, both engines,
+byte-identical apart from imports).** The full account is minty-billing-api's §5 and §6; here,
+what each one is:
+- **A draft nobody finalized is loud and, for a renewal, finished.** An error or a crash between
+  `Invoice.create` and `finalize_invoice` left a draft nothing touched again (dunning chases open
+  invoices only; every later pass skipped the period), so the period was never billed.
+  `billing_gateway.stranded_draft` logs one `STRANDED DRAFT` ERROR line wherever one is met;
+  `renewals._renew_one_group` hands a renewal row still reading "draft" to
+  `billing_gateway.resume_invoice`, which adds the missing items only, finalizes and charges the
+  account's CURRENT card, and refuses (loudly, charging nothing) anything that is not exactly what
+  was reserved; `dunning._nothing_open_but_owed` stops dunning calling it "settled elsewhere".
+- **A row says what Stripe says.** `billing_gateway.record_found_invoice` / `refresh_record`:
+  a recovered reservation is recorded whole (paid date, link, card), a stored draft/open row is
+  re-read before it is answered from, `changes.issue_change` records what it found, and dunning
+  re-reads the card's rows still reading "open" when nothing is open.
+- **The Stripe API version is pinned** (`stripe_client.STRIPE_API_VERSION`,
+  `"2024-12-18.acacia"`, also set by `scripts/subscription/prune_replay_stripe.py`) and
+  `tests/test_stripe_api_version.py` fails the build if the SDK moves under it; an invoice
+  missing `charge` / `payment_intent` is logged at ERROR.
+- **An extension-only invoice** reads "Access extension", not "Renewal" (`portal._event`).
+- **Money emails** (receipt, both declines, recovery) go to the billing account's
+  `billing_email` when it has one, greeted by its company (`notify.address_for`); the email
+  log's recipient is cut to its 200 characters; a second card's retry notice is no longer
+  swallowed when another recovers.
+- **The daily pass no longer crashes** when a card is still due after the renewal step
+  (`daily._log_renewal_backlog` read the per-card list as pairs, outside the step's try).
+Tests: `tests/test_invoice_resume.py`, `tests/test_daily_backlog.py`,
+`tests/test_stripe_api_version.py`, and new cases in the renewal, dunning, change, transfer,
+portal, notification and scheduler tests. `tests/conftest.py` now overrides `caplog` so loguru's
+records reach it, and a test asserts on the engine's log exactly as the Django twin does.
+
 ### The passes
 `services/daily.run_daily` runs five jobs in this order — `notify-trial-ending` →
 `close-trials` → `run-renewals` → `retry-dunning` → `sweep-access` — as a **full** pass once
 a day and a **light** pass (the two a customer feels, then a sweep of just the payers they
-touched) every other hour; `services/app_runtime/scheduler.py` is the in-process
+touched) every hour except the full one; `services/app_runtime/scheduler.py` is the in-process
 APScheduler timer (two gunicorn workers → both fire, a Postgres advisory lock lets one
 run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
 `flask subscriptions …` commands (`cli/subscription_access.py`: `run-daily`,
@@ -160,7 +191,9 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   and **transferring** a company's bill to another admin (offer / respond / cancel).
 - Emails: `services/notify.py` — ten events (trial ending / expired, renewal paid (a receipt)
   / failed, dunning retry failed, payment recovered, the four transfer notices), each sent
-  once per `dedupe_key` and logged in `subscription_email_log`.
+  once per `dedupe_key` and logged in `subscription_email_log`. The four about money go to the
+  billing account's `billing_email` when it has one (`notify.address_for`); the rest go to the
+  person.
 
 ### Tooling
 `scripts/subscription/replay_scenarios.py` seeds scenarios by living them (a test clock);

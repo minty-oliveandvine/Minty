@@ -259,3 +259,15 @@ def client(app):
     # unwinds out of order at teardown ("Working outside of application context"). Tests
     # that need the session use ``client.session_transaction()``.
     return app.test_client()
+
+
+@pytest.fixture
+def caplog(caplog):
+    """pytest's ``caplog``, also fed by loguru - which the services log through, and which
+    pytest does not see on its own. With it a test asserts on what the engine logged the
+    same way in both engines (``minty-billing-api`` logs through stdlib ``logging``)."""
+    from loguru import logger
+
+    handler_id = logger.add(caplog.handler, format="{message}", level=0)
+    yield caplog
+    logger.remove(handler_id)
