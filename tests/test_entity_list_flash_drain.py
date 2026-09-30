@@ -28,7 +28,7 @@ TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "templates"
 _STUB_INCLUDES = {
     "components/hover_effects.html": "",
     "components/page_transitions.html": "<script>window.PageTransition={init(){},navigateWithFade(){}}</script>",
-    "components/sidepanel.html": "",
+    "components/minty_sidebar.html": "",
 }
 
 
@@ -41,7 +41,6 @@ def _build_app() -> Flask:
     # template globals index.html calls.
     app.jinja_env.globals["url_for"] = lambda *a, **kw: "/stub"
     app.jinja_env.globals["bills_app_profile_unscoped_url"] = lambda *a, **kw: "/stub"
-    app.jinja_env.globals["toggleMenu"] = lambda *a, **kw: ""
     return app
 
 

@@ -2425,6 +2425,22 @@ the shared components (`MintySelect`, `Toast`, `Icon`) and the design tokens fro
 step 5 replaced them with `links.ts`. Install as
 `"@minty/shared": "github:minty-oliveandvine/minty-shared-ts#v0.x"`.
 
+**The sidebar is already in three apps as copies (2026-09-30, the user's "build it now and
+transfer later to shared").** minty-web's one drawer with two views - the menu and My Profile -
+was copied into billing-frontend at minty-web's own paths, each file headed `COPY of
+minty-web/<path>`: `components/ui/{Sidebar,SideMenu,ViewerBadge,NavMenu}.tsx`, `lib/viewer.ts`,
+`features/profile/*` (without the `/profile` page) and the Subscriptions Overview
+(`features/subscription/*`, the card and its `overview()`). Everything app-specific sits in ONE
+file, `billing-frontend/components/ui/sidebarHost.ts` - the company and modules in the cookie,
+where each item leads from that app, its scroll lock, its logout, how it reaches Flask and
+minty-billing-api - and that file is the list of what `@minty/shared` must take as injection.
+The lift: move minty-web's copies into the package behind that host interface, then delete
+billing-frontend's copies and keep its `sidebarHost.ts`. Flask's pages carry a Jinja port
+(`templates/components/minty_sidebar.html`, `static/js/minty_sidebar.js`,
+`blueprints/shared/sidebar.py`; Minty `docs/features/sidebar.md`) that a TypeScript package
+cannot serve: it retires with those pages in Part 3, not in the lift. Until then a change to
+minty-web's menu or profile is made in all three.
+
 ## Links between services — one shape (rule 10, added 2026-09-21)
 
 **Why.** Eight repos link to each other — handoffs with a token, redirects back, API bases,

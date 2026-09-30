@@ -296,7 +296,7 @@ Console calls have grown from 468 to 526 and spread from 14 files to 17 - this i
 | P3 | templates/report/submitted.html | 3 console calls - NEW, had none |
 | P3 | templates/report_history/report_history.html | 18 console calls (was 7), 1 open TODO |
 | P4 | templates/code.html | DELETE - 375 B, no inbound reference (re-verified) |
-| P4 | templates/entity/entity_continue_report_v2.html | DELETE - superseded by entity_dashboard_v2.html (re-verified) |
+| P4 | templates/entity/entity_continue_report_v2.html | DONE 2026-09-30 - deleted with the old side panel it included (superseded by entity_dashboard_v2.html) |
 | P4 | templates/report/index.html | DELETE - no inbound reference (re-verified) |
 | P4 | templates/user approval.html | DELETE - the filename contains a space, so it is unroutable and nothing renders it (re-verified). One thing breaks: tests/test_entity_selection_flow.py:467 asserts the file exists. Update that test in the same commit. |
 

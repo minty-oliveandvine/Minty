@@ -136,6 +136,8 @@ def init_app(app, db):
 
     @app.context_processor
     def inject_globals():
+        from blueprints.shared.sidebar import sidebar_context
+
         def bills_app_handoff_url(entity_id):
             """Module 2 (Bills) home for this entity — JWT landing with ``next=/``."""
             if not entity_id:
@@ -297,6 +299,8 @@ def init_app(app, db):
             "is_billing_enabled": is_billing_enabled,
             "is_petty_cash_enabled": is_petty_cash_enabled,
             "is_readonly_for": is_readonly_for,
+            # the sidebar's menu and links (components/minty_sidebar.html)
+            "sidebar_context": sidebar_context,
             "currency_symbol": _entity_currency_symbol(),
             # the subscription feature switch (blueprints/shared/feature_flags.py): a template
             # branches on it where a page would otherwise quote, charge or nag

@@ -154,11 +154,17 @@ with `?token=…`. minty-web (the hub, Part 2) is entered the same way through i
 and comes back for a fresh token through `GET /handoff/minty-web?next=&entity_id=` (login-gated,
 `entity/routes/modules.py`). Its entity list and My Profile read Flask's **hub surface**
 (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`) with that
-token — bearer only, CORS for `MINTY_WEB_URL`, and a token naming an unknown or switched-off
-(`approved` false) account is refused like a bad one. **Every "open my profile" link** (the
-avatar in ~20 page headers, the payments app's badge) goes through `GET /profile?entity_id=&from=`
-(`modules.py::open_profile`), which mints the token at the click and picks the profile:
-minty-web's while `MINTY_WEB_HUB` is on, billing-frontend's otherwise. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
+token — bearer only, and a token naming an unknown or switched-off (`approved` false) account is
+refused like a bad one. Its CORS names the caller when it is `MINTY_WEB_URL` or
+`FRONTEND_APP_URL` (billing-frontend, whose copy of the sidebar's My Profile reads and saves the
+same profile since 2026-09-30), minty-web's otherwise. This app's own pages draw that sidebar
+too ([sidebar.md](sidebar.md)): `GET /me/sidebar-token` (session, same-origin, `no-store`, a 401
+rather than a redirect when signed out) hands the page an unscoped module token, and the page
+calls the same routes with it. The profile's header avatar and the sidebar open My Profile in
+place; the avatar's `href` - `GET /profile?entity_id=&from=` (`modules.py::open_profile`) - is
+the way in when scripts are off, and still the payments app's old links: it mints the token at
+the click and picks the profile, minty-web's while `MINTY_WEB_HUB` is on, billing-frontend's
+otherwise. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
 re-establishes the Flask session) — `billing-relogin` is the legacy "my token ran out"
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).
@@ -208,6 +214,8 @@ the payment module counts as leaving.
 | `MAIL_*`, `BREVO_EMAIL` | OTP, invitation and reset mail |
 | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_REDIRECT_URI` | both OAuth flows |
 | `PUBLIC_URL` | absolute links in mail and hand-offs |
+| `MINTY_WEB_URL`, `FRONTEND_APP_URL` | minty-web's and billing-frontend's origins - the hand-offs, and the hub routes' CORS |
+| `BILLING_API_URL` | minty-billing-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8004`) |
 | `IDLE_TIMEOUT_SECONDS` | the presence window (there is no idle logout) |
 
 ## 10. Where it is tested
@@ -220,5 +228,6 @@ write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py
 `tests/test_billing_relogin_handback.py` (the return from the payment module),
 `tests/test_xero_scopes.py` (connect and reconnect request the same minimal scope set),
 `tests/test_char_subscription_dark.py` (the 404s while subscriptions are dark),
-`tests/test_zz_no_token_logging.py`; in the browser, `e2e/01_login.spec.ts` (login, wrong
+`tests/test_zz_no_token_logging.py`, `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
+origins); in the browser, `e2e/01_login.spec.ts` (login, wrong
 password, the terms modal on first sign-in) and the two Next suites' hand-off specs.
