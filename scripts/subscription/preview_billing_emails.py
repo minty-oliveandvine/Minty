@@ -50,15 +50,6 @@ def contexts() -> dict[str, dict]:
             "amount": 28000, "currency": "HKD",
             "needs_card": True, "needs_consent": False,
         },
-        notify.TRIAL_EXPIRED: {
-            "entity_id": "demo-entity", "entity_name": ENTITY,
-            "codes": ["PETTY_CASH"],
-        },
-        notify.RENEWAL_PAID: {
-            "total": 68000, "currency": "HKD",
-            "period_start": NOW, "period_end": NOW + timedelta(days=30),
-            "lines": [f"{ENTITY} — Petty Cash and Payment Request"],
-        },
         notify.RENEWAL_FAILED: {
             "total": 68000, "currency": "HKD",
             "deadline": NOW + timedelta(days=14),
@@ -116,7 +107,7 @@ def render(event: str, ctx: dict, *, inline: bool):
         return f"cid:{cid}"
 
     html = render_template(
-        notify.TEMPLATES.get(event, notify.NOTICE_TEMPLATE),
+        notify.NOTICE_TEMPLATE,
         first_name="Angelika",
         base_url=notify.base_url(),
         logo_src=ref(logo, notify.LOGO_CID),
@@ -128,8 +119,7 @@ def render(event: str, ctx: dict, *, inline: bool):
 
 #: The events with a mockup of their own. ``dunning_retry_failed`` is deliberately not
 #: here even though it has art: it reuses the payment-failure design, so reviewing it
-#: alongside ``renewal_failed`` shows the same page twice. The three omitted entirely
-#: (``trial_expired``, ``renewal_paid``) have no illustration yet.
+#: alongside ``renewal_failed`` shows the same page twice.
 MOCKED = (
     "trial_ending",
     "renewal_failed",

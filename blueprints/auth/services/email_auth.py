@@ -66,7 +66,11 @@ def generate_otp() -> str:
 
 
 def request_email_otp(email: str) -> tuple[bool, str | None]:
-    """Issue and email a code for `email`. Works for both new and existing emails."""
+    """Issue and email a code for `email`. Works for both new and existing emails.
+
+    Nothing is saved unless the email goes out: a failed send answers
+    ``(False, message)`` and leaves the address's ``email_otp`` rows as they were.
+    """
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         return False, "A valid email is required."
@@ -111,9 +115,21 @@ def request_email_otp(email: str) -> tuple[bool, str | None]:
             attempts=carried_attempts,
         )
     )
+    # Flush, send, and only then commit. Committing before the send meant a failed
+    # send still left the new row behind: the user was told a code was on its way,
+    # the row started the resend cooldown (so their retry was refused) and it made a
+    # brand-new address look registered to the login page's check. Rolling back
+    # undoes the delete above as well, so the previous row comes back with its
+    # carried attempts and its old created_at - already past the cooldown, or we
+    # would have returned above - and an immediate retry is allowed.
+    db.session.flush()
+    if not _send_code_email(email, code):
+        db.session.rollback()
+        return (
+            False,
+            "I couldn't send your sign-in code just now. Mind trying again in a moment?",
+        )
     db.session.commit()
-
-    _send_code_email(email, code)
     return True, None
 
 

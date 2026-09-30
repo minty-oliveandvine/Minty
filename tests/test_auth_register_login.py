@@ -166,6 +166,83 @@ def test_register_otp_verify_rejects_wrong_code(app, client, db_session, monkeyp
         assert User.query.filter_by(email=email).first() is None
 
 
+def test_request_code_saves_nothing_when_the_email_fails(app, client, db_session, monkeypatch):
+    """A code whose email never went out must not be saved. Committed before the
+    send, it told the user a code was coming, started the resend cooldown (so
+    their retry was refused) and made a brand-new address look registered."""
+    import blueprints.auth.services.email_auth as email_auth
+    from blueprints.auth.models.email_otp import EmailOtp
+
+    monkeypatch.setattr(email_auth, "_send_code_email", lambda *a, **k: False)
+
+    email = "mail.outage@test.com"
+    req = client.post("/auth/email/request-code", json={"email": email})
+    assert req.status_code == 400
+    assert req.get_json() == {
+        "status": "error",
+        "message": "I couldn't send your sign-in code just now. Mind trying again in a moment?",
+    }
+
+    with app.app_context():
+        assert EmailOtp.query.filter_by(email=email).first() is None
+
+    # ...so the login page's check still reads the address as unknown.
+    check = client.post("/auth/email/check", json={"email": email})
+    assert check.get_json()["exists"] is False
+
+
+def test_failed_code_email_keeps_the_previous_code_and_allows_a_retry(
+    app, client, db_session, monkeypatch
+):
+    """A failed send rolls the whole request back: the previous row returns with
+    its carried failure count (a mail outage must not reset the brute-force
+    counter) and its old created_at, which is past the resend cooldown - so an
+    immediate retry goes through."""
+    from datetime import datetime, timedelta, timezone
+
+    import blueprints.auth.services.email_auth as email_auth
+    from blueprints.auth.models.email_otp import EmailOtp
+
+    email = "retry.after.outage@test.com"
+    issued = datetime.now(timezone.utc) - timedelta(
+        seconds=email_auth.RESEND_COOLDOWN_SECONDS + 120
+    )
+    previous_id = str(uuid.uuid4())
+    with app.app_context():
+        db_session.session.add(
+            EmailOtp(
+                id=previous_id,
+                email=email,
+                code_hash=generate_password_hash("123456", method="pbkdf2:sha256"),
+                expires_at=issued + timedelta(seconds=email_auth.OTP_EXPIRY_SECONDS),
+                attempts=2,
+                created_at=issued,
+            )
+        )
+        db_session.session.commit()
+
+    monkeypatch.setattr(email_auth, "_send_code_email", lambda *a, **k: False)
+    failed = client.post("/auth/email/request-code", json={"email": email})
+    assert failed.status_code == 400
+
+    with app.app_context():
+        rows = EmailOtp.query.filter_by(email=email).all()
+        assert [(row.id, row.attempts, row.created_at) for row in rows] == [
+            (previous_id, 2, issued)
+        ]
+
+    monkeypatch.setattr(email_auth, "_send_code_email", lambda *a, **k: True)
+    retry = client.post("/auth/email/request-code", json={"email": email})
+    assert retry.status_code == 200
+
+    with app.app_context():
+        rows = EmailOtp.query.filter_by(email=email).all()
+        # The retry supersedes the old code and still carries its failure count.
+        assert len(rows) == 1
+        assert rows[0].id != previous_id
+        assert rows[0].attempts == 2
+
+
 def test_register_page_no_longer_exposes_role_or_company_input(client):
     response = client.get("/register")
 

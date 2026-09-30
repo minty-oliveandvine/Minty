@@ -56,10 +56,9 @@ genuinely failed ones sit in the past-due grace, and dunning's recoveries are re
 the same run.
 
 close-trials must still precede sweep-access, which running it last satisfies. It always
-had to, so a converting trial was not swept as lapsed mid-conversion; with email wired up
-it is also what keeps an expired trial from being announced twice — the trial job revokes
-access itself and sends the "trial has ended" notice, so those modules are already off by
-the time the sweep runs and never enter its "access revoked" batch.
+had to, so a converting trial was not swept as lapsed mid-conversion. (It also once kept an
+expired trial from being announced twice; both the "trial has ended" and the "access
+revoked" notices are retired now, so neither job mails a lapse.)
 
 Email is a side effect of these jobs, never their purpose: every send is deduped in
 ``subscription_email_log`` and every failure is swallowed, so a mail outage degrades

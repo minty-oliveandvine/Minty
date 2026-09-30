@@ -41,7 +41,8 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
 2. `POST /auth/email/request-code` — a 6-digit code, valid **60 s**, resend cooldown 60 s.
    Failed attempts are carried forward across resends (`email_otp.attempts`); at 5 the
    address is locked for **15 minutes** (HTTP 429, `ERR_LOCKED`). The lock is anchored to the
-   row's `created_at` and clears itself.
+   row's `created_at` and clears itself. A code whose email fails to send is rolled back and
+   the request answers 400, so the user can retry at once.
 3. `POST /auth/email/verify-code` — a correct code either signs the existing user in, or —
    for a new address — returns a signed sign-up token (`itsdangerous`, 15 minutes) that
    `POST /auth/email/complete` spends to create the passwordless user
@@ -72,9 +73,18 @@ whether that person still owes terms consent. Pending invites can be listed, res
 cancelled from the entity's Users tab.
 
 ### Sign-up with approval (legacy)
-`GET/POST /register` still creates a password account that a superuser must approve
-(`POST /approve_user/<id>` / `reject_user` on the `/admin` list). Password reset is
-`/reset_password` → emailed `itsdangerous` link → `/reset_password/<token>`.
+`GET/POST /register` no longer creates an account — a plain form POST only re-renders the
+page, and sign-up runs through the OTP path above. The approval gate remains for older
+accounts that were never approved (`POST /approve_user/<id>` / `reject_user` on the
+`/admin` list).
+
+Password reset is the legacy `/login` page's "Forgot Password?" modal:
+`POST /reset_password` stores a `uuid4()` in `user.reset_token` with a 1-hour
+`reset_token_expiry` and emails a link to `/reset_password/<token>`, which sets the new
+password and clears both columns (`blueprints/auth/routes/password_reset.py`). The address
+is matched case-insensitively on `email` or `username`, and known or not it gets the same
+neutral flash, so the form cannot be used to find out who has an account; the link is built
+on `PUBLIC_URL` (the request host when that is unset).
 
 ## 3. The session
 
@@ -221,7 +231,8 @@ the payment module counts as leaving.
 ## 10. Where it is tested
 
 `tests/test_auth_register_login.py`, `tests/test_login_flash_drain.py` and
-`tests/test_xero_login_flash_drain.py` (the sign-in paths), `tests/test_terms_signup_consent.py`
+`tests/test_xero_login_flash_drain.py` (the sign-in paths), `tests/test_password_reset.py`
+(the reset email, the neutral answer, expired and spent links), `tests/test_terms_signup_consent.py`
 (OTP sign-up, invite tokens, consent sources),
 `tests/test_authz_decorators.py`, `tests/test_user_permission_matrix_coverage.py` (every
 write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py`,
