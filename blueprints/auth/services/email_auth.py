@@ -10,6 +10,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from blueprints.auth.models.email_otp import EmailOtp
 from blueprints.auth.services.identity import resolve_user_by_email
+from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from models.db import User, db
 
 
@@ -74,6 +75,8 @@ def request_email_otp(email: str) -> tuple[bool, str | None]:
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         return False, "A valid email is required."
+    if not is_ascii_email(email):
+        return False, EMAIL_ASCII_MESSAGE
 
     latest = (
         EmailOtp.query.filter_by(email=email)

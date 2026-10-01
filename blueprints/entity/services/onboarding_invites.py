@@ -13,6 +13,7 @@ from blueprints.invitation.services.invite import (cancel_invitation,
                                                    create_invitation,
                                                    get_pending_invitations,
                                                    send_invitation_email)
+from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from models.db import User
 from services.permission_policy import (Permission,
                                         can_manage_role_assignment_for_entity,
@@ -52,6 +53,8 @@ def send_invite(user_id, entity_id, email, role, first_name="", last_name=""):
     last_name = (last_name or "").strip()
     if not email or not role:
         return {"error": "email and role are required."}, 400
+    if not is_ascii_email(email):
+        return {"error": EMAIL_ASCII_MESSAGE}, 400
     if role not in _ASSIGNABLE_ROLES:
         return {"error": "Invalid role."}, 400
 

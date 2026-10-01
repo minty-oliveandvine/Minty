@@ -38,6 +38,7 @@
   const LOAD_FAILED = "Your profile didn't come through. Mind trying again?";
   const SAVE_FAILED = "That didn't quite save. Mind trying again?";
   const EMAIL_REQUIRED = "We'll need an email here.";
+  const EMAIL_INVALID = "That doesn't look like an email address."; // services/profile.py's words
   const SAVED = "Your profile is saved.";
   const HOUSE_FALLBACK = "Something went wrong on my end. Mind trying again?";
   const SESSION_ENDED = "Your session has ended. Sign in again to keep going.";
@@ -282,6 +283,8 @@
       // the email's line keeps its hidden "Email " label with the value
       $('[data-profile-value="email"]').parentElement.hidden = editing;
       $('[data-profile-value="email"]').hidden = false;
+      // the "English only" hint sits beside the field and goes with it
+      if (!editing) window.MintyEmail.hideHint($('[data-profile-field="email"]'));
       $("[data-profile-editing]").hidden = !editing;
       editButton.textContent = editing ? "Cancel" : "Edit";
       editButton.disabled = saving;
@@ -310,7 +313,11 @@
       paintEditing();
     }
 
-    /** Only what changed is sent; an emptied email is refused here (profileView.changesFrom). */
+    /**
+     * Only what changed is sent; an emptied email is refused here (profileView.changesFrom), and
+     * so is a changed one that is not an English-only address (static/js/email_input.js) - an
+     * unchanged stored address is not re-judged.
+     */
     function changesFrom() {
       const draft = {};
       FIELDS.forEach((field) => {
@@ -321,6 +328,9 @@
       FIELDS.forEach((field) => {
         if (draft[field].trim() !== (profile.user[field] || "")) changes[field] = draft[field];
       });
+      if ("email" in changes && !window.MintyEmail.isEmail(changes.email)) {
+        return { changes: {}, error: EMAIL_INVALID };
+      }
       return { changes, error: null };
     }
 

@@ -388,6 +388,7 @@
         const form = document.getElementById('addUserForm');
         if (form) {
           form.reset();
+          window.MintyEmail.hideHint(document.getElementById('emailAddress'));
         }
       }
     }
@@ -408,8 +409,8 @@
       if (!companyUuid) { showErrorToast('Company UUID is required.'); return; }
       if (!userRole) { showErrorToast('Please select a role.'); return; }
       
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(emailAddress)) { showErrorToast('Please enter a valid email address.'); return; }
+      // static/js/email_input.js: English only, the same rule as minty-web's and the server's.
+      if (!window.MintyEmail.isEmail(emailAddress)) { showErrorToast('Please enter a valid email address.'); return; }
       
       const csrfToken = document.querySelector('meta[name="csrf_token"]')?.getAttribute('content');
       if (!csrfToken) { showErrorToast('CSRF token not found. Please refresh the page.'); return; }

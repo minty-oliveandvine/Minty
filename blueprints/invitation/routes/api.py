@@ -11,6 +11,7 @@ from blueprints.invitation.services.invite import (
     resend_invitation,
     send_invitation_email,
 )
+from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from services.authz import require_entity_access, require_permission
 from services.permission_policy import Permission, can_manage_role_assignment_for_entity
 
@@ -48,6 +49,15 @@ def send_invitation():
             ),
             400,
         )
+
+    if not is_ascii_email(email):
+        logger.info(
+            "invitation.send.invalid actor={} entity={} email={!r} reason=not_ascii",
+            current_user.id,
+            entity_id,
+            email,
+        )
+        return jsonify({"status": "error", "message": EMAIL_ASCII_MESSAGE}), 400
 
     if not can_manage_role_assignment_for_entity(current_user, role, entity_id):
         logger.warning(

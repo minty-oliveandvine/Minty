@@ -86,6 +86,26 @@ is matched case-insensitively on `email` or `username`, and known or not it gets
 neutral flash, so the form cannot be used to find out who has an account; the link is built
 on `PUBLIC_URL` (the request host when that is unset).
 
+### Email input: English only
+Every typed email address is printable ASCII (0x21-0x7E) and nothing else (2026-10-01).
+
+- **The fields** are `type="text" inputmode="email" … data-email-ascii`, not `type="email"`:
+  the browser's email input refuses Hangul before the "@" but takes it after, as an
+  international domain, and hands `.value` back as punycode (`xn--…`), so no script could
+  see it. `static/js/email_input.js` (minty-web `lib/emailInput.ts`'s twin) strips anything
+  else as it is typed (after an IME composition ends), keeps the caret, and shows "Email can
+  only contain English letters, numbers and symbols." under the field; the pages check the
+  shape with `MintyEmail.isEmail`. The fields: sign-in (`/`), `/register`, the legacy
+  `/login` reset modal, the Users tab's invite, `/entity/create` and the sidebar's My Profile.
+- **The server** refuses one loudly in the same words (`blueprints/shared/email_rules.py`):
+  `POST /auth/email/request-code` 400 (login mode too, before its 404), the invite
+  (`/minty/api/invitation/send`, `/api/onboarding/invite`) 400, the business email
+  (`/api/onboarding/create`, `PUT /api/onboarding/entity/<id>`, the `/entity/create` form) 400,
+  the onboarding billing email (`…/billing/payment-methods/confirm`, `…/billing/accounts`) 400,
+  the register form's field error, and My Profile (`PATCH /api/me/profile`) and the payer
+  portal's invite-admin 422 - those two answer every refused address with 422.
+- Stored addresses are not rewritten.
+
 ## 3. The session
 
 Server-side sessions: `SESSION_TYPE=sqlalchemy`, table `sessions` in the application
@@ -239,5 +259,5 @@ write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py
 `tests/test_billing_relogin_handback.py` (the return from the payment module),
 `tests/test_xero_scopes.py` (connect and reconnect request the same minimal scope set),
 `tests/test_zz_no_token_logging.py`, `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
-origins); in the browser, `e2e/01_login.spec.ts` (login, wrong
+origins), `tests/test_email_english_only.py` (every path refuses a non-English address); in the browser, `e2e/01_login.spec.ts` (login, wrong
 password, the terms modal on first sign-in) and the two Next suites' hand-off specs.

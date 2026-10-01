@@ -69,6 +69,14 @@ Renaming the company is reflected in the header at once (`e2e/03_settings.spec.t
   `…/cancel`. `GET /invitation/xero-not-connected/<entity>` is the page a person sees when
   they were added to a company that has no Xero connection yet. Invitation expiry and the
   superuser rules are in `tests/test_invitation*.py`, `tests/test_invite_superuser.py`.
+- **Email input: English only.** The invite's email field (and the company's business email)
+  takes printable ASCII only: it is `type="text" inputmode="email" data-email-ascii`, not
+  `type="email"` (which accepts a Korean domain and hides it as punycode), strips anything
+  else as it is typed and says "Email can only contain English letters, numbers and
+  symbols." (`static/js/email_input.js`). The server answers such an address with that
+  sentence and a 400 - the invite, the onboarding invite, and the business email on
+  `/api/onboarding/create`, `PUT /api/onboarding/entity/<id>` and the `/entity/create` form
+  ([authentication.md](authentication.md) §2, "Email input: English only").
 - `GET /leave-entity` is "log out of the company": back to Select Company with the Flask
   session kept and presence dropped (membership is untouched); Log out from the list ends
   the session.
@@ -89,6 +97,6 @@ consent history), `GET/POST /admin/download_statements` (statements across compa
 `tests/test_char_entities.py` (the tabs and their permissions), `tests/test_entity_*.py`
 (list, create, selection, the trial badge), `tests/test_user_presence.py`,
 `tests/test_settings_users_subscriber_tag.py`, `tests/test_one_payer_per_entity.py`,
-`tests/test_invitation*.py`, `tests/test_authz_decorators.py`; in the browser
+`tests/test_invitation*.py`, `tests/test_authz_decorators.py`, `tests/test_email_english_only.py`; in the browser
 `e2e/03_settings.spec.ts` (mapping, sales methods, users, the Xero page, rename, the
 module page, the CSV) and `e2e/01_login.spec.ts` (Select Company).
