@@ -207,6 +207,11 @@
       text-align: center;
       margin: -6px 0 0;
     }
+    /* The email field's "English only" hint (static/js/email_input.js). */
+    .auth-field-hint {
+      color: #d9534f;
+      font-size: 13px;
+    }
 
     .auth-divider {
       display: flex;
@@ -337,9 +342,12 @@
           <label for="auth-email">Email</label>
           <input
             id="auth-email"
-            type="email"
+            type="text"
             inputmode="email"
             autocomplete="email"
+            autocapitalize="none"
+            spellcheck="false"
+            data-email-ascii="auth-field-hint"
             placeholder="jane@example.com"
           />
         </div>
@@ -396,6 +404,7 @@
 {% endblock %}
 {% block footer %}
 {% endblock %}{% block scripts %}
+  <script src="{{ url_for('static', filename='js/email_input.js') }}"></script>
   <script>
     document.addEventListener("DOMContentLoaded", function () {
       const toastBtn = document.querySelector(".toast-close");
@@ -413,7 +422,6 @@
       const emailInput = document.getElementById("auth-email");
       const continueBtn = document.getElementById("auth-continue");
       const errorEl = document.getElementById("auth-error");
-      const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
       const showError = (msg) => {
         errorEl.textContent = msg;
@@ -424,19 +432,19 @@
         errorEl.hidden = true;
       };
       const setBusy = (busy) => {
-        const validEmail = EMAIL_RE.test(emailInput.value.trim());
+        const validEmail = MintyEmail.isEmail(emailInput.value.trim());
         continueBtn.disabled = busy || !validEmail;
         continueBtn.textContent = busy ? "Sending code…" : "Log in with OTP";
       };
 
       emailInput.addEventListener("input", () => {
         clearError();
-        continueBtn.disabled = !EMAIL_RE.test(emailInput.value.trim());
+        continueBtn.disabled = !MintyEmail.isEmail(emailInput.value.trim());
       });
 
       const submit = async () => {
         const email = emailInput.value.trim();
-        if (!EMAIL_RE.test(email)) return;
+        if (!MintyEmail.isEmail(email)) return;
         clearError();
         setBusy(true);
         try {

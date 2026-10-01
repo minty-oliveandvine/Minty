@@ -296,6 +296,12 @@
       text-align: center;
       margin: -6px 0 0;
     }
+    /* The email field's "English only" hint (static/js/email_input.js). */
+    .auth-field-hint {
+      color: #d9534f;
+      font-size: 13px;
+      margin-top: -2px;
+    }
     /* Per-field inline error text (shown/hidden by the validation script). */
     .invalid-feedback {
       display: none;
@@ -499,7 +505,7 @@
         <div class="auth-field">
           <label for="email">Email</label>
           <div class="auth-email-row">
-            <input type="email" name="email" placeholder="Email" value="{{ email or '' }}" id="email" />
+            <input type="text" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" data-email-ascii="auth-field-hint" data-email-ascii-anchor=".auth-email-row" name="email" placeholder="Email" value="{{ email or '' }}" id="email" />
             <!-- Appears only once a valid email is typed; sends the OTP. -->
             <button type="button" class="auth-verify-btn" id="verifyBtn" hidden>Verify</button>
           </div>
@@ -590,6 +596,7 @@
 {% endblock %}
 {% block footer %}
 {% endblock %}{% block scripts %}
+  <script src="{{ url_for('static', filename='js/email_input.js') }}"></script>
   <script>
   $(document).ready(function () {
 
@@ -612,7 +619,6 @@
 
     const form = document.querySelector("#registerForm");
     const submitBtn = document.querySelector("#submitBtn");
-    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const REQUIRED_MSG = "Please fill in this field";
 
     const fields = {
@@ -634,7 +640,7 @@
           return "";
         case "email":
           if (!val) return REQUIRED_MSG;
-          if (!EMAIL_RE.test(val)) return "Please enter a valid email address";
+          if (!MintyEmail.isEmail(val)) return "Please enter a valid email address";
           return "";
         // Password collection temporarily disabled — restore these cases too.
         // case "password":
@@ -828,7 +834,7 @@
 
     function refreshVerifyButton() {
       const val = (fields.email.input.value || "").trim();
-      const ready = EMAIL_RE.test(val) && nameFieldsFilled() && termsAccepted();
+      const ready = MintyEmail.isEmail(val) && nameFieldsFilled() && termsAccepted();
       // If the email changed away from the verified one, reset the OTP step.
       if (otpEmail && val.toLowerCase() !== otpEmail) {
         resetOtpStep();
@@ -836,7 +842,7 @@
       if (otpEmail) { verifyBtn.hidden = true; return; }  // code already sent
       // Show the button as soon as the email looks valid (so the user sees the
       // action), but disable it until the name fields are filled too.
-      verifyBtn.hidden = !EMAIL_RE.test(val);
+      verifyBtn.hidden = !MintyEmail.isEmail(val);
       verifyBtn.disabled = !ready;
     }
 

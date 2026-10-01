@@ -2,6 +2,8 @@ from flask_wtf import FlaskForm
 from wtforms import PasswordField, StringField, SubmitField
 from wtforms.validators import DataRequired, Email, EqualTo, Length
 
+from blueprints.shared.email_rules import ascii_email_validator
+
 # Shared so every "this field is empty" error on the form reads identically.
 _REQUIRED = "Please fill in this field"
 
@@ -43,6 +45,7 @@ class RegistrationForm(FlaskForm):
         validators=[
             DataRequired(message=_REQUIRED),
             Email(message="Please enter a valid email address"),
+            ascii_email_validator,
             Length(max=150, message="Please use 150 characters or fewer"),
         ],
     )

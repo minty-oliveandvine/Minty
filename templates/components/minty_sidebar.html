@@ -172,7 +172,7 @@
                 <span class="msb-tile" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'mail.svg') }}" alt="" width="16" height="13"></span>
                 <div class="msb-detail-main">
                   <p class="msb-detail-value"><span class="msb-sr-only">Email </span><span data-profile-value="email"></span></p>
-                  <input class="msb-field" type="email" aria-label="Email" autocomplete="email" maxlength="255" data-profile-field="email" hidden>
+                  <input class="msb-field" type="text" inputmode="email" autocapitalize="none" spellcheck="false" data-email-ascii="msb-save-error" aria-label="Email" autocomplete="email" maxlength="255" data-profile-field="email" hidden>
                 </div>
               </div>
               <div class="msb-detail-row msb-detail-password">
@@ -225,4 +225,5 @@
     </section>
   </div>
 </div>
+<script src="{{ url_for('static', filename='js/email_input.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/minty_sidebar.js') }}" defer></script>

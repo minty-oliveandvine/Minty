@@ -15,6 +15,7 @@ from iso4217 import Currency
 from loguru import logger
 
 from blueprints.entity import entity_bp
+from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from blueprints.shared.enums import EntityStatus
 from blueprints.shared import bearer_api
 from blueprints.entity.forms import CreateEntityForm
@@ -217,7 +218,20 @@ def _normalize_business_email(value: str) -> tuple[str | None, str]:
     local, sep, domain = email.partition("@")
     if not sep or not local or not domain or any(c.isspace() for c in email):
         return None, "Please enter a valid business email."
+    if not is_ascii_email(email):
+        return None, EMAIL_ASCII_MESSAGE
     return email, ""
+
+
+def _billing_email_refusal(value):
+    """A 400 for a billing-account email that is not English (``shared/email_rules.py``), else
+    None. The character rule only: the field is optional and its other checks belong to the
+    billing service."""
+    if value is None or is_ascii_email(str(value)):
+        return None
+    resp = jsonify({"error": EMAIL_ASCII_MESSAGE})
+    resp.status_code = 400
+    return _cors(resp)
 
 
 # --- Routes ---------------------------------------------------------------
@@ -1036,6 +1050,9 @@ def onboarding_billing_confirm():
     billing_group_id = str(payload.get("billing_group_id") or "").strip() or None
     billing_email = payload.get("billing_email")
     billing_company = payload.get("billing_company")
+    email_err = _billing_email_refusal(billing_email)
+    if email_err:
+        return email_err
 
     return _billing_call(
         lambda user_id: payment_methods.confirm_setup(
@@ -1109,6 +1126,9 @@ def onboarding_billing_accounts():
 
     billing_email = payload.get("billing_email")
     billing_company = payload.get("billing_company")
+    email_err = _billing_email_refusal(billing_email)
+    if email_err:
+        return email_err
 
     def _open(user_id):
         from blueprints.subscription.services import store as sub_store

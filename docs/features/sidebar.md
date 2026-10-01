@@ -26,7 +26,8 @@ minty-web's menu or profile is a change here too.
 | What the menu holds on a page, and where each item leads | `blueprints/shared/sidebar.py` (`sidebar_context()`, a context-processor global) |
 | The drawer and the menu, drawn server-side; My Profile's skeleton | `templates/components/minty_sidebar.html` |
 | Plain CSS, every rule under `#minty-sidebar` (so neither the CDN Tailwind nor its forms plugin can restyle it) | `static/css/minty_sidebar.css` |
-| The drawer's behaviour, My Profile, the Subscriptions Overview | `static/js/minty_sidebar.js` (no dependencies) |
+| The drawer's behaviour, My Profile, the Subscriptions Overview | `static/js/minty_sidebar.js` (one dependency: `window.MintyEmail`, which the partial loads first) |
+| The email field's English-only rule ([authentication.md](authentication.md) §2) | `static/js/email_input.js` |
 | Icons and the caped cat (minty-web's `public/menu`, `public/profile`) | `static/img/sidebar/` |
 
 A page includes the partial once, anywhere in its body (`{% include 'components/minty_sidebar.html' %}`;
@@ -74,6 +75,9 @@ Drawn in the browser over the **same reads minty-web makes**, so the three apps 
    with the caped cat), the person's role, the details card.
 3. Edit → Save sends only what changed as `PATCH /api/me/profile`; Flask's refusal sentence is
    shown in the card; after a save the header's initials and the menu's name change at once.
+   The email field is English only (`data-email-ascii`: anything else is stripped as it is
+   typed, with the hint under the field); a changed address must also pass
+   `MintyEmail.isEmail` before it is sent, and the server refuses a non-English one with 422.
    PASSWORD · Change opens the Xero account page.
 4. The **Subscriptions Overview**: minty-billing-api's `GET /api/me/subscriptions`
    (`BILLING_API_URL`, default `http://localhost:8004`), which lists this app's origin

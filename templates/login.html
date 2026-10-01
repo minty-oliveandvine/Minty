@@ -183,12 +183,18 @@
               <div class="form-group">
                 <label for="email">Email</label>
                 <input
-                  type="email"
+                  type="text"
+                  inputmode="email"
+                  autocomplete="email"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  data-email-ascii="small text-danger mt-1"
                   class="form-control"
                   id="resetEmail"
                   name="email"
                   required
                 />
+                <div class="invalid-feedback">Please enter a valid email address.</div>
               </div>
               <button type="submit" class="btn btn-primary btn-block">
                 Send Reset Link
@@ -237,8 +243,26 @@
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="{{ url_for('static', filename='js/email_input.js') }}"></script>
     <script>
       document.addEventListener("DOMContentLoaded", function () {
+        // The reset email: English only and shaped like an address (static/js/email_input.js),
+        // shown with Bootstrap's is-invalid / invalid-feedback.
+        const resetEmail = document.getElementById("resetEmail");
+        document
+          .getElementById("resetPasswordForm")
+          .addEventListener("submit", function (e) {
+            const valid = MintyEmail.isEmail(resetEmail.value);
+            resetEmail.classList.toggle("is-invalid", !valid);
+            if (!valid) {
+              e.preventDefault();
+              resetEmail.focus();
+            }
+          });
+        resetEmail.addEventListener("input", function () {
+          resetEmail.classList.remove("is-invalid");
+        });
+
         // Open reset password modal when clicking "Forgot Password?"
         document
           .getElementById("forgotPasswordLink")

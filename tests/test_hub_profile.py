@@ -184,6 +184,10 @@ def test_a_username_chosen_separately_stays(app, client, people, hub, db):
         ("olive at test", "That doesn't look like an email address."),
         ("two@@test.com", "That doesn't look like an email address."),
         ("OTHER@test.com", "That email address is already in use."),
+        # English only (blueprints/shared/email_rules.py): Korean before the "@", an
+        # international domain after it
+        ("홍길동@example.com", "Email can only contain English letters, numbers and symbols."),
+        ("olive@회사.com", "Email can only contain English letters, numbers and symbols."),
     ],
 )
 def test_an_email_that_cannot_be_used_is_refused_in_words(app, client, people, hub, email, sentence):
@@ -192,6 +196,13 @@ def test_an_email_that_cannot_be_used_is_refused_in_words(app, client, people, h
     assert resp.status_code == 422
     assert resp.get_json() == {"error": sentence}
     assert _user_row(app, people["olive"].id)["email"] == "olive@test.com"
+
+
+def test_an_ordinary_address_outside_the_common_shapes_is_saved(app, client, people, hub):
+    resp = _patch(client, app, people["olive"].id, {"email": "a+b@sub.domain.museum"})
+
+    assert resp.status_code == 200
+    assert _user_row(app, people["olive"].id)["email"] == "a+b@sub.domain.museum"
 
 
 def test_an_address_taken_as_somebody_elses_username_is_refused(app, client, people, hub, db):

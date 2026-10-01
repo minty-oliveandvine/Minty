@@ -18,6 +18,7 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
+from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from blueprints.shared.enums import entity_role_label
 from models.db import Entity, User, UserEntity, db
 from services.permission_policy import has_entity_access, is_superuser
@@ -116,6 +117,8 @@ def update_profile(user, **fields) -> None:
         # password-reset mail, since an unreachable address here locks the account out.
         if " " in email or email.count("@") != 1 or not all(email.split("@")):
             raise ProfileError("That doesn't look like an email address.")
+        if not is_ascii_email(email):
+            raise ProfileError(EMAIL_ASCII_MESSAGE)
 
         previous = _normalized(user.email)
         if email.casefold() != previous.casefold():

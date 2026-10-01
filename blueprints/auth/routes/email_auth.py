@@ -14,6 +14,7 @@ from blueprints.auth.services.email_auth import (
     request_email_otp,
     verify_email_otp,
 )
+from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from models.db import User
 
 _HANDOFF_SALT = "auth-email-handoff"
@@ -160,6 +161,12 @@ def email_check():
 def email_request_code():
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
+
+    # English only, before anything else (shared/email_rules.py): a non-ASCII address is
+    # refused for sign-up and sign-in alike - a 400 in the hint's words, not login mode's
+    # 404 "Please sign up first", which would send the person to a sign-up that refuses it.
+    if not is_ascii_email(email):
+        return jsonify({"status": "error", "message": EMAIL_ASCII_MESSAGE}), 400
 
     # In login mode an OTP may only go to an existing account. This is the
     # server-side enforcement behind the login page's check — it can't be
