@@ -27,6 +27,7 @@ the new hub (`../minty-web` + `../minty-billing-api`). Each of those repos has i
 | Launching the wizard and the payment module; `/api/onboarding/*` | [onboarding-and-module-handoff.md](onboarding-and-module-handoff.md) |
 | The sidebar on every page with a header - the menu and My Profile (minty-web's, ported) | [sidebar.md](sidebar.md) |
 | Modals - minty-web's design on every app; the Flask port and "Leave without saving?" | [modals.md](modals.md) |
+| Toasts - minty-web's card on every app; the one shared toast here | [toasts.md](toasts.md) |
 | Terms of Use versions, the consent record, the gate | [legal-terms.md](legal-terms.md) |
 | Reading a receipt with Gemini | [expense-ai.md](expense-ai.md) |
 | Configuration, storage, mail, logging, the test suites, scripts | [operations.md](operations.md) |

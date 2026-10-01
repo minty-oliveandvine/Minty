@@ -100,28 +100,11 @@
     }
 
     .auth-page {
-      /* Positioning context for the toasts (position:absolute). The auth pages
-         reset .main-container to static, so anchor toasts to .auth-page. */
       position: relative;
       min-height: calc(100vh - 60px);
       padding: 24px 16px 48px;
       display: flex;
       justify-content: center;
-    }
-    /* Shared toast macro is bottom-center for dashboards; on this page put every
-       toast in the top-right corner. Covers both the form/error toasts (rendered
-       inside .auth-page) and the flash toasts — e.g. the post-registration
-       success message — which the base layout renders inside .main-container.
-       Anchor to the fixed viewport so position is consistent regardless of which
-       container holds the toast. */
-    .main-container .toast:not(#flashMessagesCard),
-    .auth-page .toast:not(#flashMessagesCard) {
-      position: fixed !important;
-      top: 24px !important;
-      right: 24px !important;
-      bottom: auto !important;
-      left: auto !important;
-      transform: none !important;
     }
 
     .auth-card {
@@ -407,17 +390,6 @@
   <script src="{{ url_for('static', filename='js/email_input.js') }}"></script>
   <script>
     document.addEventListener("DOMContentLoaded", function () {
-      const toastBtn = document.querySelector(".toast-close");
-      if (toastBtn) {
-        toastBtn.addEventListener("click", function () {
-          $(".toast").hide();
-        });
-      }
-
-      setTimeout(() => {
-        $(".toast").hide();
-      }, 4000);
-
       const ONBOARDING_BASE = "{{ onboarding_base }}";
       const emailInput = document.getElementById("auth-email");
       const continueBtn = document.getElementById("auth-continue");

@@ -42,15 +42,6 @@
       }
     }
 
-    /* Toast styling */
-    .toast {
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
-
-    .toast-close:hover {
-      background-color: rgba(0, 0, 0, 0.1);
-    }
-
      /* Report entry button styling */
      .arrow-button:hover {
        transform: translateX(2px);
@@ -261,7 +252,7 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
-  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {# Canonical toast: server flashes + client showFlashMessages(). #}
   {% include 'components/flash_messages.html' %}
   <!-- Full-screen Publishing Overlay -->
   <div id="publishingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[9999] hidden items-center justify-center" style="display:none;">
@@ -364,10 +355,6 @@
       <!-- The sidebar: the menu and My Profile (components/minty_sidebar.html) -->
       {% include 'components/minty_sidebar.html' %}
 
-      <!-- Flash Notification Area (Slider) -->
-      <div id="flashNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40">
-        {# server flashes handled by canonical flash_messages partial #}
-      </div>
     <!-- Delete Confirmation Modal -->
       <div id="deleteReportModal" class="absolute inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
         <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
@@ -857,12 +844,12 @@
       const endDate = document.getElementById('endDate').value;
 
       if (!startDate || !endDate) {
-        showNotification('Please choose or enter a valid date range', 'error');
+        showFlashMessages('Please choose or enter a valid date range', 'error');
         return;
       }
 
       if (new Date(startDate) > new Date(endDate)) {
-        showNotification('Start date cannot be after end date', 'error');
+        showFlashMessages('Start date cannot be after end date', 'error');
         return;
       }
 
@@ -914,13 +901,13 @@
       const endDate = document.getElementById('endDate').value;
       
       if (!startDate || !endDate) {
-        showNotification('Please select both start and end dates before exporting', 'error');
+        showFlashMessages('Please select both start and end dates before exporting', 'error');
         return;
       }
       
       // Validate date range
       if (new Date(startDate) > new Date(endDate)) {
-        showNotification('Start date cannot be after end date', 'error');
+        showFlashMessages('Start date cannot be after end date', 'error');
         return;
       }
       
@@ -949,7 +936,7 @@
         this.disabled = false;
         
         // Show success message
-        showNotification('Your CSV export is on its way!', 'success');
+        showFlashMessages('Your CSV export is on its way!', 'success');
       }, 1000);
     });
 
@@ -959,12 +946,12 @@
       const endDate = document.getElementById('endDate').value;
 
       if (!startDate || !endDate) {
-        showNotification('Please select both start and end dates', 'error');
+        showFlashMessages('Please select both start and end dates', 'error');
         return;
       }
 
       if (new Date(startDate) > new Date(endDate)) {
-        showNotification('Start date cannot be after end date', 'error');
+        showFlashMessages('Start date cannot be after end date', 'error');
         return;
       }
 
@@ -974,100 +961,6 @@
       
       // Navigate to the filtered results
       window.location.href = url;
-    }
-
-    // Function to close notification with slide-out animation
-    function closeNotification(closeButton) {
-      // Find the toast container (the element with 'absolute' class that contains the toast)
-      let toast = closeButton.parentElement; // Go to the .toast div
-      while (toast && !toast.classList.contains('absolute')) {
-        toast = toast.parentElement;
-      }
-      
-      if (toast) {
-        // Slide out
-        toast.classList.add('translate-x-full');
-        // Remove after animation completes (500ms matches transition duration)
-        setTimeout(() => {
-          if (toast.parentElement) {
-            toast.remove();
-          }
-        }, 500);
-      }
-    }
-
-    // Function to show notifications
-    function showNotification(message, type = 'info') {
-      const toast = document.createElement('div');
-      toast.className = `absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40`;
-
-      let borderColor, bgColor, titleColor, subtextColor, iconSrc, label;
-      if (type === 'success') {
-        borderColor = '#a9d7cb';
-        bgColor = '#f1fffc';
-        titleColor = '#017155';
-        subtextColor = '#92c6b9';
-        iconSrc = "{{ url_for('static', filename='img/success-icon.png') }}";
-        label = 'Success';
-      } else if (type === 'error') {
-        borderColor = '#ffcccc';
-        bgColor = '#fff1f1';
-        titleColor = '#F03D3D';
-        subtextColor = '#f57e7e';
-        iconSrc = "{{ url_for('static', filename='img/error-icon.png') }}";
-        label = 'Error';
-      } else if (type === 'warning') {
-        borderColor = '#fee0aa';
-        bgColor = '#fffaf1';
-        titleColor = '#DA8700';
-        subtextColor = '#e8b765';
-        iconSrc = "{{ url_for('static', filename='img/warning-icon.png') }}";
-        label = 'Warning';
-      } else {
-        borderColor = '#a9d3ff';
-        bgColor = '#f1f8ff';
-        titleColor = '#006FE6';
-        subtextColor = '#5ba2ee';
-        iconSrc = "{{ url_for('static', filename='img/info-icon.png') }}";
-        label = 'Information';
-      }
-
-      toast.innerHTML = `
-        <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: ${borderColor}; background-color: ${bgColor};">
-          <img src="${iconSrc}" alt="${label}" class="shrink-0 w-[36px] h-[44px]" />
-          <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-            <p class="font-[500] whitespace-nowrap" style="color: ${titleColor};">${label}</p>
-            <p class="font-[400] break-words w-full" style="color: ${subtextColor};">${message}</p>
-          </div>
-          <button onclick="closeNotification(this)" class="toast-close shrink-0 p-1 hover:bg-gray-200 rounded ml-2">
-            <svg class="w-[14px] h-[14px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-      `;
-       
-      const phoneCard = document.querySelector('.relative.h-screen.bg-gray-50.shadow-xl');
-      if (phoneCard) {
-        phoneCard.appendChild(toast);
-      } else {
-        document.body.appendChild(toast);
-      }
-      
-      // Animate in
-      setTimeout(() => {
-        toast.classList.remove('translate-x-full');
-      }, 100);
-      
-      // Auto-hide after 4 seconds
-      setTimeout(() => {
-        toast.classList.add('translate-x-full');
-        setTimeout(() => {
-          if (toast.parentElement) {
-            toast.remove();
-          }
-        }, 500);
-      }, 4000);
     }
 
     // Handle report entry container click
@@ -1104,7 +997,7 @@
           if (window.sendLogToDataDog) {
             window.sendLogToDataDog('warn', 'Resume draft missing info', { entityId: !!entityId, reportDate: !!reportDate });
           }
-          showNotification('Unable to resume draft. Missing information.', 'error');
+          showFlashMessages('Unable to resume draft. Missing information.', 'error');
         }
         return;
       }
@@ -1119,7 +1012,7 @@
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('warn', 'Open report missing info', { reportId: !!reportId, entityId: !!entityId });
         }
-        showNotification('Unable to open report. Missing information.', 'error');
+        showFlashMessages('Unable to open report. Missing information.', 'error');
       }
     }
 
@@ -1142,14 +1035,14 @@
             if (entityId && reportDate) {
               const resumeUrl = `/report/resume?entity_id=${entityId}&transaction_date=${reportDate}`;
               console.log('Resuming draft report at:', resumeUrl);
-              showNotification(`Picking your ${reportDate} draft back up...`, 'success');
+              showFlashMessages(`Picking your ${reportDate} draft back up...`, 'success');
               PageTransition.navigateWithFade(resumeUrl);
             } else {
               console.error('Missing resume values:', { entityId: !!entityId, reportDate: !!reportDate });
               if (window.sendLogToDataDog) {
                 window.sendLogToDataDog('warn', 'Resume draft missing info', { entityId: !!entityId, reportDate: !!reportDate });
               }
-              showNotification('Unable to resume draft. Missing information.', 'error');
+              showFlashMessages('Unable to resume draft. Missing information.', 'error');
             }
             return;
           }
@@ -1158,14 +1051,14 @@
           if (reportId && entityId) {
             const url = `/entity/${entityId}/ending/${reportId}`;
             console.log('Navigating to:', url);
-            showNotification('Opening that report for you...', 'success');
+            showFlashMessages('Opening that report for you...', 'success');
             PageTransition.navigateWithFade(url);
           } else {
             console.error('Missing values:', { reportId: !!reportId, entityId: !!entityId });
             if (window.sendLogToDataDog) {
               window.sendLogToDataDog('warn', 'Open report missing info', { reportId: !!reportId, entityId: !!entityId });
             }
-            showNotification('Unable to open report. Missing information.', 'error');
+            showFlashMessages('Unable to open report. Missing information.', 'error');
           }
         });
       }
@@ -1181,7 +1074,7 @@
           const isXeroIntegrated = this.dataset.xeroIntegrated === 'true';
           
           if (!reportId || !entityId) {
-            showNotification('Unable to publish report. Missing report information.', 'error');
+            showFlashMessages('Unable to publish report. Missing report information.', 'error');
             return;
           }
           
@@ -1221,7 +1114,7 @@
      const urlParams = new URLSearchParams(window.location.search);
      if (urlParams.has('start_date') && urlParams.has('end_date')) {
        setTimeout(() => {
-         showNotification('Filter applied', 'info');
+         showFlashMessages('Filter applied', 'info');
        }, 500);
      }
 
@@ -1232,7 +1125,7 @@
        
        // Show success toast notification after page loads
        setTimeout(() => {
-         showNotification('That report is deleted.', 'success');
+         showFlashMessages('That report is deleted.', 'success');
        }, 500);
      }
 
@@ -1241,7 +1134,7 @@
     if (publishSuccessMsg) {
       sessionStorage.removeItem('publishSuccess');
       setTimeout(() => {
-        showNotification(publishSuccessMsg, 'success');
+        showFlashMessages(publishSuccessMsg, 'success');
       }, 500);
     }
 
@@ -1250,7 +1143,7 @@
     if (publishFailedMsg) {
       sessionStorage.removeItem('publishFailed');
       setTimeout(() => {
-        showNotification(publishFailedMsg, 'error');
+        showFlashMessages(publishFailedMsg, 'error');
       }, 500);
     }
 
@@ -1259,7 +1152,7 @@
     if (publishPartialMsg) {
       sessionStorage.removeItem('publishPartial');
       setTimeout(() => {
-        showNotification(publishPartialMsg, 'warning');
+        showFlashMessages(publishPartialMsg, 'warning');
       }, 500);
     }
 
@@ -1376,7 +1269,7 @@
             if (window.sendLogToDataDog) {
               window.sendLogToDataDog('error', 'Error deleting report', { reportId, status: response.status });
             }
-            showNotification('Error deleting report. Please try again.', 'error');
+            showFlashMessages('Error deleting report. Please try again.', 'error');
           }
         })
         .catch(error => {
@@ -1388,7 +1281,7 @@
           if (loadingOverlay) {
             loadingOverlay.classList.add('hidden');
           }
-          showNotification('Error deleting report. Please try again.', 'error');
+          showFlashMessages('Error deleting report. Please try again.', 'error');
         });
       }
     }
@@ -1439,7 +1332,7 @@
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('warn', 'Republish missing info', { reportToRepublish: !!reportToRepublish, entityToRepublish: !!entityToRepublish });
         }
-        showNotification('Unable to republish report. Missing information.', 'error');
+        showFlashMessages('Unable to republish report. Missing information.', 'error');
       }
     }
 
@@ -1611,7 +1504,7 @@
         if (response.status === 409) {
           return response.json().then(data => {
             hidePublishingOverlay();
-            showNotification(window.mintyErrorCopy(data.message, 'That report is already being published. Give it a moment.'), 'error');
+            showFlashMessages(window.mintyErrorCopy(data.message, 'That report is already being published. Give it a moment.'), 'error');
             return { handled: true };
           });
         }
@@ -1652,7 +1545,7 @@
     // Function to handle publish button click
     function handlePublish(reportId, entityId, buttonElement, wasPreviouslyPublished, reportDate) {
       if (!reportId || !entityId) {
-        showNotification('Unable to publish report. Missing information.', 'error');
+        showFlashMessages('Unable to publish report. Missing information.', 'error');
         return;
       }
       // A report that was edited after a prior full publish shows as "Submitted"
@@ -1668,7 +1561,7 @@
     // Function to handle republish button click (from menu)
     function handleRepublish(reportId, entityId, buttonElement, wasFullyPublished, reportDate) {
       if (!reportId || !entityId) {
-        showNotification('Unable to republish report. Missing information.', 'error');
+        showFlashMessages('Unable to republish report. Missing information.', 'error');
         return;
       }
       showRepublishModal(reportId, entityId, buttonElement, wasFullyPublished, reportDate);
@@ -1677,7 +1570,7 @@
     // Function to republish report to Xero
     function republishToXero(reportId, entityId, buttonElement) {
       if (!reportId || !entityId) {
-        showNotification('Unable to republish report. Missing information.', 'error');
+        showFlashMessages('Unable to republish report. Missing information.', 'error');
         const confirmButton = document.getElementById('confirmRepublishButton');
         if (confirmButton) {
           confirmButton.disabled = false;
@@ -1717,7 +1610,7 @@
     function handleExportButtonClick(button, reportStatus) {
       // Check if button is disabled (report is draft)
       if (reportStatus === 'draft') {
-        showNotification('Please finish the report before exporting.', 'error');
+        showFlashMessages('Please finish the report before exporting.', 'error');
         return;
       }
       
@@ -1753,7 +1646,7 @@
       if (reportId) {
         // TODO: Implement save image functionality
         console.log('Save image for report:', reportId);
-        showNotification('Save image functionality coming soon!', 'info');
+        showFlashMessages('Save image functionality coming soon!', 'info');
         // You can add your save image logic here
       }
     }
@@ -1762,12 +1655,12 @@
       if (reportId && pdfUrl) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification('Your report is downloaded!', 'success');
+          showFlashMessages('Your report is downloaded!', 'success');
         }, 500);
         // Navigate to PDF generation route
         window.location.href = pdfUrl;
       } else {
-        showNotification('Unable to download report. Missing report information.', 'error');
+        showFlashMessages('Unable to download report. Missing report information.', 'error');
       }
     }
 
@@ -1775,12 +1668,12 @@
       if (reportId && entityId) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification('Your report is downloaded!', 'success');
+          showFlashMessages('Your report is downloaded!', 'success');
         }, 500);
         // Use CSV download endpoint with report_id parameter
         window.location.href = `/entity/${entityId}/reports/download-csv?report_id=${reportId}`;
       } else {
-        showNotification('Unable to download report. Missing report information.', 'error');
+        showFlashMessages('Unable to download report. Missing report information.', 'error');
       }
     }
 
@@ -1789,7 +1682,7 @@
     // Report button on the ending page.
     async function handleEditReport(reportId, entityId, transactionDate, wasPublished) {
       if (!reportId || !entityId) {
-        showNotification('Unable to edit report. Missing report information.', 'error');
+        showFlashMessages('Unable to edit report. Missing report information.', 'error');
         return;
       }
 
@@ -1806,7 +1699,7 @@
 
       try {
         // Show loading notification
-        showNotification('Converting report to draft...', 'info');
+        showFlashMessages('Converting report to draft...', 'info');
 
         // Get CSRF token
         const csrfToken = document.querySelector('input[name="csrf_token"]');
@@ -1828,7 +1721,7 @@
 
         if (data.status === 'success') {
           // Show success notification
-          showNotification('Back to draft — opening it for you now.', 'success');
+          showFlashMessages('Back to draft — opening it for you now.', 'success');
           
           // Navigate to opening page with the draft (now treated as draft)
           const editUrl = `{{ url_for('report.report_opening') }}?entity_id=${entityId}&transaction_date=${data.transaction_date || transactionDate}`;
@@ -1837,14 +1730,14 @@
             PageTransition.navigateWithFade(editUrl);
           }, 500);
         } else {
-          showNotification(data.message || 'Failed to convert report to draft.', 'error');
+          showFlashMessages(data.message || 'Failed to convert report to draft.', 'error');
         }
       } catch (error) {
         console.error('Error converting report to draft:', error);
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('error', 'Error converting to draft', { reportId, entityId, message: error && error.message });
         }
-        showNotification('An error occurred while converting the report. Please try again.', 'error');
+        showFlashMessages('An error occurred while converting the report. Please try again.', 'error');
       }
     }
 
@@ -1852,11 +1745,11 @@
       if (reportId) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification('Your report is on its way!', 'success');
+          showFlashMessages('Your report is on its way!', 'success');
         }, 500);
         window.location.href = `/report/download/${reportId}`;
       } else {
-        showNotification('Unable to download report. Missing report information.', 'error');
+        showFlashMessages('Unable to download report. Missing report information.', 'error');
       }
     }
 
@@ -1924,38 +1817,6 @@
         }
       }
     });
-
-    // Flash notification slider functions
-    function showFlashNotification() {
-      const notification = document.getElementById('flashNotification');
-      if (notification && notification.querySelector('.toast')) {
-        // Slide in using Tailwind classes
-        notification.classList.remove('translate-x-full');
-        notification.classList.add('translate-x-0');
-        
-        // Auto-hide after 4 seconds
-        setTimeout(() => {
-          hideFlashNotification();
-        }, 4000);
-      }
-    }
-
-    function hideFlashNotification() {
-      const notification = document.getElementById('flashNotification');
-      if (notification) {
-        // Slide out using Tailwind classes
-        notification.classList.remove('translate-x-0');
-        notification.classList.add('translate-x-full');
-        
-        // Hide all toast elements after animation
-        setTimeout(() => {
-          const allToasts = notification.querySelectorAll('.toast');
-          allToasts.forEach(toast => {
-            toast.classList.add('hidden');
-          });
-        }, 500);
-      }
-    }
 
     // Show flash notification on page load if it exists
     document.addEventListener('DOMContentLoaded', function() {

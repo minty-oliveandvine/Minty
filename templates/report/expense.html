@@ -105,7 +105,7 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
-  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {# Canonical toast: server flashes + client showFlashMessages(). #}
   {% include 'components/flash_messages.html' %}
   <div class="flex min-h-screen items-center justify-center main-container">
     <!-- Phone card -->
@@ -149,26 +149,6 @@
       </div>
       <!-- Progress Steps -->
        <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
-        <!-- Flash Notification Area (from previous page saves) -->
-         <div id="flashNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-           {# server flashes handled by canonical flash_messages partial #}
-         </div>
-         <!-- Validation Notification Area (for form validation) -->
-         <div id="addExpenseNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-[70]">
-           <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-             <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-             <span id="addExpenseWarningIcon" class="shrink-0 hidden items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
-             <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-               <p class="font-[500] whitespace-nowrap" id="addExpenseNotificationTitle" style="color: #F03D3D;">Validation Error</p>
-               <p id="addExpenseNotificationMessage" class="font-[400] break-words w-full" style="color: #f57e7e;">Please fill out the Required Fields</p>
-             </div>
-             <button class="toast-close shrink-0" onclick="hideAddExpenseNotification()">
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-               </svg>
-             </button>
-           </div>
-         </div>
          <!-- Include the reusable stepper component -->
          {% include 'components/stepper.html' %}
       </div>
@@ -747,75 +727,8 @@
 
                                                              // Function to show add expense notification
         function showAddExpenseNotification(message, type = 'error') {
-          const notification = document.getElementById('addExpenseNotification');
-          const messageElement = document.getElementById('addExpenseNotificationMessage');
-          const toastDiv = notification ? notification.querySelector('.toast') : null;
-          const iconImg = notification ? notification.querySelector('img') : null;
-          const titleElement = notification ? notification.querySelector('.font-\\[500\\]') : null;
-
-          if (messageElement) {
-            messageElement.textContent = message;
-          }
-
-          if (titleElement) {
-            titleElement.textContent = type === 'success' ? 'Success' : 'Validation Error';
-          }
-
-          // Restore the image icon and hide the "!" warning badge (the unsaved
-          // warning swaps these out).
-          if (iconImg) iconImg.classList.remove('hidden');
-          const warningIcon = document.getElementById('addExpenseWarningIcon');
-          if (warningIcon) {
-            warningIcon.classList.add('hidden');
-            warningIcon.classList.remove('flex');
-          }
-
-          if (notification && toastDiv) {
-            if (type === 'success') {
-              toastDiv.style.borderColor = '#a9d7cb';
-              toastDiv.style.backgroundColor = '#f1fffc';
-              if (iconImg) {
-                iconImg.src = "{{ url_for('static', filename='img/success-icon.png') }}";
-                iconImg.alt = 'Success';
-              }
-              if (titleElement) titleElement.style.color = '#017155';
-              if (messageElement) messageElement.style.color = '#92c6b9';
-            } else {
-              toastDiv.style.borderColor = '#ffcccc';
-              toastDiv.style.backgroundColor = '#fff1f1';
-              if (iconImg) {
-                iconImg.src = "{{ url_for('static', filename='img/error-icon.png') }}";
-                iconImg.alt = 'Error';
-              }
-              if (titleElement) titleElement.style.color = '#F03D3D';
-              if (messageElement) messageElement.style.color = '#f57e7e';
-            }
-
-            // Decode the swapped icon before sliding in so the toast never
-            // flashes the previous (default error) icon for a frame.
-            const reveal = () => {
-              notification.classList.remove('translate-x-full');
-              setTimeout(() => {
-                hideAddExpenseNotification();
-              }, 4000);
-            };
-            if (iconImg && typeof iconImg.decode === 'function') {
-              iconImg.decode().then(reveal).catch(reveal);
-            } else {
-              reveal();
-            }
-          }
+          showFlashMessages(message, type);
         }
-
-     // Function to hide add expense notification
-     function hideAddExpenseNotification() {
-       const notification = document.getElementById('addExpenseNotification');
-       if (notification) {
-         // Slide out using Tailwind classes
-         notification.classList.remove('translate-x-0');
-         notification.classList.add('translate-x-full');
-       }
-    }
 
     // Function to highlight invalid field with red border
     function highlightFieldError(fieldId) {
@@ -1936,7 +1849,7 @@
           newContactSection.classList.add('hidden');
         }
          // Hide notification when user makes a selection
-         hideAddExpenseNotification();
+         hideFlashMessages();
        });
       }
 
@@ -1946,7 +1859,7 @@
          const field = document.getElementById(fieldId);
          if (field) {
            field.addEventListener('input', function() {
-             hideAddExpenseNotification();
+             hideFlashMessages();
              clearFieldError(fieldId);
            });
          }
@@ -1957,12 +1870,12 @@
       if (accountCodeSelect) {
         if (accountCodeSelect.tagName === 'INPUT') {
           accountCodeSelect.addEventListener('input', function() {
-            hideAddExpenseNotification();
+            hideFlashMessages();
             clearFieldError('expense_account_code');
           });
         } else {
           accountCodeSelect.addEventListener('change', function() {
-            hideAddExpenseNotification();
+            hideFlashMessages();
             clearFieldError('expense_account_code');
           });
         }
@@ -1972,7 +1885,7 @@
        const fileInput = document.getElementById('expense_files');
        if (fileInput) {
          fileInput.addEventListener('change', function() {
-           hideAddExpenseNotification();
+           hideFlashMessages();
            clearFieldError('expense_files');
          });
        }
@@ -2204,7 +2117,7 @@
       // Add input event listener for search
       contactInput.addEventListener('input', function() {
         const query = this.value.trim();
-        hideAddExpenseNotification();
+        hideFlashMessages();
         clearFieldError('expense_contact');
         selectedSuggestionIndex = -1; // Reset navigation when typing
         
@@ -2749,7 +2662,7 @@
       // Add input event listener for search
       accountInput.addEventListener('input', function() {
         const query = this.value.trim();
-        hideAddExpenseNotification();
+        hideFlashMessages();
         clearFieldError('expense_account_code');
         selectedAccountSuggestionIndex = -1; // Reset navigation when typing
         
@@ -4053,43 +3966,7 @@
     // Function to show a warning toast for unsaved changes (yellow "Warning"
     // style with a "!" icon).
     function showUnsavedDataAlert(message) {
-      const addExpenseNotification = document.getElementById('addExpenseNotification');
-      const addExpenseNotificationTitle = document.getElementById('addExpenseNotificationTitle');
-      const addExpenseNotificationMessage = document.getElementById('addExpenseNotificationMessage');
-
-      if (addExpenseNotificationTitle) {
-        addExpenseNotificationTitle.textContent = 'Warning';
-        addExpenseNotificationTitle.style.color = '#E59218';
-      }
-
-      if (addExpenseNotificationMessage) {
-        addExpenseNotificationMessage.textContent = message || 'You have unsaved changes. Please save your changes first.';
-        addExpenseNotificationMessage.style.color = '#F0A93B';
-      }
-
-      if (addExpenseNotification) {
-        const toast = addExpenseNotification.querySelector('.toast');
-        if (toast) {
-          toast.style.borderColor = '#ffe2b0';
-          toast.style.backgroundColor = '#fff8ed';
-          // Swap the image icon for the yellow "!" badge.
-          const iconImg = toast.querySelector('img');
-          if (iconImg) iconImg.classList.add('hidden');
-          const warningIcon = document.getElementById('addExpenseWarningIcon');
-          if (warningIcon) {
-            warningIcon.classList.remove('hidden');
-            warningIcon.classList.add('flex');
-          }
-        }
-
-        addExpenseNotification.classList.remove('translate-x-full');
-        addExpenseNotification.classList.add('translate-x-0');
-
-        setTimeout(() => {
-          addExpenseNotification.classList.remove('translate-x-0');
-          addExpenseNotification.classList.add('translate-x-full');
-        }, 4000);
-      }
+      showFlashMessages(message || 'You have unsaved changes. Please save your changes first.', 'warning');
     }
 
     function navigateToStep(step) {
@@ -4324,28 +4201,6 @@
        // Navigate back to entity dashboard
        const entityId = '{{ org.id }}';
        window.location.href = `/entity/${entityId}`;
-     }
-
-     // Flash notification slider functions
-     function showFlashNotification() {
-       const notification = document.getElementById('flashNotification');
-       if (notification && notification.querySelector('.toast')) {
-         // Slide in
-         notification.style.transform = 'translateX(0)';
-         
-         // Auto hide after 5 seconds
-         setTimeout(() => {
-           hideFlashNotification();
-         }, 5000);
-       }
-     }
-
-     function hideFlashNotification() {
-       const notification = document.getElementById('flashNotification');
-       if (notification) {
-         // Slide out
-         notification.style.transform = 'translateX(100%)';
-       }
      }
 
      // Show flash notification on page load if it exists

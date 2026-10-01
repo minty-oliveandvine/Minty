@@ -1,34 +1,8 @@
-    // Bills UI: inline banners + full-screen saving overlay (entity / Xero bills pattern)
-    function isUsersBillsUi() {
-      return !!document.getElementById('usersBillsInlineRoot');
-    }
-
-    function hideAllBillsInlineBanners() {
-      ['Success', 'Error', 'Info'].forEach(function (suffix) {
-        var el = document.getElementById('usersBillsNotify' + suffix);
-        if (el) el.classList.add('hidden');
-      });
-      if (window._usersBillsBannerTimer) {
-        clearTimeout(window._usersBillsBannerTimer);
-        window._usersBillsBannerTimer = null;
-      }
-    }
-
-    function showBillsInlineBanner(kind, message) {
-      if (!isUsersBillsUi()) return false;
-      // Surface via the new-design slide-in toast (components/flash_messages.html)
-      // instead of the old inline banners.
-      var type = kind === 'Error' ? 'error' : (kind === 'Info' ? 'info' : 'success');
-      if (typeof window.showSettingsFlashToast === 'function') {
-        window.showSettingsFlashToast(message || '', type);
-        return true;
-      }
-      return false;
-    }
-
+    // Full-screen saving overlay (entity / Xero bills pattern). Toasts are the
+    // shared globals from components/flash_messages.html.
     function showUsersBillsSaving(text) {
       // Loading overlay lives in the shared main block, so it works in both the
-      // bills UI and the regular UI — don't gate it on isUsersBillsUi().
+      // bills UI and the regular UI.
       var ov = document.getElementById('loadingOverlay');
       var lt = document.getElementById('loadingText');
       if (!ov || !lt) return;
@@ -260,93 +234,8 @@
          var roleName = displayNameForEntityRoleSlug(selectedRole);
          line = 'Users filtered by ' + roleName + ' permission';
        }
-       if (showBillsInlineBanner('Info', line)) return;
-
-       const toast = document.getElementById('filterToast');
-       if (!toast) return;
-       const titleElement = toast.querySelector('.font-\\[500\\]');
-       const messageElement = toast.querySelector('.font-\\[400\\]');
-       // Reset the title in case showInfoToast last reused this element.
-       if (titleElement) titleElement.textContent = 'Filter Applied';
-       if (messageElement) messageElement.textContent = line;
-
-       setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
-       setTimeout(() => { closeFilterToast(); }, 4000);
+       showFlashMessages(line, 'info');
      }
-
-    // Informational toast — reuses the blue, info-styled filter toast element
-    // (classic page) or the new slide-in flash toast (bills-UI page). Used for
-    // non-error notices like "feature in progress" so they don't show as errors.
-    function showInfoToast(message) {
-      if (showBillsInlineBanner('Info', message)) return;
-
-      const toast = document.getElementById('filterToast');
-      if (!toast) return;
-      const titleElement = toast.querySelector('.font-\\[500\\]');
-      const messageElement = toast.querySelector('.font-\\[400\\]');
-      if (titleElement) titleElement.textContent = 'Information';
-      if (messageElement && message) messageElement.textContent = message;
-
-      setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
-      setTimeout(() => { closeFilterToast(); }, 4000);
-    }
-
-    function closeFilterToast() {
-      if (isUsersBillsUi()) {
-        var info = document.getElementById('usersBillsNotifyInfo');
-        if (info) info.classList.add('hidden');
-        return;
-      }
-      const toast = document.getElementById('filterToast');
-      if (toast) toast.classList.add('translate-x-full');
-    }
-
-    function showSuccessToast(message) {
-      if (showBillsInlineBanner('Success', message)) return;
-
-      const toast = document.getElementById('successToast');
-      if (!toast) return;
-      const messageElement = document.getElementById('successToastMessage');
-      if (messageElement && message) messageElement.textContent = message;
-
-      setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
-      setTimeout(() => { closeSuccessToast(); }, 4000);
-    }
-
-    function closeSuccessToast() {
-      if (isUsersBillsUi()) {
-        var el = document.getElementById('usersBillsNotifySuccess');
-        if (el) el.classList.add('hidden');
-        return;
-      }
-      const toast = document.getElementById('successToast');
-      if (toast) toast.classList.add('translate-x-full');
-    }
-
-    function showErrorToast(message) {
-      // Guard raw API/exception text: this toast drives its own DOM and
-      // never reaches showFlashMessages(). See components/flash_messages.html.
-      if (window.mintyErrorCopy) message = window.mintyErrorCopy(message);
-      if (showBillsInlineBanner('Error', message)) return;
-
-      const toast = document.getElementById('errorToast');
-      if (!toast) return;
-      const messageElement = document.getElementById('errorToastMessage');
-      if (messageElement && message) messageElement.textContent = message;
-
-      setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
-      setTimeout(() => { closeErrorToast(); }, 4000);
-    }
-
-    function closeErrorToast() {
-      if (isUsersBillsUi()) {
-        var el = document.getElementById('usersBillsNotifyError');
-        if (el) el.classList.add('hidden');
-        return;
-      }
-      const toast = document.getElementById('errorToast');
-      if (toast) toast.classList.add('translate-x-full');
-    }
 
     // Add New User Modal Functions
     function addNewUser() {
@@ -565,15 +454,7 @@
     }
 
      function showResetToast() {
-       if (showBillsInlineBanner('Info', 'Filters have been reset to default')) return;
-
-       const toast = document.getElementById('filterToast');
-       if (!toast) return;
-       const messageElement = toast.querySelector('.font-\\[400\\]');
-       if (messageElement) messageElement.textContent = 'Filters have been reset to default';
-
-       setTimeout(() => { toast.classList.remove('translate-x-full'); }, 200);
-       setTimeout(() => { closeFilterToast(); }, 4000);
+       showFlashMessages('Filters have been reset to default', 'info');
      }
 
      // The role filter currently applied, so the live refresh can re-apply it to

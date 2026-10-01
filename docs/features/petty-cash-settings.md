@@ -28,8 +28,8 @@ already). Since 2026-10-01 it is ONE template for every visit, built from the ol
   tabs' links (they keep `?from=bills`) and the sidebar's Settings (the payments app's). The
   form posts `_from=bills` so the redirect after a save keeps it.
 - **Look**: plain CSS in `static/css/settings_page.css` under `#pc-settings`, with Tailwind v4's
-  values written out (the page loads Tailwind v3 from a CDN only for the shared flash toast and
-  view-only notice and the classes the mapping script toggles).
+  values written out (the page loads Tailwind v3 from a CDN only for the view-only notice and the
+  classes the mapping script toggles; the shared toast styles itself).
 - **Scripts**: `static/js/petty_cash_settings.js` runs the page (cards, pickers, account codes,
   sales methods, the save, the leave guard); the Xero mapping pickers are
   `templates/entity/partials/xero_mapping_classic_script_fragment.html`. The page's data reaches

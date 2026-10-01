@@ -100,26 +100,11 @@
     }
 
     .auth-page {
-      /* Positioning context for the toasts (they're position:absolute). The auth
-         pages reset .main-container to static, so anchor toasts to .auth-page. */
       position: relative;
       min-height: calc(100vh - 60px);
       padding: 24px 16px 48px;
       display: flex;
       justify-content: center;
-    }
-    /* Shared toast macro is bottom-center for dashboards; on this page put every
-       toast in the top-right corner. Covers the form/error toasts (.auth-page)
-       and any flash toasts the base layout renders inside .main-container.
-       Anchor to the fixed viewport so the corner is consistent. */
-    .main-container .toas:not(#flashMessagesCard),
-    .auth-page .toast:not(#flashMessagesCard) {
-      position: fixed !important;
-      top: 24px !important;
-      right: 24px !important;
-      bottom: auto !important;
-      left: auto !important;
-      transform: none !important;
     }
 
     .auth-card {
@@ -468,9 +453,8 @@
       {% for inputElement, errors in form.errors.items() %}
         {% for error in errors %}
           {{
-            components.toast(icon='img/error.webp', type='Error',
-            message=form[inputElement].label.text ~ ': ' ~ error,
-            toastBorder='errorBorder', toastBg='errorBg', toastColor='error')
+            components.toast(message=form[inputElement].label.text ~ ': ' ~ error,
+            toastBorder='errorBorder')
           }}
         {% endfor %}
       {% endfor %}
@@ -599,20 +583,6 @@
   <script src="{{ url_for('static', filename='js/email_input.js') }}"></script>
   <script>
   $(document).ready(function () {
-
-    // The base layout's scripts block (which wires toast close/auto-hide) is
-    // overridden by this block, so re-add that behavior for our error toasts.
-    document.querySelectorAll(".toast-close").forEach(function (button) {
-      button.addEventListener("click", function () {
-        const toast = this.closest(".toast");
-        if (toast) toast.style.display = "none";
-      });
-    });
-    setTimeout(function () {
-      document.querySelectorAll(".toast").forEach(function (toast) {
-        toast.style.display = "none";
-      });
-    }, 4000);
 
     // --- Our own client-side validation (native HTML5 validation is off via
     // the form's `novalidate`). Messages match the server's friendly wording. ---

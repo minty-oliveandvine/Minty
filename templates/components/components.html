@@ -53,31 +53,17 @@
     />
   </a>
 {% endmacro %}
-{%
-  macro toast(icon='img/success.webp',type='', message='',
-  toastBorder='', toastBg='', toastColor='')
-%}
+{#
+  toast(message, toastBorder): a toast rendered by the server into the page
+  (form errors on register, the error page). It is raised through the one
+  shared toast in components/flash_messages.html, so it looks and behaves like
+  every other toast; `toastBorder` picks the type ('errorBorder' -> error, etc.).
+#}
+{% macro toast(message='', toastBorder='') %}
   {% set tone = 'error' if 'error' in toastBorder else ('warning' if 'warning' in toastBorder else ('info' if 'info' in toastBorder else 'success')) %}
-  {% if tone == 'success' %}
-    {% set borderHex = '#a9d7cb' %}{% set bgHex = '#f1fffc' %}{% set titleHex = '#017155' %}{% set subHex = '#92c6b9' %}{% set iconFile = 'img/success-icon.png' %}{% set iconAlt = 'Success' %}
-  {% elif tone == 'error' %}
-    {% set borderHex = '#ffcccc' %}{% set bgHex = '#fff1f1' %}{% set titleHex = '#F03D3D' %}{% set subHex = '#f57e7e' %}{% set iconFile = 'img/error-icon.png' %}{% set iconAlt = 'Error' %}
-  {% elif tone == 'warning' %}
-    {% set borderHex = '#fee0aa' %}{% set bgHex = '#fffaf1' %}{% set titleHex = '#DA8700' %}{% set subHex = '#e8b765' %}{% set iconFile = 'img/warning-icon.png' %}{% set iconAlt = 'Warning' %}
-  {% else %}
-    {% set borderHex = '#a9d3ff' %}{% set bgHex = '#f1f8ff' %}{% set titleHex = '#006FE6' %}{% set subHex = '#5ba2ee' %}{% set iconFile = 'img/info-icon.png' %}{% set iconAlt = 'Information' %}
-  {% endif %}
-  <div
-    style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 72px; z-index: 99; border-color: {{ borderHex }}; background-color: {{ bgHex }};"
-    class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative"
-  >
-    <img src="{{ url_for('static', filename=iconFile) }}" alt="{{ iconAlt }}" class="shrink-0 w-[36px] h-[44px]" />
-    <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-      <p class="font-[500] whitespace-nowrap" style="color: {{ titleHex }};">{{ type }}</p>
-      <p class="font-[400] break-words w-full" style="color: {{ subHex }};">{{ message }}</p>
-    </div>
-    <button class="toast-close shrink-0">
-      <img src="{{ url_for('static', filename='img/toast-close.webp') }}" alt="Close" class="w-[14px] h-[14px]">
-    </button>
-  </div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      showFlashMessages({{ message|tojson }}, {{ tone|tojson }}, {{ (12000 if tone in ('error', 'warning') else 4000)|tojson }});
+    });
+  </script>
 {% endmacro %}

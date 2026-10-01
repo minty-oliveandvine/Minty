@@ -134,7 +134,7 @@ document.addEventListener('submit', function(e){
 });
 </script>
 <body class="min-h-screen  font-inter antialiased">
-  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {# Canonical toast: server flashes + client showFlashMessages(). #}
   {% include 'components/flash_messages.html' %}
   <div class="flex min-h-screen items-center justify-center main-container relative">
     <!-- Phone card -->
@@ -178,39 +178,6 @@ document.addEventListener('submit', function(e){
       </div>
       <!-- Progress Steps -->
        <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
-         <!-- Flash Notification Area (from previous page saves) -->
-         <div id="flashNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-           <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
-           <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
-             <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
-             <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-               <p class="font-[500] whitespace-nowrap" style="color: #E59218;">Warning</p>
-               <p class="font-[400] break-words w-full" style="color: #F0A93B;">You have unsaved changes. Please save your changes first.</p>
-             </div>
-             <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-               </svg>
-             </button>
-           </div>
-           {# server flashes handled by canonical flash_messages partial #}
-         </div>
-
-         <!-- Validation Notification Area -->
-         <div id="notification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-           <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-             <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-             <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-               <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Validation Error</p>
-               <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;">Please enter Balance of the safebox</p>
-             </div>
-             <button class="toast-close shrink-0" onclick="hideNotification()">
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-               </svg>
-             </button>
-           </div>
-         </div>
           
           <!-- Include the reusable stepper component -->
           {% include 'components/stepper.html' %}
@@ -610,27 +577,7 @@ document.addEventListener('submit', function(e){
 
     // Function to show unsaved data alert
     function showUnsavedDataAlert() {
-      const unsavedToast = document.getElementById('unsavedDataToast');
-      const flashNotification = document.getElementById('flashNotification');
-      
-      if (unsavedToast && flashNotification) {
-        // Hide any other toasts
-        const otherToasts = flashNotification.querySelectorAll('.toast:not(#unsavedDataToast)');
-        otherToasts.forEach(toast => toast.classList.add('hidden'));
-        
-        // Show the unsaved data toast
-        unsavedToast.classList.remove('hidden');
-        
-        // Show the notification container
-        flashNotification.classList.remove('translate-x-full');
-        flashNotification.classList.add('translate-x-0');
-        
-        // Auto-hide after 4 seconds
-        setTimeout(() => {
-          flashNotification.classList.remove('translate-x-0');
-          flashNotification.classList.add('translate-x-full');
-        }, 4000);
-      }
+      showFlashMessages("You have unsaved changes. Please save your changes first.", 'warning');
     }
 
     function navigateToStep(step) {
@@ -1148,61 +1095,6 @@ document.addEventListener('submit', function(e){
     });
 
 
-     // Function to show notification
-     function showNotification(customTitle, customMessage, type = 'error') {
-       const notification = document.getElementById('notification');
-       const toast = notification ? notification.querySelector('.toast') : null;
-       const errorTitle = document.getElementById('errorTitle');
-       const errorMessage = document.getElementById('errorMessage');
-       const iconImg = toast ? toast.querySelector('img') : null;
-
-       // Update notification content if custom messages provided
-       if (customTitle && errorTitle) {
-         errorTitle.textContent = customTitle;
-       }
-       if (customMessage && errorMessage) {
-         errorMessage.textContent = customMessage;
-       }
-
-       // Style the toast as success (green) or error (red).
-       if (toast) {
-         if (type === 'success') {
-           toast.style.borderColor = '#a9d7cb';
-           toast.style.backgroundColor = '#f1fffc';
-           if (iconImg) {
-             iconImg.src = "{{ url_for('static', filename='img/success-icon.png') }}";
-             iconImg.alt = 'Success';
-           }
-           if (errorTitle) errorTitle.style.color = '#017155';
-           if (errorMessage) errorMessage.style.color = '#92c6b9';
-         } else {
-           toast.style.borderColor = '#ffcccc';
-           toast.style.backgroundColor = '#fff1f1';
-           if (iconImg) {
-             iconImg.src = "{{ url_for('static', filename='img/error-icon.png') }}";
-             iconImg.alt = 'Error';
-           }
-           if (errorTitle) errorTitle.style.color = '#F03D3D';
-           if (errorMessage) errorMessage.style.color = '#f57e7e';
-         }
-       }
-
-       notification.classList.remove('translate-x-full');
-       notification.classList.add('translate-x-0');
-
-       // Auto-hide after 4 seconds
-       setTimeout(() => {
-         hideNotification();
-       }, 4000);
-     }
-
-     // Function to hide notification
-     function hideNotification() {
-       const notification = document.getElementById('notification');
-       notification.classList.remove('translate-x-0');
-       notification.classList.add('translate-x-full');
-     }
-
      // Function to validate safe box balance
      function validateSafeBoxBalance() {
        const safeBoxBalanceInput = document.getElementById('safeBoxBalance');
@@ -1334,7 +1226,7 @@ document.addEventListener('submit', function(e){
           if (window.sendLogToDataDog) {
             window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Please enter description' });
           }
-          showNotification('Validation Error', 'Please enter description');
+          showFlashMessages('Please enter description', 'error');
           highlightFieldError('discrepancyDescription');
           return false;
         }
@@ -1344,7 +1236,7 @@ document.addEventListener('submit', function(e){
           if (window.sendLogToDataDog) {
             window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Set cash count or provide description' });
           }
-          showNotification('Validation Error', 'Set cash count before proceeding or provide description for discrepancy');
+          showFlashMessages('Set cash count before proceeding or provide description for discrepancy', 'error');
           highlightCashCountFields();
           return false;
         }
@@ -1355,7 +1247,7 @@ document.addEventListener('submit', function(e){
           if (window.sendLogToDataDog) {
             window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Please enter Safebox Cash Balance' });
           }
-          showNotification('Validation Error', 'Please enter Safebox Cash Balance');
+          showFlashMessages('Please enter Safebox Cash Balance', 'error');
           return false;
         }
         
@@ -1483,7 +1375,7 @@ document.addEventListener('submit', function(e){
           if (window.sendLogToDataDog) {
             window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Please enter Safebox Cash Balance', context: 'save_exit' });
           }
-          showNotification('Validation Error', 'Please enter Safebox Cash Balance');
+          showFlashMessages('Please enter Safebox Cash Balance', 'error');
           return false;
         }
         
@@ -1563,7 +1455,7 @@ document.addEventListener('submit', function(e){
         const textarea = document.getElementById('discrepancyDescription');
         const reportId = '{{ current_draft.id }}';
         if (!textarea || !reportId) {
-          showNotification('Error', 'Unable to save discrepancy reason.');
+          showFlashMessages('Unable to save discrepancy reason.', 'error');
           return;
         }
         const csrfToken = document.querySelector('input[name="csrf_token"]');
@@ -1581,44 +1473,12 @@ document.addEventListener('submit', function(e){
           if (data && data.status === 'success') {
             // Reset the baseline so navigating away no longer flags this as unsaved.
             initialFormValues[textarea.name || textarea.id] = textarea.value || '';
-            showNotification('Saved', 'Your discrepancy reason is saved.', 'success');
+            showFlashMessages('Your discrepancy reason is saved.', 'success');
           } else {
-            showNotification('Error', (data && data.message) || 'Failed to save discrepancy reason.');
+            showFlashMessages((data && data.message) || 'Failed to save discrepancy reason.', 'error');
           }
         })
-        .catch(() => showNotification('Error', 'Failed to save discrepancy reason.'));
-      }
-
-      // Flash notification slider functions
-      function showFlashNotification() {
-        const notification = document.getElementById('flashNotification');
-        if (notification && notification.querySelector('.toast')) {
-          // Slide in using Tailwind classes
-          notification.classList.remove('translate-x-full');
-          notification.classList.add('translate-x-0');
-          
-          // Auto hide after 5 seconds
-          setTimeout(() => {
-            hideFlashNotification();
-          }, 5000);
-        }
-      }
-
-      function hideFlashNotification() {
-        const notification = document.getElementById('flashNotification');
-        if (notification) {
-          // Slide out using Tailwind classes
-          notification.classList.remove('translate-x-0');
-          notification.classList.add('translate-x-full');
-          
-          // Hide all toast elements after animation
-          setTimeout(() => {
-            const allToasts = notification.querySelectorAll('.toast');
-            allToasts.forEach(toast => {
-              toast.classList.add('hidden');
-            });
-          }, 500);
-        }
+        .catch(() => showFlashMessages('Failed to save discrepancy reason.', 'error'));
       }
 
       // Show flash notification on page load if it exists

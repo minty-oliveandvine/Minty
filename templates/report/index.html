@@ -506,18 +506,5 @@
       });
       //  To add sliding in action required javascript
     });
-
-    document.addEventListener("DOMContentLoaded", function () {
-      const toastBtn = document.querySelector(".toast-close");
-      const toast = document.querySelector(".toast");
-
-      toastBtn.addEventListener("click", function () {
-        $(".toast").hide();
-      });
-
-      setTimeout(() => {
-        $(".toast").hide();
-      }, 3000);
-    });
   </script>
 {% endblock %}
