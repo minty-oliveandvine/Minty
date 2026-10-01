@@ -51,6 +51,10 @@ MAPPING: dict[str, tuple[str, ...]] = {
     "Rejected envelope 1.png": ("subscriber_transfer_declined",),
     "Minty Payment failed 1.png": ("renewal_failed", "dunning_retry_failed"),
     "Minty with heart 1.png": ("payment_recovered",),
+    # minty-billing-api only (the setup reminder, 2026-10-01): exported from the Figma
+    # file's "Minty_Reminder 1" (node 1256:1664); copy the output to
+    # minty-billing-api/billing/static/email/.
+    "Minty_Reminder 1.png": ("onboarding_reminder",),
 }
 
 
