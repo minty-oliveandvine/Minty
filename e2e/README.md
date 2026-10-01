@@ -29,20 +29,28 @@ deployment's database, so run it with the `.env` that points there).
 ## The seeded identity
 
 The specs sign in through the real `/login` form as a user `scripts/e2e_seed.py` creates. Run the
-seed **before every run** — it also wipes the seeded entity's reports so the wizard starts clean,
-removes the user's terms consent so the terms modal is exercised, and resets the sales methods:
+seed **before every run** — it also wipes the seeded entity's reports so the wizard starts clean
+and resets the sales methods.
+
+**Two people, and the Terms rule.** The journeys sign in as `e2e-terms@minty.test` (Tess Tester,
+admin of `E2E Petty Cash Shop`), whose Terms the seed accepts on every run. The shared
+`e2e@minty.test` (Eve Tester) keeps its consent REMOVED, and **nothing ever accepts on it**:
+minty-web's Terms panel is checked against it, so `01` only checks that the panel shows and
+leaves it unanswered. `login()` fails loudly if the journeys' account owes the Terms (the seed
+did not run). Both share `E2E_MINTY_PASSWORD`.
 
 ```bash
 export E2E_MINTY_PASSWORD='<pick one; never commit it>'
 .venv/Scripts/python.exe scripts/e2e_seed.py --print
 # copy the export lines it prints:
 export E2E_MINTY_USER=...   E2E_MINTY_ENTITY=...   E2E_MINTY_EMAIL=e2e@minty.test
+export E2E_MINTY_TERMS_USER=...   E2E_MINTY_TERMS_EMAIL=e2e-terms@minty.test
 npm run test:e2e
 ```
 
 The seed goes through the app's own models, so it works against whichever schema the code
 currently matches. It only ever touches the rows it created (`e2e@minty.test`,
-`E2E Petty Cash Shop` and that entity's reports/settings) — safe against `minty_cleanse`.
+`e2e-terms@minty.test`, `E2E Petty Cash Shop` and that entity's reports/settings) — safe against `minty_cleanse`.
 
 Since 2026-09-22 it also creates and RESETS a second company for minty-web's live subscription
 journeys, `E2E Subscription Shop` (printed as `E2E_MINTY_SUBSCRIPTION_ENTITY`): both modules off
@@ -64,12 +72,12 @@ LOCAL_DATABASE_URI=$OLD RDS_DATABASE_URI=$OLD SUBSCRIPTION_SCHEDULER_ENABLED=0 \
 
 | File | Journeys |
 |---|---|
-| `01_login.spec.ts` | login form, wrong password, first sign-in shows the terms modal (scroll-to-end, tick, accept), the company dashboard |
+| `01_login.spec.ts` | login form, wrong password, the terms panel shows for the shared account (locked tick box; never answered), the Terms-accepted account lands on the entity list, the company dashboard |
 | `02_report_wizard.spec.ts` | opening (live opening balance) → sales (three live sub-totals) → expenses (receipt upload, supplier and account pickers, running total) → deposit (cash on hand) → cash count (calculator modal, hidden fields, zero discrepancy) → ending (summary figures) → submitted → history row and the posted report's summary |
 | `03_settings.spec.ts` | petty-cash account mapping, the sales-methods editor (add via the catalogue picker → visible on the sales form), users, the Xero page and an entity rename round-trip, the module page, the CSV export's movement lines |
 | `04_xero_publish.spec.ts` | `E2E_XERO=1` only: the report 02 posted → Publish on its submitted page → `/api/report/<id>/publishing_status` reaches `xero_integrated_yes` → Republish offered. Real bank transactions, a transfer and the receipt land in the linked organisation |
 
-Serial, one worker: every spec signs in as the same user and writes to the same entity.
+Serial, one worker: every journey signs in as the same user and writes to the same entity.
 
 ## A shop connected to Xero (`E2E_XERO=1`)
 

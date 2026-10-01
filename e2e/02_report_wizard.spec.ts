@@ -163,11 +163,12 @@ test.describe.serial('report wizard', () => {
     const [y, m, d] = day.split('-').map(Number);
     const monthName = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][m - 1];
     const results = page.locator('body');
-    // "15 SEP 2026 TUE  Sales HKD600.59  Expenses HKD25.10  Submitted ... by Eve"
+    // "15 SEP 2026 TUE  Sales HKD600.59  Expenses HKD25.10  Submitted ... by Tess" (the
+    // journeys' account, e2e-terms@minty.test)
     await expect(results).toContainText(new RegExp([d, monthName, y].join('[ ]+'), 'i'));
     await expect(results).toContainText(moneyRegex(CASH + VISA + ALIPAY + FOODPANDA));
     await expect(results).toContainText(moneyRegex(EXPENSE));
-    await expect(results).toContainText(/by Eve/);
+    await expect(results).toContainText(/by Tess/);
     // "View Report" opens the ending summary of the posted report
     await page.getByRole('link', { name: /view report/i }).first().click();
     await expect(page).toHaveURL(/\/entity\/[0-9a-f-]{36}\/ending\/[0-9a-f-]{36}/);

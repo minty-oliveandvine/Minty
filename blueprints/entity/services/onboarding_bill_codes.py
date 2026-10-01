@@ -111,6 +111,18 @@ def save_bill_codes(user_id, entity_id, selected_codes):
 
     selected = sorted({str(c).strip() for c in selected_codes if str(c).strip()})
 
+    # At least one code stays ticked (Payment Settings' rule, billing-backend's 409): a payment
+    # can only use the ticked codes. A company with no codes listed has nothing to tick.
+    listed = {
+        (row[0] or "").strip()
+        for row in db.session.execute(
+            text(f"SELECT account_code FROM {_TBL} WHERE entity_id = :eid AND is_deleted = false"),
+            {"eid": entity_id},
+        )
+    } - {""}
+    if listed and not listed.intersection(selected):
+        return {"error": "Pick at least one account code."}, 400
+
     try:
         db.session.execute(
             text(

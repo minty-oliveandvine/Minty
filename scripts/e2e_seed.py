@@ -13,7 +13,10 @@ Each run:
 
 * creates the user if missing, sets the password from ``E2E_MINTY_PASSWORD`` (required),
   approved, normal system role, and REMOVES the user's terms consent so the first
-  browser journey always sees the terms modal;
+  browser journey always sees the terms modal. Nothing ever accepts on this account
+  (minty-web's Terms rule); the journeys that need a signed-in person use the next one;
+* creates ``e2e-terms@minty.test`` (same password) WITH the live Terms accepted, every run,
+  as a second admin of the Petty Cash shop: the account specs 01-04 sign in as;
 * creates the entity if missing (HKD, HK, Petty Cash module on) with the user as admin,
   seeds the sales methods through the real service (``replace_sales_methods``);
 * deletes the entity's reports, expenses, sale detail rows and cash counts so the wizard
@@ -44,6 +47,9 @@ from blueprints.shared.schema import SCHEMA  # noqa: E402
 
 
 E2E_EMAIL = "e2e@minty.test"
+# Signs in for the journeys; its Terms are accepted by this seed, so no run ever accepts on
+# E2E_EMAIL (whose consent stays removed - the panel is checked there, never answered).
+E2E_TERMS_EMAIL = "e2e-terms@minty.test"
 E2E_ENTITY_NAME = "E2E Petty Cash Shop"
 E2E_SUBSCRIPTION_ENTITY_NAME = "E2E Subscription Shop"
 
@@ -170,6 +176,28 @@ def main() -> int:
             db.session.flush()
         if UserEntity.query.filter_by(user_id=user.id, entity_id=entity.id).first() is None:
             db.session.add(UserEntity(user_id=user.id, entity_id=entity.id, role="admin", approved=True))
+
+        # --- the account the journeys sign in as: Terms already accepted -----------
+        from blueprints.legal.models.terms_consent import SOURCE_GATE
+        from blueprints.legal.services.consent import record_consent
+
+        terms_user = User.query.filter_by(username=E2E_TERMS_EMAIL).first()
+        if terms_user is None:
+            terms_user = User(id=str(uuid.uuid4()), email=E2E_TERMS_EMAIL, username=E2E_TERMS_EMAIL,
+                              first_name="Tess", last_name="Tester",
+                              password=generate_password_hash(password, method="pbkdf2:sha256"),
+                              system_role=User.SYSTEM_ROLE_NORMAL, approved=True)
+            db.session.add(terms_user)
+            db.session.flush()
+        else:
+            terms_user.password = generate_password_hash(password, method="pbkdf2:sha256")
+            terms_user.approved = True
+        if record_consent(terms_user.id, source=SOURCE_GATE) is None:
+            print("the live Terms version has no document; cannot accept for "
+                  + E2E_TERMS_EMAIL, file=sys.stderr)
+            return 1
+        if UserEntity.query.filter_by(user_id=terms_user.id, entity_id=entity.id).first() is None:
+            db.session.add(UserEntity(user_id=terms_user.id, entity_id=entity.id, role="admin", approved=True))
         for fn in (petty, bill):  # both modules on: the Minty wizard AND the payment-request app
             if EntityFunctionMap.query.filter_by(entity_id=entity.id, entity_function_id=fn.id).first() is None:
                 now = datetime.now(timezone.utc)
@@ -284,7 +312,8 @@ def main() -> int:
         # --- the subscription journeys' own company, reset to "never held anything" ---
         subscription_shop = reset_subscription_shop(db, user, hkd, (petty, bill))
 
-        print(f"user    {user.id}  {E2E_EMAIL}")
+        print(f"user    {user.id}  {E2E_EMAIL}  (Terms NOT accepted, never accept on it)")
+        print(f"user    {terms_user.id}  {E2E_TERMS_EMAIL}  (Terms accepted; the journeys sign in as it)")
         print(f"entity  {entity.id}  {E2E_ENTITY_NAME}  (reports wiped: {len(report_ids)})")
         print(f"entity  {subscription_shop.id}  {E2E_SUBSCRIPTION_ENTITY_NAME}  (modules off, subscription rows wiped)")
         if args.print:
@@ -293,6 +322,8 @@ def main() -> int:
             print("export E2E_MINTY_ENTITY=" + entity.id)
             print("export E2E_MINTY_SUBSCRIPTION_ENTITY=" + subscription_shop.id)
             print("export E2E_MINTY_EMAIL=" + E2E_EMAIL)
+            print("export E2E_MINTY_TERMS_USER=" + terms_user.id)
+            print("export E2E_MINTY_TERMS_EMAIL=" + E2E_TERMS_EMAIL)
             print("export E2E_MINTY_PASSWORD=<the value you seeded with>")
     return 0
 

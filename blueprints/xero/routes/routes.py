@@ -1723,6 +1723,14 @@ def disconnect_from_xero():
         return redirect(url_for("entity_settings", entity_id=entity_id))
 
 
+def _without_full_bank_numbers(accounts):
+    """The page shows ``MaskedBankAccountNumber`` only; the full number never leaves the server."""
+    return [
+        {k: v for k, v in acc.items() if k != "BankAccountNumber"}
+        for acc in (accounts or [])
+    ]
+
+
 @xero_bp.route("/api/entity/<string:entity_id>/xero-data", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="entity_id")
@@ -1759,6 +1767,8 @@ def get_entity_xero_data(entity_id):
                     "contacts",
                 )
             ):
+                db_data["bank_accounts"] = _without_full_bank_numbers(
+                    db_data["bank_accounts"])
                 return jsonify({"status": "success", **db_data})
             return (
                 jsonify({"status": "error", "message": "Xero authentication expired"}),
@@ -1838,7 +1848,7 @@ def get_entity_xero_data(entity_id):
             discrepancy_account = cached_data["discrepancy_account"]
             contacts = cached_data["contacts"]
 
-        bank_accounts = bank_accounts or []
+        bank_accounts = _without_full_bank_numbers(bank_accounts)
         cashsale_account = cashsale_account or []
         owners_account = owners_account or []
         discrepancy_account = discrepancy_account or []

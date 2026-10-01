@@ -198,7 +198,9 @@ def process_xero_account_mapping_post(
     """Apply mapping from ``request.form``.
 
     Returns ``None`` when no ``main_bank`` field was submitted (caller may continue).
-    Otherwise returns a Flask ``Response`` (redirect or JSON error).
+    With ``defer_success_redirect`` a successful save also returns ``None``: the caller
+    (Petty Cash Settings) saves the ticked codes next and picks the redirect. Otherwise
+    returns a Flask ``Response`` (redirect or JSON error).
     """
 
     _from = request.form.get("_from") or request.args.get("from")
@@ -328,6 +330,13 @@ def process_xero_account_mapping_post(
 
         db.session.commit()
 
+        if defer_success_redirect:
+            # Petty Cash Settings saves the ticked codes (and country/currency) right after
+            # this returns, and decides where to go. Switching every code on here, or
+            # returning the first save's dashboard redirect, threw the ticks away.
+            logger.info(f"Entity settings mapping saved for entity ID: {entity_id}")
+            return None
+
         try:
             token_user = get_xero_token_user_for_entity(entity_id)
             if ensure_valid_token(token_user):
@@ -350,14 +359,11 @@ def process_xero_account_mapping_post(
                 exc,
             )
 
-        if not (defer_success_redirect and has_existing_settings):
-            flash("Entity settings saved!", "success")
+        flash("Entity settings saved!", "success")
         if entity_id:
             logger.info(f"Entity settings updated for entity ID: {entity_id}")
 
         if has_existing_settings:
-            if defer_success_redirect:
-                return None
             return _mapping_redirect(entity_id, _from, return_view=return_view)
         else:
             return redirect(

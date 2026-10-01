@@ -1,6 +1,6 @@
 // Signing in, the terms modal, the entity list. Every other spec depends on this working.
 import { expect, test } from '@playwright/test';
-import { acceptTermsIfShown, login, requireCredentials, requireStack } from './helpers';
+import { ENTITY_LIST_URL, login, requireCredentials, requireSharedAccount, requireStack, termsTickBox } from './helpers';
 
 test.describe('login and terms', () => {
   test.beforeEach(async () => {
@@ -22,18 +22,26 @@ test.describe('login and terms', () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test('first sign-in shows the terms, accepting them opens the entity list', async ({ page }) => {
-    // scripts/e2e_seed.py removes the seeded user's consent, so this run sees the modal.
-    const creds = requireCredentials();
+  test('a person who owes the terms sees them over the entity list (never answered here)', async ({ page }) => {
+    // scripts/e2e_seed.py removes the shared account's consent, so it owes the Terms. Nothing
+    // may accept on it (minty-web's rule): the panel is checked, then the page is left as it is.
+    const creds = requireSharedAccount();
     await page.goto('/login');
     await page.locator('#username').fill(creds.email);
     await page.locator('#password').fill(creds.password);
     await page.locator('#submit').click();
     await page.waitForURL((u) => !u.pathname.endsWith('/login'));
-    const shown = await acceptTermsIfShown(page);
-    test.info().annotations.push({ type: 'terms-modal', description: shown ? 'shown and accepted' : 'already accepted' });
-    await expect(page).toHaveURL(/\/entity/);
-    await expect(page.getByText('E2E Petty Cash Shop')).toBeVisible();
+    await expect(page).toHaveURL(ENTITY_LIST_URL);
+    // the tick box shows, locked until the document has been read to its end
+    await expect(termsTickBox(page)).toBeVisible({ timeout: 10_000 });
+    await expect(termsTickBox(page)).toBeDisabled();
+  });
+
+  test('a person whose terms are accepted lands on the entity list', async ({ page }) => {
+    const creds = requireCredentials();
+    await login(page, creds);
+    await expect(page).toHaveURL(ENTITY_LIST_URL);
+    await expect(page.getByText('E2E Petty Cash Shop').first()).toBeVisible();
   });
 
   test('a signed-in user reaches the company dashboard', async ({ page }) => {
