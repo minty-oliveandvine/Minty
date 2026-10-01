@@ -1,17 +1,15 @@
 import secrets
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 from flask_mail import Message
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from loguru import logger
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from blueprints.auth.models.email_otp import EmailOtp
 from blueprints.auth.services.identity import resolve_user_by_email
 from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
-from models.db import User, db
+from models.db import db
 
 
 def _utcnow() -> datetime:
@@ -35,8 +33,6 @@ RESEND_COOLDOWN_SECONDS = 60
 # trivially bypassable, because each resend deletes the prior row. The lock is
 # anchored to the locked row's created_at and auto-clears after the window.
 LOCKOUT_MINUTES = 15
-SIGNUP_TOKEN_MAX_AGE = 15 * 60  # window to choose a username after verifying
-_SIGNUP_SALT = "email-signup-verified"
 
 # Error codes returned alongside the message so the route can map them to HTTP
 # status (e.g. lockout → 429). Plain strings keep the (result, error) callers
@@ -56,10 +52,6 @@ def _lockout_remaining_seconds(otp: EmailOtp) -> int:
     unlock_at = _as_utc(otp.created_at) + timedelta(minutes=LOCKOUT_MINUTES)
     remaining = (unlock_at - _utcnow()).total_seconds()
     return int(remaining) if remaining > 0 else 0
-
-
-def _serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"])
 
 
 def generate_otp() -> str:
@@ -124,7 +116,9 @@ def request_email_otp(email: str) -> tuple[bool, str | None]:
     # brand-new address look registered to the login page's check. Rolling back
     # undoes the delete above as well, so the previous row comes back with its
     # carried attempts and its old created_at - already past the cooldown, or we
-    # would have returned above - and an immediate retry is allowed.
+    # would have returned above - and an immediate retry is allowed. The transaction
+    # stays open for the send, which MAIL_TIMEOUT bounds per SMTP step
+    # (services/app_runtime/mail.py): a stalled mail server fails it, not hangs it.
     db.session.flush()
     if not _send_code_email(email, code):
         db.session.rollback()
@@ -143,7 +137,8 @@ def verify_email_otp(
 
     On success ``result`` is one of:
     {"action": "login", "user": User}                 # email already has an account
-    {"action": "choose_username", "signup_token": str} # brand-new email
+    {"action": "signup"}                               # brand-new email: the route
+                                                       # creates the account itself
 
     On failure ``result`` is None, ``error`` is a user-facing message, and
     ``err_code`` is an optional machine code (``ERR_LOCKED`` when the email is
@@ -213,61 +208,7 @@ def verify_email_otp(
     if existing_user:
         return {"action": "login", "user": existing_user}, None, None
 
-    token = _serializer().dumps({"email": email}, salt=_SIGNUP_SALT)
-    return {"action": "choose_username", "signup_token": token}, None, None
-
-
-def complete_email_signup(
-    signup_token: str,
-    username: str,
-    first_name: str,
-    last_name: str,
-) -> tuple[User | None, str | None]:
-    """Create the passwordless personal account after the username step."""
-    try:
-        data = _serializer().loads(
-            signup_token, salt=_SIGNUP_SALT, max_age=SIGNUP_TOKEN_MAX_AGE
-        )
-    except SignatureExpired:
-        return None, "Your verification expired. Please start again."
-    except BadSignature:
-        return None, "Invalid verification. Please start again."
-
-    email = (data.get("email") or "").strip().lower()
-    username = (username or "").strip()
-    first_name = (first_name or "").strip()
-    last_name = (last_name or "").strip()
-
-    if not email:
-        return None, "Invalid verification. Please start again."
-    if not username:
-        return None, "A username is required."
-    if not first_name or not last_name:
-        # Flip to first_name = first_name or "" / last_name or "" for name-less signup.
-        return None, "First and last name are required."
-
-    if resolve_user_by_email(email):
-        return None, "An account already exists for this email. Please log in."
-    if User.query.filter_by(username=username).first():
-        return None, "That username is taken."
-
-    new_user = User(
-        id=str(uuid.uuid4()),
-        email=email,
-        username=username,
-        first_name=first_name,
-        last_name=last_name,
-        password=generate_password_hash(
-            secrets.token_urlsafe(32), method="pbkdf2:sha256"
-        ),
-        system_role=User.SYSTEM_ROLE_DEFAULT,
-        approved=True,
-        # xero_user_id / xero_token / access_token ... all left NULL → personal account
-    )
-    db.session.add(new_user)
-    EmailOtp.query.filter_by(email=email).delete()
-    db.session.commit()
-    return new_user, None
+    return {"action": "signup"}, None, None
 
 
 def _send_code_email(email: str, code: str) -> bool:

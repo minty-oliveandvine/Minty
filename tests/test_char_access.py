@@ -328,6 +328,114 @@ def test_resend_is_rate_limited_then_goes_out_again(company, client, app, db, ma
     assert len(mail.to("new@test.com")) == 2
 
 
+# ---- the invitation email itself -------------------------------------------------------------
+# It is HTML built by hand, and a company or a person can be named anything.
+
+
+@pytest.fixture
+def hostile_company(app, db):
+    """An entity and an inviter whose names are markup."""
+    with app.app_context():
+        currency = F.seed_currency(db)
+        country = F.seed_country(db, currency)
+        owner = F.make_user(db, "owner@test.com", first_name="<script>alert(1)</script>",
+                            last_name="O'Neil & Co")
+        entity = F.make_entity(db, owner, name='<b>Olive</b> & "Vine"',
+                               currency=currency, country=country)
+    return owner, entity
+
+
+def _invitation_html(mail, email):
+    sent = mail.to(email)
+    assert len(sent) == 1
+    return sent[0].html
+
+
+def test_the_invitation_email_escapes_every_name(hostile_company, client, mail):
+    owner, entity = hostile_company
+    F.login(client, owner)
+
+    assert send_invite(client, entity, "new@test.com", "cashier").status_code in (200, 201)
+
+    html = _invitation_html(mail, "new@test.com")
+    assert "<script>" not in html and "<b>Olive</b>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt; O&#x27;Neil &amp; Co" in html
+    assert "&lt;b&gt;Olive&lt;/b&gt; &amp; &quot;Vine&quot;" in html
+    # Twice: the hidden preview text as well as the card.
+    assert html.count("&lt;b&gt;Olive&lt;/b&gt;") == 2
+    # The link's own "&" between fn and ln is escaped inside the href, as HTML requires.
+    assert "?fn=In&amp;ln=Vited" in html
+
+
+def test_the_invitation_subject_is_one_line(app, client, db, mail):
+    with app.app_context():
+        currency = F.seed_currency(db)
+        country = F.seed_country(db, currency)
+        owner = F.make_user(db, "owner@test.com", first_name="Olive", last_name="Owner")
+        entity = F.make_entity(db, owner, name="Olive\r\nBcc: someone@else.test",
+                               currency=currency, country=country)
+    F.login(client, owner)
+
+    resp = send_invite(client, entity, "new@test.com", "cashier")
+
+    assert resp.get_json()["invitation"]["email_sent"] is True
+    assert mail.to("new@test.com")[0].subject == (
+        "You've been invited to Olive Bcc: someone@else.test on Minty"
+    )
+
+
+@pytest.mark.parametrize("public_url, logo", [
+    ("", "http://localhost/static/img/minty-mark.png?v="),
+    ("https://app.minty.test", "https://app.minty.test/static/img/minty-mark.png?v="),
+])
+def test_the_invitation_logo_is_served_from_static_once(company, client, mail, monkeypatch,
+                                                        public_url, logo):
+    """Without PUBLIC_URL the base came from url_for("static", ...), which already ends in
+    /static, so the logo pointed at /static/static/... and 404'd."""
+    owner, entity, superuser = company
+    monkeypatch.setenv("PUBLIC_URL", public_url)
+    F.login(client, owner)
+
+    send_invite(client, entity, "new@test.com", "cashier")
+
+    html = _invitation_html(mail, "new@test.com")
+    assert f'src="{logo}' in html
+    assert "/static/static/" not in html
+
+
+def test_an_inviter_with_no_last_name_is_named_cleanly(app, client, db, mail):
+    with app.app_context():
+        currency = F.seed_currency(db)
+        country = F.seed_country(db, currency)
+        owner = F.make_user(db, "owner@test.com", first_name="Ada", last_name="")
+        entity = F.make_entity(db, owner, currency=currency, country=country)
+    F.login(client, owner)
+
+    send_invite(client, entity, "new@test.com", "cashier")
+
+    html = _invitation_html(mail, "new@test.com")
+    assert "<strong>Ada</strong> has invited you" in html
+    assert "None" not in html
+
+
+def test_a_resend_keeps_the_invitees_names_in_the_link(company, client, app, mail):
+    owner, entity, superuser = company
+    F.login(client, owner)
+    send_invite(client, entity, "new@test.com", "cashier")
+    with app.app_context():
+        from models.db import Invitation
+
+        invitation_id = Invitation.query.filter_by(email="new@test.com").first().id
+    from blueprints.invitation.services import invite as invite_service
+
+    invite_service._LAST_SENT.clear()
+    resp = client.post(f"/minty/api/invitation/{invitation_id}/resend")
+
+    assert resp.status_code == 200, resp.data[:300]
+    resent = mail.to("new@test.com")[-1].html
+    assert "?fn=In&amp;ln=Vited" in resent
+
+
 # ---- the terms gate -------------------------------------------------------------------------
 
 

@@ -896,3 +896,30 @@ def test_status_still_reports_consent_when_stripe_is_down(app, db_session, monke
         "has_billing_consent": True,
         "card": None,
     }
+
+
+def test_choosing_the_main_card_reaches_the_service(app, monkeypatch):
+    """Step 2's "make this my main card". It nominates nothing itself - the service decides
+    which card is offered first - so the route only has to hand over the caller's own
+    account and the card, and answer the fresh list."""
+    from blueprints.subscription.services import payment_methods
+
+    monkeypatch.setenv("ONBOARDING_APP_URL", "https://onboard.example.com")
+    seen = {}
+
+    def _set_default(user_id, payment_method):
+        seen.update(user_id=user_id, payment_method=payment_method)
+        return {"has_account": True, "default_id": payment_method, "methods": [], "total": 2}
+
+    monkeypatch.setattr(payment_methods, "set_default", _set_default)
+
+    res = app.test_client().post(
+        "/api/onboarding/billing/payment-methods/default",
+        json={"payment_method": " pm_2 "},
+        headers={"Authorization": f"Bearer {_token(app)}"},
+    )
+
+    assert res.status_code == 200, res.data[:300]
+    assert seen == {"user_id": U1, "payment_method": "pm_2"}
+    assert res.get_json()["default_id"] == "pm_2"
+    assert res.headers["Access-Control-Allow-Origin"] == "https://onboard.example.com"

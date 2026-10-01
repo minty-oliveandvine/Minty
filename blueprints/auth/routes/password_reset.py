@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from flask import current_app, flash, redirect, render_template, request, url_for
+from flask import current_app, flash, redirect, render_template, url_for
 from flask_login import current_user
 from flask_mail import Message
 from loguru import logger
@@ -146,10 +146,10 @@ def _reset_message(recipient: str, token: str) -> Message:
     """The reset email. Its links are built on PUBLIC_URL, as the invitation
     email's are: the request host is whichever proxy or internal name the request
     arrived on, which is not necessarily one the recipient can reach."""
-    # _asset_url is the invitation service's private helper, imported rather than
-    # copied so emailed assets keep ONE content-fingerprint cache. Imported here, as
+    # The invitation service's helpers, imported rather than copied so emailed assets keep
+    # ONE content-fingerprint cache and one rule for their host. Imported here, as
     # auth.email_handoff does, to keep the invitation package out of import time.
-    from blueprints.invitation.services.invite import _asset_url
+    from blueprints.invitation.services.invite import _asset_url, email_base_url
 
     public_url = os.environ.get("PUBLIC_URL", "").rstrip("/")
     reset_url = (
@@ -157,14 +157,13 @@ def _reset_message(recipient: str, token: str) -> Message:
         if public_url
         else url_for("auth.reset_token", token=token, _external=True)
     )
-    # Not invite.py's url_for("static", filename="", _external=True) fallback: that
-    # base already ends in /static and _asset_url adds another, so the logo 404s.
-    base_url = public_url or request.url_root.rstrip("/")
     return Message(
         subject="Reset your Minty password",
         sender=current_app.config.get("BREVO_EMAIL"),
         recipients=[recipient],
-        html=_build_reset_html(reset_url, _asset_url(base_url, "img/minty-mark.png")),
+        html=_build_reset_html(
+            reset_url, _asset_url(email_base_url(), "img/minty-mark.png")
+        ),
     )
 
 

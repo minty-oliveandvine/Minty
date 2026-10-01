@@ -125,13 +125,34 @@ def pytest_collection_modifyitems(config, items):
                 reason=f"{item.path.name} is in PG_PENDING: its phase C unit has not landed "
                        "(docs/modernisation/modernisation_plan.md). Remove it from the set when the unit is green.",
             ))
+    # The route-coverage gate runs LAST, so in a serial run every other test has made its
+    # requests before it judges them (tests/test_zz_route_coverage.py).
+    gate = [item for item in items if item.name == "test_every_schema_touching_route_is_exercised"]
+    for item in gate:
+        items.remove(item)
+        items.append(item)
 
 
-# Every endpoint a request reached in this process (tests/test_zz_route_coverage.py). One
-# set per process: under pytest-xdist each worker sends its set to the controller at the
-# end, and the controller - which sees every worker - runs the coverage check once.
+# Every endpoint a REAL request reached in this process (tests/test_zz_route_coverage.py;
+# what counts is decided in the ``app`` fixture's recorder). One set per process: under
+# pytest-xdist each worker sends its set - with the app's live endpoints and whether the gate
+# test ran there - to the controller at the end, and the controller judges once.
 _HIT_ENDPOINTS: set[str] = set()
-_MERGED_HITS: set[str] = set()  # controller only
+_LIVE_ENDPOINTS: set[str] = set()
+_GATE_RAN = False
+# Controller only.
+_MERGED_HITS: set[str] = set()
+_MERGED_LIVE: set[str] = set()
+_MERGED_GATE_RAN = False
+_WORKER_CRASHED = False
+
+
+def pytest_runtest_logreport(report):
+    global _GATE_RAN
+    if report.when == "call" and report.nodeid.endswith(
+        "test_zz_route_coverage.py::test_every_schema_touching_route_is_exercised"
+    ):
+        _GATE_RAN = True
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -139,25 +160,109 @@ def pytest_sessionfinish(session, exitstatus):
         workeroutput = getattr(session.config, "workeroutput", None)
         if workeroutput is not None:
             workeroutput["hit_endpoints"] = sorted(_HIT_ENDPOINTS)
+            workeroutput["live_endpoints"] = sorted(_LIVE_ENDPOINTS)
+            workeroutput["route_gate_ran"] = _GATE_RAN
         return
-    if not _MERGED_HITS:  # not an xdist controller: the zz test itself did the check
-        return
-    from test_zz_route_coverage import MISSES, route_coverage_misses
+    if not session.config.pluginmanager.has_plugin("dsession"):
+        return  # not an xdist controller: the gate test itself judged (or skipped)
+    from test_zz_route_coverage import incomplete_run, judge, report
 
-    misses, total = route_coverage_misses(_MERGED_HITS)
-    if misses:
-        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    why = incomplete_run(session.config, gate_ran=_MERGED_GATE_RAN, crashed=_WORKER_CRASHED)
+    if why:
+        if reporter is not None:
+            reporter.write_line(f"route coverage not judged (partial run: {why})")
+        return
+    problems, total = judge(_MERGED_HITS, _MERGED_LIVE)
+    if problems:
         if reporter is not None:
             reporter.write_sep("=", "route coverage", red=True)
-            reporter.write_line(
-                f"{len(misses)} of {total} schema-touching endpoints were never requested "
-                f"(see {MISSES}); merged across every xdist worker", red=True,
-            )
+            reporter.write_line(report(problems, total) + "\n(merged across every xdist worker)",
+                                red=True)
         session.exitstatus = 1
+    elif reporter is not None:
+        reporter.write_line(f"route coverage: every one of {total} in-scope routes is tested "
+                            "or a listed gap")
 
 
 def pytest_testnodedown(node, error):  # xdist controller: a worker finished
-    _MERGED_HITS.update(getattr(node, "workeroutput", {}).get("hit_endpoints", []))
+    global _MERGED_GATE_RAN, _WORKER_CRASHED
+    output = getattr(node, "workeroutput", {}) or {}
+    _MERGED_HITS.update(output.get("hit_endpoints", []))
+    _MERGED_LIVE.update(output.get("live_endpoints", []))
+    _MERGED_GATE_RAN = _MERGED_GATE_RAN or bool(output.get("route_gate_ran"))
+    if error is not None or not output:
+        _WORKER_CRASHED = True
+
+
+_MARK = "minty.route_under_test"
+_REFUSED = "minty.route_refused"
+
+
+def _install_route_recorder(flask_app) -> None:
+    """Record an endpoint only when a request really ran its view (tests/test_zz_route_coverage.py).
+
+    * Marked by an app-level ``before_request`` registered LAST, so it runs only once every
+      earlier app-level hook (the terms gate, the token middleware, the read-only superuser
+      block) has let the request through. Never for OPTIONS: Flask answers those without
+      calling the view, and an OPTIONS sweep alone once "covered" ~50 routes.
+    * Refusals flag the request: the ``services.authz`` helpers that every access decorator,
+      ``permission_denied`` and the report module guard answer with (looked up by name at
+      call time, so wrapping them here catches all of them), and Flask-Login's
+      ``user_unauthorized`` signal, sent before its sign-in redirect.
+    * Recorded in ``after_request`` unless refused, a server error, or a 401/403/404/405.
+
+    The mark lives in ``request.environ``, not ``g``: requests made inside a test's own app
+    context share one ``g``, so a mark there could leak into the next request.
+    """
+    import functools
+
+    from flask import request as _request
+    from flask_login import user_unauthorized
+
+    from services import authz
+
+    _LIVE_ENDPOINTS.update(rule.endpoint for rule in flask_app.url_map.iter_rules())
+    flask_app.extensions["hit_endpoints"] = _HIT_ENDPOINTS
+
+    def _flag_refusal(*_args, **_kwargs):
+        try:
+            _request.environ[_REFUSED] = True
+        except RuntimeError:  # outside a request: nothing to flag
+            pass
+
+    def _flagging(helper):
+        @functools.wraps(helper)
+        def wrapper(*args, **kwargs):
+            _flag_refusal()
+            return helper(*args, **kwargs)
+
+        return wrapper
+
+    for name in ("_auth_redirect", "_forbidden", "_bad_request"):
+        current = getattr(authz, name)
+        if not getattr(current, "_route_recorder", False):
+            wrapped = _flagging(current)
+            wrapped._route_recorder = True
+            setattr(authz, name, wrapped)
+    user_unauthorized.connect(_flag_refusal, flask_app, weak=False)
+
+    @flask_app.before_request
+    def _mark_endpoint():  # pragma: no cover - bookkeeping
+        if _request.endpoint and _request.method != "OPTIONS":
+            _request.environ[_MARK] = _request.endpoint
+
+    @flask_app.after_request
+    def _record_endpoint(response):  # pragma: no cover - bookkeeping
+        endpoint = _request.environ.get(_MARK)
+        if (
+            endpoint
+            and not _request.environ.get(_REFUSED)
+            and response.status_code < 500
+            and response.status_code not in (401, 403, 404, 405)
+        ):
+            flask_app.extensions["hit_endpoints"].add(endpoint)
+        return response
 
 
 @pytest.fixture(scope="session")
@@ -219,18 +324,13 @@ def app(built_database) -> Iterator:
         flask_app.config["TESTING"] = True
         flask_app.config["WTF_CSRF_ENABLED"] = False
         flask_app.config["DEBUG"] = False
+        # No test opens an SMTP connection. Flask-Mail decides ``suppress`` from TESTING
+        # when the app is built - before TESTING is set above - so an unpatched send dialled
+        # MAIL_SERVER (localhost:587). Suppressed sends still fire ``email_dispatched``, so
+        # ``record_messages`` works; the fakes in char_factories replace ``send`` outright.
+        flask_app.extensions["mail"].suppress = True
 
-        # Record every endpoint the suite exercises. tests/test_zz_route_coverage.py compares
-        # the set against tests/_baseline/route_inventory.json (the routes whose code touches
-        # a column the schema redesign changes) and names the ones no test reached.
-        from flask import request as _request
-
-        flask_app.extensions["hit_endpoints"] = _HIT_ENDPOINTS
-
-        @flask_app.before_request
-        def _record_endpoint():  # pragma: no cover - bookkeeping
-            if _request.endpoint:
-                flask_app.extensions["hit_endpoints"].add(_request.endpoint)
+        _install_route_recorder(flask_app)
 
         # The schema came from the file, not from the models: a create_all here would add
         # whatever shape the models say beside the real tables and hide exactly the

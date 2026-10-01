@@ -261,7 +261,7 @@ CREATE INDEX ix_terms_consent_user
 | `terms_version` | text, 32 | Which version, e.g. `beta-1`. |
 | `document_hash` | text, 64 | A fingerprint of the exact wording shown. Explained below. |
 | `accepted_at` | timestamp | When. Stored with the time zone. |
-| `source` | text, 32 | How they agreed. One of: `signup_otp`, `signup_invite`, `signup_token`, `gate`, `hub` (minty-web's panel, since 2026-09-29). |
+| `source` | text, 32 | How they agreed. One of: `signup_otp`, `signup_invite`, `gate`, `hub` (minty-web's panel, since 2026-09-29). |
 | `ip_address` | text, 45 | Their internet address. Long enough for the newer IPv6 format. |
 | `user_agent` | text, 512 | Which browser they used. |
 

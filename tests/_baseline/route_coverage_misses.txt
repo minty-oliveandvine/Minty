@@ -1,2 +1,39 @@
-# 115/115 schema-touching endpoints exercised
+# Known gaps: in-scope routes no test reaches with a real request yet (tests/test_zz_route_coverage.py).
+# The gate fails on a route missing from this list AND on a listed route that a test now reaches.
+# Rewrite only on a complete run: MINTY_ROUTE_BASELINE=update (drop covered) or =add (also add misses).
+# 34 of 121 in-scope routes
 
+entity.billing_relogin                                  GET       /entity/<string:entity_id>/billing-relogin         company
+entity.billing_sync_chart_accounts                      POST      /api/entities/<string:entity_id>/billing/sync-chart-accounts via ensure_valid_token
+entity.billing_sync_chart_if_changed                    POST      /api/entities/<string:entity_id>/billing/sync-chart-if-changed access_token
+entity.entity_contact_create                            POST      /entity/contact/create                             access_token
+entity.go_to_bills                                      GET       /entity/<string:entity_id>/bills                   via is_superuser
+entity.onboarding_account_codes                         GET POST  /api/onboarding/account-codes                      via get_account_code_options, save_account_codes
+entity.onboarding_contacts_create                       POST      /api/onboarding/contacts/create                    via create_contact
+entity.onboarding_opening_balance                       POST      /api/onboarding/opening-balance                    cash_addition, date, opening_balance
+entity.onboarding_server_time                           GET       /api/onboarding/server-time                        date
+entity.onboarding_xero_disconnect                       POST      /api/onboarding/xero/disconnect                    via disconnect_entity_xero
+report.create_report                                    GET POST  /create                                            ShopExpense, actual_cash_total, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, delivery_sales, expenses, opening_balance, shop_sales, total_sales, uploaded_by
+report.download_report                                  GET       /report/download/<string:id>                       ShopExpense, cash_sales, company, expenses, uploaded_by
+report.download_statements                              GET POST  /admin/download_statements                         bank_deposit, cash_addition, cash_sales, company, date
+report.edit_report                                      GET POST  /report/edit/<string:id>                           ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, delivery_sales, expenses, opening_balance, shop_sales, value_name
+report.expense_upload_files                             POST      /report/expense/upload_files                       ShopExpense, company, expenses
+report.expense_validate_drafts                          GET       /report/expense/validate_drafts                    ShopExpense
+report.generate_pdf_report                              GET       /report/<string:id>/export                         ReportSaleDetail, ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, delivery_sales, expenses, legacy_column, opening_balance, sale_name, shop_sales, uploaded_by, value_name
+report.minty_report_ending                              GET       /Minty_Report_<path:entity_and_date>/ending        company, date
+report.report_check_dept_bank_yest                      GET POST  /api/check-dept-bank-yest/<string:entity_id>       bank_deposit, closing_balance, company, date
+report.report_edit_withdrawal                           POST      /report/<string:id>/edit/withdrawal                cash_addition, company, date, withdrawal_bank_account, withdrawal_type, xero_integrated_yes
+report.report_expense_create_contact                    POST      /report/expense/create_contact                     access_token
+report.report_expense_edit_submitted                    POST      /report/expense/edit/<string:expense_id>           ShopExpense, xero_integrated_yes
+report.report_expense_extract                           POST      /report/expense/extract                            company
+report.report_expense_submit_all                        POST      /report/expense/submit_all                         ReportSaleDetail, ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, expenses, opening_balance
+report.report_expense_update                            POST      /report/expense/update/<string:expense_id>         ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, expenses, opening_balance
+report.report_insert_xero_transaction                   GET       /insert_xero_transaction                           create_at
+report.report_publishing_status                         GET       /api/report/<report_id>/publishing_status          company, xero_integrated_yes
+report.report_screenshot                                GET       /report/<string:id>/screenshot                     via can_view_report, remove
+user_management.deactivate_my_account                   DELETE    /minty/api/users/me                                access_token, company, expires_in, id_token, refresh_token
+user_management.update_user_details                     PATCH     /minty/api/users/<string:user_id>                  via check_role_change_or_error
+xero.get_latest_xero_bank_transactions                  GET       /api/xero/bank-transactions/latest/<entity_id>     access_token, date
+xero.remove_connections_all                             GET       /remove/connections/all                            access_token
+xero.update_bank_transaction                            POST      /api/xero/bank-transactions/update/<entity_id>     access_token, bank_deposit, company, date
+xero.xero_callback                                      GET       /callback                                          access_token, expires_in, id_token, refresh_token, token_created_at, xero_entity_id

@@ -24,7 +24,7 @@ name against the same database, so never on in both.
 | secrets | `SECRET_KEY` (shared with the two Django services), `WTF_CSRF_SECRET_KEY` |
 | Xero | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_REDIRECT_URI`, `XERO_API_BASE_URL` |
 | storage | `S3_KEY`, `S3_SECRET`, `S3_REGION`, `S3_BUCKET` — Backblaze B2 through the S3 API; one bucket shared by every environment today |
-| mail | `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `BREVO_EMAIL` (the sender), `SUBSCRIPTION_EMAIL` |
+| mail | `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_TIMEOUT` (seconds per SMTP step, default 10 - `services/app_runtime/mail.py`), `BREVO_EMAIL` (the sender), `SUBSCRIPTION_EMAIL` |
 | URLs | `PUBLIC_URL` (Minty), `ONBOARDING_APP_URL` (the wizard), `FRONTEND_APP_URL` (the payment app) |
 | switches | `SUBSCRIPTION_SCHEDULER_ENABLED` (+ `_FULL_HOUR`, `_TZ`, `_LIGHT`), `MINTY_WEB_HUB`, `EXPENSE_AI_*` |
 | sessions | `SESSION_TYPE` (`sqlalchemy`), `SESSION_SQLALCHEMY_TABLE` (`sessions`) |
@@ -59,7 +59,12 @@ user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
   (`tests/pg_harness.py`, `MINTY_TEST_PG_URI` or the `.env` URI) and renames it to
   `MINTY_DB_SCHEMA`. The `test_zz_*` files are the guards that run last: the schema audit
   against the harness build, the schema-name literal guard, route coverage, the
-  token-logging guard. `tests/_baseline/README.md` holds the pre-C10 history.
+  token-logging guard. **Route coverage** counts a route only when a request ran its view
+  (never OPTIONS, never a refusal) and fails on an in-scope route that is neither reached nor
+  listed in `tests/_baseline/route_coverage_misses.txt` (the known gaps), on a listed route
+  that a test now reaches, and on a route `route_inventory.json` doesn't know. It judges a
+  complete run only - a partial or `-k`/`-x` run prints "not judged" - and rewrites the list
+  only with `MINTY_ROUTE_BASELINE=update` (drop covered) or `=add` (also add misses). `tests/_baseline/README.md` holds the pre-C10 history.
   `tests/conftest.py` pins `SUBSCRIPTION_SCHEDULER_ENABLED=0` (and `MINTY_WEB_HUB=0`), so a
   developer `.env` that switches the daily billing jobs on never starts them in a test app.
 - **Playwright** (`e2e/`, `npm run test:e2e`): a real browser against a Flask that is

@@ -384,3 +384,60 @@ def test_the_payer_portal_lists_the_converted_company(shop, client, app, monkeyp
     module = next(m for m in body["entities"][0]["modules"] if m["code"] == MODULE)
     assert module["status"] == "active"
     assert body["billing"]["paid_through"] is not None
+
+
+def test_the_payer_portal_lists_the_invoice_the_conversion_raised(shop, client, app, monkeypatch):
+    """``GET /api/me/invoices`` on the real tables: the conversion's invoice, paid, for the
+    exact amount, with the company offered as a filter - all of it, and filtered."""
+    owner, entity = shop
+    F.login(client, owner)
+    start_trial(client, entity)
+    _payer_with_a_card(app, owner, entity)
+    install_fake_stripe(monkeypatch, pays=True)
+    set_clock(monkeypatch, module_row(app, entity.id).trial_end + timedelta(minutes=1))
+    from blueprints.subscription.services import checkout
+    from models.db import SubscriptionInvoice
+
+    with app.app_context():
+        assert checkout.convert_or_expire_due_trials()["converted"]
+        invoice = SubscriptionInvoice.query.filter_by(payer_user_id=owner.id).one()
+        invoice_id, total = str(invoice.id), int(invoice.total)
+    headers = {"Authorization": f"Bearer {_billing_token(app, owner.id)}"}
+
+    everything = client.get("/api/me/invoices", headers=headers)
+    filtered = client.get(f"/api/me/invoices?entity={entity.id}", headers=headers)
+
+    for resp in (everything, filtered):
+        assert resp.status_code == 200, resp.data[:300]
+        body = resp.get_json()
+        assert body["total"] == 1
+        (row,) = body["invoices"]
+        assert row["id"] == invoice_id and row["amount_minor"] == total
+        assert row["status"] == "paid"
+        assert body["entity_options"] == [{"id": entity.id, "name": "Acme Shop"}]
+        assert "Access-Control-Allow-Origin" in resp.headers
+    assert filtered.get_json()["entity_id"] == entity.id
+
+
+def test_the_payer_invites_an_admin_from_the_portal(shop, client, app, mail):
+    """``POST /api/me/subscriptions/invite-admin``: the portal's one write to Minty's own
+    tables adds a pending admin invitation and mails it."""
+    owner, entity = shop
+    F.login(client, owner)
+    start_trial(client, entity)  # makes the owner this company's payer
+
+    resp = client.post(
+        "/api/me/subscriptions/invite-admin",
+        json={"entity": entity.id, "email": "second.admin@test.com"},
+        headers={"Authorization": f"Bearer {_billing_token(app, owner.id)}"},
+    )
+
+    assert resp.status_code == 200, resp.data[:300]
+    assert resp.get_json()["ok"] is True
+    assert len(mail.to("second.admin@test.com")) == 1
+    with app.app_context():
+        from models.db import Invitation
+
+        (invitation,) = Invitation.query.filter_by(email="second.admin@test.com").all()
+        assert str(invitation.role) == "admin" and str(invitation.status) == "pending"
+        assert str(invitation.entity_id) == entity.id
