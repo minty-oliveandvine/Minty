@@ -112,10 +112,29 @@ offers (`COA_*` permissions to change); the bill module's own list is
 
 **At least one stays ticked** (2026-10-01): a save that ticks none would switch every code off,
 and a petty cash expense can only use the codes ticked here. The page greys Save and says why
-("Pick at least one account code") under the list and beside Save; the route refuses it too,
-before anything is written (`_saveable_account_codes`: the page's own list, rows WITH a code —
-a row without one can never be ticked back on, so it never counts and is not offered). A
-company with no codes saves as before. Onboarding's Step 5 does not have the rule.
+beside it ("Pick at least one account code." - said once; the route's refusal uses the same
+words); the route refuses it too, before anything is written
+(`saveable_account_codes` in `blueprints/entity/services/settings.py`: the page's own list,
+rows WITH a code — a row without one can never be ticked back on, so it never counts and is not
+offered). A company with no codes saves as before. Onboarding's Step 5 has the same rule since
+2026-10-01 (`save_account_codes` answers 400; it asks `listed_only=False`, because its codes
+have no `entity_account_xero` row yet), and Payment Settings keeps at least one bill code
+(billing-backend's PUT answers 409). Onboarding's Step 8 (the Payment Request codes) has it too:
+the wizard shows the same words and does not post, and Flask's `save_bill_codes`
+(`blueprints/entity/services/onboarding_bill_codes.py`) answers 400 when the company has codes
+and none is ticked.
+
+Step 8 is still answered by Flask (`/api/onboarding/bill-codes`, reached through
+onboarding-backend's pass-through), although the table it writes, `entity_bill_account_xero`, is
+billing-backend's. Kept there by decision (2026-10-01, "keep in flask for now"). When it moves
+to billing-backend, the agreed shape is: Xero connect (Step 3, Flask) fills
+`entity_bill_account_xero`, so billing-backend only ever reads its own table, and Flask's route
+plus the pass-through are deleted.
+
+**The first-ever save** (no `entity_pettycash_settings` row yet) used to switch every code on
+and leave for the dashboard before the ticks were saved. Now the mapping service hands back to
+the page (`defer_success_redirect`), the ticks and country/currency are saved, and THEN the
+first save opens the dashboard (`?success=true`) as before.
 
 The ticks are posted from the page's own set by a `formdata` listener (sorted, never blank),
 not by the boxes — so a search that hides a ticked row, an Enter, or a Save before the list is
@@ -123,8 +142,10 @@ drawn cannot drop one. (Before this, each of those switched codes off.)
 
 ## Tests
 
-`tests/test_petty_cash_settings_page.py` (the account-code rule, the two ways in, the codes as
-data, view-only, the disconnected notice), `tests/test_char_entities.py`,
+`tests/test_petty_cash_settings_page.py` (the account-code rule, the first save, the two ways
+in, the codes as data, view-only, the disconnected notice),
+`tests/test_xero_data_and_onboarding_codes.py` (the mapping lists' database fallback and masked
+bank numbers, onboarding's codes rule), `tests/test_char_entities.py`,
 `tests/test_char_sales_methods.py`, `tests/test_payment_methods_permissions.py`,
 `tests/test_char_report_lifecycle.py` (the cash count with the currency's denominations),
 `tests/test_char_xero_sync.py` (the mapping and the cache);

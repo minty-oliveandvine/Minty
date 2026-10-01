@@ -15,7 +15,7 @@ from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import (billing_settings_app_url,
                                               minty_web_module_page_url)
 from blueprints.entity.services.settings import (
-    COA_INCLUDED_TYPES,
+    COA_INCLUDED_TYPES, saveable_account_codes,
     sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
     sync_expense_account_info_from_xero, sync_xero_accounts_to_db_background,
     sync_xero_coa_pettycash)
@@ -163,25 +163,6 @@ def _flash_if_xero_disconnected(org) -> bool:
         "danger",
     )
     return True
-
-
-def _saveable_account_codes(org_id) -> set[str]:
-    """The account codes Petty Cash Settings lists and can save.
-
-    The page's own list - ``account_info`` rows of the petty cash types that have an
-    ``entity_account_xero`` row - limited to rows that HAVE a code: the save keys on
-    ``account_codes[]``, so a row without one can never be ticked back on.
-    """
-    rows = (
-        db.session.query(AccountInfo.xero_code)
-        .join(EntityAccountXero, EntityAccountXero.account_id == AccountInfo.id)
-        .filter(
-            AccountInfo.entity_id == org_id,
-            AccountInfo.type.in_(list(COA_INCLUDED_TYPES)),
-        )
-        .all()
-    )
-    return {str(code).strip() for (code,) in rows if code and str(code).strip()}
 
 
 def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None):
@@ -932,7 +913,7 @@ def entity_settings_entity(org_id):
             # connected), and a petty cash expense can only use the codes ticked here. Refused
             # BEFORE anything is written - the mapping save commits on its own. A company with
             # no codes at all saves as before; the page greys Save in the same case.
-            saveable = _saveable_account_codes(org_id)
+            saveable = saveable_account_codes(org_id)
             if saveable:
                 posted = {
                     str(c).strip()
@@ -940,14 +921,15 @@ def entity_settings_entity(org_id):
                     if c and str(c).strip()
                 }
                 if not posted & saveable:
-                    flash(
-                        "Pick at least one account code - a petty cash expense can "
-                        "only use the codes ticked here.",
-                        "danger",
-                    )
+                    flash("Pick at least one account code.", "danger")
                     return _redirect_xero_mapping(
                         org_id, _from, return_view="entity_settings_entity"
                     )
+            # The first mapping save sends the company to its dashboard (as it always has),
+            # but only AFTER the ticks and country/currency below are saved.
+            first_save = (
+                EntityPettycashSettings.query.filter_by(entity_id=org_id).first() is None
+            )
             try:
                 if request.form.get("main_bank") and has_permission(
                     current_user, Permission.COA_UPDATE, org_id
@@ -1064,6 +1046,12 @@ def entity_settings_entity(org_id):
                     )
 
                 flash("Entity settings saved!", "success")
+                if first_save and EntityPettycashSettings.query.filter_by(
+                    entity_id=org_id
+                ).first() is not None:
+                    return redirect(
+                        url_for("entity.report_dashboard", id=org_id, success="true")
+                    )
                 return _redirect_xero_mapping(
                     org_id, _from, return_view="entity_settings_entity"
                 )

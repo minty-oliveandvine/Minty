@@ -103,7 +103,9 @@ the plain button — `publishing_status` is NOT NULL and `unpublished` is that s
 `GET /api/xero/bank-transactions/latest/<entity_id>` and
 `POST /api/xero/bank-transactions/update/<entity_id>` (edit a deposit already in Xero —
 `update_after_deposit_change`), `GET /api/entity/<id>/xero-data` (the cached accounts and
-contacts as JSON), `POST /api/entities/<id>/billing/sync-*` (the three sync triggers
+contacts as JSON; from the database when the token no longer works. A bank account carries
+only `MaskedBankAccountNumber`, `****` + the last four - the full number never leaves the
+server, since 2026-10-01), `POST /api/entities/<id>/billing/sync-*` (the three sync triggers
 billing-backend calls, JWT-authenticated — `blueprints/entity/routes/billing_sync.py`).
 
 ## 6. Tests

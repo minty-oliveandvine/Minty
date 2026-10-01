@@ -998,6 +998,23 @@ BILL_COA_INCLUDED_TYPES = frozenset({
 })
 
 
+def saveable_account_codes(entity_id, *, listed_only=True) -> set[str]:
+    """The petty cash account codes a save can tick, for the at-least-one-code rule.
+
+    ``account_info`` rows of the petty cash types that HAVE a code (the saves key on the
+    code, so a row without one can never be ticked back on). ``listed_only`` keeps the rows
+    Petty Cash Settings lists (those with an ``entity_account_xero`` row); onboarding's step
+    5 runs before those rows exist, so it asks with ``listed_only=False``.
+    """
+    q = db.session.query(AccountInfo.xero_code).filter(
+        AccountInfo.entity_id == entity_id,
+        AccountInfo.type.in_(list(COA_INCLUDED_TYPES)),
+    )
+    if listed_only:
+        q = q.join(EntityAccountXero, EntityAccountXero.account_id == AccountInfo.id)
+    return {str(code).strip() for (code,) in q.all() if code and str(code).strip()}
+
+
 def sync_entity_account_xero_active(entity_id, xero_org_id):
     """Mirror petty-cash CoA tick state into ``entity_account_xero.is_active``.
 

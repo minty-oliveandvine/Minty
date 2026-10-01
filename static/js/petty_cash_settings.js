@@ -343,9 +343,7 @@
 
   function codesChanged() {
     var missing = codesEditable && noCodesTicked();
-    var hint = document.getElementById("accountCodeHint");
     var saveHint = document.getElementById("saveHint");
-    if (hint) hint.hidden = !missing;
     if (saveHint) saveHint.hidden = !missing;
     updatePettyCashSave();
   }

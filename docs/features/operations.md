@@ -60,6 +60,8 @@ user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
   `MINTY_DB_SCHEMA`. The `test_zz_*` files are the guards that run last: the schema audit
   against the harness build, the schema-name literal guard, route coverage, the
   token-logging guard. `tests/_baseline/README.md` holds the pre-C10 history.
+  `tests/conftest.py` pins `SUBSCRIPTION_SCHEDULER_ENABLED=0` (and `MINTY_WEB_HUB=0`), so a
+  developer `.env` that switches the daily billing jobs on never starts them in a test app.
 - **Playwright** (`e2e/`, `npm run test:e2e`): a real browser against a Flask that is
   already running — `e2e/README.md` has the environment (`E2E_BASE_URL`, the seeded
   identity from `scripts/e2e_seed.py --print`, `E2E_XERO=1` for a shop linked to a Demo

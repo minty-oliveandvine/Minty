@@ -7,6 +7,8 @@ Pins:
   otherwise be switched off (``entity_account_xero.is_active``), and a petty cash expense can
   only use the codes ticked here. Rows without a code do not count either way (the save keys
   on the code), and a company with no codes saves as before;
+* the first-ever save keeps the ticks (it used to switch every code on) and still opens the
+  dashboard;
 * one template serves both ways in: ``?from=bills`` changes only the way back (Payments, not
   Reports), the tabs' links (they keep it) and the posted ``_from``;
 * the account codes reach the page as data (the page script draws them as text), never as
@@ -120,8 +122,7 @@ def test_a_save_with_no_code_ticked_is_refused_and_writes_nothing(shop, app, db,
 
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith(f"/entity/settings/entity/{entity.id}?from=bills")
-    assert ("danger", "Pick at least one account code - a petty cash expense can only use the "
-                      "codes ticked here.") in flashes(client)
+    assert ("danger", "Pick at least one account code.") in flashes(client)
     assert ticks(app, entity.id) == {"400": True, "404": True}
     assert company_country(app, entity.id) == "HK"
     assert not mapping_saved(app, entity.id)
@@ -173,6 +174,41 @@ def test_rows_without_a_code_do_not_count(shop, app, db, client):
 
     assert resp.status_code == 302
     assert ("success", "Entity settings saved!") in flashes(client)
+
+
+def test_the_first_ever_save_keeps_the_ticks_and_opens_the_dashboard(shop, app, db, client):
+    # The first mapping save used to switch every code on and leave for the dashboard before
+    # the ticks were saved; now the ticks land first, then it goes to the dashboard as before.
+    from models.db import AccountInfo, XeroContactSync
+
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    add_account(app, db, entity.id, "404", "Bank Fees")
+    with app.app_context():
+        for xero_id, kind, code, name in (("acc-pc", "BANK", "", "Petty Cash"),
+                                          ("acc-dep", "BANK", "", "Business Bank"),
+                                          ("acc-sales", "REVENUE", "200", "Sales"),
+                                          ("acc-owner", "CURRLIAB", "800", "Director Loan")):
+            db.session.add(AccountInfo(entity_id=entity.id, type=kind, name=name, xero_code=code,
+                                       xero_account_id=xero_id, status="ACTIVE"))
+        db.session.add(XeroContactSync(entity_id=entity.id, xero_contact_id="con-1", name="Cash Customer"))
+        db.session.commit()
+    F.login(client, owner)
+    assert not mapping_saved(app, entity.id)
+
+    resp = client.post(f"/entity/settings/entity/{entity.id}", data={
+        "main_bank": "acc-pc", "deposit_bank": "acc-dep", "discrepancy_bank": "acc-pc",
+        "cashsale_account": "200", "cashsale_contact": "con-1",
+        "owners_account": "800", "owners_contact": "con-1",
+        "discrepancy_account": "400", "discrepancy_contact": "con-1",
+        "account_codes[]": ["404"],
+    })
+
+    assert resp.status_code == 302
+    assert "success=true" in resp.headers["Location"]
+    assert mapping_saved(app, entity.id)
+    assert ticks(app, entity.id) == {"400": False, "404": True}
+    assert flashes(client).count(("success", "Entity settings saved!")) == 1
 
 
 # ---- one page, two ways in --------------------------------------------------------------------

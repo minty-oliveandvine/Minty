@@ -10,6 +10,7 @@ from loguru import logger
 
 from models.db import AccountInfo, XeroContactSync
 from services.auth.token_service import ensure_valid_token
+from services.helpers.xero import mask_account_number
 from services.helpers.xero_bridge import (account_info_to_xero_format,
                                           contact_sync_to_xero_format)
 
@@ -130,8 +131,8 @@ def get_accounts_from_xero(
         logger.info(f"Fetched accounts from Xero: {response}")
         for account in response.json().get("Accounts", []):
             if account.get("Type") == "BANK":
-                account["MaskedBankAccountNumber"] = account.get(
-                    "BankAccountNumber")
+                account["MaskedBankAccountNumber"] = mask_account_number(
+                    account.get("BankAccountNumber"))
             accounts.append(account)
         return accounts
     except Exception as e:
@@ -204,8 +205,9 @@ def get_organisation_lock_dates(access_token, xero_org_id):
 
 def _get_entity_xero_data_from_db(entity_id):
     db_accounts = AccountInfo.query.filter_by(entity_id=entity_id).all()
-    db_contacts = XeroContactSync.query.filter_by(
-        entity_id=entity_id, is_active=True).all()
+    # xero_contact_sync has no is_active column - filtering on one threw, so this fallback
+    # always answered 500
+    db_contacts = XeroContactSync.query.filter_by(entity_id=entity_id).all()
     if not db_accounts and not db_contacts:
         return None
     all_accounts = [account_info_to_xero_format(acc) for acc in db_accounts]

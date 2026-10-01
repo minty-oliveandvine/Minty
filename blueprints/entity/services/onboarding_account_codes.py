@@ -11,8 +11,8 @@ from __future__ import annotations
 from loguru import logger
 
 from blueprints.entity.services.settings import (
-    COA_INCLUDED_TYPES, sync_entity_account_xero_active,
-    sync_expense_account_info_from_xero)
+    COA_INCLUDED_TYPES, saveable_account_codes,
+    sync_entity_account_xero_active, sync_expense_account_info_from_xero)
 from blueprints.entity.services.xero_account_mapping_post import (
     _resolve_account_id, _resolve_contact_id)
 from models.db import (AccountInfo, Entity, EntityAccountXero,
@@ -226,6 +226,12 @@ def save_account_codes(user_id, entity_id, *, expense_codes, mapping):
         return {"error": "Access denied"}, 403
     if not isinstance(expense_codes, list):
         return {"error": "expense_codes must be an array"}, 400
+    # At least one code stays ticked, as on Petty Cash Settings: a petty cash expense can
+    # only use the ticked codes. A company with no codes at all still saves.
+    if not any(str(c).strip() for c in expense_codes if c) and saveable_account_codes(
+        entity_id, listed_only=False
+    ):
+        return {"error": "Pick at least one account code."}, 400
     mapping = mapping or {}
 
     pettycash_sel = (mapping.get("pettycash") or "").strip()
