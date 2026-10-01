@@ -408,3 +408,18 @@ Same call as xero/entity — `routes/api.py` (2025) and `services/ending.py`
   (`report/services/ending.py`) verify an HMAC token carried in the URL. They can't be
   guessed, but nothing generates those URLs any more. Remove them once no old link can
   still be in use (tokens last 30 days).
+- **Share links were silently dead on pettycashv3 (FIXED 2026-10-01, `4f91285`).**
+  `minty_report_share` compared the TIMESTAMPTZ `expires_at` (tz-aware) with naive
+  `datetime.now()`. The TypeError was swallowed by the route's blanket `except` and shown as
+  "This link doesn't look right to me", so no link opened. The route now compares aware
+  datetimes and logs the traceback (`logger.exception`).
+- **NOT FIXED: two crashes on the report ending page (`report_ending`), found 2026-10-01.**
+  1. `services/ending.py` (~line 663) adds `report.opening_balance` and subtracts
+     `report.expenses` without coalescing. A submitted report with a NULL `expense_total`
+     or `opening_balance` raises `TypeError: NoneType + int`.
+  2. `templates/report/ending.html` (~line 391): when an entity has no sales methods
+     (`sale_info`), the "hardcoded list" fallback calls `.format()` on
+     `sales_data.foodpanda_sales`. That value is Jinja `Undefined`, and `is not none` is true
+     for it, so the page raises `unsupported format string passed to Undefined.__format__`.
+  Both surface through the share route as the generic "This link doesn't look right" flash
+  and are now logged with a traceback.
