@@ -149,10 +149,6 @@
     <!-- Pills + page content share one 1024px column -->
     <div class="relative mx-auto w-full max-w-[1024px] px-4 pb-28 pt-3 sm:px-6 sm:pt-4">
 
-      <!-- Hidden marker so settings_users_scripts.html detects bills-UI mode
-           (notifications now surface via the toast, not inline banners). -->
-      <div id="usersBillsInlineRoot" class="hidden"></div>
-
       {% with bills_ui=true %}
       {% include 'entity/settings_users_modals.html' %}
       {% endwith %}

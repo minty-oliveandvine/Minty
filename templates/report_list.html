@@ -114,29 +114,6 @@
 
   <script>
     PageTransition.init('.main-content', 'fadeIn', 10);
-
-    document.addEventListener("DOMContentLoaded", function () {
-      const toastCloseButtons = document.querySelectorAll(".toast-close");
-      toastCloseButtons.forEach(function(button) {
-        button.addEventListener("click", function () {
-          const toast = this.closest(".toast");
-          if (toast) {
-            toast.style.transition = "opacity 0.5s ease-out";
-            toast.style.opacity = "0";
-            setTimeout(() => { toast.style.display = "none"; }, 500);
-          }
-        });
-      });
-
-      setTimeout(() => {
-        const toasts = document.querySelectorAll(".toast");
-        toasts.forEach(function(toast) {
-          toast.style.transition = "opacity 0.5s ease-out";
-          toast.style.opacity = "0";
-          setTimeout(() => { toast.style.display = "none"; }, 500);
-        });
-      }, 3000);
-    });
   </script>
 </body>
 </html>

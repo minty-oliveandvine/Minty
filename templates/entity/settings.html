@@ -156,40 +156,9 @@
       </div>
 
 
-      {# Flash toasts + drain (canonical). Client-side validation still uses the
-         page's own #settingsNotification below. #}
+      {# Flash toasts + drain (canonical). Client-side validation and the
+         contact-flow toasts call the shared globals defined here. #}
       {% include 'components/flash_messages.html' %}
-
-      <!-- Toast Notification -->
-      <div id="settingsNotification" class="absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-          <!-- Error Toast -->
-          <div id="errorToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: #ffcccc; background-color: #fff1f1;">
-            <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-            <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-              <p class="font-[500] whitespace-nowrap" style="color: #F03D3D;">Validation Error</p>
-              <p id="settingsNotificationMessage" class="font-[400] break-words w-full" style="color: #f57e7e;">Please connect to Xero and set up Entity Settings</p>
-            </div>
-            <button class="toast-close shrink-0" onclick="hideSettingsNotification()">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <!-- Success Toast -->
-          <div id="successToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #a9d7cb; background-color: #f1fffc;">
-            <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-            <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-              <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-              <p id="successToastMessage" class="font-[400] break-words w-full" style="color: #92c6b9;">Your entity settings are saved!</p>
-            </div>
-            <button class="toast-close shrink-0" onclick="hideSettingsNotification()">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
 
       <!-- Main Content Area -->
       <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1 overflow-hidden">
@@ -464,21 +433,9 @@
       const currentFieldName = fieldNames[currentField];
       const conflictingFieldName = fieldNames[conflictingField];
       
-      // Show error notification
-      const notification = document.getElementById('settingsNotification');
-      const message = document.getElementById('settingsNotificationMessage');
-      
-      if (notification && message) {
-        message.textContent = `${currentFieldName} cannot be the same as ${conflictingFieldName}. Please select a different bank account.`;
-        notification.classList.remove('hidden');
-        notification.style.transform = 'translateX(0)';
-        
-        // Auto-hide after 5 seconds
-        setTimeout(() => {
-          hideSettingsNotification();
-        }, 5000);
-      }
-      
+      // Show error notification (shared toast; stays 5 seconds)
+      showFlashMessages(`${currentFieldName} cannot be the same as ${conflictingFieldName}. Please select a different bank account.`, 'error', 5000);
+
       // Highlight the conflicting field
       const conflictingInput = document.getElementById(`${conflictingField}_bank_input`);
       if (conflictingInput) {
@@ -686,83 +643,6 @@
       return true;
     }
     
-     // Function to show error toast
-     function showErrorToast(message = 'Something went wrong on my end. Mind trying again?') {
-       // Guard raw API/exception text: this toast drives its own DOM and
-       // never reaches showFlashMessages(). See components/flash_messages.html.
-       if (window.mintyErrorCopy) message = window.mintyErrorCopy(message);
-       const notification = document.getElementById('settingsNotification');
-       const errorToast = document.getElementById('errorToast');
-       const successToast = document.getElementById('successToast');
-       
-       if (notification && errorToast) {
-         // Hide success toast if visible
-         if (successToast) {
-           successToast.classList.add('hidden');
-         }
-         
-         // Update error message if provided
-         const messageElement = document.getElementById('settingsNotificationMessage');
-         if (messageElement && message) {
-           messageElement.textContent = message;
-         }
-         
-         // Show error toast
-         errorToast.classList.remove('hidden');
-         notification.classList.remove('translate-x-full');
-         notification.classList.add('translate-x-0');
-         
-         // Auto-hide after 4 seconds
-         setTimeout(() => {
-           hideSettingsNotification();
-         }, 4000);
-       }
-     }
-     
-     // Function to show success toast
-     function showSuccessToast(message = 'Your entity settings are saved!') {
-       const notification = document.getElementById('settingsNotification');
-       const errorToast = document.getElementById('errorToast');
-       const successToast = document.getElementById('successToast');
-       
-       if (notification && successToast) {
-         // Hide error toast if visible
-         if (errorToast) {
-           errorToast.classList.add('hidden');
-         }
-         
-         // Update success message if provided
-         const messageElement = document.getElementById('successToastMessage');
-         if (messageElement && message) {
-           messageElement.textContent = message;
-         }
-         
-         // Show success toast
-         successToast.classList.remove('hidden');
-         notification.classList.remove('translate-x-full');
-         notification.classList.add('translate-x-0');
-         
-         // Auto-hide after 4 seconds
-         setTimeout(() => {
-           hideSettingsNotification();
-         }, 4000);
-       }
-     }
-     
-     // Legacy function for backward compatibility
-     function showSettingsNotification() {
-       showErrorToast();
-     }
-     
-     // Function to hide settings notification
-     function hideSettingsNotification() {
-       const notification = document.getElementById('settingsNotification');
-       if (notification) {
-         notification.classList.remove('translate-x-0');
-         notification.classList.add('translate-x-full');
-       }
-     }
-
      // Function to clear field highlighting
      function clearFieldHighlighting(event) {
        const input = event.target;

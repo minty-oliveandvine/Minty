@@ -141,49 +141,6 @@
           <!-- Loading Overlay -->
            {% include 'components/loading_overlay.html' %}                                                                                                                                       <!-- Progress Steps -->
             <div class=" bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
-              <!-- Notification Area -->
-               <div id="notification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-                 <!-- Success Toast -->
-                 <div id="successToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #a9d7cb; background-color: #f1fffc;">
-                   <img src="{{ url_for('static', filename='img/success-icon.png') }}" alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-                   <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                     <p class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-                     <p class="font-[400] break-words w-full" id="successMessage" style="color: #92c6b9;">Bank Transfer Created Successfully</p>
-                   </div>
-                   <button class="toast-close shrink-0" onclick="hideNotification()">
-                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                     </svg>
-                   </button>
-                 </div>
-
-                 <!-- Error Toast -->
-                 <div id="errorToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffcccc; background-color: #fff1f1;">
-                   <img src="{{ url_for('static', filename='img/error-icon.png') }}" alt="Error" class="shrink-0 w-[36px] h-[44px]" />
-                   <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                     <p class="font-[500] whitespace-nowrap" id="errorTitle" style="color: #F03D3D;">Validation Error</p>
-                     <p class="font-[400] break-words w-full" id="errorMessage" style="color: #f57e7e;"></p>
-                   </div>
-                   <button class="toast-close shrink-0" onclick="hideNotification()">
-                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                     </svg>
-                   </button>
-                 </div>
-                 <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
-                 <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
-                   <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
-                   <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-                     <p class="font-[500] whitespace-nowrap" style="color: #E59218;">Warning</p>
-                     <p class="font-[400] break-words w-full" style="color: #F0A93B;">You have unsaved changes. Please save your changes first.</p>
-                   </div>
-                   <button class="toast-close shrink-0" onclick="hideNotification()">
-                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                     </svg>
-                   </button>
-                 </div>
-               </div>
           
           <!-- Include the reusable stepper component -->
           {% include 'components/stepper.html' %}
@@ -463,7 +420,7 @@
 
         if (hasChanges) {
           // Show the unsaved-changes warning using the same path/timing as the success toast
-          showNotification('unsaved');
+          showFlashMessages("You have unsaved changes. Please save your changes first.", 'warning');
           // Prevent navigation when there are unsaved changes
           return;
         }
@@ -491,7 +448,7 @@
       // (constrained edit mode). The cash amount is never touched here.
       function saveWithdrawalSource() {
         const selected = document.querySelector('input[name="withdrawal"]:checked');
-        if (!selected) { showNotification('error'); return; }
+        if (!selected) { showFlashMessages('Please choose where the cash was withdrawn from.', 'error'); return; }
         const bankAccountHidden = document.getElementById('bank_account_hidden');
         const csrfToken = document.querySelector('input[name="csrf_token"]');
         const reportId = '{{ current_draft.id }}';
@@ -509,23 +466,13 @@
         .then(data => {
           if (data && data.status === 'success') {
             withdrawalSourceDirty = false;
-            const successMessage = document.getElementById('successMessage');
-            if (successMessage) successMessage.textContent = 'Your withdrawal source is saved.';
-            showNotification('success');
+            showFlashMessages('Your withdrawal source is saved.', 'success');
           } else {
-            const errorTitle = document.getElementById('errorTitle');
-            const errorMessage = document.getElementById('errorMessage');
-            if (errorTitle) errorTitle.textContent = 'Error';
-            if (errorMessage) errorMessage.textContent = (data && data.message) || 'Failed to save withdrawal source';
-            showNotification('error');
+            showFlashMessages((data && data.message) || 'Failed to save withdrawal source', 'error');
           }
         })
         .catch(() => {
-          const errorTitle = document.getElementById('errorTitle');
-          const errorMessage = document.getElementById('errorMessage');
-          if (errorTitle) errorTitle.textContent = 'Error';
-          if (errorMessage) errorMessage.textContent = 'Failed to save withdrawal source';
-          showNotification('error');
+          showFlashMessages('Failed to save withdrawal source', 'error');
         });
       }
 
@@ -655,22 +602,10 @@
         const urlParams = new URLSearchParams(window.location.search);
         const bankTransferSuccess = urlParams.get('bank_transfer_success');
         const bankTransferId = urlParams.get('bank_transfer_id');
-        const toastMessage = urlParams.get('toast_message');
-        const toastType = urlParams.get('toast_type');
 
-        if (toastMessage && toastType) {
-          showNotification(toastType);
-        }
-        
         if (bankTransferSuccess === 'true') {
           // Update success message with bank transfer ID if available
-          if (bankTransferId) {
-            const successMessage = document.getElementById('successMessage');
-            if (successMessage) {
-              successMessage.textContent = `Your bank transfer is created!`;
-            }
-          }
-          showNotification('success');
+          showFlashMessages(bankTransferId ? 'Your bank transfer is created!' : 'Bank Transfer Created Successfully', 'success');
           
           // Clean up URL parameters
           const newUrl = window.location.pathname + '?entity_id=' + urlParams.get('entity_id');
@@ -759,43 +694,6 @@
       });
 
 
-             // Function to show notification
-       function showNotification(toastType = 'error') {
-         const notification = document.getElementById('notification');
-         const successToast = document.getElementById('successToast');
-         const errorToast = document.getElementById('errorToast');
-         const unsavedToast = document.getElementById('unsavedDataToast');
-
-         // Hide all toasts first
-         successToast.classList.add('hidden');
-         errorToast.classList.add('hidden');
-         if (unsavedToast) unsavedToast.classList.add('hidden');
-
-         // Show the appropriate toast
-         if (toastType === 'success') {
-           successToast.classList.remove('hidden');
-         } else if (toastType === 'unsaved' && unsavedToast) {
-           unsavedToast.classList.remove('hidden');
-         } else {
-           errorToast.classList.remove('hidden');
-         }
-         
-         notification.classList.remove('translate-x-full');
-         notification.classList.add('translate-x-0');
-         
-         // Hide notification after 4 seconds
-         setTimeout(() => {
-           hideNotification();
-         }, 4000);
-       }
-       
-       // Function to hide notification
-       function hideNotification() {
-         const notification = document.getElementById('notification');
-         notification.classList.remove('translate-x-0');
-         notification.classList.add('translate-x-full');
-       }
-       
       // Function to clean form data before submission
       function cleanFormData() {
         // Clean cash addition field

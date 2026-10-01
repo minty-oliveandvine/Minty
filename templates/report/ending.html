@@ -113,7 +113,7 @@
   </script>
 </head>
 <body class="min-h-screen font-inter antialiased">
-  {# Canonical flash toasts + drain. Client toasts still use #flashNotification / #notification below. #}
+  {# Canonical toast: server flashes + client showFlashMessages(). #}
   {% include 'components/flash_messages.html' %}
 
 <!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
@@ -193,23 +193,6 @@ document.addEventListener('submit', function(e){
       <!-- Progress Steps -->
       {% if current_draft and not is_shared_link %}
       <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
-        <!-- Flash Notification Area (from previous page saves) -->
-        <div id="flashNotification" class="absolute top-0 right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50">
-          <!-- Permanent error toast for unsaved data alerts (hidden by default) -->
-          <div id="unsavedDataToast" class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative hidden" style="border-color: #ffe2b0; background-color: #fff8ed;">
-            <span class="shrink-0 flex items-center justify-center w-[36px] h-[36px] rounded-full font-bold text-[22px] text-white" style="background-color: #F5A623;">!</span>
-            <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-              <p class="font-[500] whitespace-nowrap" style="color: #E59218;">Warning</p>
-              <p class="font-[400] break-words w-full" style="color: #F0A93B;">You have unsaved changes. Please save your changes first.</p>
-            </div>
-            <button class="toast-close shrink-0" onclick="hideFlashNotification()">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          {# server flashes handled by canonical flash_messages partial #}
-        </div>       
         <!-- Include the reusable stepper component -->
         {% if not is_shared_link %}
         {% include 'components/stepper.html' %}
@@ -934,102 +917,12 @@ document.addEventListener('submit', function(e){
        if (reportId && pdfUrl) {
          // Show success notification after a short delay
          setTimeout(() => {
-           showNotification('Your report is downloaded!', 'success');
+           showFlashMessages('Your report is downloaded!', 'success');
          }, 500);
          // Navigate to PDF generation route
          window.location.href = pdfUrl;
        } else {
-         showNotification('Unable to download report. Missing report information.', 'error');
-       }
-     }
-
-     // Function to show notifications
-     function showNotification(message, type = 'success') {
-       const toast = document.createElement('div');
-       toast.className = `absolute top-[56px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-40`;
-
-       let borderColor, bgColor, titleColor, subtextColor, iconSrc, label;
-
-       if (type === 'success') {
-         borderColor = '#a9d7cb';
-         bgColor = '#f1fffc';
-         titleColor = '#017155';
-         subtextColor = '#92c6b9';
-         iconSrc = "{{ url_for('static', filename='img/success-icon.png') }}";
-         label = 'Success';
-       } else if (type === 'info') {
-         borderColor = '#a9d3ff';
-         bgColor = '#f1f8ff';
-         titleColor = '#006FE6';
-         subtextColor = '#5ba2ee';
-         iconSrc = "{{ url_for('static', filename='img/info-icon.png') }}";
-         label = 'Information';
-       } else if (type === 'warning') {
-         borderColor = '#fee0aa';
-         bgColor = '#fffaf1';
-         titleColor = '#DA8700';
-         subtextColor = '#e8b765';
-         iconSrc = "{{ url_for('static', filename='img/warning-icon.png') }}";
-         label = 'Warning';
-       } else {
-         borderColor = '#ffcccc';
-         bgColor = '#fff1f1';
-         titleColor = '#F03D3D';
-         subtextColor = '#f57e7e';
-         iconSrc = "{{ url_for('static', filename='img/error-icon.png') }}";
-         label = 'Error';
-       }
-
-       toast.innerHTML = `
-         <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: ${borderColor}; background-color: ${bgColor};">
-           <img src="${iconSrc}" alt="${label}" class="shrink-0 w-[36px] h-[44px]" />
-           <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-             <p class="font-[500] whitespace-nowrap" style="color: ${titleColor};">${label}</p>
-             <p class="font-[400] break-words w-full" style="color: ${subtextColor};">${message}</p>
-           </div>
-           <button onclick="closeNotification(this)" class="toast-close shrink-0 p-1 hover:bg-gray-200 rounded">
-             <svg class="w-[14px] h-[14px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-             </svg>
-           </button>
-         </div>
-       `;
-       
-       const phoneCard = document.querySelector('.relative.h-screen.bg-white.shadow-xl');
-       if (phoneCard) {
-         phoneCard.appendChild(toast);
-       } else {
-         document.body.appendChild(toast);
-       }
-       
-       setTimeout(() => {
-         toast.classList.remove('translate-x-full');
-       }, 100);
-       
-       setTimeout(() => {
-         toast.classList.add('translate-x-full');
-         setTimeout(() => {
-           if (toast.parentElement) {
-             toast.remove();
-           }
-         }, 500);
-       }, 4000);
-     }
-
-     // Function to close notification
-     function closeNotification(closeButton) {
-       let toast = closeButton.parentElement;
-       while (toast && !toast.classList.contains('absolute')) {
-         toast = toast.parentElement;
-       }
-       
-       if (toast) {
-         toast.classList.add('translate-x-full');
-         setTimeout(() => {
-           if (toast.parentElement) {
-             toast.remove();
-           }
-         }, 500);
+         showFlashMessages('Unable to download report. Missing report information.', 'error');
        }
      }
 
@@ -1293,7 +1186,7 @@ document.addEventListener('submit', function(e){
        }
 
        try {
-         showNotification('Converting report to draft...', 'info');
+         showFlashMessages('Converting report to draft...', 'info');
 
          const csrfToken = document.querySelector('input[name="csrf_token"]');
          const formData = new FormData();
@@ -1309,16 +1202,16 @@ document.addEventListener('submit', function(e){
          const data = await response.json();
 
          if (data.status === 'success') {
-           showNotification('Back to draft — opening it for you now.', 'success');
+           showFlashMessages('Back to draft — opening it for you now.', 'success');
            const editUrl = '{{ url_for("report.report_opening") }}?entity_id=' + entityId +
              (data.transaction_date ? '&transaction_date=' + data.transaction_date : '');
            setTimeout(() => { PageTransition.navigateWithFade(editUrl); }, 500);
          } else {
-           showNotification(data.message || 'Failed to convert report to draft.', 'error');
+           showFlashMessages(data.message || 'Failed to convert report to draft.', 'error');
          }
        } catch (error) {
          console.error('Error converting report to draft:', error);
-         showNotification('An error occurred while converting the report. Please try again.', 'error');
+         showFlashMessages('An error occurred while converting the report. Please try again.', 'error');
        }
      }
 
@@ -1328,14 +1221,14 @@ document.addEventListener('submit', function(e){
        const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
        
        if (!entityId || !transactionDate) {
-         showNotification('Missing entity or date information', 'error');
+         showFlashMessages('Missing entity or date information', 'error');
          return;
        }
        
        // Get CSRF token
        const csrfToken = document.querySelector('input[name="csrf_token"]');
        if (!csrfToken) {
-         showNotification('CSRF token not found', 'error');
+         showFlashMessages('CSRF token not found', 'error');
          return;
        }
        
@@ -1375,7 +1268,7 @@ document.addEventListener('submit', function(e){
            input.disabled = false;
            copyBtn.disabled = false;
          } else {
-           showNotification(data.error || 'Failed to generate share link', 'error');
+           showFlashMessages(data.error || 'Failed to generate share link', 'error');
            hideShareModal();
          }
        })
@@ -1384,7 +1277,7 @@ document.addEventListener('submit', function(e){
          if (window.sendLogToDataDog) {
            window.sendLogToDataDog('error', 'Error generating share link', { message: error && error.message });
          }
-         showNotification('Failed to generate share link', 'error');
+         showFlashMessages('Failed to generate share link', 'error');
          hideShareModal();
        });
      }
@@ -1416,13 +1309,13 @@ document.addEventListener('submit', function(e){
                if (window.sendLogToDataDog) {
                  window.sendLogToDataDog('error', 'Failed to copy link');
                }
-               showNotification('Failed to copy link', 'error');
+               showFlashMessages('Failed to copy link', 'error');
              });
            } else {
              if (window.sendLogToDataDog) {
                window.sendLogToDataDog('error', 'Copy not supported in this browser');
              }
-             showNotification('Copy not supported in this browser', 'error');
+             showFlashMessages('Copy not supported in this browser', 'error');
            }
          }
        }
@@ -1536,27 +1429,7 @@ document.addEventListener('submit', function(e){
 
     // Function to show unsaved data alert
     function showUnsavedDataAlert() {
-      const unsavedToast = document.getElementById('unsavedDataToast');
-      const flashNotification = document.getElementById('flashNotification');
-      
-      if (unsavedToast && flashNotification) {
-        // Hide any other toasts
-        const otherToasts = flashNotification.querySelectorAll('.toast:not(#unsavedDataToast)');
-        otherToasts.forEach(toast => toast.classList.add('hidden'));
-        
-        // Show the unsaved data toast
-        unsavedToast.classList.remove('hidden');
-        
-        // Show the notification container
-        flashNotification.classList.remove('translate-x-full');
-        flashNotification.classList.add('translate-x-0');
-        
-        // Auto-hide after 4 seconds
-        setTimeout(() => {
-          flashNotification.classList.remove('translate-x-0');
-          flashNotification.classList.add('translate-x-full');
-        }, 4000);
-      }
+      showFlashMessages("You have unsaved changes. Please save your changes first.", 'warning');
     }
 
     function navigateToStep(step) {
@@ -1957,28 +1830,6 @@ document.addEventListener('submit', function(e){
         }
       }
     });
-
-    // Flash notification slider functions
-    function showFlashNotification() {
-      const notification = document.getElementById('flashNotification');
-      if (notification && notification.querySelector('.toast')) {
-        // Slide in
-        notification.style.transform = 'translateX(0)';
-        
-        // Auto hide after 5 seconds
-        setTimeout(() => {
-          hideFlashNotification();
-        }, 5000);
-      }
-    }
-
-    function hideFlashNotification() {
-      const notification = document.getElementById('flashNotification');
-      if (notification) {
-        // Slide out
-        notification.style.transform = 'translateX(100%)';
-      }
-    }
 
     // Initialize Sales History Chart
     function initializeSalesHistoryChart() {

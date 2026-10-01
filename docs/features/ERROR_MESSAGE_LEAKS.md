@@ -46,21 +46,15 @@ throw err;
 Anything reaching a `.catch()` without that flag is a JS/network/parse failure
 and must never be surfaced. **When you add a `fetch()`, tag its throw.**
 
-### Two legacy toasts bypass all of this
+### No page keeps its own toast
 
-`showErrorToast` is redefined per-page in two files, each driving its own DOM
-(`#settingsNotification` / `#errorToast`) and never reaching
-`showFlashMessages`. A top-level `function showErrorToast` overwrites
-`window.showErrorToast` regardless of include order, so the page-local version
-always wins:
-
-- `templates/entity/settings.html`
-- `templates/entity/settings_users_scripts.html`
-
-Each now calls `window.mintyErrorCopy(message)` on entry. **If you add a third,
-it must do the same.** (Petty Cash Settings had two more until 2026-10-01; its
-rewrite uses the shared `showFlashMessages` through `components/flash_messages.html`.) Consolidating them onto `showFlashMessages` means
-removing the legacy DOM from those pages — deliberately not attempted.
+Until 2026-10-01 `templates/entity/settings.html` and
+`templates/entity/settings_users_scripts.html` redefined `showErrorToast` over their own DOM
+(`#settingsNotification` / `#errorToast`), and eight other pages had toast copies of their
+own, some putting server text in with `innerHTML`. All of them now call the shared
+`showFlashMessages`, so every error and warning toast goes through `mintyErrorCopy` and is set
+as text. **Never add a page-level toast function**: a top-level `function showErrorToast`
+silently replaces the shared one. See [toasts.md](toasts.md).
 
 ---
 

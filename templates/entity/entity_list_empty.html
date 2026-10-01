@@ -135,44 +135,6 @@
     // Initialize page transition
     PageTransition.init('.main-content', 'fadeIn', 10);
 
-    // Toast functionality
-    document.addEventListener("DOMContentLoaded", function () {
-      // Handle all toast close buttons
-      const toastCloseButtons = document.querySelectorAll(".toast-close");
-      
-      toastCloseButtons.forEach(function(button) {
-        button.addEventListener("click", function () {
-          // Find the parent toast and fade it out
-          const toast = this.closest(".toast");
-          if (toast) {
-            // Add fade-out animation
-            toast.style.transition = "opacity 0.5s ease-out";
-            toast.style.opacity = "0";
-            
-            // Remove element after animation completes
-            setTimeout(() => {
-              toast.style.display = "none";
-            }, 500);
-          }
-        });
-      });
-
-      // Auto-hide toasts after 3 seconds with fade animation
-      setTimeout(() => {
-        const toasts = document.querySelectorAll(".toast");
-        toasts.forEach(function(toast) {
-          // Add fade-out animation
-          toast.style.transition = "opacity 0.5s ease-out";
-          toast.style.opacity = "0";
-          
-          // Remove element after animation completes
-          setTimeout(() => {
-            toast.style.display = "none";
-          }, 500);
-        });
-      }, 3000);
-    });
-
     // Function to show continue report message
     function showContinueReportMessage() {
       showFlashMessages('This one is still on the way.', 'info');

@@ -300,7 +300,7 @@
       if (publishSuccessMsg) {
         sessionStorage.removeItem('publishSuccess');
         setTimeout(() => {
-          showNotification(publishSuccessMsg, 'success');
+          showFlashMessages(publishSuccessMsg, 'success');
         }, 500);
       }
     })();
@@ -374,7 +374,7 @@
 
     function publishingFailed(errorMsg) {
       hidePublishingOverlay();
-      showNotification(errorMsg || 'Publishing to Xero failed. Please try again.', 'error');
+      showFlashMessages(errorMsg || 'Publishing to Xero failed. Please try again.', 'error');
     }
 
     function pollPublishStatus(reportId, entityId, isRepublish) {
@@ -448,7 +448,7 @@
         if (response.status === 409) {
           return response.json().then(data => {
             hidePublishingOverlay();
-            showNotification(data.message || 'This report is already being published. Please wait...', 'warning');
+            showFlashMessages(data.message || 'This report is already being published. Please wait...', 'warning');
             return { handled: true };
           });
         }
@@ -495,103 +495,11 @@
       const reportId = '{{ id }}';
 
       if (!entityId || !reportId || entityId === 'None' || reportId === 'None') {
-        showNotification('Missing required information to publish report.', 'error');
+        showFlashMessages('Missing required information to publish report.', 'error');
         return;
       }
 
       executePublishRequest(reportId, entityId, false);
-    }
-
-    // Notification functions
-    function closeNotification(closeButton) {
-      let toast = closeButton.parentElement;
-      while (toast && !toast.classList.contains('absolute')) {
-        toast = toast.parentElement;
-      }
-      
-      if (toast) {
-        toast.classList.add('translate-x-full');
-        setTimeout(() => {
-          if (toast.parentElement) {
-            toast.remove();
-          }
-        }, 500);
-      }
-    }
-
-    function showNotification(message, type = 'info') {
-      const toast = document.createElement('div');
-      toast.className = `absolute top-[0px] right-0 transform translate-x-full transition-transform duration-500 ease-in-out z-50`;
-
-      let borderColor, bgColor, titleColor, subtextColor, iconSrc, label;
-      switch(type) {
-        case 'success':
-          borderColor = '#a9d7cb';
-          bgColor = '#f1fffc';
-          titleColor = '#017155';
-          subtextColor = '#92c6b9';
-          iconSrc = "{{ url_for('static', filename='img/success-icon.png') }}";
-          label = 'Success';
-          break;
-        case 'error':
-          borderColor = '#ffcccc';
-          bgColor = '#fff1f1';
-          titleColor = '#F03D3D';
-          subtextColor = '#f57e7e';
-          iconSrc = "{{ url_for('static', filename='img/error-icon.png') }}";
-          label = 'Error';
-          break;
-        case 'warning':
-          borderColor = '#fee0aa';
-          bgColor = '#fffaf1';
-          titleColor = '#DA8700';
-          subtextColor = '#e8b765';
-          iconSrc = "{{ url_for('static', filename='img/warning-icon.png') }}";
-          label = 'Warning';
-          break;
-        default:
-          borderColor = '#a9d3ff';
-          bgColor = '#f1f8ff';
-          titleColor = '#006FE6';
-          subtextColor = '#5ba2ee';
-          iconSrc = "{{ url_for('static', filename='img/info-icon.png') }}";
-          label = 'Information';
-      }
-
-      toast.innerHTML = `
-        <div class="toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative" style="border-color: ${borderColor}; background-color: ${bgColor};">
-          <img src="${iconSrc}" alt="${label}" class="shrink-0 w-[36px] h-[44px]" />
-          <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-            <p class="font-[500] whitespace-nowrap" style="color: ${titleColor};">${label}</p>
-            <p class="font-[400] break-words w-full" style="color: ${subtextColor};">${message}</p>
-          </div>
-          <button onclick="closeNotification(this)" class="toast-close shrink-0 p-1 hover:bg-gray-200 rounded ml-2">
-            <svg class="w-[14px] h-[14px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-      `;
-      
-      const phoneCard = document.querySelector('.relative.h-screen.bg-gray-50.shadow-xl');
-      if (phoneCard) {
-        phoneCard.appendChild(toast);
-      } else {
-        document.body.appendChild(toast);
-      }
-      
-      setTimeout(() => {
-        toast.classList.remove('translate-x-full');
-      }, 100);
-      
-      setTimeout(() => {
-        toast.classList.add('translate-x-full');
-        setTimeout(() => {
-          if (toast.parentElement) {
-            toast.remove();
-          }
-        }, 500);
-      }, 4000);
     }
 
     // Republish functions
@@ -640,7 +548,7 @@
           confirmButton.disabled = false;
           confirmButton.innerHTML = '<span>Confirm</span>';
         }
-        showNotification('Missing required information to republish report.', 'error');
+        showFlashMessages('Missing required information to republish report.', 'error');
         return;
       }
 
@@ -652,12 +560,12 @@
       if (reportId && pdfUrl) {
         // Show success notification after a short delay
         setTimeout(() => {
-          showNotification('Your report is downloaded!', 'success');
+          showFlashMessages('Your report is downloaded!', 'success');
         }, 500);
         // Navigate to PDF generation route
         window.location.href = pdfUrl;
       } else {
-        showNotification('Unable to download report. Missing report information.', 'error');
+        showFlashMessages('Unable to download report. Missing report information.', 'error');
       }
     }
 
@@ -699,7 +607,7 @@
       const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
 
       if (!transactionDate) {
-        showNotification('Missing date information', 'error');
+        showFlashMessages('Missing date information', 'error');
         return;
       }
 
@@ -767,14 +675,14 @@
       const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
       
       if (!entityId || !transactionDate) {
-        showNotification('Missing entity or date information', 'error');
+        showFlashMessages('Missing entity or date information', 'error');
         return;
       }
       
       // Get CSRF token
       const csrfToken = document.querySelector('input[name="csrf_token"]');
       if (!csrfToken) {
-        showNotification('CSRF token not found', 'error');
+        showFlashMessages('CSRF token not found', 'error');
         return;
       }
       
@@ -814,7 +722,7 @@
           input.disabled = false;
           copyBtn.disabled = false;
         } else {
-          showNotification(data.error || 'Failed to generate share link', 'error');
+          showFlashMessages(data.error || 'Failed to generate share link', 'error');
           hideShareModal();
         }
       })
@@ -823,7 +731,7 @@
         if (window.sendLogToDataDog) {
           window.sendLogToDataDog('error', 'Error generating share link', { message: error && error.message });
         }
-        showNotification('Failed to generate share link', 'error');
+        showFlashMessages('Failed to generate share link', 'error');
         hideShareModal();
       });
     }
@@ -855,13 +763,13 @@
               if (window.sendLogToDataDog) {
                 window.sendLogToDataDog('error', 'Failed to copy link');
               }
-              showNotification('Failed to copy link', 'error');
+              showFlashMessages('Failed to copy link', 'error');
             });
           } else {
             if (window.sendLogToDataDog) {
               window.sendLogToDataDog('error', 'Copy not supported in this browser');
             }
-            showNotification('Copy not supported in this browser', 'error');
+            showFlashMessages('Copy not supported in this browser', 'error');
           }
         }
       }

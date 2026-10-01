@@ -1,83 +1,50 @@
 {# Canonical flash + client-notification toast.
 
-   ONE source of truth for flash rendering across the app. Renders a single
-   reusable slide-in pill (border-[5px] rounded-full + PNG icon), decodes the
-   icon before showing so it never flashes the wrong icon, and drains
-   `get_flashed_messages()` at the bottom so EVERY page that includes this
-   partial consumes the session flash queue on load. That consumption is the
+   ONE toast for the whole app. Every page includes this partial (base/layout.html
+   and the standalone templates); no page keeps its own toast markup or toast
+   function any more. The look is the house toast shared with minty-web
+   (components/ui/Toast.tsx is the reference): a white card, a bold type label
+   (Success / Error / Warning / Information), the message in grey and a close
+   button, stacked at the top-right. No per-type colour or icon by decision.
+
+   It drains `get_flashed_messages()` at the bottom so EVERY page that includes
+   this partial consumes the session flash queue on load. That consumption is the
    whole point: without it, a flash queued by a redirect (session expired,
    "entity not found", read-only write, CSRF) survives in the session and pops
-   up later on some unrelated page — the "stale toast" bug.
+   up later on some unrelated page - the "stale toast" bug.
 
-   Client code can also raise a toast directly via the exposed helpers
-   (showSuccessToast / showErrorToast / showFlashNotification / showToast / ...).
-   Every helper is installed with a `window.X = window.X || ...` guard so a page
-   that already defines its own richer version (e.g. the report / dashboard
-   slider pages) is never clobbered — include this BEFORE the page's own script.
+   Client code raises a toast with showFlashMessages(message, type, durationMs)
+   or one of the aliases below (showToast / showSuccessToast / showErrorToast /
+   ...). Every message is set with textContent, never innerHTML.
 #}
-<div id="flashMessages"
-     class="pointer-events-none fixed right-4 z-[400] transition-transform duration-500 ease-in-out"
-     style="top: 24px; transform: translateX(calc(100% + 1.5rem));">
-  <div id="flashMessagesCard"
-       class="pointer-events-auto toast border-[5px] rounded-full flex justify-between items-center gap-3 w-[420px] max-w-[calc(100vw-2rem)] min-h-[64px] py-[6px] pl-[8px] pr-[20px] relative"
-       style="border-color: #a9d7cb; background-color: #f1fffc;">
-    <img id="flashMessagesIcon"
-         src="{{ url_for('static', filename='img/success-icon.png') }}"
-         alt="Success" class="shrink-0 w-[36px] h-[44px]" />
-    <div class="flex-1 min-w-0 text-[14px] flex flex-col items-start justify-center leading-snug">
-      <p id="flashMessagesTitle" class="font-[500] whitespace-nowrap" style="color: #017155;">Success</p>
-      <p id="flashMessagesMessage" class="font-[400] break-words w-full" style="color: #92c6b9;"></p>
-    </div>
-    <button type="button" class="toast-close shrink-0" onclick="hideFlashMessages()" aria-label="Dismiss">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-[14px] h-[14px] text-gray-500">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-</div>
+<style>
+  #flashMessages {
+    position: fixed; top: 16px; right: 16px; z-index: 400;
+    width: 320px; max-width: calc(100vw - 2rem);
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  #flashMessages .minty-toast {
+    pointer-events: auto;
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px; border: 1px solid #e5e7eb; border-radius: 4px;
+    background: #ffffff; color: #171717;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, .1), 0 1px 2px -1px rgba(0, 0, 0, .1);
+    font-size: 14px; line-height: 20px; text-align: left;
+  }
+  #flashMessages .minty-toast-body { flex: 1; min-width: 0; }
+  #flashMessages .minty-toast-title { margin: 0; font-weight: 600; }
+  #flashMessages .minty-toast-message { margin: 0; color: #6b7280; overflow-wrap: anywhere; }
+  #flashMessages .minty-toast-close {
+    background: none; border: 0; padding: 0; cursor: pointer;
+    color: #6b7280; font-size: 14px; line-height: 20px;
+  }
+  #flashMessages .minty-toast-close:hover { color: #171717; }
+</style>
+<div id="flashMessages" aria-live="polite" aria-atomic="false"></div>
 <script>
   (function () {
-    var TONES = {
-      success: { border: '#a9d7cb', bg: '#f1fffc', title: '#017155', sub: '#92c6b9', icon: "{{ url_for('static', filename='img/success-icon.png') }}", label: 'Success' },
-      error:   { border: '#ffcccc', bg: '#fff1f1', title: '#F03D3D', sub: '#f57e7e', icon: "{{ url_for('static', filename='img/error-icon.png') }}", label: 'Error' },
-      warning: { border: '#fee0aa', bg: '#fffaf1', title: '#DA8700', sub: '#e8b765', icon: "{{ url_for('static', filename='img/warning-icon.png') }}", label: 'Warning' },
-      info:    { border: '#a9d3ff', bg: '#f1f8ff', title: '#006FE6', sub: '#5ba2ee', icon: "{{ url_for('static', filename='img/info-icon.png') }}", label: 'Information' }
-    };
-    var hideTimer = null;
-
-    // Sit just below the header's lower edge when a header exists; otherwise
-    // fall back to a fixed top offset so header-less pages still position sanely.
-    function positionToast() {
-      var wrap = document.getElementById('flashMessages');
-      var card = document.getElementById('flashMessagesCard');
-      if (!wrap) return;
-      var header = document.querySelector('header');
-      if (!header) { wrap.style.top = '24px'; return; }
-      var cardH = (card && card.offsetHeight) ? card.offsetHeight : 64;
-      var headerBottom = header.getBoundingClientRect().bottom;
-      var titleRow = header.firstElementChild;
-      var titleBottom = titleRow ? titleRow.getBoundingClientRect().bottom : (headerBottom - cardH - 8);
-      // On mobile the header often stacks multiple rows (e.g. title + pills),
-      // so sitting below the whole header pushes the toast far down the screen.
-      // Pin it just under the first (title) row instead — its z-index keeps it
-      // above the rest of the header.
-      if (window.innerWidth < 640) {
-        wrap.style.top = (titleBottom + 4) + 'px';
-        return;
-      }
-      wrap.style.top = Math.max(titleBottom + 4, headerBottom - cardH - 8) + 'px';
-    }
-    if (document.readyState !== 'loading') {
-      positionToast();
-    } else {
-      document.addEventListener('DOMContentLoaded', positionToast);
-    }
-    window.addEventListener('resize', positionToast);
-
-    function hideFlashMessages() {
-      var wrap = document.getElementById('flashMessages');
-      if (wrap) wrap.style.transform = 'translateX(calc(100% + 1.5rem))';
-    }
+    var LABEL = { success: 'Success', error: 'Error', warning: 'Warning', info: 'Information' };
 
     // ---- Raw-error scrubber -------------------------------------------------
     // There is no shared API client in this app: every call site does a bare
@@ -118,7 +85,7 @@
 
     // The `fromServer` convention from templates/report/expense.html: only a
     // message the server actually authored is fit to show. Anything reaching a
-    // .catch() without the flag is a JS/network/parse failure — never surface it.
+    // .catch() without the flag is a JS/network/parse failure - never surface it.
     function mintyApiError(error, fallback) {
       if (error && error.fromServer && error.message) {
         return mintyErrorCopy(error.message, fallback);
@@ -126,78 +93,88 @@
       return fallback || HOUSE_FALLBACK;
     }
 
-    // durationMs: how long the toast stays before auto-hiding (default 4000).
-    // Pass a larger value (or 0 to disable auto-hide) for messages the user must
-    // not miss — e.g. the "disconnected from Xero" warning, which can otherwise
-    // fire and vanish behind a page's loading phase before it's seen.
+    function dismiss(card) {
+      if (card && card.parentNode) card.parentNode.removeChild(card);
+    }
+
+    // Removes every toast on screen (the old single-card API's "hide").
+    function hideFlashMessages() {
+      var wrap = document.getElementById('flashMessages');
+      while (wrap && wrap.firstChild) wrap.removeChild(wrap.firstChild);
+    }
+
+    // type: success | error | danger | warning | info (anything else = success).
+    // durationMs: how long the toast stays (default 4000; 0 or less = until
+    // dismissed). Each toast has its own timer, so toasts stack and never cut
+    // each other short.
     function showFlashMessages(message, type, durationMs) {
       var wrap = document.getElementById('flashMessages');
-      var card = document.getElementById('flashMessagesCard');
-      var icon = document.getElementById('flashMessagesIcon');
-      var title = document.getElementById('flashMessagesTitle');
-      var msg = document.getElementById('flashMessagesMessage');
-      if (!wrap || !card || !icon || !title || !msg) return;
+      if (!wrap) return;
+      if (type === 'danger') type = 'error';
+      if (!LABEL[type]) type = 'success';
 
-      var tone = TONES[type] || TONES.success;
-      card.style.borderColor = tone.border;
-      card.style.backgroundColor = tone.bg;
-      icon.alt = tone.label;
-      title.style.color = tone.title;
-      title.textContent = tone.label;
-      msg.style.color = tone.sub;
       // Error/warning copy is scrubbed; success/info is app-authored and
       // passes through untouched.
-      msg.textContent = (type === 'error' || type === 'danger' || type === 'warning')
+      var text = (type === 'error' || type === 'warning')
         ? mintyErrorCopy(message)
-        : message;
-      icon.src = tone.icon;
+        : (message == null ? '' : String(message));
 
-      positionToast();
+      var card = document.createElement('div');
+      card.className = 'minty-toast';
+      card.setAttribute('role', type === 'error' ? 'alert' : 'status');
+      card.setAttribute('data-toast-type', type);
+
+      var body = document.createElement('div');
+      body.className = 'minty-toast-body';
+      var title = document.createElement('p');
+      title.className = 'minty-toast-title';
+      title.textContent = LABEL[type];
+      var msg = document.createElement('p');
+      msg.className = 'minty-toast-message';
+      msg.textContent = text;
+      body.appendChild(title);
+      body.appendChild(msg);
+
+      var close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'minty-toast-close';
+      close.setAttribute('aria-label', 'Dismiss');
+      close.textContent = '×';
+      close.addEventListener('click', function () { dismiss(card); });
+
+      card.appendChild(body);
+      card.appendChild(close);
+      wrap.appendChild(card);
 
       var timeout = (typeof durationMs === 'number') ? durationMs : 4000;
+      if (timeout > 0) setTimeout(function () { dismiss(card); }, timeout);
+    }
 
-      // Decode the swapped icon before sliding in so the toast never flashes
-      // the previously rendered icon for a frame. Auto-dismiss is scoped to
-      // THIS toast only (per-invocation timer) — never a global `.toast` sweep,
-      // which would also kill unrelated client-side validation toasts.
-      var reveal = function () {
-        wrap.style.transform = 'translateX(0)';
-        if (hideTimer) clearTimeout(hideTimer);
-        // timeout <= 0 means "stay until dismissed" (no auto-hide timer).
-        if (timeout > 0) hideTimer = setTimeout(hideFlashMessages, timeout);
-      };
-      if (typeof icon.decode === 'function') {
-        icon.decode().then(reveal).catch(reveal);
-      } else {
-        reveal();
-      }
+    function typed(type) {
+      return function (m) { showFlashMessages(m || LABEL[type], type); };
     }
 
     // Canonical names.
-    window.mintyErrorCopy = window.mintyErrorCopy || mintyErrorCopy;
-    window.mintyApiError = window.mintyApiError || mintyApiError;
-    window.showFlashMessages = window.showFlashMessages || showFlashMessages;
-    window.hideFlashMessages = window.hideFlashMessages || hideFlashMessages;
+    window.mintyErrorCopy = mintyErrorCopy;
+    window.mintyApiError = mintyApiError;
+    window.showFlashMessages = showFlashMessages;
+    window.hideFlashMessages = hideFlashMessages;
 
-    // Back-compat aliases so existing per-page callers keep working. Guarded so
-    // a page that defines its own richer version wins.
-    window.showSettingsFlashToast = window.showSettingsFlashToast || showFlashMessages;
-    window.hideSettingsFlashToast = window.hideSettingsFlashToast || hideFlashMessages;
-    window.hideSettingsNotification = window.hideSettingsNotification || hideFlashMessages;
-    window.showSuccessToast = window.showSuccessToast || function (m) { showFlashMessages(m || 'Success', 'success'); };
-    window.showErrorToast   = window.showErrorToast   || function (m) { showFlashMessages(m || 'Error', 'error'); };
-    window.showWarningToast = window.showWarningToast || function (m) { showFlashMessages(m || 'Warning', 'warning'); };
-    window.showInfoToast    = window.showInfoToast    || function (m) { showFlashMessages(m || 'Information', 'info'); };
-    window.showFlashSuccessToast = window.showFlashSuccessToast || function (m) { showFlashMessages(m || 'Success', 'success'); };
-    window.showFlashErrorToast   = window.showFlashErrorToast   || function (m) { showFlashMessages(m || 'Error', 'error'); };
-    window.showFlashWarningToast = window.showFlashWarningToast || function (m) { showFlashMessages(m || 'Warning', 'warning'); };
-    window.showFlashInfoToast    = window.showFlashInfoToast    || function (m) { showFlashMessages(m || 'Information', 'info'); };
-    // Generic showToast(message, type) — mirror of the per-page validation helper.
-    window.showToast = window.showToast || function (m, t) { showFlashMessages(m, t || 'error'); };
-    // The report / dashboard slider pages reveal a pre-rendered toast via
-    // showFlashNotification(); provide a no-arg fallback for pages that don't.
-    window.showFlashNotification = window.showFlashNotification || function () {};
-    window.hideFlashNotification = window.hideFlashNotification || hideFlashMessages;
+    // Aliases kept so the many existing callers need no edit. No page defines
+    // its own version any more; do not add one - call these.
+    window.showToast = function (m, t) { showFlashMessages(m, t || 'error'); };
+    window.showSuccessToast = typed('success');
+    window.showErrorToast = typed('error');
+    window.showWarningToast = typed('warning');
+    window.showInfoToast = typed('info');
+    window.showFlashSuccessToast = typed('success');
+    window.showFlashErrorToast = typed('error');
+    window.showFlashWarningToast = typed('warning');
+    window.showFlashInfoToast = typed('info');
+    window.showSettingsFlashToast = showFlashMessages;
+    window.hideSettingsFlashToast = hideFlashMessages;
+    window.hideSettingsNotification = hideFlashMessages;
+    window.hideFlashNotification = hideFlashMessages;
   })();
 
   {% with messages = get_flashed_messages(with_categories=True) %}
@@ -209,7 +186,7 @@
             {{ ('error' if category in ('error', 'danger') else ('warning' if category == 'warning' else ('info' if category == 'info' else 'success')))|tojson }},
             // Keep error/warning toasts up a bit longer (12s) so a warning like
             // "disconnected from Xero" isn't missed behind a page's loading
-            // phase; success/info keep the default 4s. NOT 100s — that leaves a
+            // phase; success/info keep the default 4s. NOT 100s - that leaves a
             // stale error parked on screen long after the user has moved on.
             {{ (12000 if category in ('error', 'danger', 'warning') else 4000)|tojson }}
           );

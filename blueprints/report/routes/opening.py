@@ -137,15 +137,8 @@ def report_opening(id=None, entity_id=None):
         session.get("onboarding_opening_entity") == str(entity_id)
     )
 
-    toast = {
-        "message": request.args.get("toast_message"),
-        "type": request.args.get("toast_type"),
-    }
-
     deposit_type = request.args.get("deposit_type") or ""
 
-    request.form.get("withdrawal")
-    request.form.get("bank_account")
     _pettycash_settings = (
         get_entity_account_settings(entity_id, "pettycash") or {}
     )
@@ -153,8 +146,6 @@ def report_opening(id=None, entity_id=None):
 
     _bank_settings = get_entity_account_settings(entity_id, "bank") or {}
     company_bank = _bank_settings.get("xero_account_id")
-
-    logger.info(f"Toast: {toast}")
 
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):

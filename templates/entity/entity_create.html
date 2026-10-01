@@ -497,7 +497,7 @@
     // Initialize page transition
     PageTransition.init('.main-content', 'fadeIn', 10);
 
-    // Toast functionality
+    // Page initialisation
     document.addEventListener("DOMContentLoaded", function () {
       // Initialize country search
       initializeCountrySearch();
@@ -516,28 +516,6 @@
       document.getElementById('currency').value = 'Hong Kong Dollar';
       selectedCountryCode = 'HK';
       selectedCurrencyCode = 'HKD';
-
-      // Handle all toast close buttons
-      const toastCloseButtons = document.querySelectorAll(".toast-close");
-      
-      toastCloseButtons.forEach(function(button) {
-        button.addEventListener("click", function () {
-          // Find the parent toast and hide it
-          const toast = this.closest(".toast");
-          if (toast) {
-            toast.style.display = "none";
-          }
-        });
-
-      });
-
-      // Auto-hide toasts after 5 seconds
-      setTimeout(() => {
-        const toasts = document.querySelectorAll(".toast");
-        toasts.forEach(function(toast) {
-          toast.style.display = "none";
-        });
-      }, 5000);
     });
   </script>
 </body>

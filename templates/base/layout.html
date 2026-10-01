@@ -79,27 +79,7 @@
       <header class="main-header">{% block header %}{% endblock %}</header>
       <main class="main-content">{% block content %}{% endblock %}</main>
       <footer class="main-footer">{% block footer %}{% endblock %}</footer>
-      {% block scripts %}
-                 <script>
-           document.addEventListener("DOMContentLoaded", function () {
-             // Handle all toast close buttons
-             const toastCloseButtons = document.querySelectorAll(".toast-close");
-             
-             toastCloseButtons.forEach(function(button) {
-               button.addEventListener("click", function () {
-                 // Find the parent toast and hide it
-                 const toast = this.closest(".toast");
-                 if (toast) {
-                   toast.style.display = "none";
-                 }
-               });
-             });
-             // NOTE: no blanket `.toast` auto-hide here — the canonical
-             // flash_messages partial scopes auto-dismiss to its own toast so
-             // client-side (validation) toasts are never killed by a global sweep.
-           });
-         </script>
-      {% endblock %}
+      {% block scripts %}{% endblock %}
     </div>
   </body>
 </html>
