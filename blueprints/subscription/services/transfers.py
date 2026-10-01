@@ -829,25 +829,26 @@ def _notify(offer, kind: str) -> None:
 
     events = {
         "requested": (
-            notifier.SUBSCRIBER_TRANSFER_REQUESTED, offer.to_user_id, "/profile/subscriptions/incoming"
+            notifier.SUBSCRIBER_TRANSFER_REQUESTED,
+            offer.to_user_id,
+            "/subscription/subscriptions/incoming",
         ),
         "accepted": (
-            notifier.SUBSCRIBER_TRANSFER_ACCEPTED, offer.from_user_id, "/profile/subscriptions"
+            notifier.SUBSCRIBER_TRANSFER_ACCEPTED, offer.from_user_id, "/subscription/subscriptions"
         ),
         # Both of these go to the payer who ASKED. The recipient already knows what they
         # did — declining is their own click, and an expiry is a request they chose not
         # to answer. The person left waiting is the one who learns nothing otherwise.
         "declined": (
-            notifier.SUBSCRIBER_TRANSFER_DECLINED, offer.from_user_id, "/profile/subscriptions"
+            notifier.SUBSCRIBER_TRANSFER_DECLINED, offer.from_user_id, "/subscription/subscriptions"
         ),
         "expired": (
-            notifier.SUBSCRIBER_TRANSFER_EXPIRED, offer.from_user_id, "/profile/subscriptions"
+            notifier.SUBSCRIBER_TRANSFER_EXPIRED, offer.from_user_id, "/subscription/subscriptions"
         ),
     }
     event, recipient, path = events[kind]
 
     try:
-        from blueprints.entity.routes.modules import billing_app_profile_unscoped_url
         from models.db import Entity
 
         entity = db.session.get(Entity, str(offer.entity_id))
@@ -877,7 +878,9 @@ def _notify(offer, kind: str) -> None:
                 "currency": offer.quoted_currency,
                 "billed_through": offer.accepted_billed_through,
                 "expires_at": offer.expires_at,
-                "portal_url": billing_app_profile_unscoped_url(recipient, next_path=path),
+                # minty-web's portal through this app's login-gated hand-over
+                # (billing-frontend's /profile pages were deleted on 2026-10-01).
+                "portal_url": notifier.portal_url(path),
                 **names,
             },
         )

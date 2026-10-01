@@ -11,7 +11,7 @@ that setup covers this repo alone.
 | `billing-frontend` | `billing-frontend` | <http://localhost:3000> | Module 2 — Next.js UI |
 | `onboarding-backend` | `onboarding-backend` | <http://localhost:8001> | Onboarding API — Django, extracted from Minty |
 | `onboarding` | `onboarding` | <http://localhost:3001> | Onboarding — Next.js UI |
-| `billing-api` | `minty-billing-api` | <http://localhost:8004> | Subscriptions API — Django, Part 2 of the modernisation plan (dark unless `SUBSCRIPTION_ENABLED=1`) |
+| `billing-api` | `minty-billing-api` | <http://localhost:8004> | Subscriptions API — Django, Part 2 of the modernisation plan |
 | `minty-web` | `minty-web` | <http://localhost:3002> | The hub — Next.js, Part 2; subscriptions is its only feature until Part 3 |
 | `db` | — | `localhost:5432` | PostgreSQL 15, shared by every backend |
 
@@ -200,13 +200,11 @@ its own `XERO_CLIENT_ID`/`SECRET` — Xero invalidates a refresh token the momen
 it is used, so a second refresher breaks the connection until someone
 reconnects by hand.
 
-**Subscriptions (Part 2):** `billing-api` and `minty-web` ship **dark**. Three
-backends read `SUBSCRIPTION_ENABLED` (`minty`, `onboarding-backend`, `billing-api`)
-and must carry the same value; the two web apps read
-`NEXT_PUBLIC_SUBSCRIPTION_ENABLED`, which is on unless `0`. Dark, every
-`billing-api` route answers 404 (with CORS headers) and its scheduler never
-starts. Stripe keys are read by `minty` today and by `billing-api`; from Part 2
-step 5 only `billing-api` holds them.
+**Subscriptions (Part 2):** always on - the dark switch (`SUBSCRIPTION_ENABLED`)
+was removed on 2026-10-01. The one switch left is the daily pass,
+`SUBSCRIPTION_SCHEDULER_ENABLED`, read by `minty` AND `billing-api`: never set it
+on both, they share the database. Stripe keys are read by `minty` today and by
+`billing-api`; from Part 2 step 5 only `billing-api` holds them.
 
 ---
 
@@ -278,7 +276,7 @@ docker compose restart minty billing-backend onboarding-backend billing-api
 # Minty              http://localhost:5001
 # Billing API        http://localhost:8000
 # Onboarding API     http://localhost:8001
-# Subscriptions API  http://localhost:8004   (every route 404 while dark)
+# Subscriptions API  http://localhost:8004
 # Billing UI         http://localhost:3000
 # Onboarding UI      http://localhost:3001
 # Minty hub          http://localhost:3002

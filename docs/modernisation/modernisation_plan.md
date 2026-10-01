@@ -1706,6 +1706,34 @@ run WITH the rename, not a rewrite of what was true on the day.
 
 ### 5. The Flask cut, link-outs and repoints
 
+> **Landed early, 2026-10-01 (the user: "remove dark now since it is deployed on a test site so
+> no need for dark anymore"; "clean up Flask's unused settings pages and billing-frontend's
+> profile and subscription pages"; "keep link to minty web. the trial notice remove them").**
+> Read the prose below with these already true:
+> - **There is no dark switch.** `SUBSCRIPTION_ENABLED` / `NEXT_PUBLIC_SUBSCRIPTION_ENABLED`
+>   and every branch on them are gone from all six repos; `SubscriptionsDarkMiddleware`,
+>   `feature_flags.subscriptions_enabled`, `require_subscriptions_enabled`,
+>   `module_plain_section.html`, `entity_settings_module_toggle`, `get_plain_module_cards`,
+>   minty-web's `/not-available`, `E2E_SUBSCRIPTIONS`, `test_char_subscription_dark.py`,
+>   `test_subscriptions_dark.py` and `test_dark.py` are deleted. Migration `m1a01` is an
+>   unconditional no-op; `revoke-ungranted` stays the deliberate command (dry unless `--apply`).
+>   The scheduler's own switch is the only one left - in Minty AND `minty-billing-api`.
+> - **Flask's Jinja module page is deleted** with its nine `module_*` partials and the 20 session
+>   routes (the 19 actions + `/toggle`); `GET /entity/settings/module/<id>` is the 302 to
+>   minty-web's page, always (`MINTY_WEB_MODULE_PAGE` is gone). The engine services stay for now.
+> - **billing-frontend holds only the Payment Request app**: `app/profile/**`,
+>   `components/profile/*`, `lib/payerPortal.ts`, `lib/subscriptions.ts` are deleted and the
+>   `/profile*` addresses forward through Minty to minty-web; Flask's `/profile` always opens
+>   minty-web's My Profile (`MINTY_WEB_HUB` now decides the entity list only); the transfer emails
+>   link through `/handoff/minty-web` in both engines; Flask's `/api/me/*` has no browser caller.
+> - **The in-app notices keep two kinds** (`past_due`, a paid `pending_cancel`); every trial kind
+>   is gone from both engines, and the button is `/handoff/minty-web?next=<module page>`.
+> - `SUBSCRIPTION_ENABLED` has to be REMOVED from the test site's env, and
+>   `SUBSCRIPTION_SCHEDULER_ENABLED` checked on both Flask and the API (never both on).
+>
+> Still to do here: `links.py` / the env-name hard cut, `store_ro.py`, deleting the engine,
+> `billing_client.fetch_notice`, `test_zz_no_stripe.py`, `test_zz_links.py`.
+
 **Minty.** Delete `blueprints/subscription/services/*` except the new `store_ro.py`,
 `routes/portal.py`, `cli/subscription_access.py`, `cli/subscription_plans.py`,
 `services/app_runtime/scheduler.py`, `scripts/subscription/*` (ported), the two
@@ -1786,8 +1814,9 @@ and `app/maintenance`'s hardcoded `www` link; +`NEXT_PUBLIC_HUB_WEB_URL`,
 hidden when dark); **the old `/profile` page goes with them** (`app/profile/page.tsx`,
 `MyProfileContent`, `ProfilePortalLinks` — My Profile is minty-web's since 2026-09-29, and every
 "My Profile" link here already goes through Minty's `/profile`, `lib/mintyUrls.ts::
-buildMintyProfileUrl`); billing-backend's `PUT /api/v1/profile/me` then has no caller, while
-its `DELETE` stays by the user's decision (deactivation left the UI, not the API);
+buildMintyProfileUrl`); billing-backend's `GET /api/v1/auth/me` and `PUT|DELETE /api/v1/profile/me` then have no
+caller and were REMOVED on 2026-10-01 (the user reversed the 09-29 "DELETE stays" call;
+`GET /profile/me` stays for `useUserRole`), and its unused `@stripe/*` packages went the same day;
 `middleware.ts` drops the portal redirect; `lib/subscriptionNotice.ts` reads
 `links.origin("billing-api")`; `03_payer_portal.spec.ts` shrinks to "links present when live /
 none when dark"; `links.guard.test.ts` added. **billing-backend: zero changes** (its
@@ -1865,20 +1894,20 @@ Cutover day repeats steps 3–8 with the window's backup.
    a static `/maintenance` page, and `minty-web` ships the same seed, which the Vercel apps can
    be pointed at for the window). A real gate, `MAINTENANCE_MODE`, is a Part 3 deliverable
    (step 2, the shared packages) so every later cutover has one.
-2. Pause: `SUBSCRIPTION_ENABLED=0` and `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty
-   instance **and on `minty-billing-api`** (Render env; the change restarts the service, which
-   is what applies it — both read the flag at start-up), `SUBSCRIPTION_ENABLED=0` on
-   onboarding-backend, `NEXT_PUBLIC_SUBSCRIPTION_ENABLED=0` on billing-frontend **and
-   `minty-web`**; nobody runs `flask subscriptions run-daily --issue` or `manage.py subscriptions
-   run-daily` by hand. Note the time. **There is no Stripe webhook to disable**: the receiver
+2. Pause: `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Minty instance **and on
+   `minty-billing-api`** (Render env; the change restarts the service, which is what applies it
+   — both read the flag at start-up); nobody runs `flask subscriptions run-daily --issue` or
+   `manage.py subscriptions run-daily` by hand. Note the time. (There is no feature switch to
+   turn off any more - the dark switch was removed on 2026-10-01; the services are suspended for
+   the window anyway, step 1.) **There is no Stripe webhook to disable**: the receiver
    went with the in-house biller (Minty charges synchronously and owns subscription state), and
    Stripe does not queue events for a disabled endpoint anyway — a stale endpoint in the
    dashboard can be deleted, nothing depends on it.
 3. `pg_dump` Supabase (custom format) to two places. Verify it restores.
 4. Run the pipeline on the staging Postgres from a fresh dump of the old production host
-   (**`SUBSCRIPTION_ENABLED=0 rehearse.py --dump … --db <name>`** — the expense receipts load
-   at the end of 03 since 2026-09-28, so there is no `--attachments` step any more; the flag is
-   what makes `m1a01` skip its revocation; the log must say `m1a01: skipped` — then
+   (**`rehearse.py --dump … --db <name>`** — the expense receipts load at the end of 03 since
+   2026-09-28, so there is no `--attachments` step any more; `m1a01` is a no-op since 2026-10-01
+   and the log must say `m1a01: no-op` — then
    `ALTER SCHEMA pettycash_test RENAME TO pettycashv3`). All checks OK or **stop and reopen on
    the old schema** — nothing has changed yet. Supabase's own `pettycashv2` is not the source
    (decision 2: its test entities are discarded).
@@ -1899,33 +1928,35 @@ Cutover day repeats steps 3–8 with the window's backup.
    (2 rows each; `cutover_checks.py` does not cover it — check the page in step 7.)
 6. Deploy the phase-C builds of Minty, `billing-backend`, `onboarding-backend` (Render, from the
    branches green on Postgres since phase C), **`minty-billing-api`**, and the frontends
-   (`billing-frontend`, `onboarding`, **`minty-web`**) — seven apps, all with the switch off
-   (step 2's values stay).
+   (`billing-frontend`, `onboarding`, **`minty-web`**) — seven apps, the scheduler flag off
+   everywhere (step 2's value stays). **Remove `SUBSCRIPTION_ENABLED` and
+   `NEXT_PUBLIC_SUBSCRIPTION_ENABLED` from every service's env** - nothing reads them since
+   2026-10-01, and a stale `=0` would only mislead.
 7. Smoke: seed (`FLASK_ENV=production scripts/e2e_seed.py --print` + the disposable onboarding
-   entity), then the three existing e2e suites and `minty-web`'s dark spec against the production
-   URLs with `E2E_SUBSCRIPTIONS=0` (the 2026-09-18 runs are the template: env names in each
-   suite's helpers; add `E2E_XERO=1` only if the e2e shop has been linked to a Demo Company again
-   — the restore drops the link); `curl <BILLING_API>/healthz` = 200 and
-   `curl <BILLING_API>/api/me/subscriptions` = 404 with `Access-Control-Allow-Origin`; the manual
+   entity), then the four e2e suites (Minty, onboarding, billing-frontend, `minty-web`) against
+   the production URLs (the 2026-09-18 runs are the template: env names in each suite's helpers;
+   add `E2E_XERO=1` only if the e2e shop has been linked to a Demo Company again — the restore
+   drops the link); `curl <BILLING_API>/healthz` = 200 and `curl <BILLING_API>/api/me/subscriptions`
+   = 401 (live, unauthenticated) with `Access-Control-Allow-Origin`; the manual
    checklist = `cutover_checks.py --uri <project> --old-uri <rehearsal db>` (the e2e shop's own
    rows are the only expected difference); `audit_models.py` against production = 0 for all three
    Django repos; `rehearse.py` exited 0 on the window's dump and the checks match the rehearsal's
    numbers row for row; a report's totals, a bill's audit trail and a payer's invoices read the
    same before and after for three hand-picked entities, recorded in the cutover log.
-8. Reopen: end the maintenance hold. **Subscriptions stay dark** — `SUBSCRIPTION_ENABLED` and
-   the scheduler flag stay 0 everywhere — so there is no scheduler cycle to watch and no
-   webhook to re-enable. Watch the logs for one business day.
-8b. **Launch day (later, its own decision):** `SUBSCRIPTION_ENABLED=1` — **`minty-billing-api`
-   first, then `minty-web` and billing-frontend, then Minty and onboarding-backend** (a
-   half-flipped state is safe only with the API on first; switching on grants nothing and starts
-   nothing); then `manage.py subscriptions revoke-ungranted` on `minty-billing-api` (dry) → read
-   the list → `--apply` (the modules no subscription backs switch off; each company starts its
-   own trial from the module page); then `SUBSCRIPTION_SCHEDULER_ENABLED=1` on
-   `minty-billing-api` (the restart starts the thread); watch one full pass at 05:00 HKT. The
-   support announcement belongs to this day, not to the cutover.
+8. Reopen: end the maintenance hold. Subscriptions are live the moment the services answer
+   (there is no dark switch since 2026-10-01) - but **no money moves until 8b**: the scheduler
+   flag is still 0 everywhere, every company's modules are on as carried over, and nothing
+   starts a trial or a charge except a person pressing a button on the module page. Watch the
+   logs for one business day.
+8b. **Launch day (later, its own decision):** `manage.py subscriptions revoke-ungranted` on
+   `minty-billing-api` (dry) → read the list → `--apply` (the modules no subscription backs
+   switch off; each company starts its own trial from the module page); then
+   `SUBSCRIPTION_SCHEDULER_ENABLED=1` on **`minty-billing-api` only** (the restart starts the
+   thread; Minty's stays 0 - the two engines share the database); watch one full pass at 05:00
+   HKT. The support announcement belongs to this day, not to the cutover.
 9. **Rollback** (only inside the window, before step 8): redeploy the previous images — they
    still read `pettycashv2`, which was never touched; `DROP SCHEMA pettycashv3 CASCADE`; the two
-   new services hold no state — leave them dark or suspended. After step 8, forward-fix only —
+   new services hold no state — leave them suspended. After step 8, forward-fix only —
    `pettycashv2` is read-only reference.
 10. The old `pettycashv2` schema stays **6 weeks**, then is dropped. Regenerate
     `docs/schema/pettycashv2_schema.sql` from the new production (as `pettycashv3`) and update
@@ -1943,9 +1974,10 @@ Cutover day repeats steps 3–8 with the window's backup.
 - **billing-backend: no change.** billing-frontend: only the cut list, the links and the notice
   base URL. onboarding (Next): only the All Set retry. onboarding-backend: one client module,
   one env var, a native finalize, no `migrations/`, no Stripe.
-- The dark 404 contract the three e2e suites pin, `module_plain_section.html`,
-  `entity_settings_module_toggle`, `POST /api/onboarding/modules`, `flask modules set|show`,
-  `m1a01`'s skip, the `scripts/e2e_seed.py` identities.
+- `POST /api/onboarding/modules`, `flask modules set|show`, the `scripts/e2e_seed.py`
+  identities. (The dark 404 contract, `module_plain_section.html`,
+  `entity_settings_module_toggle` and `m1a01`'s skip were on this list until 2026-10-01, when
+  the dark switch and the Jinja module page were removed - see the note at the top of step 5.)
 
 ## Risks and traps specific to this cut
 
@@ -1954,9 +1986,9 @@ Cutover day repeats steps 3–8 with the window's backup.
    payer guards ×4, `user_management/routes/approve_reject_access.py`,
    `entity/services/modules.py::_entity_customer_id`); a guard test asserts `store_ro` never
    adds or commits.
-2. **`entity_function_map` double writers**: Flask writes while dark (the toggle), during the
-   wizard (`/api/onboarding/modules`, the entity-create defaults) and from `flask modules set`;
-   Django writes the projection when live and never for `status = onboarding` entities (the
+2. **`entity_function_map` double writers**: Flask writes during the wizard
+   (`/api/onboarding/modules`, the entity-create defaults) and from `flask modules set`;
+   Django writes the projection and never for `status = onboarding` entities (the
    sweep's existing exemption). Both must produce the same row shape — `audit_models.py` covers
    the columns; one cross-repo test proves a Django `set_entity_module` row reads back through
    Flask's `_is_module_enabled`.

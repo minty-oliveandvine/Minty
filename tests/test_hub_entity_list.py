@@ -127,11 +127,6 @@ def test_every_bad_token_is_one_401_the_browser_can_read(app, client, people, hu
     assert resp.headers["Access-Control-Allow-Origin"] == HUB
 
 
-def test_it_answers_while_subscriptions_are_dark(app, client, people, hub, monkeypatch):
-    monkeypatch.setenv("SUBSCRIPTION_ENABLED", "0")
-    assert _get(client, app, people["olive"].id).status_code == 200
-
-
 # --- the list --------------------------------------------------------------------------
 
 

@@ -38,7 +38,7 @@ types, the enum vocabulary (01 header item 18), nine renames, the token split, a
 handful of things item 19 lists. One run on the production dataset:
 
 ```
-SUBSCRIPTION_ENABLED=0 PYTHONUTF8=1 python scripts/schema_migration/rehearse.py --from-db production-backup --db pcreh_github7d_upcheck
+PYTHONUTF8=1 python scripts/schema_migration/rehearse.py --from-db production-backup --db pcreh_github7d_upcheck
     restore 4.6s · snapshot 0.1s · upgrade 20.4s · upgrade-check 0.6s · build 0.5s · 00 0.1s · 02 1.6s · 03 218.4s · manifest 0.9s
     total 247s  → maintenance window 8 min          ALL GREEN   (2026-09-28, the 09-25 data: 5,078 of 5,176 reports,
                                                     13,866 receipt links, 485 expense rows dropped by the upgrade and

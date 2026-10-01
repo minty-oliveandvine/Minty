@@ -14,7 +14,6 @@ from flask_login import current_user, login_required
 from iso4217 import Currency
 from loguru import logger
 
-from blueprints.shared.feature_flags import subscriptions_enabled
 from blueprints.entity import entity_bp
 from blueprints.shared.enums import EntityStatus
 from blueprints.shared import bearer_api
@@ -705,11 +704,6 @@ def onboarding_plans():
         resp.status_code = 401
         return _cors(resp)
 
-    if not subscriptions_enabled():
-        # dark: nothing to quote. An empty list is what the wizard already treats as
-        # "no summary", and the flag lets it hide the billing sheet too.
-        return _cors(jsonify({"plans": [], "subscriptions_enabled": False}))
-
     # Lazy import — pulls in the model graph and the Stripe layer.
     from blueprints.entity.services.modules import get_module_plan_catalog
 
@@ -723,7 +717,6 @@ def onboarding_plans():
         resp.status_code = 503
         return _cors(resp)
 
-    data["subscriptions_enabled"] = True
     return _cors(jsonify(data))
 
 
@@ -779,8 +772,6 @@ def onboarding_payment_method_status():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     user_id = _user_id_from_bearer()
     if not user_id:
@@ -851,8 +842,6 @@ def onboarding_payment_method_setup():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     user_id = _user_id_from_bearer()
     if not user_id:
@@ -904,8 +893,6 @@ def onboarding_payment_method_complete():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     user_id = _user_id_from_bearer()
     if not user_id:
@@ -990,8 +977,6 @@ def onboarding_billing_payment_methods():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     from blueprints.subscription.services import payment_methods
 
@@ -1015,8 +1000,6 @@ def onboarding_billing_setup_intent():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     from blueprints.subscription.services import payment_methods
 
@@ -1038,8 +1021,6 @@ def onboarding_billing_confirm():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     from blueprints.subscription.services import payment_methods
 
@@ -1080,8 +1061,6 @@ def onboarding_billing_set_default():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     from blueprints.subscription.services import payment_methods
 
@@ -1115,8 +1094,6 @@ def onboarding_billing_accounts():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     from blueprints.subscription.services import payment_methods
 
@@ -1167,8 +1144,8 @@ def onboarding_billing_authorize():
     entity, and lets it lapse otherwise. So this is the difference between "converts" and
     "expires", not between "trial" and "charged now".
 
-    ``payment_method`` is nominated BEFORE consent is recorded, exactly as the in-app twin
-    ``entity_settings_module_authorize_billing`` does it: authorising a charge while the
+    ``payment_method`` is nominated BEFORE consent is recorded, exactly as the Module page's
+    ``authorize-billing`` action (minty-billing-api) does it: authorising a charge while the
     company still points at a different card authorises one the payer was never shown.
 
     IT IS WHAT LETS ONBOARDING STOP SETTING THE ACCOUNT DEFAULT. The sheet used to make
@@ -1193,8 +1170,6 @@ def onboarding_billing_authorize():
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():  # the feature is dark: no such route
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
 
     user_id = _user_id_from_bearer()
     if not user_id:
@@ -1372,24 +1347,19 @@ def onboarding_finalize():
         # Start card-free Stripe trials for the modules the wizard enabled. The
         # subscription webhook keeps entity_function_map in lock-step. Best-effort:
         # a Stripe hiccup must not fail onboarding finalize.
-        #
-        # Subscriptions dark: nothing is started. The modules step 2 switched on stay
-        # on - ``entity_function_map`` is the record while the feature is off - and the
-        # All Set screen has no trial to state (``trial_end`` stays null below).
-        if subscriptions_enabled():
-            try:
-                from blueprints.subscription.services.checkout import (
-                    start_trials_for_enabled_modules,
-                )
-                from models.db import User
+        try:
+            from blueprints.subscription.services.checkout import (
+                start_trials_for_enabled_modules,
+            )
+            from models.db import User
 
-                user = User.query.get(str(user_id))
-                start_trials_for_enabled_modules(entity, user)
-            except Exception:
-                current_app.logger.exception(
-                    "onboarding finalize: failed to start trials for entity %s",
-                    entity_id,
-                )
+            user = User.query.get(str(user_id))
+            start_trials_for_enabled_modules(entity, user)
+        except Exception:
+            current_app.logger.exception(
+                "onboarding finalize: failed to start trials for entity %s",
+                entity_id,
+            )
 
     # The trial's end date, for the All Set screen to state rather than guess.
     #
@@ -1403,10 +1373,6 @@ def onboarding_finalize():
     # best-effort, and an entity finalised before trials existed has no rows at all. The
     # screen omits the date rather than inventing one.
     trial_end = None
-    if not subscriptions_enabled():
-        resp = jsonify({"status": "success", "trial_end": None, "subscriptions_enabled": False})
-        resp.status_code = 200
-        return _cors(resp)
     try:
         from models.db import EntityModuleSubscription
 

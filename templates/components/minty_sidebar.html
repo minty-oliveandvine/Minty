@@ -47,7 +47,6 @@
           <span class="msb-icon-28" aria-hidden="true"><img src="{{ url_for('static', filename=_img ~ 'select-entity.svg') }}" alt="" width="22" height="20"></span>
           Select Entity
         </a>
-        {% if subscriptions_enabled %}
         <a href="{{ sb.links.subscriptions }}" class="msb-row msb-idle msb-row-subscriptions">
           <span class="msb-subs-icon" aria-hidden="true">
             <img class="msb-subs-ring" src="{{ url_for('static', filename=_img ~ 'subscriptions-ring.svg') }}" alt="" width="22" height="23">
@@ -57,7 +56,6 @@
           </span>
           <span class="msb-label-narrow">Manage subscriptions</span>
         </a>
-        {% endif %}
       </div>
       <div class="msb-sep-after-links"><div class="msb-sep" role="presentation"></div></div>
 
@@ -190,8 +188,7 @@
             </form>
           </section>
 
-          {# The subscription feature's "Subscriptions Overview" - not even drawn while subscriptions are dark #}
-          {% if subscriptions_enabled %}
+          {# The subscription feature's "Subscriptions Overview" (features/subscription SubscriptionsOverviewCard) #}
           <section class="msb-subs" aria-labelledby="msb-subs-title" data-subs hidden>
             <h2 class="msb-subs-title" id="msb-subs-title">Subscriptions Overview</h2>
             <div class="msb-subs-card">
@@ -218,7 +215,6 @@
               </div>
             </div>
           </section>
-          {% endif %}
         </div>
 
         <a href="{{ sb.links.logout }}" class="msb-logout-link">

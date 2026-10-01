@@ -97,16 +97,6 @@ export function moneyRegex(amount: number): RegExp {
 }
 
 /**
- * The mode the stack under test runs in. ``E2E_SUBSCRIPTIONS=0`` says the backends were
- * started with ``SUBSCRIPTION_ENABLED=0`` (subscriptions dark, the cutover state); unset
- * or ``1`` means live. Specs that show different screens in the two states branch on it.
- */
-export function subscriptionsDark(): boolean {
-  const raw = (process.env.E2E_SUBSCRIPTIONS ?? '1').trim().toLowerCase();
-  return raw === '0' || raw === 'false' || raw === 'off';
-}
-
-/**
  * The e2e shop is connected to a real Xero organisation (a Demo Company, linked by hand) when
  * ``E2E_XERO=1``: the publish spec runs, and the names below are the organisation's real rows
  * rather than the seed's placeholders (scripts/e2e_seed.py leaves a connected shop's mapping

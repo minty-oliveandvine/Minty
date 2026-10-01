@@ -25,7 +25,6 @@ of inline JS that reads the field names and JSON keys the schema redesign rename
 
 Override the base URL with `E2E_BASE_URL` (a deployed host works: the seed then needs the
 deployment's database, so run it with the `.env` that points there).
-`E2E_SUBSCRIPTIONS=0` says Flask runs with `SUBSCRIPTION_ENABLED=0` (subscriptions dark).
 
 ## The seeded identity
 

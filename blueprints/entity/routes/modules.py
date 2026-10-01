@@ -37,7 +37,6 @@ from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
 from services.permission_policy import Role, is_superuser
 from services.user_presence import resume_presence
 from blueprints.shared.enums import ModuleCode
-from blueprints.shared.feature_flags import subscriptions_enabled
 
 #: How long every module token this app mints lives (``_generate_module_token``).
 MODULE_TOKEN_MINUTES = 30
@@ -215,12 +214,30 @@ def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
     )
 
 
+def minty_web_module_page_path(entity_id) -> str:
+    """minty-web's module settings page of one company, as a path on minty-web's origin."""
+    return f"/subscription/entities/{entity_id}/modules"
+
+
 def minty_web_module_page_url(org: Entity, user_id, *, from_bills: bool = False) -> str:
     """minty-web's module settings page of ``org`` (Part 2 step 4a), through the landing."""
-    path = f"/subscription/entities/{org.id}/modules"
+    path = minty_web_module_page_path(org.id)
     if from_bills:
         path += "?from=bills"
     return minty_web_landing_url(path, org, user_id)
+
+
+def minty_web_module_page_handoff(entity_id) -> str:
+    """The module page as a link Flask authenticates at the CLICK, not when it is drawn:
+    ``/handoff/minty-web?next=<module page>&entity_id=``. For links that wait on a page or a
+    dialog (the subscription notice) - a token minted at render time lapses after
+    ``MODULE_TOKEN_MINUTES``. A path on this app's origin, so the payments app can hand it
+    to ``buildMintyEnterUrl`` like any other Minty path."""
+    return url_for(
+        "entity.handoff_minty_web",
+        next=minty_web_module_page_path(entity_id),
+        entity_id=str(entity_id),
+    )
 
 
 #: minty-web's hub pages (``MINTY_WEB_HUB``): the entity list and My Profile.
@@ -305,13 +322,12 @@ def open_profile():
     """Every "open my profile" link in Minty and the payments app comes here:
     ``?entity_id=<company it was opened from>&from=bills``.
 
-    One place decides WHICH profile opens: minty-web's when ``MINTY_WEB_HUB`` is on,
-    billing-frontend's otherwise. Minted here, at the click, rather than when the page that
-    carries the link renders - a link minted at render time held a 30-minute token, and a
-    page left open longer than that sent its avatar to an expired landing.
+    Always minty-web's My Profile: billing-frontend's profile page was deleted on 2026-10-01
+    (that app holds only Payment Request now), and its old ``/profile`` address forwards
+    here. Minted here, at the click, rather than when the page that carries the link
+    renders - a link minted at render time held a 30-minute token, and a page left open
+    longer than that sent its avatar to an expired landing.
     """
-    from blueprints.shared.feature_flags import minty_web_hub
-
     from_bills = request.args.get("from") == "bills"
     entity_id = (request.args.get("entity_id") or "").strip()
     org = None
@@ -323,11 +339,7 @@ def open_profile():
             flash("Hmm, it looks like you don't have permission to look there.", "danger")
             return redirect(url_for("entity.entity_list"))
 
-    if minty_web_hub():
-        return redirect(minty_web_profile_url(org, current_user.id, from_bills=from_bills))
-    if org is not None:
-        return redirect(billing_app_profile_url(org.id, org, current_user.id, from_bills=from_bills))
-    return redirect(billing_app_profile_unscoped_url(str(current_user.id), from_bills=from_bills))
+    return redirect(minty_web_profile_url(org, current_user.id, from_bills=from_bills))
 
 
 @entity_bp.route("/entity/<string:entity_id>/enter")
@@ -581,36 +593,6 @@ def billing_settings_app_url(entity_id: str, org: Entity, user_id, *, from_bills
     return url
 
 
-def billing_app_profile_url(entity_id: str, org: Entity, user_id, *, from_bills: bool = False) -> str:
-    """Handoff URL for Module 2 profile page."""
-    profile_seg = (
-        os.environ.get("PAYMENT_REQUEST_PROFILE_PATH")
-        or os.environ.get("BILLING_PROFILE_PATH")
-        or "profile"
-    ).strip("/")
-    next_arg = f"/{profile_seg}" if profile_seg else "/profile"
-    role = _resolve_user_entity_role(user_id, entity_id)
-    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
-    petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
-    token = _generate_module_token(
-        user_id,
-        entity_id,
-        org.xero_org_id,
-        role,
-        billing_enabled=billing_enabled,
-        petty_cash_enabled=petty_cash_enabled,
-    )
-    entity_name = quote(org.name or "", safe="")
-    url = (
-        f"{_frontend_origin()}/landing"
-        f"?next={next_arg}"
-        f"&entity_id={entity_id}&entity_name={entity_name}&token={token}"
-    )
-    if from_bills:
-        url += "&from=bills"
-    return url
-
-
 def _notice_cors(resp):
     """Let the Module 2 frontend call this cross-origin (bearer-token auth).
 
@@ -645,8 +627,6 @@ def subscription_notice_api(entity_id):
 
     if request.method == "OPTIONS":
         return _notice_cors(make_response("", 204))
-    if not subscriptions_enabled():  # dark: no notice exists; the caller treats non-200 as none
-        return _notice_cors(make_response(jsonify({"error": "not_found"}), 404))
 
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
@@ -698,42 +678,8 @@ def subscription_notice_api(entity_id):
         )
         return _notice_cors(make_response(jsonify({"items": []}), 200))
 
-    # A Minty PATH, not a URL: subscription management lives on this side, and the
-    # frontend's buildMintyEnterUrl() already knows how to hand its token back for a
-    # session. Returning a bare origin here would skip that and land on the login form.
-    notice["settings_path"] = url_for(
-        "entity.entity_settings_module", org_id=entity_id
-    )
+    # A Minty PATH, not a URL: the frontend's buildMintyEnterUrl() hands its token back
+    # for a session first, and this path then sends the browser on to minty-web's Module
+    # page. Returning a bare origin here would skip that and land on the login form.
+    notice["settings_path"] = minty_web_module_page_handoff(entity_id)
     return _notice_cors(make_response(jsonify(notice), 200))
-
-
-def billing_app_profile_unscoped_url(
-    user_id, *, from_bills: bool = False, next_path: str | None = None
-) -> str:
-    """Handoff URL for Module 2 profile with no entity context (Select Company).
-
-    ``next_path`` lands the recipient somewhere DEEPER than the profile root, and exists
-    for the subscriber-handover email: its whole purpose is to put someone in front of one
-    specific request, and a link to the profile root asks them to go and find it. It must
-    still go through this function rather than straight at the frontend path — a cold
-    recipient with no session is bounced to module selection, and the minted token is what
-    stops that.
-    """
-    profile_seg = (
-        os.environ.get("PAYMENT_REQUEST_PROFILE_PATH")
-        or os.environ.get("BILLING_PROFILE_PATH")
-        or "profile"
-    ).strip("/")
-    next_arg = f"/{profile_seg}" if profile_seg else "/profile"
-    if next_path:
-        next_arg = "/" + str(next_path).lstrip("/")
-    role = _resolve_user_entity_role(user_id, "")
-    token = _generate_module_token(user_id, "", None, role)
-    url = (
-        f"{_frontend_origin()}/landing"
-        f"?next={next_arg}"
-        f"&token={token}"
-    )
-    if from_bills:
-        url += "&from=bills"
-    return url

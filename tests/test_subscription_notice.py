@@ -20,7 +20,6 @@ the tests feed synthetic ones and assert on the reading.
 """
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -134,25 +133,6 @@ def test_past_due_without_a_deadline_still_says_something_actionable(notices):
     assert "payment method" in result["items"][0]["detail"]
 
 
-def test_trial_without_a_card_is_distinguished_from_one_needing_consent(notices):
-    """Two reasons a trial won't convert, and the fix differs — so must the copy."""
-    no_card = notices(
-        [_card("PETTY_CASH", "Petty Cash", needs_card=True,
-               period_end_long="19 Aug 2026")]
-    )["items"][0]
-    consent = notices(
-        [_card("PETTY_CASH", "Petty Cash", needs_card=True, needs_consent_only=True,
-               period_end_long="19 Aug 2026")]
-    )["items"][0]
-
-    assert no_card["kind"] == "needs_card"
-    assert "Add a payment method" in no_card["title"]
-
-    assert consent["kind"] == "needs_consent"
-    assert "Confirm billing" in consent["title"]
-    assert "other companies" in consent["detail"]
-
-
 def test_pending_cancel_reports_when_access_ends(notices):
     result = notices(
         [_card("PAYMENT_REQUEST", "Payment", pending_cancel=True, access_end_long="1 Sep 2026")]
@@ -164,105 +144,49 @@ def test_pending_cancel_reports_when_access_ends(notices):
     assert "won't be billed again" in item["detail"]
 
 
-# --- the trial-ending window ------------------------------------------------
+# --- trials say nothing -----------------------------------------------------
 
 
-def test_a_trial_ending_soon_is_announced(notices):
-    soon = datetime.now(UTC) + timedelta(days=2)
+def test_a_cancelled_trial_running_out_is_not_announced(notices):
+    """``pending_cancel`` is set for a cancelled free trial too (cards.py: it is still a
+    trial, running out its free days). That is a trial notice, so it says nothing - only
+    a PAID module winding down does."""
     result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               period_end=soon, period_end_long="10 Aug 2026")]
-    )
-
-    assert result["items"][0]["kind"] == "trial_ending"
-    assert result["items"][0]["severity"] == "info"
-
-
-def test_a_trial_ending_far_off_is_announced_too(notices):
-    """No window: a running trial carries its first-charge date from day one.
-
-    This used to be silent outside a 7-day window. It isn't, because the point of
-    the line is that nobody can say they were never told the date — which is only
-    true if it is there before the last week.
-    """
-    later = datetime.now(UTC) + timedelta(days=45)
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               period_end=later, period_end_long="30 Sep 2026")]
-    )
-
-    assert result["items"][0]["kind"] == "trial_ending"
-    assert "30 Sep 2026" in result["items"][0]["detail"]
-
-
-def test_a_trial_titles_the_state_not_a_countdown(notices):
-    """"is ending" on day one of thirty reads as a bug."""
-    later = datetime.now(UTC) + timedelta(days=45)
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               period_end=later, period_end_long="30 Sep 2026")]
-    )
-
-    assert result["items"][0]["title"] == "Petty Cash is on a free trial"
-
-
-def test_a_trial_past_its_end_date_is_not_announced(notices):
-    """It has ended, not "is ending" — the sweep is what speaks next."""
-    past = datetime.now(UTC) - timedelta(days=3)
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               period_end=past, period_end_long="1 Aug 2026")]
+        [_card("PETTY_CASH", "Petty Cash", pending_cancel=True, trial_cancelled=True,
+               access_end_long="1 Sep 2026", subscription_status="trialing")]
     )
 
     assert result["items"] == []
 
 
-def test_a_trial_still_being_closed_out_keeps_its_notice(notices):
-    """The one exception, and it does not contradict the rule above.
-
-    ``trial_closing`` means the term has passed but the subscription pass has not closed
-    the trial out yet and the customer still has access — a window of under an hour. The
-    notice carries "the first charge is coming, on this date", so dropping it here would
-    remove that message in the final minutes before the charge, which is when it is most
-    worth having on screen. It would also make the page visibly rearrange itself for a
-    state nobody can act on.
-
-    The card above has no ``trial_closing`` flag at all, which is what keeps a genuinely
-    stale trial silent.
-    """
-    past = datetime.now(UTC) - timedelta(minutes=20)
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               period_end=past, period_end_long="12 Aug 2026", trial_closing=True)]
-    )
-
-    assert [i["kind"] for i in result["items"]] == ["trial_ending"]
-    assert result["items"][0]["title"] == "Petty Cash is on a free trial"
-
-
-def test_the_window_can_be_restored(notices, monkeypatch):
-    """TRIAL_ENDING_SOON_DAYS = int goes back to warning only near the end."""
-    monkeypatch.setattr(
-        "blueprints.entity.services.modules.TRIAL_ENDING_SOON_DAYS", 7
-    )
-    later = datetime.now(UTC) + timedelta(days=45)
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               period_end=later, period_end_long="30 Sep 2026")]
-    )
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # a healthy trial that will convert, early and late in its term
+        dict(subscription_status="trialing",
+             period_end=datetime.now(UTC) + timedelta(days=25), period_end_long="19 Aug 2026"),
+        dict(subscription_status="trialing",
+             period_end=datetime.now(UTC) + timedelta(days=2), period_end_long="19 Aug 2026"),
+        # the term has passed and the pass has not closed it out yet
+        dict(subscription_status="trialing", trial_closing=True,
+             period_end=datetime.now(UTC) - timedelta(hours=1)),
+        # a trial that will NOT convert: no card at all / a card but no consent for this company
+        dict(subscription_status="trialing", needs_card=True, period_end_long="19 Aug 2026"),
+        dict(subscription_status="trialing", needs_card=True, needs_consent_only=True,
+             period_end_long="19 Aug 2026"),
+        # a lapsed trial: the gate is off and the restart screen could fix it
+        dict(trial_expired=True, has_access=False, access_end_long="1 Aug 2026"),
+    ],
+    ids=["running-early", "running-late", "closing", "no-card", "no-consent", "lapsed"],
+)
+def test_no_trial_state_produces_a_notice(notices, overrides):
+    """Every TRIAL notice was removed on 2026-10-01 (the user's decision): trial ending,
+    a trial that will not convert, a lapsed trial. The trial-ending EMAIL still warns a
+    trial that will not convert, and minty-web's Module page shows every trial's state."""
+    result = notices([_card("PETTY_CASH", "Petty Cash", **overrides)])
 
     assert result["items"] == []
-
-
-def test_a_trial_that_wont_convert_reports_the_fix_not_the_countdown(notices):
-    """needs_card wins over trial_ending: "add a card" is the actionable half."""
-    soon = datetime.now(UTC) + timedelta(days=1)
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", subscription_status="trialing",
-               needs_card=True, period_end=soon, period_end_long="5 Aug 2026")]
-    )
-
-    assert [i["kind"] for i in result["items"]] == ["needs_card"]
+    assert result["severity"] is None
 
 
 # --- the list ---------------------------------------------------------------
@@ -666,9 +590,17 @@ def test_notice_api_returns_the_items_and_a_minty_settings_path(app, notice_api)
     assert res.status_code == 200
     body = res.get_json()
     assert body["items"][0]["kind"] == "past_due"
-    # A PATH, not a URL: the frontend wraps it in buildMintyEnterUrl so its token
-    # buys a Flask session. A bare origin would land on the login form instead.
-    assert body["settings_path"] == "/entity/settings/module/entity-1"
+    # A PATH on Minty, not a URL: the frontend wraps it in buildMintyEnterUrl so its
+    # token buys a Flask session first; Flask then hands the browser to minty-web's
+    # Module page (the hand-over is authenticated at the click, not at render).
+    from urllib.parse import parse_qs, urlsplit
+
+    parts = urlsplit(body["settings_path"])
+    assert (parts.scheme, parts.netloc, parts.path) == ("", "", "/handoff/minty-web")
+    assert parse_qs(parts.query) == {
+        "next": ["/subscription/entities/entity-1/modules"],
+        "entity_id": ["entity-1"],
+    }
 
 
 def test_notice_api_survives_a_builder_failure(app, notice_api, monkeypatch):

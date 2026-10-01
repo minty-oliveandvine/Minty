@@ -42,8 +42,7 @@ It replaced `templates/components/sidepanel.html` and the Payment Request pages'
 ## The menu
 
 Top to bottom: the Minty mark; the person (avatar + name — opens My Profile); **Select Entity**
-(`/entity`); **Manage subscriptions** (only while `SUBSCRIPTION_ENABLED`; minty-web's portal
-through `/handoff/minty-web`); inside a company only, **Petty Cash** (Dashboard, Reports) and
+(`/entity`); **Manage subscriptions** (minty-web's portal through `/handoff/minty-web`); inside a company only, **Petty Cash** (Dashboard, Reports) and
 **Payment Request** (Bills → `go_to_bills`); the cat; **Settings** (inside a company only) and
 **Logout**.
 
@@ -76,10 +75,10 @@ Drawn in the browser over the **same reads minty-web makes**, so the three apps 
 3. Edit → Save sends only what changed as `PATCH /api/me/profile`; Flask's refusal sentence is
    shown in the card; after a save the header's initials and the menu's name change at once.
    PASSWORD · Change opens the Xero account page.
-4. The **Subscriptions Overview** (only while `SUBSCRIPTION_ENABLED` — otherwise not even
-   drawn): minty-billing-api's `GET /api/me/subscriptions` (`BILLING_API_URL`, default
-   `http://localhost:8004`), which lists this app's origin (`MINTY_PUBLIC_URL`) in its CORS; a
-   404 (the API dark) hides the card. *Manage Subscription* goes to minty-web's portal.
+4. The **Subscriptions Overview**: minty-billing-api's `GET /api/me/subscriptions`
+   (`BILLING_API_URL`, default `http://localhost:8004`), which lists this app's origin
+   (`MINTY_PUBLIC_URL`) in its CORS; a failed read (any status) shows the card's "didn't load"
+   state with *Try again*. *Manage Subscription* goes to minty-web's portal.
 
 Every bearer call goes without this app's cookie (as minty-web's cross-origin calls do), so the
 session-side hooks (Terms gate, read-only superuser block) see no one; a 401 fetches one fresh
@@ -91,7 +90,7 @@ billing-frontend's cookie tokens already are, and as it already travels in every
 ## Tests
 
 `tests/test_sidebar.py` — the menu on each kind of page (in a company, a module off, the entity
-list, subscriptions dark, the Payment Request pages, a company without Petty Cash), where every
+list, the Payment Request pages, a company without Petty Cash), where every
 item leads, the token route, the hub answering billing-frontend's origin by name, the dashboard's
 setup links, every page family carrying the partial and none of the old drawers. The drawer's
 behaviour was checked live on 2026-09-30 (menu 353 px, profile 440 px and full width at 375,

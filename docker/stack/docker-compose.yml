@@ -330,8 +330,8 @@ services:
   # Subscriptions API — minty-billing-api (Part 2 of the modernisation plan).
   # Django + django-ninja on Python 3.13 against the SAME schema, managed = False
   # models and no migrations of its own. The single Stripe writer once the engine
-  # is ported; verifies Flask's token, never mints one. Dark unless
-  # SUBSCRIPTION_ENABLED=1 (every route 404s, the in-process scheduler stays off).
+  # is ported; verifies Flask's token, never mints one. Its in-process scheduler runs
+  # only with SUBSCRIPTION_SCHEDULER_ENABLED=1.
   # ---------------------------------------------------------------------------
   billing-api:
     build:
@@ -363,8 +363,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-minty_ref_pass}
       DB_HOST: db
       DB_PORT: "5432"
-      # The two switches, deployed with the same value as Minty's (see .env.example).
-      SUBSCRIPTION_ENABLED: ${SUBSCRIPTION_ENABLED:-0}
+      # The daily pass; the same value as Minty's (see .env.example) - never both on.
       SUBSCRIPTION_SCHEDULER_ENABLED: ${SUBSCRIPTION_SCHEDULER_ENABLED:-0}
       # Server-to-server: the one forwarded call (invite-admin). Internal name.
       FLASK_APP_URL: http://minty:5001
@@ -419,8 +418,6 @@ services:
       NEXT_PUBLIC_BILLING_API_URL: ${BILLING_API_PUBLIC_URL:-http://localhost:8004}
       NEXT_PUBLIC_MINTY_URL: ${MINTY_PUBLIC_URL:-http://localhost:5001}
       NEXT_PUBLIC_PAYMENTS_WEB_URL: ${BILLING_FRONTEND_PUBLIC_URL:-http://localhost:3000}
-      # ON unless 0 (the app's default is the opposite of the backends' - README §6).
-      NEXT_PUBLIC_SUBSCRIPTION_ENABLED: ${NEXT_PUBLIC_SUBSCRIPTION_ENABLED:-1}
       NODE_ENV: development
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"

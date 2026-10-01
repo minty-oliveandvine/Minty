@@ -15,40 +15,14 @@ Two halves, and the second is the one that matters:
   * the page hides the actions for anyone who is not the payer;
   * every route refuses them, because hiding a button is not a permission.
 
+The routes half (``@require_subscription_payer`` on every money route) is pinned in
+minty-billing-api now: Flask's session routes went with its Jinja module page on 2026-10-01,
+and ``store.may_manage_subscription`` below is the rule they shared.
+
 An entity with NO payer is open to any admin — starting the first trial or subscription
 is precisely what establishes the payer.
 """
 from __future__ import annotations
-
-import re
-
-SETTINGS = r"C:\Github\Minty\blueprints\entity\routes\settings.py"
-
-# Every module-subscription route that spends or commits money, or opens the portal that
-# can. If you add one, add it here — this list is the point of the structural test.
-MONEY_ROUTES = [
-    "checkout",
-    "authorize-billing",
-    "confirm-billing",
-    "start-trial",
-    "cancel-preview",
-    "retry-payment",
-    "cancel",
-    "payment-method",
-    "renew",
-    "manage-billing",
-    # The lapsed-trial restart screen. The four card routes do not name an entity in
-    # what they act on, but they are money-adjacent and carry the same guard stack, so
-    # they belong here: without the payer check a co-admin could nominate the card the
-    # restart is about to charge.
-    "payment-methods",
-    "payment-methods/setup-intent",
-    "payment-methods/confirm",
-    "payment-methods/default",
-    "restart-quote",
-    "restart-billing",
-]
-
 
 def test_the_payer_may_manage(app, monkeypatch):
     from blueprints.subscription.services import store
@@ -100,55 +74,3 @@ def test_missing_arguments_deny(app, monkeypatch):
     with app.app_context():
         assert store.may_manage_subscription(None, "u1") is False
         assert store.may_manage_subscription("e1", None) is False
-
-
-# --- the routes ----------------------------------------------------------------
-
-
-def _decorators_for(src: str, path_segment: str) -> str:
-    """The decorator block between a route's @entity_bp.route(...) and its def."""
-    m = re.search(
-        r'@entity_bp\.route\(\s*\n?\s*"/entity/settings/module/<string:org_id>/'
-        + re.escape(path_segment)
-        + r'".*?\ndef ',
-        src,
-        re.S,
-    )
-    assert m, f"route {path_segment} not found"
-    return m.group(0)
-
-
-def test_every_money_route_requires_the_payer():
-    """Hiding the buttons is presentation. This is the permission.
-
-    Asserted structurally rather than by calling each route: the guard is a decorator,
-    and a route that simply forgot it would pass any behavioural test written against the
-    payer's own session.
-    """
-    src = open(SETTINGS, encoding="utf-8").read()
-
-    missing = [
-        seg for seg in MONEY_ROUTES
-        if "require_subscription_payer" not in _decorators_for(src, seg)
-    ]
-    assert missing == [], f"unguarded money routes: {missing}"
-
-
-def test_the_money_routes_also_still_require_the_permission():
-    """Being the payer is necessary, not sufficient — an entity admin who stops being an
-    admin must not keep the buttons because they happen to hold the card."""
-    src = open(SETTINGS, encoding="utf-8").read()
-
-    missing = [
-        seg for seg in MONEY_ROUTES
-        if "require_permission" not in _decorators_for(src, seg)
-    ]
-    assert missing == [], f"routes missing the permission guard: {missing}"
-
-
-def test_the_stripe_return_leg_is_not_payer_guarded():
-    """checkout-complete is the GET Stripe redirects back to. Refusing it would strand a
-    payment that has ALREADY happened, leaving the customer charged and unentitled."""
-    src = open(SETTINGS, encoding="utf-8").read()
-
-    assert "require_subscription_payer" not in _decorators_for(src, "checkout-complete")

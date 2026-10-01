@@ -2,7 +2,7 @@
 // users, the Xero page, the module page, and the CSV export. These pages read the tables the
 // redesign reshapes most (sale_info / entity_sale_setting, entity_pettycash_settings, entities).
 import { expect, test } from '@playwright/test';
-import { login, moneyRegex, reportDate, requireCredentials, requireStack, subscriptionsDark, fixtures, xeroLive } from './helpers';
+import { login, moneyRegex, reportDate, requireCredentials, requireStack, fixtures, xeroLive } from './helpers';
 
 test.describe('entity settings', () => {
   let entityId = '';
@@ -97,65 +97,17 @@ test.describe('entity settings', () => {
     await expect(name).toHaveValue('E2E Petty Cash Shop');
   });
 
-  test('module page shows Petty Cash on and the subscription entry point', async ({ page }) => {
-    await page.goto(`/entity/settings/module/${entityId}`);
-    await expect(page.getByRole('heading', { name: 'Petty Cash' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Payment Request' })).toBeVisible();
-    if (subscriptionsDark()) {
-      // the cutover state: an admin's on/off switch per module, and nothing that quotes
-      await expect(page.locator('[data-module-switch="PETTY_CASH"]')).toHaveAttribute('aria-checked', 'true');
-      await expect(page.locator('[data-module-switch="PAYMENT_REQUEST"]')).toBeVisible();
-      await expect(page.getByRole('heading', { name: /your subscription/i })).toHaveCount(0);
-      await expect(page.getByText(/free trial/i)).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
-      return;
-    }
-    await expect(page.getByRole('heading', { name: /your subscription/i })).toBeVisible();
-  });
-
-  test('dark: a switch is pending until Save; Save repaints the tabs and the side panel, no reload', async ({ page }) => {
-    test.skip(!subscriptionsDark(), 'the switch exists only while subscriptions are dark');
-    await page.goto(`/entity/settings/module/${entityId}`);
-    const pr = page.locator('[data-module-switch="PAYMENT_REQUEST"]');
-    const status = page.locator('[data-module-status="PAYMENT_REQUEST"]');
-    const tab = page.locator('[data-module-tab="PAYMENT_REQUEST"]');
-    const nav = page.locator('[data-module-nav="PAYMENT_REQUEST"]');
-    const save = page.getByRole('button', { name: 'Save' });
-    const before = (await pr.getAttribute('aria-checked')) === 'true';
-    const word = (on: boolean) => (on ? 'active' : 'not active');
-    const shown = async (on: boolean) => {
-      // what the eye gets: the tab is in the tab row; the side panel group sits in the
-      // (closed, off-screen) drawer, so its display style is the thing to read
-      if (on) await expect(tab).toBeVisible();
-      else await expect(tab).toBeHidden();
-      await expect(nav).toHaveCSS('display', on ? 'flex' : 'none');
-    };
-    await expect(status).toHaveText(word(before));
-    await shown(before);
-    await expect(save).toBeDisabled();
-
-    // flipping is pending: the switch moves, nothing else does, Save wakes up
-    await pr.click();
-    await expect(pr).toHaveAttribute('aria-checked', String(!before));
-    await expect(status).toHaveText(word(before));
-    await shown(before);
-    await expect(save).toBeEnabled();
-
-    // Save: the status, the settings tab and the side panel follow the server's answer
-    await save.click();
-    await expect(status).toHaveText(word(!before));
-    await shown(!before);
-    await expect(save).toBeDisabled();
-    // and a reload agrees - the server has it
-    await page.reload();
-    await expect(page.locator('[data-module-status="PAYMENT_REQUEST"]')).toHaveText(word(!before));
-    await shown(!before);
-
-    // and back, so the seeded shop is left as it was
-    await page.locator('[data-module-switch="PAYMENT_REQUEST"]').click();
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.locator('[data-module-status="PAYMENT_REQUEST"]')).toHaveText(word(before));
-    await shown(before);
+  test('the Module tab hands the browser to minty-web with a token for the company', async ({ page }) => {
+    // Flask's Jinja module page was deleted on 2026-10-01: the address is a hand-over to
+    // minty-web's Module page. Read the redirect itself rather than following it - the
+    // minty-web dev server is not part of this stack.
+    const resp = await page.request.get(`/entity/settings/module/${entityId}?from=bills`, { maxRedirects: 0 });
+    expect(resp.status()).toBe(302);
+    const location = new URL(resp.headers()['location']);
+    expect(location.pathname).toBe('/landing');
+    expect(location.searchParams.get('next')).toBe(`/subscription/entities/${entityId}/modules?from=bills`);
+    expect(location.searchParams.get('entity_id')).toBe(entityId);
+    expect(location.searchParams.get('token')).toBeTruthy();
   });
 
   test('history CSV lists the posted day as movements', async ({ page }) => {

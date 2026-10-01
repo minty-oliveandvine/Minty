@@ -15,8 +15,7 @@ in `blueprints/entity/services/entity_list.py::build_entity_list`, for two reade
 - **minty-web's list** (`/entities`, the hub's "Select Company", 2026-09-29) — with
   `MINTY_WEB_HUB` on, `/entity` mints an unscoped token and sends the browser there
   (`routes/list.py::_to_minty_web_list`), which reads `GET /api/me/entities`
-  (`routes/me_api.py`, bearer + CORS for minty-web through `blueprints/shared/hub_api.py`,
-  not behind `SUBSCRIPTION_ENABLED`). **Whether or not Terms are owed** (since 2026-09-29):
+  (`routes/me_api.py`, bearer + CORS for minty-web through `blueprints/shared/hub_api.py`). **Whether or not Terms are owed** (since 2026-09-29):
   minty-web's own Terms gate takes the acceptance ([legal-terms.md](legal-terms.md), minty-web's
   panel). Seventy-odd routes flash a message
   and redirect to `/entity`; the redirect drains those flashes, signs them (`itsdangerous`,
@@ -42,8 +41,9 @@ follow on its later steps, and `POST /api/onboarding/finalize` flips the company
 ## Settings (`/entity/<id>/settings/…`)
 
 Tabs of their own templates (`settings.html`, `settings_entity.html`, `settings_users.html`,
-`settings_module*.html`, and the `*_bills_ui.html` dress when reached from the payments app with
-`?from=bills`), each carrying the sidebar ([sidebar.md](sidebar.md)), whose module groups show
+and the `*_bills_ui.html` dress when reached from the payments app with `?from=bills`; the Module
+tab is a hand-over to minty-web's page, [modules-and-subscriptions.md](modules-and-subscriptions.md)),
+each carrying the sidebar ([sidebar.md](sidebar.md)), whose module groups show
 only the modules the company has on (`data-module-nav`, hidden with an inline `display:none` — a
 `hidden` attribute loses to Tailwind's `.flex`). The sidebar's **Settings** opens the settings of
 the app it is pressed in: Petty Cash Settings from the Petty Cash pages, the payments app's

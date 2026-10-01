@@ -10,7 +10,8 @@ from loguru import logger
 from sqlalchemy import func, or_
 
 from blueprints.entity import entity_bp
-from blueprints.shared.feature_flags import minty_web_hub, subscriptions_enabled
+from blueprints.shared.feature_flags import minty_web_hub
+from blueprints.entity.routes.modules import minty_web_module_page_handoff
 from blueprints.entity.services.entity_list import build_entity_list, sign_notices
 from blueprints.entity.services.modules import (build_subscription_notices,
                                                 claim_subscription_notice)
@@ -370,8 +371,7 @@ def report_dashboard(id):
     # means logging out between every attempt, and the claim is spent even on a visit
     # that had nothing to show.
     force_notice = bool(current_app.debug) and request.args.get("notice") == "1"
-    # dark: no notice, and the claim is not spent (nothing to claim)
-    claimed = subscriptions_enabled() and (force_notice or claim_subscription_notice(session, id))
+    claimed = force_notice or claim_subscription_notice(session, id)
     subscription_notice = None
     if claimed:
         try:
@@ -392,9 +392,8 @@ def report_dashboard(id):
         "entity/entity_dashboard_v2.html",
         org=org,
         subscription_notice=subscription_notice,
-        subscription_settings_url=url_for(
-            "entity.entity_settings_module", org_id=id
-        ),
+        # minty-web's Module page, through this app's hand-over at the click
+        subscription_settings_url=minty_web_module_page_handoff(id),
         currency_symbol=currency_symbol,
         server_today_hk=server_today_hk,
         main_bank_account=main_bank_account,

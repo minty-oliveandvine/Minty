@@ -367,22 +367,12 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "entity_settings_users_presence",
             "USER_VIEW_ALL",
         ),
+        # the Module tab is a hand-over to minty-web's page (its writes live in
+        # minty-billing-api since 2026-10-01); the view permission still gates the door
         (
             "blueprints/entity/routes/settings.py",
             "entity_settings_module",
             "MODULE_VIEW",
-        ),
-        # the module toggle/save form went with the in-house subscription engine; modules
-        # are now switched on by subscribing, and these two are the writes on that page
-        (
-            "blueprints/entity/routes/settings.py",
-            "entity_settings_module_checkout",
-            "MODULE_MANAGE",
-        ),
-        (
-            "blueprints/entity/routes/settings.py",
-            "entity_settings_module_authorize_billing",
-            "MODULE_MANAGE",
         ),
         (
             "blueprints/xero/routes/routes.py",

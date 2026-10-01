@@ -15,9 +15,13 @@ be pointed at another payer's companies at all.
 Auth mirrors ``entity.routes.modules.subscription_notice_api``: the billing JWT Module 2
 already holds, signed with this app's ``SECRET_KEY``. Two differences, both deliberate:
 
-* the token's ``entity_id`` claim is IGNORED. Profile is reached with an unscoped token
-  (``billing_app_profile_unscoped_url`` mints one with no entity), and this screen spans
-  entities anyway, so requiring a claim would lock out the exact path the design uses.
+* the token's ``entity_id`` claim is IGNORED. The portal was reached with an unscoped
+  token, and this screen spans entities anyway, so requiring a claim would lock out the
+  exact path the design uses.
+
+NO BROWSER CALLS THIS ANY MORE (2026-10-01): its one client, billing-frontend's payer portal
+(``lib/payerPortal.ts``), was deleted with that app's ``/profile`` pages; minty-web and the
+sidebars read minty-billing-api's ``/api/me/*``. It goes with Flask's subscription engine.
 * it is READ-ONLY and stays that way. Cancelling and subscribing remain on the entity
   settings page behind the payer decorator; this is the index, not a second till.
 """
@@ -27,7 +31,6 @@ from __future__ import annotations
 from flask import current_app, jsonify, make_response, request
 
 from blueprints.shared import bearer_api
-from blueprints.shared.feature_flags import subscriptions_enabled
 from blueprints.subscription import subscription_bp
 
 
@@ -52,19 +55,12 @@ def _unauthorized(reason: str, status: int = 401):
 def _preflight():
     """The CORS answer to a preflight, or None when this request is not one.
 
-    Every route on this blueprint opens with it - which is why the feature switch is
-    answered here too. In one place so the preflight contract
+    Every route on this blueprint opens with it. In one place so the preflight contract
     -- 204, and the same ``_cors`` headers a real answer carries -- cannot drift across
     the thirteen sites that used to spell it out.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
-    if not subscriptions_enabled():
-        # Subscriptions dark: the portal has nothing to show, on any route. 404 through
-        # _cors like every other refusal, so the browser reads "not there" rather than a
-        # CORS failure. Here rather than in _guard because the payment-method routes open
-        # with the preflight alone.
-        return _cors(make_response(jsonify({"error": "not_found"}), 404))
     return None
 
 
