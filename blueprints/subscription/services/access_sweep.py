@@ -31,11 +31,11 @@ from models.db import EntityFunction, EntityFunctionMap
 def revoke_ungranted_module_access(*, dry_run: bool = True) -> list[dict]:
     """Switch off every module grant that no ``entity_module_subscription`` row backs.
 
-    The launch-day counterpart of migration ``m1a01``, which the cutover skipped because
-    subscriptions were dark (blueprints/shared/feature_flags.py): once the feature is on,
-    access is a projection of the subscription row, and a map row switched on with no row
-    behind it offers a module the card would then invite the company to start a trial
-    for. Same boundary as the migration - "has no row at all", never a date comparison
+    The deliberate counterpart of migration ``m1a01``, which never revokes anything (it
+    was skipped while subscriptions were dark, and is a no-op since the switch was removed
+    on 2026-10-01): access is a projection of the subscription row, and a map row switched
+    on with no row behind it offers a module the card would then invite the company to
+    start a trial for. Same boundary as the migration - "has no row at all", never a date comparison
     (that is the sweep's job) - and the same exemption for mid-wizard entities.
 
     Returns the rows it would (dry run) or did switch off, ``{entity_id, code}`` each.

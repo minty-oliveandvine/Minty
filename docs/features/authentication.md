@@ -172,9 +172,9 @@ too ([sidebar.md](sidebar.md)): `GET /me/sidebar-token` (session, same-origin, `
 rather than a redirect when signed out) hands the page an unscoped module token, and the page
 calls the same routes with it. The profile's header avatar and the sidebar open My Profile in
 place; the avatar's `href` - `GET /profile?entity_id=&from=` (`modules.py::open_profile`) - is
-the way in when scripts are off, and still the payments app's old links: it mints the token at
-the click and picks the profile, minty-web's while `MINTY_WEB_HUB` is on, billing-frontend's
-otherwise. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
+the way in when scripts are off, and still the payments app's old links (its `/profile*`
+addresses forward here): it mints the token at the click and hands over to minty-web's My Profile
+- always, since billing-frontend's profile page was deleted on 2026-10-01. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
 re-establishes the Flask session) — `billing-relogin` is the legacy "my token ran out"
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).
@@ -238,7 +238,6 @@ the payment module counts as leaving.
 write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py`,
 `tests/test_billing_relogin_handback.py` (the return from the payment module),
 `tests/test_xero_scopes.py` (connect and reconnect request the same minimal scope set),
-`tests/test_char_subscription_dark.py` (the 404s while subscriptions are dark),
 `tests/test_zz_no_token_logging.py`, `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
 origins); in the browser, `e2e/01_login.spec.ts` (login, wrong
 password, the terms modal on first sign-in) and the two Next suites' hand-off specs.

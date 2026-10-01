@@ -423,7 +423,6 @@
   // --- Subscriptions Overview (features/subscription SubscriptionsOverviewCard) ---------------
 
   const Subs = (() => {
-    // Not drawn at all while subscriptions are dark (the template leaves it out).
     const section = views.profile.querySelector("[data-subs]");
     if (!section) return { mount() {}, unmount() {} };
     const $ = (selector) => section.querySelector(selector);
@@ -503,11 +502,6 @@
         setState("ready");
       } catch (err) {
         if (mine !== generation) return;
-        // A 404 is the feature dark at the API: then the card is not there at all.
-        if (err instanceof ReadError && err.status === 404) {
-          section.hidden = true;
-          return;
-        }
         console.error("[sidebar] subscriptions read failed", err);
         setState("error");
       }

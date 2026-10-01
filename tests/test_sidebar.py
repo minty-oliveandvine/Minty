@@ -97,8 +97,7 @@ def _is_current(html: str, label: str) -> bool:
 # --- the menu --------------------------------------------------------------------------------
 
 
-def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people, monkeypatch):
-    monkeypatch.setenv("SUBSCRIPTION_ENABLED", "1")
+def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people):
     shop = people["both"].id
     html = _menu(app, f"/entity/{shop}", user_id=people["olive"].id, org_id=shop)
 
@@ -144,16 +143,6 @@ def test_on_the_entity_list_there_is_no_company_and_no_settings(app, people):
     assert "data-module-nav" not in html
     assert 'data-entity-id=""' in html
     assert _link(html, "Logout") == "/logout"
-
-
-def test_subscriptions_dark_no_door_into_them(app, people, monkeypatch):
-    monkeypatch.setenv("SUBSCRIPTION_ENABLED", "0")
-    html = _menu(app, "/entity", user_id=people["olive"].id)
-
-    assert _link(html, "Manage subscriptions") is None
-    # the card is not drawn at all - no heading, no figures, no door into a dark portal
-    assert "Subscriptions Overview" not in html
-    assert "Your subscription" not in html
 
 
 def test_on_the_payment_request_pages_settings_is_the_payments_apps(app, people):
@@ -273,10 +262,8 @@ PAGES = [
     "entity/index.html",
     "entity/settings.html",
     "entity/settings_entity.html",
-    "entity/settings_module.html",
     "entity/settings_users.html",
     "entity/settings_entity_bills_ui.html",
-    "entity/settings_module_bills_ui.html",
     "entity/settings_users_bills_ui.html",
     "entity/settings_xero_bills_ui.html",
     "report/cash_count.html",

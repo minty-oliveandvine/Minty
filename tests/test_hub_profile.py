@@ -236,8 +236,7 @@ def _landing(resp):
     return parts, parse_qs(parts.query)
 
 
-def test_switch_on_the_profile_is_minty_webs(app, client, people, hub, monkeypatch):
-    monkeypatch.setenv("MINTY_WEB_HUB", "1")
+def test_the_profile_is_minty_webs(app, client, people, hub):
     F.login(client, people["olive"])
 
     parts, query = _landing(client.get("/profile"))
@@ -253,17 +252,20 @@ def test_switch_on_the_profile_is_minty_webs(app, client, people, hub, monkeypat
     assert claims["entity_id"] == shop.id and claims["role"] == "shop_manager"
 
 
-def test_switch_off_the_payments_apps_profile_as_before(app, client, people, hub, monkeypatch):
+def test_whatever_the_hub_switch_says(app, client, people, hub, monkeypatch):
+    """billing-frontend's profile page was deleted on 2026-10-01 (that app holds only
+    Payment Request), so ``MINTY_WEB_HUB`` - which still decides the ENTITY LIST - no longer
+    has a say here: off, the profile is minty-web's all the same."""
     monkeypatch.delenv("MINTY_WEB_HUB", raising=False)
     F.login(client, people["olive"])
 
     parts, query = _landing(client.get("/profile"))
-    assert (parts.scheme + "://" + parts.netloc, parts.path) == (PAYMENTS, "/landing")
+    assert (parts.netloc, parts.path) == ("hub.minty.test", "/landing")
     assert query["next"] == ["/profile"]
 
     shop = people["shop"]
     _, query = _landing(client.get(f"/profile?entity_id={shop.id}&from=bills"))
-    assert query["entity_id"] == [shop.id] and query["from"] == ["bills"]
+    assert query["next"] == ["/profile?from=bills"] and query["entity_id"] == [shop.id]
 
 
 def test_a_company_the_person_is_not_in_opens_no_profile(app, client, people, hub, monkeypatch):

@@ -185,8 +185,40 @@ def module_on(app, entity_id) -> bool:
         return bool(_is_module_enabled(entity_id, MODULE))
 
 
+class _Outcome:
+    """What the old session route answered, so the walk reads as before: 200 with the
+    module map on success, 409 when the trial was already used."""
+
+    def __init__(self, status, body):
+        self.status_code = status
+        self._body = body
+        self.data = repr(body).encode()
+
+    def get_json(self):
+        return self._body
+
+
 def start_trial(client, entity):
-    return client.post(f"/entity/settings/module/{entity.id}/start-trial", json={"codes": [MODULE]})
+    """Start the module's free trial THROUGH THE ENGINE. The session route that did this
+    (``POST /entity/settings/module/<id>/start-trial``) went with Flask's Jinja module page on
+    2026-10-01 - the page is minty-web's and posts to minty-billing-api - and what this file
+    proves is the lifecycle underneath, which is unchanged."""
+    from blueprints.subscription.services import checkout
+    from models.db import Entity, User
+
+    with client.application.test_request_context():
+        with client.session_transaction() as sess:
+            user_id = sess.get("_user_id")
+    with client.application.app_context():
+        entity_row = Entity.query.get(entity.id)
+        user = User.query.get(str(user_id))
+        try:
+            checkout.start_module_trials(entity_row, user, [MODULE])
+        except checkout.CheckoutError as exc:
+            return _Outcome(exc.status, {"error": str(exc)})
+        from blueprints.entity.services.modules import _enabled_state
+
+        return _Outcome(200, {"modules": _enabled_state(entity.id)})
 
 
 # ---- the walk ---------------------------------------------------------------------------------

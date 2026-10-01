@@ -1,11 +1,10 @@
 """Flask's two doors into minty-web (Part 2 step 4a).
 
-``GET /entity/settings/module/<id>``, live, is minty-web's page now: Flask mints the company's
-module token and sends the browser to minty-web's ``/landing`` with it (``MINTY_WEB_MODULE_PAGE``,
-on by default; the suite runs with it off so the Jinja-page tests still describe what they
-exercise). ``GET /handoff/minty-web?next=&entity_id=`` is the re-entry minty-web uses when its
-token lapses (``lib/handoff.ts``): login-gated, a scoped or unscoped token, never an open
-redirect. Dark, neither door exists.
+``GET /entity/settings/module/<id>`` IS minty-web's page: Flask mints the company's module
+token and sends the browser to minty-web's ``/landing`` with it, always (the Jinja module page
+was deleted on 2026-10-01). ``GET /handoff/minty-web?next=&entity_id=`` is the re-entry
+minty-web uses when its token lapses (``lib/handoff.ts``): login-gated, a scoped or unscoped
+token, never an open redirect.
 """
 
 from __future__ import annotations
@@ -46,7 +45,6 @@ def shop(app, db):
 
 @pytest.fixture
 def live_page(monkeypatch):
-    monkeypatch.setenv("MINTY_WEB_MODULE_PAGE", "1")
     monkeypatch.setenv("MINTY_WEB_URL", "http://hub.minty.test/")
 
 
@@ -81,20 +79,12 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
     assert query["next"] == [f"/subscription/entities/{entity.id}/modules"]
 
 
-def test_the_jinja_page_stays_when_the_switch_is_off(shop, client, monkeypatch):
-    owner, entity, _ = shop
-    monkeypatch.setenv("MINTY_WEB_MODULE_PAGE", "0")
-    F.login(client, owner)
-    resp = client.get(f"/entity/settings/module/{entity.id}")
-    assert resp.status_code == 200
-    assert b"Module" in resp.data
-
-
-def test_dark_the_plain_page_stays_whatever_the_switch(shop, client, monkeypatch, live_page):
-    owner, entity, _ = shop
-    monkeypatch.setenv("SUBSCRIPTION_ENABLED", "0")
-    F.login(client, owner)
-    assert client.get(f"/entity/settings/module/{entity.id}").status_code == 200
+def test_there_is_no_jinja_module_page_any_more(app):
+    """The Jinja module page and the session routes behind it were deleted on 2026-10-01:
+    the address above is a hand-over and nothing else answers under it."""
+    rules = {r.rule for r in app.url_map.iter_rules() if r.rule.startswith("/entity/settings/module/")}
+    assert rules == {"/entity/settings/module/<string:org_id>"}
+    assert not (app.root_path and (__import__("pathlib").Path(app.root_path) / "templates/entity/settings_module.html").exists())
 
 
 def test_the_handoff_mints_a_scoped_token_for_a_company(shop, client, app, live_page):

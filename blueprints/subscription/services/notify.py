@@ -57,6 +57,7 @@ Dates are written in the company's time zone (``entities.timezone``, Hong Kong w
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from urllib.parse import urlencode
 
 import pytz
 from flask import current_app, render_template
@@ -282,6 +283,27 @@ def settings_url(entity_id) -> str:
     if not root or not entity_id:
         return root
     return f"{root}/entity/settings/module/{entity_id}"
+
+
+def handoff_url(next_path: str, *, entity_id=None) -> str:
+    """``{PUBLIC_URL}/handoff/minty-web?next=...[&entity_id=...]`` - a link into minty-web
+    that this app authenticates at the click (login first for a cold recipient), so no
+    token travels in an email. Empty when there is no public origin, like every other link
+    here. minty-billing-api's ``notify.handoff_url`` builds the same link."""
+    root = base_url()
+    if not root:
+        return root
+    params = {"next": "/" + str(next_path or "").lstrip("/")}
+    if entity_id:
+        params["entity_id"] = str(entity_id)
+    return f"{root}/handoff/minty-web?{urlencode(params)}"
+
+
+def portal_url(next_path: str = "/subscription/subscriptions") -> str:
+    """The payer portal in minty-web (``/subscription/subscriptions``, or ``/incoming`` for
+    the recipient of a handover), through ``handoff_url``. Replaced billing-frontend's
+    ``/profile/subscriptions`` on 2026-10-01, when that app's profile pages were deleted."""
+    return handoff_url(next_path)
 
 
 # --- Inline images ------------------------------------------------------------

@@ -12,8 +12,8 @@ database after ``ALTER SCHEMA pettycash_test RENAME TO pettycashv3``, or product
   2. bills: rows and amount, bill lines, the audit trail; the three biggest companies per status
   3. subscription rows on both sides (production holds none)
   4. module grants carried, and how many live companies (a report in the last 90 days) have
-     Petty Cash switched off - 0 while subscriptions are dark (m1a01 skipped), 47 on the
-     09-16 data if it ran
+     Petty Cash switched off - 0 unless ``flask subscriptions revoke-ungranted --apply``
+     has run (m1a01 is a no-op), 47 on the 09-16 data if it had
 
 Counts only, by default. ``--names`` adds the company names to section 4 for support; they
 are printed, never written anywhere. ``--old-uri`` reads the OLD schema from another database:

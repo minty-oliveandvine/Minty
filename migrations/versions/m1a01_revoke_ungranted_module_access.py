@@ -1,4 +1,13 @@
-"""Revoke module access that no subscription row ever granted.
+"""Revoke module access that no subscription row ever granted - NOW A NO-OP.
+
+A NO-OP SINCE 2026-10-01. While subscriptions were dark (2026-09-18) this revocation ran
+only with ``SUBSCRIPTION_ENABLED`` on, because it is the one step of an upgrade that would
+change what a customer can do. The switch was removed on 2026-10-01 (the stack is deployed
+to a test site), and its standing rule outlives it: turning subscriptions on writes nothing.
+So the revision is still recorded and revokes nothing; the same UPDATE is the deliberate
+``flask subscriptions revoke-ungranted`` (dry by default, ``--apply`` writes -
+``blueprints.subscription.services.access_sweep.revoke_ungranted_module_access``). What
+follows is the original rationale, kept because the command still follows it.
 
 Companion to ``b8f3a2c1d4e5``, which seeded the catalog and backfilled the missing
 ``entity_function_map`` rows. That one is INSERT-ONLY by design — it targets entities
@@ -80,75 +89,18 @@ existed long before either neighbour, and no revision between them reads what it
 
 """
 
-import os
-
-from alembic import op
-from sqlalchemy import text
-
 revision = "m1a01_revoke_ungranted"
 down_revision = "t1a01_terms_consent"
 branch_labels = None
 depends_on = None
 
-SCHEMA = "pettycashv2"
-
-# Mirrors blueprints.entity.services.modules.MODULE_CODES. Spelled out rather than
-# imported: a migration must keep describing the database as it was when written, and
-# an import would silently change this statement's meaning the day a third module ships.
-MODULE_CODES = ("PETTY_CASH", "BILL")
 
 
 def upgrade():
-    # SUBSCRIPTIONS DARK (2026-09-18, docs/modernisation/modernisation_plan.md Phase E):
-    # production cuts over to the redesigned schema with the subscription feature switched
-    # off, and this revocation is the one step of the upgrade that would change what a
-    # customer can do - 47 live companies would lose Petty Cash for a feature nobody can
-    # see. So it runs only when the feature is on. With it off the grants come through as
-    # they are, the revision is still recorded, and the same UPDATE is available on launch
-    # day as ``flask subscriptions revoke-ungranted`` - a deliberate command, not a side
-    # effect of a deploy. The switch's default is off (blueprints/shared/feature_flags.py).
-    if (os.environ.get("SUBSCRIPTION_ENABLED") or "").strip().lower() not in {"1", "true", "yes", "on"}:
-        print("m1a01: skipped - subscriptions are dark (SUBSCRIPTION_ENABLED unset/0); "
-              "nothing revoked. Launch day: flask subscriptions revoke-ungranted.")
-        return
-
-    bind = op.get_bind()
-
-    result = bind.execute(
-        text(
-            f"""
-            UPDATE {SCHEMA}.entity_function_map AS m
-            SET is_enabled  = FALSE,
-                disabled_at = NOW(),
-                updated_at  = NOW()
-            FROM {SCHEMA}.entity_function AS f
-            WHERE f.id = m.entity_function_id
-              AND UPPER(f.function_code) IN :codes
-              AND m.is_enabled
-              -- The whole test: nothing in the record of truth grants this module.
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM {SCHEMA}.entity_module_subscription AS s
-                  WHERE s.entity_id = m.entity_id
-                    AND UPPER(s.function_code) = UPPER(f.function_code)
-              )
-              -- Mid-wizard entities keep their selection (see docstring). Written as
-              -- NOT EXISTS on purpose rather than a join to entities: a map row whose
-              -- entity is gone matches nothing here and so stays in scope for revoking.
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM {SCHEMA}.entities AS e
-                  WHERE e.id = m.entity_id
-                    AND e.status = 'onboarding'
-              )
-            """
-        ).bindparams(codes=tuple(MODULE_CODES))
-    )
-
-    # Printed rather than logged: alembic's output is the only record anyone reads when
-    # deciding whether a deploy did what it claimed, and "0 rows" is a meaningful and
-    # expected result here (already swept), not a sign the statement failed to match.
-    print(f"m1a01: revoked {result.rowcount} module grant(s) with no subscription row.")
+    # A no-op on purpose (see the docstring): the revocation is the deliberate
+    # ``flask subscriptions revoke-ungranted``, never a side effect of a deploy.
+    print("m1a01: no-op - nothing revoked; the revocation is "
+          "`flask subscriptions revoke-ungranted` (dry unless --apply).")
 
 
 def downgrade():

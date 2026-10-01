@@ -182,20 +182,14 @@ def close_trials_cmd(limit: int | None) -> None:
 
 @subscriptions_cli.command(
     "revoke-ungranted",
-    help="LAUNCH DAY: switch off every module grant that no subscription row backs - the "
-         "m1a01 step the cutover skipped while subscriptions were dark. Dry by default; "
-         "--apply writes. Grants nothing, starts nothing.",
+    help="Switch off every module grant that no subscription row backs - the step "
+         "migration m1a01 never takes. Dry by default; --apply writes. Grants nothing, "
+         "starts nothing.",
 )
 @click.option("--apply", is_flag=True, default=False, help="Write the revocation. Without it, list only.")
 def revoke_ungranted_cmd(apply: bool) -> None:
-    from blueprints.shared.feature_flags import subscriptions_enabled
     from blueprints.subscription.services.access_sweep import revoke_ungranted_module_access
 
-    if apply and not subscriptions_enabled():
-        raise click.ClickException(
-            "SUBSCRIPTION_ENABLED is off: revoking now would take modules away for a feature "
-            "nobody can see. Switch the feature on first, or run without --apply to list."
-        )
     hits = revoke_ungranted_module_access(dry_run=not apply)
     verb = "Switched off" if apply else "Would switch off"
     click.echo(f"{verb} {len(hits)} module grant(s) with no subscription row.")

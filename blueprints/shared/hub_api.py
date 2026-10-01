@@ -6,8 +6,8 @@ The same transport as the other bearer surfaces (``bearer_api``: an explicit ori
 ``Vary: Origin``, a JWT in the ``Authorization`` header and no session cookie), and three
 differences worth knowing:
 
-* NOT behind ``SUBSCRIPTION_ENABLED``. The entity list and the profile exist whether or not
-  subscriptions do; only the payer portal's routes go dark.
+* Not a subscription surface: the entity list and the profile are the person's, whatever
+  they pay for.
 * The token's ``entity_id`` claim is ignored: a person reads their OWN list and their OWN
   profile, and a company the profile should describe travels as an explicit ``?entity=``
   that is checked against membership.

@@ -27,14 +27,14 @@ header). The endpoints, in wizard order:
 | Step | Endpoints |
 |---|---|
 | reference | `server-time` (HK "today", server-authoritative), `currencies`, `countries` |
-| resume | `state` (everything saved so far, `subscriptions_enabled`, `saved_step`, `current_step`), `saved-step` (Save & Exit) |
+| resume | `state` (everything saved so far, `saved_step`, `current_step`), `saved-step` (Save & Exit) |
 | 1 Basic | `create`, `entity/<id>` (edit an in-progress company) |
-| 2 Modules | `modules`, `plans` (empty while dark), the billing routes `payment-method*`, `billing/*`, `billing/authorize` (404 while dark) |
+| 2 Modules | `modules`, `plans`, the billing routes `payment-method*`, `billing/*`, `billing/authorize` |
 | 3 Invite | `invite` (GET/POST), `invite/cancel` |
 | 4 Accounting | Xero connect is Minty's `/xero_connect` with the entity in the state; `xero/disconnect` |
 | 5–7 Petty cash | `sales-methods`, `opening-balance`, `account-codes`, `contacts`, `contacts/create` |
 | 8 Bills | `bill-codes` |
-| 9 All Set | `finalize` — flips the company live (`status`), enables the chosen modules; **starts trials only when subscriptions are on** (dark: `trial_end: null`) |
+| 9 All Set | `finalize` — flips the company live (`status`), enables the chosen modules and starts their card-free trials (`trial_end` in the answer; null when none could be started) |
 
 **Arriving on step 9 finalizes** (the wizard calls it on arrival, the screen commits
 nothing) — a test must never navigate there directly (`onboarding-step9-finalizes-on-arrival`
@@ -50,8 +50,8 @@ it with the shared secret, re-reads the person's role on the company and the mod
 and asks Minty for a live Xero token when it publishes. Coming back:
 `GET /entity/<id>/enter?token=` (re-validates the token, re-establishes the session);
 `GET /entity/<id>/billing-relogin` is the legacy "token expired" return;
-`GET /api/entity/<id>/subscription-notice` feeds the payment app's landing-page notice
-(404 while dark). billing-backend triggers Minty's Xero syncs through
+`GET /api/entity/<id>/subscription-notice` feeds the payment app's landing-page notice.
+billing-backend triggers Minty's Xero syncs through
 `POST /api/entities/<id>/billing/sync-*` (JWT-authenticated).
 
 ## Configuration
@@ -65,6 +65,6 @@ backends. On the apps' side the `NEXT_PUBLIC_*` variables point back at Minty (s
 ## Tests
 
 `tests/test_onboarding_*.py` (launch, CSRF exemption, module state, plans, payment
-method — the API through Flask, including the dark rules), `tests/test_billing_relogin_handback.py`,
-`tests/test_char_subscription_dark.py`; the two Next suites end to end
+method — the API through Flask), `tests/test_billing_relogin_handback.py`; the two Next suites
+end to end
 (`onboarding/e2e`, `billing-frontend/e2e`) with the tokens minted from the shared secret.

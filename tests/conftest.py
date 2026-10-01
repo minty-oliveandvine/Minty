@@ -198,13 +198,6 @@ def app(built_database) -> Iterator:
         "MAIL_SERVER": "localhost",
         "MAIL_PORT": "587",
         "FLASK_DEBUG": "False",
-        # the subscription feature is ON for the suite (its default is off - production cut
-        # over dark); tests/test_char_subscription_dark.py flips it per test
-        "SUBSCRIPTION_ENABLED": "1",
-        # live, the module page is minty-web's and Flask redirects there (Part 2 step 4a);
-        # the suite keeps the Jinja page its tests describe, and
-        # tests/test_minty_web_handoff.py flips this to pin the redirect
-        "MINTY_WEB_MODULE_PAGE": "0",
         # the entity list and the profile hand over to minty-web when this is on - a developer's
         # .env may say so (load_dotenv never overrides what is set here); the suite keeps the
         # Jinja list its tests describe, and tests/test_hub_*.py flip it per test

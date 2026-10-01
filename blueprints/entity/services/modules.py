@@ -196,34 +196,6 @@ def get_enabled_modules_for_entities(entity_ids: list[str]) -> dict[str, set[str
 
 
 
-def get_plain_module_cards(entity_id: str) -> list[dict]:
-    """The module page's list while subscriptions are dark: one card per catalogue
-    module with its name, description, illustration and whether it is on.
-
-    No subscription state, no Stripe read, no price - ``is_enabled`` is the whole answer,
-    as it was before the engine (blueprints/shared/feature_flags.py). Ordered by the
-    catalogue's ``display_order``.
-    """
-    state = _enabled_state(entity_id)
-    rows = EntityFunction.query.filter(EntityFunction.function_code.in_(MODULE_CODES)).all()
-    by_code = {fn.function_code: fn for fn in rows}
-    cards = []
-    for code in MODULE_CODES:
-        fn = by_code.get(code)
-        display = MODULE_DISPLAY.get(code, {})
-        cards.append({
-            "code": code,
-            "name": fn.function_name if fn and fn.function_name else code,
-            "description": fn.description if fn and fn.description else "",
-            "image": display.get("image", ""),
-            "learn_more": display.get("learn_more", "#"),
-            "enabled": bool(state.get(code)),
-            "display_order": getattr(fn, "display_order", None) or 0,
-        })
-    cards.sort(key=lambda c: (c["display_order"], c["code"]))
-    return cards
-
-
 def module_display_names(codes) -> dict[str, str]:
     """Human labels for module codes, from the catalog — ``{code: name}``.
 
@@ -322,26 +294,22 @@ def build_subscription_panel(cards, summary, anchor_display):
     return _panel(cards, summary, anchor_display)
 
 
-# How close a converting trial has to be before it is worth mentioning, or None to
-# mention it for the whole trial. None is deliberate: a running trial has a first
-# charge coming, and a customer who is told the date on day one cannot say they were
-# never told. Nothing else in the notice is time-windowed either — past due, a trial
-# that will not convert, and a wind-down are all shown whenever they are true.
-#
-# Set to an int (7 was the previous value) to go back to only warning near the end.
-TRIAL_ENDING_SOON_DAYS: int | None = None
-
 # Ordering for the notice list, most severe first. The modal shows every item that
 # applies rather than picking one — a company can be past due on one module and
 # winding down another, and hiding the second would be a lie of omission.
-_NOTICE_ORDER = ("past_due", "needs_card", "needs_consent", "pending_cancel", "trial_ending")
+#
+# No trial kind: every trial notice (trial ending, a trial that will not convert, a lapsed
+# trial, a cancelled trial running out) was removed on 2026-10-01 by the user's decision.
+# Every kind ``notices.build_subscription_notices`` emits must be listed here - the sort
+# calls ``.index()`` on it.
+_NOTICE_ORDER = ("past_due", "pending_cancel")
 
 
 # The dashboard notice moved to ``subscription.services.notices`` -- deciding a company
 # is past due or winding down is subscription reasoning. Re-exported rather than
 # repointed: importers name THIS module (some binding at import, some per request), and
 # the moved code reads its inputs back off here at call time so the suite's patches on
-# ``modules.TRIAL_ENDING_SOON_DAYS`` and ``modules.get_module_cards`` still bite.
+# ``modules.get_module_cards`` still bite.
 def claim_subscription_notice(session, entity_id: str) -> bool:
     from blueprints.subscription.services.notices import claim_subscription_notice as _claim
 

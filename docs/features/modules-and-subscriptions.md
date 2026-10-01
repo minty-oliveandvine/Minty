@@ -3,7 +3,7 @@
 Two modules can be on for a company: **Petty Cash** (this app's daily report) and
 **Payment Request** (`BILL` — the bills module served by `billing-frontend` +
 `billing-backend`). Whether a company *has* a module, and whether anyone *pays* for it, are
-separate questions, and the second one is switched off in production today.
+separate questions.
 
 > **Moving out (Part 2 of `docs/modernisation/modernisation_plan.md`, since 2026-09-21).** The
 > engine described in §3, the payer portal routes, the module settings page and the daily pass
@@ -15,43 +15,34 @@ separate questions, and the second one is switched off in production today.
 > checked against - `blueprints/subscription/services/*`, `entity/services/modules.py`, the
 > models and `tests/*` are FROZEN for the duration, a bug found by the port is fixed on both
 > sides together, never on one. What Flask keeps for good: §2's
-> gate (`_is_module_enabled`), the dark toggle, `flask modules set|show`, `POST /api/onboarding/modules`,
-> the m1a01 skip, and five read-only lookups through a `store_ro.py` that step 5 introduces.
+> gate (`_is_module_enabled`), `flask modules set|show`, `POST /api/onboarding/modules`, and
+> five read-only lookups through a `store_ro.py` that step 5 introduces.
+>
+> **2026-10-01:** Flask's Jinja module page and the 20 session routes behind it are DELETED
+> (the Module tab is a hand-over to minty-web's page), the dark switch is gone from every
+> repo, and the in-app notices lost their trial kinds - see §1, §4 and the notices bullet.
 
-## 1. The switch: `SUBSCRIPTION_ENABLED` (off unless set)
+## 1. No switch: subscriptions are always on
 
-`blueprints/shared/feature_flags.py` — `subscriptions_enabled()` and
-`@require_subscriptions_enabled` (404). The same name is read by onboarding-backend
-(`config.settings.SUBSCRIPTION_ENABLED`) and billing-frontend
-(`NEXT_PUBLIC_SUBSCRIPTION_ENABLED`, on unless `0`); Minty is the real guard.
-
-**Dark** (the cutover state, `tests/test_char_subscription_dark.py`):
-- module access is `entity_function_map.is_enabled`, nothing else;
-- the module page is a plain list of the two modules with an admin switch and a **Save**
-  button (`POST /entity/settings/module/<id>/toggle` with `{modules: {code: bool}}`, a
-  dark-only route; the page repaints the tabs and the side panel without a reload —
-  `templates/entity/partials/module_plain_section.html`);
-- every quote / charge / card / portal route answers 404: the 19 module actions on the
-  settings page, `/api/me/*`, the onboarding billing routes, the subscription-notice API;
-  the wizard's Step 2 is a plain module pick and `finalize` starts no trial;
-- the scheduler does not start whatever `SUBSCRIPTION_SCHEDULER_ENABLED` says; migration
-  `m1a01` skips its revocation.
-
-**Switching it on writes nothing** — no grant, no trial, no revocation. Taking access away
-from a module no subscription backs is the separate launch-day command
-`flask subscriptions revoke-ungranted [--apply]` (`services/access_sweep.py`; dry by
-default, refused while dark). The plan for that day is Phase E step 8b of
-`docs/modernisation/modernisation_plan.md`.
+The dark switch `SUBSCRIPTION_ENABLED` (off unless set; production was to cut over with the
+feature dark, 2026-09-18) was **removed on 2026-10-01** in every repo - Minty, onboarding-backend,
+onboarding, billing-frontend, minty-web and minty-billing-api - because the stack is deployed to
+a test site and nothing is dark any more. Its one rule outlives it: **turning the feature on
+wrote nothing** - no grant, no trial, no revocation - and taking access away from a module no
+subscription backs is still the separate, deliberate `flask subscriptions revoke-ungranted
+[--apply]` (`services/access_sweep.py`; dry by default). Migration `m1a01` is a no-op for the
+same reason. The daily pass keeps its own switch, `SUBSCRIPTION_SCHEDULER_ENABLED` (§3) - in
+Minty AND minty-billing-api, which share the database, so never on in both.
 
 ## 2. Module access (always on)
 
 `entity_function` is the catalogue (`PETTY_CASH`, `PAYMENT_REQUEST`), `entity_function_map`
-the per-company switches. `blueprints/entity/services/modules.py` (`set_entity_module`,
-`get_plain_module_cards`, `get_module_cards`) and the context processors in
+the per-company switches. `blueprints/entity/services/modules.py` (`set_entity_module`, `get_module_cards`) and the
+context processors in
 `pettycash/core/hooks.py` (`is_pettycash_enabled`, `is_billing_enabled` — keyed on
 `MODULE_BILL`) decide what the side panel, the settings tabs and the dashboard show; a
-page of a module that is off renders `entity_no_permission.html` ("This module isn't
-switched on…" while dark, with a link to the module settings). The module token minted
+page of a module that is off renders `entity_no_permission.html` (with a link to the
+module settings when the person may open them). The module token minted
 for the payment app carries `billing_enabled` / `petty_cash_enabled`, but billing-backend
 re-reads the map (`/api/auth/entitlements`) — the database decides, not the claim.
 
@@ -79,8 +70,8 @@ owns every state. Models in `blueprints/subscription/models/`:
   "Change billing account"), `entity_billing_consent` (the payer's consent to be billed
   for this company; recorded before any charge). Since 2026-09-25 the accounts are read,
   renamed, re-carded and given companies from minty-web's payer portal, served by
-  minty-billing-api; Flask's copy of the services is not mirrored (subscriptions are dark
-  here, and Django replaces them).
+  minty-billing-api; Flask's copy of the services is not mirrored (Django replaces them -
+  see `flask-subscription-no-more-ports`).
 
 **Every charge names the billing account's card, and there is no fallback** (the
 per-entity-cards decision of 2026-08-25). A renewal, a mid-period change, a trial conversion,
@@ -164,31 +155,38 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
 `reconcile-customers`, `revoke-ungranted`); `flask plans list`, `flask modules set|show`.
 
 ### What the pages do
-- The **module page** (`/entity/settings/module/<id>`): cards per module with the
-  subscription state, and the 19 actions under `…/module/<id>/…` — quotes
-  (`subscribe-preview`, `resume-preview`, `cancel-preview`, `restart-quote`), the charges
-  (`checkout`, `confirm-billing`, `restart-billing`, `retry-payment`), cards
-  (`payment-methods*`, `payment-method`), `start-trial`, `cancel`, `renew`,
-  `authorize-billing`, `manage-billing` (the Stripe portal), `checkout-complete`. The
-  lapsed-trial **restart screen** keys on the access gate, not on `trial_end`
-  (`subscription-restart-screen` note). **Live, the page is minty-web's now** (Part 2 step
-  4a, `../minty-web/docs/features/subscriptions.md` §9): the route mints the company's module
-  token and redirects to `MINTY_WEB_URL/landing?next=/subscription/entities/<id>/modules`
-  (`?from=bills` travels in `next`); `MINTY_WEB_MODULE_PAGE=0` keeps the Jinja page, and the
-  test suite runs that way so the tests above still describe what they exercise
-  (`tests/test_minty_web_handoff.py`). Two more doors exist for that page:
+- The **Module tab** (`GET /entity/settings/module/<id>`) is a **hand-over**: the route mints
+  the company's module token and redirects to
+  `MINTY_WEB_URL/landing?next=/subscription/entities/<id>/modules` (`?from=bills` travels in
+  `next`; `tests/test_minty_web_handoff.py`). The page is minty-web's (Part 2 step 4a,
+  `../minty-web/docs/features/subscriptions.md` §9) and posts its 19 actions to
+  minty-billing-api. **Flask's Jinja module page, its partials (`module_*.html`), the lapsed-trial
+  restart screen and the 20 session routes under `…/module/<id>/…` (the 19 actions and the
+  dark-only `/toggle`) were deleted on 2026-10-01**; the engine services they called stay until
+  Flask's engine goes as a whole. Two more doors exist for that page:
   `GET /handoff/minty-web?next=&entity_id=` (login-gated re-entry when minty-web's token
   lapses - a scoped token with `entity_id`, unscoped without; `next` is a path only) and
   `GET /entity/settings/payments/<id>` (the Payment Settings tab as a URL: the redirect
   `billing_settings_app_url` builds, since only Flask mints the payments-app token;
   `tests/test_settings_payments_redirect.py`).
-- The **dashboard notices** (`services/notices.py`, `/api/entity/<id>/subscription-notice`
-  for the payment app's landing page): trial ending, past due, expired, cancelled — one
-  popup per scenario (`subscription-dashboard-notice-coverage`).
-- The **payer portal** lives in billing-frontend and reads `/api/me/*`
-  (`blueprints/subscription/routes/portal.py`): the companies the caller pays for with
-  each module's state, invoices, saved cards and the card per company, inviting an admin
-  and **transferring** a company's bill to another admin (offer / respond / cancel).
+- The **in-app notices** (`services/notices.py`; the Petty Cash dashboard's once-per-login
+  modal `partials/subscription_notice_modal.html`, and `GET /api/entity/<id>/subscription-notice`
+  for the payment app's landing page): **two kinds only since 2026-10-01** - `past_due` ("payment
+  failed", critical) and a PAID module's `pending_cancel` ("is ending", warning). Every TRIAL
+  notice (trial ending, a trial that will not convert, a lapsed trial, a cancelled trial running
+  out) was removed by the user's decision; the trial-ending EMAIL still warns a trial that will
+  not convert. `_NOTICE_ORDER` (`entity/services/modules.py`) must list every kind emitted - the
+  sort `.index()`es it, and the API answers `{"items": []}` on any builder failure (logged).
+  The one button, "Go to subscription settings", is `/handoff/minty-web?next=<module page>
+  &entity_id=` - a Minty path the payment app wraps in `buildMintyEnterUrl`, authenticated at
+  the click (`minty_web_module_page_handoff`), landing on minty-web's Module page.
+- The **payer portal** lives in minty-web (`/subscription/*`, served by minty-billing-api's
+  `/api/me/*`). Flask's `/api/me/*` (`blueprints/subscription/routes/portal.py`) has **no browser
+  caller since 2026-10-01** - billing-frontend's portal pages were deleted - and goes with the
+  engine. Every "open my profile" link (`bills_app_profile_url`, the sidebar) goes through
+  `GET /profile` (`entity.open_profile`), which always hands over to minty-web's My Profile;
+  the transfer emails link to minty-web's portal through `/handoff/minty-web`
+  (`notify.portal_url`).
 - Emails: `services/notify.py` — eight events, exactly the approved Figma designs (trial
   ending, renewal failed, dunning retry failed, payment recovered, the four transfer notices),
   each sent once per `dedupe_key` and logged in `subscription_email_log`. The receipt
@@ -210,8 +208,10 @@ same shapes.
 
 ## Tests
 
-`tests/test_char_subscription_dark.py` (dark), `tests/test_access_rules.py`,
-`tests/test_double_buy_guard.py`, `tests/test_subscription_*.py`, `tests/test_billing_*.py`,
-`tests/test_one_payer_per_entity.py`; billing-frontend's `03_payer_portal.spec.ts`
-(live and dark) and Minty's `e2e/03_settings.spec.ts` (the dark module page: a switch is
-pending until Save, Save repaints tabs and side panel).
+`tests/test_access_rules.py`, `tests/test_double_buy_guard.py`,
+`tests/test_subscription_*.py`, `tests/test_billing_*.py`, `tests/test_one_payer_per_entity.py`,
+`tests/test_minty_web_handoff.py` (the Module tab is a hand-over, and nothing else answers under
+it); Minty's `e2e/03_settings.spec.ts` reads that redirect. The Jinja module-page tests
+(`test_subscription_templates`, `test_consent_takeover`, `test_restart_billing_guard`,
+`test_purchase_card_choice`, `test_retry_decline_wording`, the dark suite) went with the page on
+2026-10-01.

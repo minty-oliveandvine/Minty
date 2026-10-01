@@ -88,17 +88,9 @@
             </div>
             <h1 class="text-2xl font-bold text-gray-900">Module not active</h1>
             <p class="text-center text-gray-600 max-w-sm">
-              {% if subscriptions_enabled %}
               This module isn't active for this entity. That usually means it was switched off, or its subscription has lapsed.
               {% if not subscription_settings_url %}
                 Ask an admin for this entity to check its subscription settings.
-              {% endif %}
-              {% else %}
-              {# subscriptions dark: a module is simply on or off, and the switch is in module settings #}
-              This module isn't switched on for this entity.
-              {% if not subscription_settings_url %}
-                Ask an admin for this entity to switch it on in module settings.
-              {% endif %}
               {% endif %}
             </p>
             {% else %}
@@ -120,7 +112,7 @@
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
               </svg>
-              <span class="w-fit">{% if subscriptions_enabled %}Check subscription settings{% else %}Go to module settings{% endif %}</span>
+              <span class="w-fit">Check subscription settings</span>
             </a>
             <a href="{{ url_for('entity.entity_list') }}" class="bg-white border border-gray-300 flex font-medium gap-2 hover-scale hover:bg-gray-100 items-center justify-center py-3 rounded-xl text-[#474747] transition-colors w-full" onclick="PageTransition.navigateWithFade(this.href); return false;">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

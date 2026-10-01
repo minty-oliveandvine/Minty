@@ -9,7 +9,8 @@ Minty is the Flask hub of a seven-app system. It owns identity, the companies, t
 petty-cash report and the Xero connection, and it launches the Next.js apps with a
 short-lived token: the onboarding wizard (`../onboarding` + `../onboarding-backend`), the
 payment-request module (`../billing-frontend` + `../billing-backend`) and, since Part 2 of
-the modernisation plan (scaffolded 2026-09-21, dark until launch), the subscription pages of
+the modernisation plan (scaffolded 2026-09-21), the subscription pages, the profile and the
+entity list of
 the new hub (`../minty-web` + `../minty-billing-api`). Each of those repos has its own
 `docs/features/` folder in the same shape.
 
@@ -22,7 +23,7 @@ the new hub (`../minty-web` + `../minty-billing-api`). Each of those repos has i
 | Receipts: storage, naming, the comma trap, downloads | [receipts-and-attachments.md](receipts-and-attachments.md) |
 | History, detail pages, CSV / Excel / docx / screenshot exports, share links | [report-history-and-exports.md](report-history-and-exports.md) |
 | Connecting a company to Xero, syncing, publishing and republishing a day | [xero-integration.md](xero-integration.md) |
-| Modules, the `SUBSCRIPTION_ENABLED` switch, the subscription engine, the scheduler | [modules-and-subscriptions.md](modules-and-subscriptions.md) |
+| Modules, the subscription engine, the in-app notices, the scheduler | [modules-and-subscriptions.md](modules-and-subscriptions.md) |
 | Launching the wizard and the payment module; `/api/onboarding/*` | [onboarding-and-module-handoff.md](onboarding-and-module-handoff.md) |
 | The sidebar on every page with a header - the menu and My Profile (minty-web's, ported) | [sidebar.md](sidebar.md) |
 | Terms of Use versions, the consent record, the gate | [legal-terms.md](legal-terms.md) |
