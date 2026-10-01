@@ -1,93 +1,62 @@
-{% set sales_view_only = not (can_edit_sales_methods | default(false)) %}
-{# Electronic + Delivery payment methods sections, shared by petty cash settings templates. #}
-        <!-- Electronic Payment Methods Card -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if sales_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-gray-800">Electronic</h3>
-            <div class="flex items-center gap-3">
-              <svg class="size-5 text-gray-400 transition-transform duration-200 ease-in-out cursor-pointer" id="electronicChevron" onclick="toggleElectronic()" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
-              </svg>
-            </div>
-          </div>
-          
-          <!-- Electronic Content (Collapsible) -->
-          <div id="electronicContent" {% if sales_view_only %}class="settings-readonly"{% endif %}>
-            <!-- Payment Methods List -->
-            <div id="paymentMethodsList" class="mb-4 mt-4">
-              <!-- Dynamic payment methods will be loaded here -->
-            </div>
-            
-            <!-- Add New Method Button -->
-            <button type="button" id="addMethodBtn" {% if sales_view_only %}disabled{% endif %} class="w-full border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors hover-scale-parent">
-              <svg width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg" class="hover-scale">
-                <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="currentColor"/>
-              </svg>
-              Add New Method
-            </button>
-            
-            <!-- Add Method Form (Hidden by default) -->
-            <div id="addMethodForm" class="hidden">
-              <div class="space-y-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                  <input type="text" id="methodName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" placeholder="Enter payment method name">
-                </div>
-                <div class="flex justify-end gap-3">
-                  <button type="button" id="cancelMethodBtn" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors">
-                    Cancel
-                  </button>
-                  <button type="button" id="saveMethodBtn" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
-                    Add
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+{#
+  The Electronic and Delivery cards of Petty Cash Settings (templates/entity/settings_entity.html),
+  in Payment Settings' card look. static/js/petty_cash_settings.js loads the company's methods
+  into the lists, draws each row (rename by clicking the name; Move up, Move down and Delete under
+  the ⋮), and keeps every change pending until Save Changes.
 
-        <!-- Delivery Sales Card -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if sales_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-gray-800">Delivery</h3>
-            <div class="flex items-center gap-3">
-              <svg class="size-5 text-gray-400 transition-transform duration-200 ease-in-out cursor-pointer" id="deliveryChevron" onclick="toggleDelivery()" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
-              </svg>
-            </div>
-          </div>
-          
-          <!-- Delivery Content (Collapsible) -->
-          <div id="deliveryContent" {% if sales_view_only %}class="settings-readonly"{% endif %}>
-            <!-- Delivery Methods List -->
-            <div id="deliveryMethodsList" class="mb-4 mt-4">
-              <!-- Dynamic delivery methods will be loaded here -->
-            </div>
-            
-            <!-- Add New Method Button -->
-            <button type="button" id="addDeliveryMethodBtn" {% if sales_view_only %}disabled{% endif %} class="w-full border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors hover-scale-parent">
-              <svg width="13" height="14" viewBox="0 0 13 14" fill="none" xmlns="http://www.w3.org/2000/svg" class="hover-scale">
-                <path d="M5.57143 5.69643V0.125H7.42857V5.69643H13V7.55357H7.42857V13.125H5.57143V7.55357H0V5.69643H5.57143Z" fill="currentColor"/>
-              </svg>
-              Add New Method
-            </button>
-            
-            <!-- Add Method Form (Hidden by default) -->
-            <div id="addDeliveryMethodForm" class="hidden">
-              <div class="space-y-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                  <input type="text" id="deliveryMethodName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" placeholder="Enter delivery method name">
-                </div>   
-                <div class="flex justify-end gap-3">
-                  <button type="button" id="cancelDeliveryMethodBtn" class="flex-1 border-2 border-[#54D3DA] text-[#54D3DA] py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/10 transition-colors">
-                    Cancel
-                  </button>
-                  <button type="button" id="saveDeliveryMethodBtn" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
-                    Add
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+  "Add New Method" opens the catalogue picker: a method another company already uses ("VISA") is
+  picked from the list rather than retyped ("Viza" would mint a second catalogue row); "+ Other"
+  reveals the Name box for a new one. The ids are what e2e/03_settings.spec.ts drives.
+#}
+{% set sales_view_only = not (can_edit_sales_methods | default(false)) %}
+{% for kind in (
+    {'type': 'electronic', 'title': 'Electronic', 'sub': 'Card and wallet payments a sales report can record.',
+     'list': 'paymentMethodsList', 'add': 'addMethodBtn', 'form': 'addMethodForm',
+     'catalog': 'methodCatalog', 'name_wrap': 'methodNameWrapper', 'name': 'methodName',
+     'cancel': 'cancelMethodBtn', 'save': 'saveMethodBtn',
+     'pick': 'Select a payment method', 'enter': 'Enter payment method name'},
+    {'type': 'delivery', 'title': 'Delivery', 'sub': 'Delivery platforms a sales report can record.',
+     'list': 'deliveryMethodsList', 'add': 'addDeliveryMethodBtn', 'form': 'addDeliveryMethodForm',
+     'catalog': 'deliveryCatalog', 'name_wrap': 'deliveryMethodNameWrapper', 'name': 'deliveryMethodName',
+     'cancel': 'cancelDeliveryMethodBtn', 'save': 'saveDeliveryMethodBtn',
+     'pick': 'Select a delivery method', 'enter': 'Enter delivery method name'},
+) %}
+<section class="pcs-card{% if sales_view_only %} pcs-card-readonly{% endif %}" data-sales-card="{{ kind.type }}">
+  <div class="pcs-card-head">
+    <h2 class="pcs-card-heading">
+      <button type="button" class="pcs-card-toggle" data-card-toggle aria-expanded="true" aria-controls="{{ kind.type }}Content">
+        <span class="pcs-card-title">{{ kind.title }}</span>
+        <span class="material-symbols-outlined pcs-chevron" aria-hidden="true">expand_more</span>
+      </button>
+    </h2>
+    <p class="pcs-card-sub">{{ kind.sub }}</p>
+  </div>
+  <div class="pcs-card-body" id="{{ kind.type }}Content">
+    <p class="pcs-methods-note" data-methods-note="{{ kind.type }}" role="status">Loading…</p>
+    <ul id="{{ kind.list }}" class="pcs-methods" aria-label="{{ kind.title }} methods"></ul>
+
+    <button type="button" id="{{ kind.add }}" class="pcs-btn pcs-btn-outline pcs-btn-wide" disabled>
+      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+      Add New Method
+    </button>
+
+    <div id="{{ kind.form }}" class="pcs-add-form hidden">
+      <label class="pcs-label" for="{{ kind.catalog }}Input">Method</label>
+      <div class="pcs-combo">
+        <input type="text" id="{{ kind.catalog }}Input" class="pcs-combo-input" placeholder="{{ kind.pick }}" autocomplete="off"
+               role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="{{ kind.catalog }}Suggestions">
+        <span class="pcs-combo-chevron" aria-hidden="true"><span id="{{ kind.catalog }}DropdownIcon" class="material-symbols-outlined">expand_more</span></span>
+        <div id="{{ kind.catalog }}Suggestions" class="pcs-suggest hidden" role="listbox"></div>
+      </div>
+      <div id="{{ kind.name_wrap }}" class="pcs-add-form hidden">
+        <label class="pcs-label" for="{{ kind.name }}">Name</label>
+        <input type="text" id="{{ kind.name }}" class="pcs-input" placeholder="{{ kind.enter }}" autocomplete="off">
+      </div>
+      <div class="pcs-actions">
+        <button type="button" id="{{ kind.cancel }}" class="pcs-btn pcs-btn-outline">Cancel</button>
+        <button type="button" id="{{ kind.save }}" class="pcs-btn pcs-btn-solid">Add</button>
+      </div>
+    </div>
+  </div>
+</section>
+{% endfor %}

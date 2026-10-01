@@ -1,7 +1,8 @@
 # The sidebar — the menu and My Profile
 
 Every Petty Cash page with a header — the dashboard, the report wizard, report history, the
-settings tabs in both dresses (Petty Cash and `?from=bills`), the entity list while
+settings tabs (Users and Entity & Integration in both dresses, Petty Cash and `?from=bills`;
+Petty Cash Settings, one template for both), the entity list while
 `MINTY_WEB_HUB` is off, create and no-permission — carries the same sidebar minty-web draws:
 **one drawer, two views** (the user's call, 2026-09-29; brought here 2026-09-30).
 
@@ -58,6 +59,9 @@ Top to bottom: the Minty mark; the person (avatar + name — opens My Profile); 
   mints its token at the click — where billing-frontend's own Settings goes). A company without
   Petty Cash has no Petty Cash Settings tab (`require_module`), so it gets Entity & Integration.
   minty-web's own menu keeps its module page.
+- **On Petty Cash Settings with unsaved changes**, a link in the drawer — Logout included —
+  asks first ("Leave without saving?", [modals.md](modals.md)): the dialog sits above the drawer
+  (z-index 250 over 200) and Escape closes only the dialog. The initials and the ≡ never ask.
 - **Logout ends the session everywhere** (`/logout`) — in all three apps (the user's call,
   2026-09-30). The old side panel's "leave this company" (`/leave-entity`) is no longer in the
   menu; the route stays.

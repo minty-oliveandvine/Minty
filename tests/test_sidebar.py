@@ -263,7 +263,6 @@ PAGES = [
     "entity/settings.html",
     "entity/settings_entity.html",
     "entity/settings_users.html",
-    "entity/settings_entity_bills_ui.html",
     "entity/settings_users_bills_ui.html",
     "entity/settings_xero_bills_ui.html",
     "report/cash_count.html",

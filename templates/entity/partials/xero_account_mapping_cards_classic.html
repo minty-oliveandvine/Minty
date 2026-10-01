@@ -1,249 +1,129 @@
-      
-        <!-- Account Mapping Cards -->
-        <!-- Main Bank Account -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <h3 class="text-lg font-semibold text-gray-800 mb-2">Petty Cash Account</h3>
-          <p class="text-sm text-gray-600 mb-4">Select Petty Cash bank account from Xero</p>
-          <div class="relative">
-            <input 
-              type="text" 
-              id="main_bank_input" 
-              placeholder="Select a bank account" 
-              class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700"
-              autocomplete="off"
-            >
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="mainBankDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Bank Account Suggestions Dropdown -->
-            <div id="mainBankSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-          </div>
-          <!-- Hidden select for form submission -->
-          <select name="main_bank" id="main_bank_select" class="hidden">
-            <option value="" selected disabled>Select a bank account</option>
-            {% for account in bank_accounts %}
-              <option value="{{ account['AccountID'] }}">{{ account['Name'] }} - {{ account['MaskedBankAccountNumber'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
+{#
+  The Xero account mapping fields of Petty Cash Settings (templates/entity/settings_entity.html),
+  drawn inside its "Xero account mapping" card in Payment Settings' look (static/css/settings_page.css).
 
-        <!-- Deposit Bank Account -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <h3 class="text-lg font-semibold text-gray-800 mb-2">Deposit Bank Account</h3>
-          <p class="text-sm text-gray-600 mb-4">Select bank account to deposit excess cash</p>
-          <div class="relative">
-            <input type="text" id="deposit_bank_input" placeholder="Select a bank account" 
-              class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="depositBankDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Bank Account Suggestions Dropdown -->
-            <div id="depositBankSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-          </div>
-          <!-- Hidden select for form submission -->
-          <select name="deposit_bank" id="deposit_bank_select" class="hidden">
-            <option value="">Select a bank account</option>
-            {% for account in bank_accounts %}
-              <option value="{{ account['AccountID'] }}">{{ account['Name'] }} - {{ account['MaskedBankAccountNumber'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <!-- Cash Sales -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <h3 class="text-lg font-semibold text-gray-800 mb-2">Cash Sales</h3>
-          <p class="text-sm text-gray-600 mb-4">Select account code for cash sales</p>
-          <div class="relative mb-4">
-            <input type="text" id="cashsale_account_input" placeholder="Select an account code" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="cashsaleAccountDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Account Code Suggestions Dropdown -->
-            <div id="cashsaleAccountSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-          </div>
-          <!-- Hidden select for form submission -->
-          <select name="cashsale_account" id="cashsale_account_select" class="hidden">
-            <option value="" selected disabled>Select an account code</option>
-           {%for account in cashsale_account %}
-              <option value="{{ account['Code'] }}">{{ account['Name'] }} - {{ account['Code'] }}</option>
-            {% endfor %}
-          </select>
-          <p class="text-sm text-gray-600 mb-4">Select the Customer contact</p>
-          <div id="cashSaleContactField">
-            <div class="relative">
-              <input type="text" id="cashsale_contact_input" placeholder="Select a contact" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="cashsaleContactDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Contact Suggestions Dropdown -->
-            <div id="cashsaleContactSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-            </div>
-          </div>
-          
-          <!-- New Contact Section (hidden by default) -->
-          <div id="newCashSaleContactSection" class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-lg hidden">
-            <label class="block text-sm font-medium text-gray-700 mb-2">New Contact <span class="text-red-500">*</span></label>
-            <input type="text" id="newCashSaleContactInput" placeholder="Enter a New Contact" class="w-full pl-3 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer">
-            <div class="flex gap-2 mt-2">
-              <button type="button" onclick="cancelNewCashSaleContact()" class="flex-1 py-2 px-4 border-2 border-[#54D3DA] text-[#54D3DA] rounded-xl text-sm font-medium hover:bg-[#54D3DA]/10 transition-colors">Cancel</button>
-              <button type="button" onclick="createCashSaleContact()" class="flex-1 py-2 px-4 bg-[#54D3DA] text-white rounded-xl text-sm font-medium hover:bg-[#54D3DA]/80 transition-colors">Create</button>
-            </div>
-          </div>
-          
-          <!-- Hidden select for form submission -->
-          <select name="cashsale_contact" id="cashsale_contact_select" class="hidden">
-            <option value="" selected disabled>Select a contact</option>
-            {%for contact in contacts %}
-              <option value="{{ contact['ContactID'] }}">{{ contact['Name'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <!-- Director Personal Account -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <h3 class="text-lg font-semibold text-gray-800 mb-2">Director Personal Account</h3>
-          <p class="text-sm text-gray-600 mb-4">Select account code for the Advance Payment from director</p>
-          <div class="relative mb-4">
-            <input type="text" id="owners_account_input" placeholder="Select an account code" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="ownersAccountDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Account Code Suggestions Dropdown -->
-            <div id="ownersAccountSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-          </div>
-          <!-- Hidden select for form submission -->
-          <select name="owners_account" id="owners_account_select" class="hidden">
-            <option value="" selected disabled>Select an account code</option>
-           {%for account in owners_account %}
-              <option value="{{ account['Code'] }}">{{ account['Name'] }} - {{ account['Code'] }}</option>
-            {% endfor %}
-          </select>
-          <p class="text-sm text-gray-600 mb-4">Select Director or Responsible person</p>
-          <div id="ownersContactField">
-            <div class="relative">
-              <input type="text" id="owners_contact_input" placeholder="Select a contact" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="ownersContactDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Contact Suggestions Dropdown -->
-            <div id="ownersContactSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-            </div>
-          </div>
-          
-          <!-- New Contact Section (hidden by default) -->
-          <div id="newOwnersContactSection" class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-lg hidden">
-            <label class="block text-sm font-medium text-gray-700 mb-2">New Contact <span class="text-red-500">*</span></label>
-            <input type="text" id="newOwnersContactInput" placeholder="Enter a New Contact" class="w-full pl-3 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer">
-            <div class="flex gap-2 mt-2">
-              <button type="button" onclick="cancelNewOwnersContact()" class="flex-1 py-2 px-4 border-2 border-[#54D3DA] text-[#54D3DA] rounded-xl text-sm font-medium hover:bg-[#54D3DA]/10 transition-colors">Cancel</button>
-              <button type="button" onclick="createOwnersContact()" class="flex-1 py-2 px-4 bg-[#54D3DA] text-white rounded-xl text-sm font-medium hover:bg-[#54D3DA]/80 transition-colors">Create</button>
-            </div>
-          </div>
-          
-          <!-- Hidden select for form submission -->
-          <select name="owners_contact" id="owners_contact_select" class="hidden">
-            <option value="" selected disabled>Select a contact</option>
-            {%for contact in contacts %}
-              <option value="{{ contact['ContactID'] }}">{{ contact['Name'] }}</option>
-            {% endfor %}
-          </select>
-          </div>
+  The pickers are driven by partials/xero_mapping_classic_script_fragment.html, which reads every
+  id below: the visible input, its chevron icon (rotated while open), the suggestion list, the
+  hidden <select> the form posts, and the "+ New Contact" panels. Keep the ids when changing this.
+  The <option> lists are the server-seeded fallback the script starts from (and what a
+  disconnected company keeps using).
+#}
+{% macro combo(input_id, icon_id, list_id, placeholder) -%}
+<div class="pcs-combo">
+  <input type="text" id="{{ input_id }}" class="pcs-combo-input" placeholder="{{ placeholder }}" autocomplete="off">
+  <span class="pcs-combo-chevron" aria-hidden="true"><span id="{{ icon_id }}" class="material-symbols-outlined">expand_more</span></span>
+  <div id="{{ list_id }}" class="pcs-suggest hidden"></div>
+</div>
+{%- endmacro %}
+{% macro new_contact(section_id, input_id, cancel_fn, create_fn) -%}
+<div id="{{ section_id }}" class="pcs-panel hidden">
+  <label class="pcs-label" for="{{ input_id }}">New Contact <span class="pcs-required">*</span></label>
+  <input type="text" id="{{ input_id }}" class="pcs-input" placeholder="Enter a New Contact" autocomplete="off">
+  <div class="pcs-actions">
+    <button type="button" class="pcs-btn pcs-btn-outline" onclick="{{ cancel_fn }}()">Cancel</button>
+    <button type="button" class="pcs-btn pcs-btn-solid" onclick="{{ create_fn }}()">Create</button>
+  </div>
+</div>
+{%- endmacro %}
 
-        <!-- Discrepancy - Other Expense -->
-        <div class="mb-6 rounded-lg border border-gray-200 {% if is_view_only %}bg-gray-100{% else %}bg-white{% endif %} p-4 shadow-sm">
-          <h3 class="text-lg font-semibold text-gray-800 mb-2">Discrepancy - Other Expense</h3>
-          <p class="hidden text-sm text-gray-600 mb-4">Bank account for discrepancy from Xero</p>
-          <div class="hidden relative mb-4">
-            <input type="text" id="discrepancy_bank_input" placeholder="Select a bank account" class="w-full pl-3 pr-3 py-3 bg-[#E5E7EB] border border-gray-300 rounded-2xl text-gray-700 focus:outline-none cursor-not-allowed placeholder:text-gray-400" autocomplete="off" readonly>
-          </div>
-          <!-- Hidden select for form submission -->
-          <select name="discrepancy_bank" id="discrepancy_bank_select" class="hidden">
-            <option value="" selected disabled>Select a bank account</option>
-            {% for account in bank_accounts %}
-              <option value="{{ account['AccountID'] }}">{{ account['Name'] }} - {{ account['MaskedBankAccountNumber'] }}</option>
-            {% endfor %}
-          </select>
-          <p class="text-sm text-gray-600 mb-4">Select account code to record Cash Discrepancy</p>
-          <div class="relative mb-4">
-            <input type="text" id="discrepancy_account_input" placeholder="Select an account code" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="discrepancyAccountDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Account Code Suggestions Dropdown -->
-            <div id="discrepancyAccountSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-          </div>
-          <!-- Hidden select for form submission -->
-          <select name="discrepancy_account" id="discrepancy_account_select" class="hidden">
-            <option value="" selected disabled>Select an account code</option>
-           {%for account in discrepancy_account %}
-              <option value="{{ account['Code'] }}">{{ account['Name'] }} - {{ account['Code'] }}</option>
-            {% endfor %}
-          </select>
-          <p class="text-sm text-gray-600 mb-4">Select Director or Responsible person</p>
-          <div id="discrepancyContactField">
-            <div class="relative">
-              <input type="text" id="discrepancy_contact_input" placeholder="Select a contact" class="w-full pl-3 pr-10 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer placeholder:text-gray-700" autocomplete="off">
-            <!-- Dropdown Icon -->
-            <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <svg id="discrepancyContactDropdownIcon" width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg" class="transition-transform duration-200 ease-in-out">
-                <path d="M4.99999 3.17648L1.16223 7.01656L0.0590677 5.92828L4.99999 0.984375L9.94092 5.92828L8.83776 7.01656L4.99999 3.17648Z" fill="#546881"/>
-              </svg>
-            </div>
-            <!-- Contact Suggestions Dropdown -->
-            <div id="discrepancyContactSuggestions" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg hidden max-h-60 overflow-y-auto">
-              <!-- Suggestions will be populated here -->
-            </div>
-            </div>
-          </div>
-          
-          <!-- New Contact Section (hidden by default) -->
-          <div id="newDiscrepancyContactSection" class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-lg hidden">
-            <label class="block text-sm font-medium text-gray-700 mb-2">New Contact <span class="text-red-500">*</span></label>
-            <input type="text" id="newDiscrepancyContactInput" placeholder="Enter a New Contact" class="w-full pl-3 pr-3 py-3 bg-white border border-gray-300 rounded-2xl text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer">
-            <div class="flex gap-2 mt-2">
-              <button type="button" onclick="cancelNewDiscrepancyContact()" class="flex-1 py-2 px-4 border-2 border-[#54D3DA] text-[#54D3DA] rounded-xl text-sm font-medium hover:bg-[#54D3DA]/10 transition-colors">Cancel</button>
-              <button type="button" onclick="createDiscrepancyContact()" class="flex-1 py-2 px-4 bg-[#54D3DA] text-white rounded-xl text-sm font-medium hover:bg-[#54D3DA]/80 transition-colors">Create</button>
-            </div>
-          </div>
-          
-          <!-- Hidden select for form submission -->
-          <select name="discrepancy_contact" id="discrepancy_contact_select" class="hidden">
-            <option value="" selected disabled>Select a contact</option>
-            {%for contact in contacts %}
-              <option value="{{ contact['ContactID'] }}">{{ contact['Name'] }}</option>
-            {% endfor %}
-          </select>
-        </div>
+<div class="pcs-field-group">
+  <h3 class="pcs-field-title">Petty Cash Account</h3>
+  <p class="pcs-field-sub">Select Petty Cash bank account from Xero</p>
+  {{ combo('main_bank_input', 'mainBankDropdownIcon', 'mainBankSuggestions', 'Select a bank account') }}
+  <select name="main_bank" id="main_bank_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select a bank account</option>
+    {% for account in bank_accounts %}
+      <option value="{{ account['AccountID'] }}">{{ account['Name'] }} - {{ account['MaskedBankAccountNumber'] }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="pcs-field-group">
+  <h3 class="pcs-field-title">Deposit Bank Account</h3>
+  <p class="pcs-field-sub">Select bank account to deposit excess cash</p>
+  {{ combo('deposit_bank_input', 'depositBankDropdownIcon', 'depositBankSuggestions', 'Select a bank account') }}
+  <select name="deposit_bank" id="deposit_bank_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="">Select a bank account</option>
+    {% for account in bank_accounts %}
+      <option value="{{ account['AccountID'] }}">{{ account['Name'] }} - {{ account['MaskedBankAccountNumber'] }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="pcs-field-group">
+  <h3 class="pcs-field-title">Cash Sales</h3>
+  <p class="pcs-field-sub">Select account code for cash sales</p>
+  {{ combo('cashsale_account_input', 'cashsaleAccountDropdownIcon', 'cashsaleAccountSuggestions', 'Select an account code') }}
+  <select name="cashsale_account" id="cashsale_account_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select an account code</option>
+    {% for account in cashsale_account %}
+      <option value="{{ account['Code'] }}">{{ account['Name'] }} - {{ account['Code'] }}</option>
+    {% endfor %}
+  </select>
+  <p class="pcs-field-sub">Select the Customer contact</p>
+  <div id="cashSaleContactField">
+    {{ combo('cashsale_contact_input', 'cashsaleContactDropdownIcon', 'cashsaleContactSuggestions', 'Select a contact') }}
+  </div>
+  {{ new_contact('newCashSaleContactSection', 'newCashSaleContactInput', 'cancelNewCashSaleContact', 'createCashSaleContact') }}
+  <select name="cashsale_contact" id="cashsale_contact_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select a contact</option>
+    {% for contact in contacts %}
+      <option value="{{ contact['ContactID'] }}">{{ contact['Name'] }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="pcs-field-group">
+  <h3 class="pcs-field-title">Director Personal Account</h3>
+  <p class="pcs-field-sub">Select account code for the Advance Payment from director</p>
+  {{ combo('owners_account_input', 'ownersAccountDropdownIcon', 'ownersAccountSuggestions', 'Select an account code') }}
+  <select name="owners_account" id="owners_account_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select an account code</option>
+    {% for account in owners_account %}
+      <option value="{{ account['Code'] }}">{{ account['Name'] }} - {{ account['Code'] }}</option>
+    {% endfor %}
+  </select>
+  <p class="pcs-field-sub">Select Director or Responsible person</p>
+  <div id="ownersContactField">
+    {{ combo('owners_contact_input', 'ownersContactDropdownIcon', 'ownersContactSuggestions', 'Select a contact') }}
+  </div>
+  {{ new_contact('newOwnersContactSection', 'newOwnersContactInput', 'cancelNewOwnersContact', 'createOwnersContact') }}
+  <select name="owners_contact" id="owners_contact_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select a contact</option>
+    {% for contact in contacts %}
+      <option value="{{ contact['ContactID'] }}">{{ contact['Name'] }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="pcs-field-group">
+  <h3 class="pcs-field-title">Discrepancy - Other Expense</h3>
+  {# The discrepancy bank always mirrors the Petty Cash Account (the script copies it across);
+     its own picker stays hidden, and only the select is posted. #}
+  <input type="text" id="discrepancy_bank_input" class="hidden" tabindex="-1" aria-hidden="true" readonly>
+  <select name="discrepancy_bank" id="discrepancy_bank_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select a bank account</option>
+    {% for account in bank_accounts %}
+      <option value="{{ account['AccountID'] }}">{{ account['Name'] }} - {{ account['MaskedBankAccountNumber'] }}</option>
+    {% endfor %}
+  </select>
+  <p class="pcs-field-sub">Select account code to record Cash Discrepancy</p>
+  {{ combo('discrepancy_account_input', 'discrepancyAccountDropdownIcon', 'discrepancyAccountSuggestions', 'Select an account code') }}
+  <select name="discrepancy_account" id="discrepancy_account_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select an account code</option>
+    {% for account in discrepancy_account %}
+      <option value="{{ account['Code'] }}">{{ account['Name'] }} - {{ account['Code'] }}</option>
+    {% endfor %}
+  </select>
+  <p class="pcs-field-sub">Select Director or Responsible person</p>
+  <div id="discrepancyContactField">
+    {{ combo('discrepancy_contact_input', 'discrepancyContactDropdownIcon', 'discrepancyContactSuggestions', 'Select a contact') }}
+  </div>
+  {{ new_contact('newDiscrepancyContactSection', 'newDiscrepancyContactInput', 'cancelNewDiscrepancyContact', 'createDiscrepancyContact') }}
+  <select name="discrepancy_contact" id="discrepancy_contact_select" class="hidden" aria-hidden="true" tabindex="-1">
+    <option value="" selected disabled>Select a contact</option>
+    {% for contact in contacts %}
+      <option value="{{ contact['ContactID'] }}">{{ contact['Name'] }}</option>
+    {% endfor %}
+  </select>
+</div>

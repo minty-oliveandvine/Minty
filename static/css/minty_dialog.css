@@ -1,0 +1,179 @@
+/*
+ * minty-web's modal family on this app's Jinja pages - ModalFrame + ConfirmDialog
+ * (minty-web features/subscription/components/), ported value for value. The behaviour is in
+ * static/js/minty_dialog.js, which builds the markup these rules dress.
+ *
+ * Plain CSS scoped under #minty-dialog, not CDN Tailwind classes: the pages load Tailwind v3 from
+ * a CDN and minty-web is Tailwind v4, whose palette and defaults differ (the sidebar does the
+ * same, static/css/minty_sidebar.css). Change minty-web, billing-frontend's copy and this together.
+ *
+ * z-index 250: above the sidebar drawer (200), so a link pressed inside the open drawer asks over
+ * it; below the loading overlays (300) and the flash toast (400). minty-web's frame is z-150
+ * because nothing of its own sits between; here the drawer does.
+ */
+
+#minty-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Opened by an attribute, not [hidden]: a display rule on the id would beat [hidden]. */
+#minty-dialog[data-open] {
+  display: flex;
+}
+
+#minty-dialog *,
+#minty-dialog *::before,
+#minty-dialog *::after {
+  box-sizing: border-box;
+}
+
+/* ModalFrame: the page blurred behind a pale backdrop - the card's sibling, never its parent,
+   so the blur does not soften the card. */
+#minty-dialog .md-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+/* ConfirmDialog's card: max-w-[435px] rounded-[24px] border-white/40 p-12 and its two shadows. */
+#minty-dialog .md-card {
+  position: relative;
+  width: 100%;
+  max-width: 435px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 24px;
+  background: #ffffff;
+  padding: 3rem;
+  box-shadow:
+    0 4px 8px 0 rgba(15, 23, 42, 0.08),
+    0 12px 32px 0 rgba(0, 0, 0, 0.1);
+  text-align: left;
+}
+
+#minty-dialog .md-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#minty-dialog .md-title-col {
+  min-width: 0;
+  flex: 1 1 0%;
+}
+
+#minty-dialog .md-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #000000;
+}
+
+/* Minty beside the title: the height is pinned (the script sets it per picture) and the width
+   follows, pulled into the card's corner (-mr-3 -mt-2). */
+#minty-dialog .md-image {
+  display: block;
+  flex-shrink: 0;
+  width: auto;
+  max-width: none;
+  margin: -0.5rem -0.75rem 0 0;
+}
+
+#minty-dialog .md-body {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 15px;
+  line-height: 1.375;
+  color: #757575;
+}
+
+#minty-dialog .md-body p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The button row is wider than the card's padding (-mx-[9px]): two 169px buttons and a 20px gap,
+   as the design draws them, without pinning a width a longer label could not wrap inside. */
+#minty-dialog .md-actions {
+  display: flex;
+  gap: 1.25rem;
+  margin: 2rem -9px 0;
+}
+
+#minty-dialog .md-btn {
+  height: 66px;
+  flex: 1 1 0%;
+  margin: 0;
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 1.125rem;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+#minty-dialog .md-back {
+  background: #ffffff;
+  font-weight: 400;
+}
+
+#minty-dialog .md-back[data-tone="grey"] {
+  border-color: rgba(115, 122, 135, 0.3);
+  font-weight: 700;
+  color: #000000;
+}
+
+#minty-dialog .md-back[data-tone="grey"]:hover {
+  background: #f9fafb;
+}
+
+#minty-dialog .md-back[data-tone="teal"] {
+  border-color: #18c4c7;
+  color: #4fc7c7;
+}
+
+#minty-dialog .md-back[data-tone="teal"]:hover {
+  background: #f5ffff;
+}
+
+#minty-dialog .md-confirm {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+#minty-dialog .md-confirm:hover {
+  opacity: 0.9;
+}
+
+#minty-dialog .md-confirm[data-tone="teal"] {
+  background: #4fc7c7;
+}
+
+#minty-dialog .md-confirm[data-tone="orange"] {
+  background: #ea9713;
+}
+
+#minty-dialog .md-confirm[data-tone="red"] {
+  background: #dc5a5a;
+}
