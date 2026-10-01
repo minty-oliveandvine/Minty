@@ -49,7 +49,10 @@ ending summary of a submitted report without a login.
 Until 2026-10-01 the URL had no secret. Anyone could edit the date and open other days, and
 two companies with the same initials (e.g. "Dine at Venus" / "Dine at Venus 2") shared one
 row, so the second company to share took over the first one's link. Those two-part URLs are
-now refused outright (`is_share_path`), even while their row still exists. A refused or
+now refused outright (`is_share_path`), even while their row still exists. On the
+`pettycashv3` schema, no link opened at all before that date either: a naive-vs-aware
+`expires_at` comparison crashed and was shown as "This link doesn't look right" (see
+CODE_CLEANSE_NOTES). A refused or
 unknown path is logged as `share link refused` with the caller's IP, and a successful open
 as `share link opened` with the link id, so access is traceable from then on.
 
