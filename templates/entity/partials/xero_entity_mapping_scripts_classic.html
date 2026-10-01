@@ -1,8 +1,9 @@
-<script defer>
+<script>
 {% include 'entity/partials/xero_mapping_classic_script_fragment.html' %}
   document.addEventListener('DOMContentLoaded', function () {
     if (document.getElementById('main_bank_select') && typeof loadXeroDataAsync === 'function') {
-      loadXeroDataAsync();
+      // Kept, so the page knows when the lists have settled (its leave guard measures from there).
+      window.xeroDataLoad = loadXeroDataAsync();
     }
   });
 </script>

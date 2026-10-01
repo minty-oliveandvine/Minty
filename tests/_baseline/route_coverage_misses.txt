@@ -1,2 +1,2 @@
-# 125/125 schema-touching endpoints exercised
+# 115/115 schema-touching endpoints exercised
 

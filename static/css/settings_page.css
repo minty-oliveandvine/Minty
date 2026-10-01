@@ -1,0 +1,1250 @@
+/*
+ * Petty Cash Settings (templates/entity/settings_entity.html): minty-web's Module page chrome -
+ * AppHeader + SettingsTabs, which billing-frontend's Payment Settings wears class for class - and
+ * Payment Settings' card (billing-frontend components/settings/AccountCodeSettings.tsx,
+ * ThemedSelect.tsx) for the content. The user, 2026-09-30: "Petty Cash drawn in Payment
+ * Settings'/module settings design and The settings tabs in the Module page's chrome".
+ *
+ * Plain CSS scoped under #pc-settings, with Tailwind v4's values written out: the page loads
+ * Tailwind v3 from a CDN (for the shared flash toast and view-only notice, and the classes the
+ * Xero mapping script toggles), whose palette and defaults differ from the Next apps'. Where that
+ * script toggles a utility class on an element styled here (hidden, rotate-180, bg-gray-100, the
+ * red border-red-500 highlight), the rule is restated below so the id-scoped look cannot hide it.
+ *
+ * Breakpoints are Tailwind's: sm 640px, md 768px, lg 1024px.
+ */
+
+/* --- the page --------------------------------------------------------------------------------- */
+
+.pcs-body {
+  margin: 0;
+  background: #ffffff;
+  color: #171717;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#pc-settings {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+#pc-settings [hidden],
+#pc-settings .hidden {
+  display: none !important;
+}
+
+#pc-settings .rotate-180 {
+  transform: rotate(180deg);
+}
+
+#pc-settings .material-symbols-outlined {
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  direction: ltr;
+  user-select: none;
+}
+
+/* --- header: minty-web AppHeader (noBorder) --------------------------------------------------- */
+
+#pc-settings .pcs-header {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: #ffffff;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+#pc-settings .pcs-header-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 1920px;
+  height: 4rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+#pc-settings .pcs-header-lead {
+  display: flex;
+  flex: 1 1 0%;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 2.5rem;
+}
+
+#pc-settings .pcs-back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.125rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: #656565;
+  text-decoration: none;
+  transition: color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-back:hover {
+  color: #54d3da;
+}
+
+#pc-settings .pcs-back .material-symbols-outlined {
+  font-size: 22px;
+}
+
+#pc-settings .pcs-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+  color: #000000;
+}
+
+#pc-settings .pcs-header-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+#pc-settings .pcs-company-icon {
+  font-size: 22px;
+  color: #656565;
+}
+
+/* A plain 6.5rem, not AppHeader's max-w-[min(100%,6.5rem)]: a percentage cap counts as no cap
+   while the shrink-0 block around it is sized, so a long name made that block 334px wide at 375
+   - over the back link - with only 104px of it drawn. (Fixed the same way in minty-web and
+   billing-frontend, 2026-10-01.) */
+#pc-settings .pcs-company {
+  min-width: 0;
+  max-width: 6.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: #656565;
+}
+
+#pc-settings .pcs-doors {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.375rem;
+  padding-left: 0.125rem;
+}
+
+/* ViewerBadge */
+#pc-settings .pcs-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  background: #ffe6b1;
+  color: #6b3a12;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-avatar:hover {
+  box-shadow: 0 0 0 2px rgba(101, 101, 101, 0.3);
+}
+
+/* NavMenu's ≡ */
+#pc-settings .pcs-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-menu:hover {
+  background: rgba(101, 101, 101, 0.1);
+}
+
+#pc-settings .pcs-menu img {
+  display: block;
+  width: 29px;
+  height: auto;
+}
+
+/* --- the scrolling column and the tab strip: minty-web ModuleSettingsScreen + SettingsTabs ---- */
+
+#pc-settings .pcs-main {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+#pc-settings .pcs-column {
+  width: 100%;
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+#pc-settings .pcs-tabs-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #ffffff;
+  padding: 0.75rem 0;
+}
+
+#pc-settings .pcs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.25rem;
+}
+
+#pc-settings .pcs-pill {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  background: #e5e7eb;
+  color: #364153;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings a.pcs-pill:hover {
+  background: #d1d5dc;
+}
+
+#pc-settings .pcs-pill[aria-current="page"] {
+  background: #54d3da;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: default;
+}
+
+/* --- content: AccountCodeSettings ------------------------------------------------------------- */
+
+#pc-settings .pcs-content {
+  width: 100%;
+  padding: 0.5rem 0 2rem;
+}
+
+#pc-settings .pcs-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#pc-settings .pcs-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.1),
+    0 1px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+#pc-settings .pcs-card-readonly {
+  background: #f3f4f6;
+}
+
+/* AccountCodeSettings: the header button's px-4 py-4, the body's px-4 pb-4 (sm: px-5 pb-5). */
+#pc-settings .pcs-card-head {
+  padding: 1rem;
+}
+
+#pc-settings .pcs-card-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+#pc-settings .pcs-card-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-card-title {
+  min-width: 0;
+  flex: 1 1 0%;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+  color: #1e2939;
+}
+
+#pc-settings .pcs-chevron {
+  flex-shrink: 0;
+  font-size: 24px;
+  color: #99a1af;
+  transition: transform 200ms ease-out;
+}
+
+#pc-settings .pcs-card-toggle[aria-expanded="false"] .pcs-chevron {
+  transform: rotate(180deg);
+}
+
+#pc-settings .pcs-card-sub {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: #4a5565;
+}
+
+#pc-settings .pcs-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+}
+
+/* The read-only cards: nothing in them moves, the search box excepted (a cashier may still look). */
+#pc-settings .pcs-readonly input:not([type="hidden"]):not([type="checkbox"]):not(.pcs-search-input),
+#pc-settings .pcs-readonly .pcs-combo-chevron {
+  pointer-events: none;
+  background: #e5e7eb;
+  color: #6a7282;
+}
+
+#pc-settings .pcs-readonly button:not(.pcs-card-toggle) {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* --- notices ---------------------------------------------------------------------------------- */
+
+#pc-settings .pcs-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #f9fafb;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: #4a5565;
+}
+
+#pc-settings .pcs-notice .material-symbols-outlined {
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1.25rem;
+  color: #99a1af;
+}
+
+#pc-settings .pcs-notice-alert {
+  border-color: #f3b6ad;
+  background: #fff5f5;
+}
+
+#pc-settings .pcs-notice-alert .material-symbols-outlined {
+  color: #d92d20;
+}
+
+#pc-settings .pcs-notice a {
+  color: #18c4c7;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#pc-settings .pcs-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: #e7000b;
+}
+
+/* --- fields: ThemedSelect's searchable look (h-11, rounded-lg, the grey chevron strip) --------- */
+
+#pc-settings .pcs-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#pc-settings .pcs-field-group + .pcs-field-group {
+  padding-top: 1rem;
+  border-top: 1px solid #f3f4f6;
+}
+
+#pc-settings .pcs-field-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+  font-weight: 600;
+  color: #1e2939;
+}
+
+#pc-settings .pcs-field-sub,
+#pc-settings .pcs-label {
+  display: block;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+  color: #4a5565;
+}
+
+#pc-settings .pcs-field-sub + .pcs-combo,
+#pc-settings .pcs-label + .pcs-combo,
+#pc-settings .pcs-label + .pcs-input {
+  margin-top: -0.125rem;
+}
+
+#pc-settings .pcs-required {
+  color: #e7000b;
+}
+
+#pc-settings .pcs-combo {
+  position: relative;
+}
+
+#pc-settings .pcs-combo-input,
+#pc-settings .pcs-input,
+#pc-settings .pcs-search-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 2.75rem;
+  margin: 0;
+  border: 1px solid #d1d5dc;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: #000000;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  box-shadow: none;
+  outline: none;
+  transition:
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-combo-input {
+  padding: 0 3.5rem 0 0.75rem;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-input {
+  padding: 0 0.75rem;
+}
+
+#pc-settings .pcs-search-input {
+  padding: 0 2.75rem 0 0.75rem;
+}
+
+#pc-settings .pcs-combo-input::placeholder,
+#pc-settings .pcs-input::placeholder,
+#pc-settings .pcs-search-input::placeholder {
+  color: #364153;
+  opacity: 1;
+}
+
+#pc-settings .pcs-combo-input:focus,
+#pc-settings .pcs-input:focus,
+#pc-settings .pcs-search-input:focus {
+  border-color: #54d3da;
+  box-shadow: 0 0 0 2px rgba(84, 211, 218, 0.25);
+}
+
+#pc-settings .pcs-combo-input:disabled,
+#pc-settings .pcs-input:disabled {
+  cursor: not-allowed;
+  background: #e5e7eb;
+  color: #6a7282;
+}
+
+/* The mapping check's highlight (validateMappingBeforeSave adds these classes). */
+#pc-settings .pcs-combo-input.border-red-500,
+#pc-settings .pcs-input.border-red-500 {
+  border-color: #fb2c36;
+  box-shadow: 0 0 0 2px rgba(251, 44, 54, 0.2);
+}
+
+#pc-settings .pcs-combo-chevron {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6875rem;
+  border-left: 1px solid #d1d5dc;
+  border-radius: 0 7px 7px 0;
+  background: #ededed;
+  pointer-events: none;
+}
+
+#pc-settings .pcs-combo-chevron .material-symbols-outlined {
+  font-size: 22px;
+  color: #656565;
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-search-icon {
+  position: absolute;
+  top: 0;
+  right: 0.75rem;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  font-size: 22px;
+  color: #d1d5dc;
+  pointer-events: none;
+}
+
+/* The option list: ThemedSelect's (rounded-lg border-gray-300 py-1 shadow-lg ring-black/5). */
+#pc-settings .pcs-suggest {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 15rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem 0;
+  border: 1px solid #d1d5dc;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -4px rgba(0, 0, 0, 0.1);
+}
+
+#pc-settings .pcs-suggest > div {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: #6a7282;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-style: normal;
+  cursor: default;
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-suggest > div[data-index] {
+  color: #000000;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-suggest > div[data-index]:hover {
+  background: rgba(84, 211, 218, 0.1);
+}
+
+#pc-settings .pcs-suggest > div.bg-gray-100,
+#pc-settings .pcs-suggest > div[data-active] {
+  background: rgba(84, 211, 218, 0.15);
+}
+
+#pc-settings .pcs-suggest > div[aria-selected="true"] {
+  background: rgba(84, 211, 218, 0.15);
+  color: #54d3da;
+  font-weight: 600;
+}
+
+#pc-settings .pcs-suggest > div > div {
+  font: inherit;
+  color: inherit;
+}
+
+#pc-settings .pcs-suggest .text-xs {
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: #6a7282;
+}
+
+#pc-settings .pcs-suggest [data-value="__other__"],
+#pc-settings .pcs-suggest [data-type="add-new"] {
+  color: #4a5565;
+}
+
+/* --- buttons ---------------------------------------------------------------------------------- */
+
+#pc-settings .pcs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.75rem;
+  margin: 0;
+  padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+#pc-settings .pcs-btn-outline {
+  border-color: #54d3da;
+  background: #ffffff;
+  color: #54d3da;
+}
+
+#pc-settings .pcs-btn-outline:hover:not(:disabled) {
+  background: rgba(84, 211, 218, 0.1);
+}
+
+#pc-settings .pcs-btn-solid {
+  background: #54d3da;
+  color: #ffffff;
+}
+
+#pc-settings .pcs-btn-solid:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+#pc-settings .pcs-btn .material-symbols-outlined {
+  font-size: 20px;
+}
+
+#pc-settings .pcs-btn-wide {
+  width: 100%;
+}
+
+#pc-settings .pcs-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+#pc-settings .pcs-actions .pcs-btn {
+  flex: 1 1 0%;
+}
+
+#pc-settings .pcs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+}
+
+/* --- sales methods: rows with RowMenu's ⋮ (minty-web features/subscription/components) -------- */
+
+#pc-settings .pcs-methods {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#pc-settings .pcs-method {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 3rem;
+  padding: 0.25rem 0.25rem 0.25rem 0.75rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+#pc-settings .pcs-method-name {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  color: #364153;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  text-align: left;
+  cursor: text;
+}
+
+#pc-settings button.pcs-method-name:hover {
+  color: #54d3da;
+}
+
+#pc-settings .pcs-method-rename {
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 20rem;
+  height: 2.25rem;
+  margin: 0;
+  padding: 0 0.5rem;
+  border: 1px solid #d1d5dc;
+  border-radius: 0.375rem;
+  background: #ffffff;
+  color: #000000;
+  font-family: inherit;
+  font-size: 1rem;
+  outline: none;
+}
+
+#pc-settings .pcs-method-rename:focus {
+  border-color: #54d3da;
+  box-shadow: 0 0 0 2px rgba(84, 211, 218, 0.25);
+}
+
+#pc-settings .pcs-row-menu {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+#pc-settings .pcs-row-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: #8c949e;
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-row-menu-btn:hover {
+  background: #f3f4f6;
+}
+
+#pc-settings .pcs-row-menu-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  z-index: 30;
+  width: 201px;
+  margin: 0;
+  padding: 0.5rem 0;
+  list-style: none;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+}
+
+#pc-settings .pcs-row-menu-list button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 7px 22px;
+  border: 0;
+  background: transparent;
+  color: #16202e;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-row-menu-list button:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+#pc-settings .pcs-row-menu-list button:disabled {
+  color: #a0a8b2;
+  cursor: not-allowed;
+}
+
+#pc-settings .pcs-methods-note {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: #6a7282;
+}
+
+#pc-settings .pcs-methods-note[data-tone="error"] {
+  color: #e7000b;
+}
+
+#pc-settings .pcs-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* --- account codes: AccountCodeSettings' checklist -------------------------------------------- */
+
+#pc-settings .pcs-search {
+  position: relative;
+}
+
+#pc-settings .pcs-codes {
+  max-height: min(24rem, 50vh);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border-right: 1px solid #f3f4f6;
+  border-bottom: 1px solid #f3f4f6;
+  border-radius: 0 0 0.5rem 0.5rem;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #c4c4c4 #f0f0f0;
+}
+
+#pc-settings .pcs-codes::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+#pc-settings .pcs-codes::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 9999px;
+}
+
+#pc-settings .pcs-codes::-webkit-scrollbar-thumb {
+  background: #c4c4c4;
+  border: 2px solid #f0f0f0;
+  border-radius: 9999px;
+}
+
+#pc-settings .pcs-codes::-webkit-scrollbar-thumb:hover {
+  background: #a3a3a3;
+}
+
+#pc-settings .pcs-code-row,
+#pc-settings .pcs-select-all {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+#pc-settings .pcs-select-all {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #ffffff;
+}
+
+#pc-settings .pcs-card-readonly .pcs-select-all {
+  background: #f3f4f6;
+}
+
+#pc-settings .pcs-code-row + .pcs-code-row {
+  border-top: 1px solid #f3f4f6;
+}
+
+#pc-settings .pcs-code-row label,
+#pc-settings .pcs-select-all label {
+  display: flex;
+  flex: 1 1 0%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-code-label {
+  min-width: 0;
+  flex: 1 1 0%;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 400;
+  color: #364153;
+  overflow-wrap: anywhere;
+}
+
+#pc-settings .pcs-select-all-label {
+  min-width: 0;
+  flex: 1 1 0%;
+  text-align: right;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 400;
+  color: #656565;
+}
+
+#pc-settings .pcs-codes-empty {
+  margin: 0;
+  padding: 2rem 0;
+  text-align: center;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: rgba(101, 101, 101, 0.6);
+}
+
+#pc-settings .pcs-codes-nomatch {
+  margin: 0;
+  text-align: center;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: rgba(101, 101, 101, 0.6);
+}
+
+#pc-settings .pcs-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 0;
+}
+
+#pc-settings .pcs-skeleton-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  animation: pcs-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+#pc-settings .pcs-skeleton-row span {
+  height: 1rem;
+  border-radius: 0.25rem;
+  background: #f3f4f6;
+}
+
+#pc-settings .pcs-skeleton-row span:first-child {
+  flex: 1 1 0%;
+}
+
+#pc-settings .pcs-skeleton-row span:last-child {
+  width: 1rem;
+  flex-shrink: 0;
+}
+
+@keyframes pcs-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* checkbox-secondary-white-tick h-4 w-4 rounded border border-primary/40 */
+#pc-settings .pcs-tick {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(101, 101, 101, 0.4);
+  border-radius: 0.25rem;
+  background-color: #ffffff;
+  background-image: none;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.875rem 0.875rem;
+  color: #54d3da;
+  cursor: pointer;
+}
+
+#pc-settings .pcs-tick:checked {
+  border-color: #54d3da;
+  background: #54d3da
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E")
+    no-repeat center / 0.875rem 0.875rem;
+}
+
+#pc-settings .pcs-tick:indeterminate {
+  border-color: #54d3da;
+  background: #54d3da
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M6 11h12v2H6z'/%3E%3C/svg%3E")
+    no-repeat center / 0.875rem 0.875rem;
+}
+
+#pc-settings .pcs-tick:focus {
+  outline: none;
+}
+
+#pc-settings .pcs-tick:focus-visible {
+  box-shadow: 0 0 0 2px rgba(84, 211, 218, 0.5);
+}
+
+#pc-settings .pcs-tick:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* --- Save ------------------------------------------------------------------------------------- */
+
+#pc-settings .pcs-save {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+#pc-settings .pcs-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  width: 100%;
+  height: 3rem;
+  margin: 0;
+  padding: 0 1rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: #54d3da;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.1),
+    0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#pc-settings .pcs-save-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+#pc-settings .pcs-save-btn:focus-visible {
+  outline: 2px solid #54d3da;
+  outline-offset: 2px;
+}
+
+#pc-settings .pcs-save-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+#pc-settings .pcs-spin {
+  font-size: 20px;
+  animation: pcs-spin 1s linear infinite;
+}
+
+@keyframes pcs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- the busy overlay (Xero lists loading, a contact being created, the save) --------------- */
+
+#pc-settings .pcs-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+#pc-settings .pcs-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow:
+    0 4px 8px 0 rgba(15, 23, 42, 0.08),
+    0 12px 32px 0 rgba(0, 0, 0, 0.1);
+  color: #364153;
+  font-size: 15px;
+  line-height: 1.375;
+  font-weight: 500;
+}
+
+#pc-settings .pcs-overlay-card .pcs-spin {
+  font-size: 24px;
+  color: #54d3da;
+}
+
+/* --- sm (640px): AppHeader's sm: sizes, the card's sm:px-5, Save's sm:h-11 sm:text-sm ---------- */
+
+@media (min-width: 640px) {
+  #pc-settings .pcs-header-row {
+    height: 4.5rem;
+    gap: 0.75rem;
+    padding: 0 1.5rem;
+  }
+
+  #pc-settings .pcs-header-lead {
+    gap: 0.75rem;
+    min-height: 0;
+  }
+
+  #pc-settings .pcs-back {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+
+  #pc-settings .pcs-back .material-symbols-outlined {
+    font-size: 24px;
+  }
+
+  #pc-settings .pcs-title {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+  }
+
+  #pc-settings .pcs-header-end {
+    gap: 0.75rem;
+  }
+
+  #pc-settings .pcs-company-icon {
+    font-size: 26px;
+  }
+
+  #pc-settings .pcs-company {
+    max-width: 9rem;
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+
+  #pc-settings .pcs-doors {
+    gap: 0.5rem;
+    padding-left: 0.5rem;
+  }
+
+  #pc-settings .pcs-column {
+    padding: 0 1.5rem;
+  }
+
+  #pc-settings .pcs-tabs-bar {
+    padding: 1rem 0;
+  }
+
+  #pc-settings .pcs-content {
+    padding-top: 0.75rem;
+  }
+
+  #pc-settings .pcs-card-head {
+    padding: 1rem 1.25rem;
+  }
+
+  #pc-settings .pcs-card-title {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+  }
+
+  #pc-settings .pcs-card-body {
+    padding: 0 1.25rem 1.25rem;
+  }
+
+  #pc-settings .pcs-code-row,
+  #pc-settings .pcs-select-all {
+    padding: 0.75rem 1rem;
+  }
+
+  #pc-settings .pcs-skeleton-row {
+    padding: 0 1rem;
+  }
+
+  #pc-settings .pcs-combo-input,
+  #pc-settings .pcs-input {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  #pc-settings .pcs-save-btn {
+    height: 2.75rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+}
+
+@media (min-width: 768px) {
+  #pc-settings .pcs-company {
+    max-width: 14rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  #pc-settings .pcs-company {
+    max-width: 28rem;
+  }
+}

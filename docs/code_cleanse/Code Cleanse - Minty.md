@@ -281,10 +281,10 @@ Console calls have grown from 468 to 526 and spread from 14 files to 17 - this i
 | P3 | templates/download_statements.html | 5 console calls - NEW, had none |
 | P3 | templates/edit_report.html | 1 console call - NEW, had none |
 | P3 | templates/entity/entity_dashboard_v2.html | 53 console calls (was 49) - 2,625 lines |
-| P3 | templates/entity/partials/electronic_delivery_scripts.html | 37 console calls (was 29) |
+| P3 | ~~templates/entity/partials/electronic_delivery_scripts.html~~ | deleted 2026-10-01: Petty Cash Settings' rewrite (static/js/petty_cash_settings.js, 10 console.error calls, each a failure said out loud) |
 | P3 | templates/entity/partials/xero_mapping_classic_script_fragment.html | 115 console calls (was 107) - 3,896 lines |
 | P3 | templates/entity/settings.html | 122 console calls (was 113) - 4,870 lines |
-| P3 | templates/entity/settings_entity.html | 45 console calls (was 34) - 2,903 lines |
+| P3 | templates/entity/settings_entity.html | rewritten 2026-10-01 - 244 lines, no inline script, no console calls |
 | P3 | templates/entity/settings_users_scripts.html | 2 console calls (was 1), 1 open TODO |
 | P3 | templates/login.html | 3 console calls - NEW, had none |
 | P3 | templates/report/cash_count.html | 8 console calls - NEW, had none |

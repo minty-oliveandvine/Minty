@@ -59,7 +59,7 @@ def _country_currency_choices(org):
     The entity's CURRENT row is always included even when it has since been
     deactivated. Without that, ``selected_*`` would fall to None and the
     template renders the hidden country_code / currency_id inputs as
-    ``value=""`` (settings_entity.html:336-337), so the form shows a blank
+    ``value=""`` (``settings_entity.html``), so the form shows a blank
     country for an entity that has one. The save path skips empty values
     (xero_account_mapping_post.py:44) so nothing is overwritten, but a blank
     field reads as "unset" and invites someone to change it. Deactivating a
@@ -116,20 +116,17 @@ def _redirect_xero_mapping(entity_id: str, _from: str | None, *, return_view: st
     return redirect(url_for("entity_settings", entity_id=entity_id, **bills_kw))
 
 
-def _flash_if_xero_disconnected(org) -> bool:
-    """Flash a "Xero disconnected — please reconnect" error when the entity was
-    connected to a Xero org but is no longer live. Returns True if the entity is
-    disconnected.
+def _xero_disconnected(org) -> bool:
+    """Whether the entity was connected to a Xero org but is no longer live.
 
-    Only flashes for entities that are SUPPOSED to be connected
-    (``org.xero_org_id`` is set) so entities that never connected don't nag the
-    user.
+    Only entities that are SUPPOSED to be connected (``org.xero_org_id`` is set)
+    count, so entities that never connected don't nag the user.
 
     Runs the authoritative LIVE check first: ``sync_entity_xero_status`` hits
     Xero's /connections endpoint and reconciles ``org.status`` to reality. This
     matters because a connection revoked on the Xero website can leave the
     connector token still valid — so a token-only check (``resolve_xero_token``)
-    would wrongly report "connected". We therefore flash when EITHER no token
+    would wrongly report "connected". So: disconnected when EITHER no token
     resolves OR the live sync flipped status to "disconnected".
     """
     if org is None or not getattr(org, "xero_org_id", None):
@@ -151,15 +148,40 @@ def _flash_if_xero_disconnected(org) -> bool:
                 org.id, sync_error,
             )
 
-    if token_resolved and getattr(org, "status", None) != "disconnected":
-        return False
+    return not (token_resolved and getattr(org, "status", None) != "disconnected")
 
+
+def _flash_if_xero_disconnected(org) -> bool:
+    """Flash a "Xero disconnected — please reconnect" error when
+    ``_xero_disconnected(org)``. Returns True if the entity is disconnected.
+    (Petty Cash Settings says it inside its mapping card instead.)"""
+    if not _xero_disconnected(org):
+        return False
     flash(
         "This entity has been disconnected from Xero. Please reconnect it to "
         "keep your data in sync.",
         "danger",
     )
     return True
+
+
+def _saveable_account_codes(org_id) -> set[str]:
+    """The account codes Petty Cash Settings lists and can save.
+
+    The page's own list - ``account_info`` rows of the petty cash types that have an
+    ``entity_account_xero`` row - limited to rows that HAVE a code: the save keys on
+    ``account_codes[]``, so a row without one can never be ticked back on.
+    """
+    rows = (
+        db.session.query(AccountInfo.xero_code)
+        .join(EntityAccountXero, EntityAccountXero.account_id == AccountInfo.id)
+        .filter(
+            AccountInfo.entity_id == org_id,
+            AccountInfo.type.in_(list(COA_INCLUDED_TYPES)),
+        )
+        .all()
+    )
+    return {str(code).strip() for (code,) in rows if code and str(code).strip()}
 
 
 def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None):
@@ -904,6 +926,28 @@ def entity_settings_entity(org_id):
                     "You do not have permission to delete CoA settings.",
                     entity_id=org_id,
                 )
+            _from = request.form.get("_from") or request.args.get("from")
+            # At least one account code stays ticked: a save with none switches every code off
+            # (entity_account_xero.is_active below, and account_info.status with Xero
+            # connected), and a petty cash expense can only use the codes ticked here. Refused
+            # BEFORE anything is written - the mapping save commits on its own. A company with
+            # no codes at all saves as before; the page greys Save in the same case.
+            saveable = _saveable_account_codes(org_id)
+            if saveable:
+                posted = {
+                    str(c).strip()
+                    for c in request.form.getlist("account_codes[]")
+                    if c and str(c).strip()
+                }
+                if not posted & saveable:
+                    flash(
+                        "Pick at least one account code - a petty cash expense can "
+                        "only use the codes ticked here.",
+                        "danger",
+                    )
+                    return _redirect_xero_mapping(
+                        org_id, _from, return_view="entity_settings_entity"
+                    )
             try:
                 if request.form.get("main_bank") and has_permission(
                     current_user, Permission.COA_UPDATE, org_id
@@ -1020,13 +1064,8 @@ def entity_settings_entity(org_id):
                     )
 
                 flash("Entity settings saved!", "success")
-                _from = request.form.get("_from") or request.args.get("from")
-                return redirect(
-                    url_for(
-                        "entity_settings_entity",
-                        org_id=org_id,
-                        **{"from": _from} if _from == "bills" else {},
-                    )
+                return _redirect_xero_mapping(
+                    org_id, _from, return_view="entity_settings_entity"
                 )
             except IntegrityError as e:
                 db.session.rollback()
@@ -1037,13 +1076,8 @@ def entity_settings_entity(org_id):
                     "your entries and try again?",
                     "danger",
                 )
-                _from = request.form.get("_from") or request.args.get("from")
-                return redirect(
-                    url_for(
-                        "entity_settings_entity",
-                        org_id=org_id,
-                        **{"from": _from} if _from == "bills" else {},
-                    )
+                return _redirect_xero_mapping(
+                    org_id, _from, return_view="entity_settings_entity"
                 )
             except Exception as e:
                 db.session.rollback()
@@ -1053,13 +1087,8 @@ def entity_settings_entity(org_id):
                     "entries and try again?",
                     "danger",
                 )
-                _from = request.form.get("_from") or request.args.get("from")
-                return redirect(
-                    url_for(
-                        "entity_settings_entity",
-                        org_id=org_id,
-                        **{"from": _from} if _from == "bills" else {},
-                    )
+                return _redirect_xero_mapping(
+                    org_id, _from, return_view="entity_settings_entity"
                 )
 
         # Handle GET request (display form)
@@ -1129,7 +1158,9 @@ def entity_settings_entity(org_id):
                 _coa_backfill_err,
             )
 
-        expense_account_code = []
+        # The Petty Cash Account Code list, in code order: {code, name, selected} per row. The
+        # page script draws it as text and posts the ticks (static/js/petty_cash_settings.js).
+        petty_cash_codes = []
         if org_id:
             coa_rows = (
                 db.session.query(AccountInfo, EntityAccountXero.is_active)
@@ -1146,22 +1177,19 @@ def entity_settings_entity(org_id):
             )
             for acc, is_active in coa_rows:
                 entry = account_info_to_xero_format(acc)
-                entry["Name"] = html.unescape(entry.get("Name", "") or "")
-                entry["_is_selected"] = bool(is_active)
-                expense_account_code.append(entry)
+                petty_cash_codes.append(
+                    {
+                        "code": entry.get("Code") or "",
+                        "name": html.unescape(entry.get("Name", "") or ""),
+                        "selected": bool(is_active),
+                    }
+                )
             logger.info(
                 "entity_settings_entity: loaded {} petty cash CoA accounts "
                 "from entity_account_xero for entity {}",
-                len(expense_account_code), org_id,
+                len(petty_cash_codes), org_id,
             )
 
-        entity_acronym = ""
-        if org and org.name:
-            words = org.name.split()
-            entity_acronym = "".join([word[0].upper()
-                                     for word in words if word])
-
-        from_param = request.args.get("from")
         token_valid = False
         try:
             token_valid = ensure_valid_token(current_user)
@@ -1171,44 +1199,37 @@ def entity_settings_entity(org_id):
                 org_id,
                 tok_err,
             )
-        can_edit_coa_mappings = has_permission(
-            current_user, Permission.COA_UPDATE, org_id
-        )
+        _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
         from blueprints.entity.services.xero_mapping_form_context import \
             build_xero_mapping_form_context
 
         _mapping = build_xero_mapping_form_context(org_id, org, token_valid)
 
-        template = (
-            "entity/settings_entity_bills_ui.html"
-            if from_param == "bills"
-            else "entity/settings_entity.html"
-        )
-        _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
         # The Electronic/Delivery cards are the only controls on this page whose
         # APIs enforce SALES_METHOD_* rather than COA_*. Same minimum role today,
         # but gate the UI on the permission its own endpoints check.
         _can_edit_sales_methods = has_permission(
             current_user, Permission.SALES_METHOD_UPDATE, org_id
         )
-        # Live check (hits Xero /connections): warn if the entity was connected
-        # to Xero but is no longer live, so the user knows to reconnect.
-        _flash_if_xero_disconnected(org)
+        # Live check (hits Xero /connections): the mapping card says so when the
+        # entity was connected to Xero but is no longer live, so the user knows to
+        # reconnect.
+        xero_disconnected = _xero_disconnected(org)
+        # One template for every visit; ?from=bills (the Payment Request app sent the person
+        # here) changes only the way back, the tabs' links and the sidebar's Settings.
         return render_template(
-            template,
+            "entity/settings_entity.html",
             org=org,
-            bill_settings_url=billing_settings_app_url(
-                org_id, org, current_user.id, from_bills=from_param == "bills"
-            ),
+            from_bills=request.args.get("from") == "bills",
             country_code=country_code,
             currencies=currencies,
             selected_country=selected_country,
             selected_currency=selected_currency,
-            expense_account_code=expense_account_code,
-            entity_acronym=entity_acronym,
+            petty_cash_codes=petty_cash_codes,
             is_view_only=not _can_edit_coa,
-            can_edit_coa_mappings=can_edit_coa_mappings,
+            can_edit_coa_mappings=_can_edit_coa,
             can_edit_sales_methods=_can_edit_sales_methods,
+            xero_disconnected=xero_disconnected,
             **_mapping,
         )
     except Exception as e:

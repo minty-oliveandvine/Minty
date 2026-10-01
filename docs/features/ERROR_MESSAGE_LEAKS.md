@@ -46,21 +46,20 @@ throw err;
 Anything reaching a `.catch()` without that flag is a JS/network/parse failure
 and must never be surfaced. **When you add a `fetch()`, tag its throw.**
 
-### Four legacy toasts bypass all of this
+### Two legacy toasts bypass all of this
 
-`showErrorToast` is redefined per-page in four files, each driving its own DOM
+`showErrorToast` is redefined per-page in two files, each driving its own DOM
 (`#settingsNotification` / `#errorToast`) and never reaching
 `showFlashMessages`. A top-level `function showErrorToast` overwrites
 `window.showErrorToast` regardless of include order, so the page-local version
 always wins:
 
 - `templates/entity/settings.html`
-- `templates/entity/settings_entity.html`
-- `templates/entity/partials/electronic_delivery_scripts.html`
 - `templates/entity/settings_users_scripts.html`
 
-Each now calls `window.mintyErrorCopy(message)` on entry. **If you add a fifth,
-it must do the same.** Consolidating them onto `showFlashMessages` means
+Each now calls `window.mintyErrorCopy(message)` on entry. **If you add a third,
+it must do the same.** (Petty Cash Settings had two more until 2026-10-01; its
+rewrite uses the shared `showFlashMessages` through `components/flash_messages.html`.) Consolidating them onto `showFlashMessages` means
 removing the legacy DOM from those pages — deliberately not attempted.
 
 ---

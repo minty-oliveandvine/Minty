@@ -1,0 +1,8 @@
+{#
+  minty-web's modal family (ModalFrame + ConfirmDialog, and the "Leave without saving?" guard),
+  ported: static/js/minty_dialog.js says what and why. Include it ONCE in a page's head, before the
+  page's own scripts; the script builds the dialog itself on first use, so there is no markup
+  here. Every new modal on this app's pages uses it (the user, 2026-09-30).
+#}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/minty_dialog.css') }}">
+<script src="{{ url_for('static', filename='js/minty_dialog.js') }}"></script>

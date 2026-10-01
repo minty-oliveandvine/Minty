@@ -1,21 +1,35 @@
+    // Xero account and contact names arrive from Xero (and from this page's own "+ New Contact"):
+    // text, never markup, wherever a suggestion row is built from them.
+    function _escapeHtml(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    // Save is the page's to turn on and off (static/js/petty_cash_settings.js,
+    // updatePettyCashSave): it stays off until these lists are ready, so empty hidden <select>
+    // values cannot be submitted while they load.
+    function _updateSave() {
+      if (typeof window.updatePettyCashSave === 'function') window.updatePettyCashSave();
+    }
+
     // Function to load Xero data asynchronously
     async function loadXeroDataAsync() {
       const entityId = '{{ org.id }}';
       const xeroLoadingOverlay = document.getElementById('xeroLoadingOverlay');
       const xeroLoadingText = document.getElementById('xeroLoadingText');
-      const saveChangesBtn = document.getElementById('saveChangesBtn');
+      // A company that never connected to Xero has nothing to refresh (the endpoint answers 400):
+      // the pickers start from the server-seeded lists, with no request and no error logged.
+      const xeroConnected = {{ 'true' if org.xero_org_id else 'false' }};
 
       try {
-        // Block Save until the dropdown data is ready, so the user can't submit
-        // empty hidden <select> values while Xero data is still loading.
         window.xeroDataReady = false;
-        if (saveChangesBtn) {
-          saveChangesBtn.disabled = true;
-        }
+        _updateSave();
+        if (!xeroConnected) return; // the finally below still wires the pickers
 
         // Show loading modal
         if (xeroLoadingOverlay) {
-          xeroLoadingText.textContent = 'Loading xero entity settings';
+          if (xeroLoadingText) xeroLoadingText.textContent = 'Loading your Xero settings…';
           xeroLoadingOverlay.classList.remove('hidden');
         }
 
@@ -58,8 +72,8 @@
           // hidden <select> options and the all*Accounts/Contacts globals are
           // already server-seeded from account_info / xero_contact_sync, so
           // the dropdowns still work — we just skip the API-driven refresh.
-          console.error('Failed to load Xero data:', data.error);
-          showXeroDataError(data.error);
+          console.error('Failed to load Xero data:', data.message || data.error);
+          showXeroDataError(data.message || data.error);
         }
       } catch (error) {
         console.error('Error loading Xero data:', error);
@@ -87,12 +101,9 @@
         }
 
         // Dropdowns are now populated (from the API or the server-seeded
-        // fallback) — re-enable Save and let the submit handler validate.
+        // fallback): Save may come on, and the submit handler validates.
         window.xeroDataReady = true;
-        if (saveChangesBtn && !saveChangesBtn.hasAttribute('title')) {
-          // Keep view-only Save (which carries a title tooltip) disabled.
-          saveChangesBtn.disabled = false;
-        }
+        _updateSave();
       }
     }
 
@@ -391,11 +402,20 @@
       }
     }
 
-    // Function to show Xero data loading error
+    // The lists could not be refreshed from Xero: the pickers keep the server-seeded copies
+    // (what was last synced), and the mapping card says so rather than failing quietly.
     function showXeroDataError(error) {
       console.error('Xero data loading error:', error);
-      // You can add a toast notification or error message here
-      // For now, just log the error
+      const note = document.getElementById('xeroRefreshNote');
+      if (note) note.hidden = false;
+    }
+
+    // A bank account already chosen for the other bank field (the pickers leave it out of their
+    // lists, so this is the keyboard's way in).
+    function showBankAccountConflict(currentField, conflictingField) {
+      const names = { main: 'Petty Cash Account', deposit: 'Deposit Bank Account' };
+      _mappingToast(`${names[currentField]} can't be the same bank account as the ${names[conflictingField]}. Pick a different one.`);
+      _setMappingHighlight(`${currentField}_bank_input`, true);
     }
 
     // Global variables for main bank account search (seeded from server so dropdowns work before API)
@@ -601,8 +621,8 @@
         suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
-          <div class="text-xs text-gray-500">${account.MaskedBankAccountNumber}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(account.Name)}</div>
+          <div class="text-xs text-gray-500">${_escapeHtml(account.MaskedBankAccountNumber)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -904,8 +924,8 @@
         suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
-          <div class="text-xs text-gray-500">${account.MaskedBankAccountNumber}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(account.Name)}</div>
+          <div class="text-xs text-gray-500">${_escapeHtml(account.MaskedBankAccountNumber)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -1040,10 +1060,6 @@
         depositBankInput.value = newValue;
         depositBankInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        depositBankInput.style.color = '#1f2937';
-        depositBankInput.style.fontWeight = '400'; // Normal weight instead of bold
-        depositBankInput.style.backgroundColor = '#f9fafb'; // Lighter background
         depositBankInput.placeholder = '';
         
         console.log('Input value set to:', depositBankInput.value);
@@ -1234,8 +1250,8 @@
         suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
-          <div class="text-xs text-gray-500">${account.Code}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(account.Name)}</div>
+          <div class="text-xs text-gray-500">${_escapeHtml(account.Code)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -1344,10 +1360,6 @@
         cashSalesAccountInput.value = newValue;
         cashSalesAccountInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        cashSalesAccountInput.style.color = '#1f2937';
-        cashSalesAccountInput.style.fontWeight = '400'; // Normal weight
-        cashSalesAccountInput.style.backgroundColor = '#f9fafb'; // Light background
         cashSalesAccountInput.placeholder = '';
         
         console.log('Input value set to:', cashSalesAccountInput.value);
@@ -1547,7 +1559,7 @@
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.setAttribute('data-type', 'contact');
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${contact.Name}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(contact.Name)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -1564,7 +1576,7 @@
         addNewContactOption.setAttribute('data-type', 'add-new');
         addNewContactOption.innerHTML = `
           <div class="text-gray-600 hover:text-gray-800">
-            + Add '${addNewContactQuery}' as a new contact
+            + Add '${_escapeHtml(addNewContactQuery)}' as a new contact
           </div>
         `;
         addNewContactOption.addEventListener('mousedown', function(e) {
@@ -1717,10 +1729,6 @@
         cashSalesContactInput.value = newValue;
         cashSalesContactInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        cashSalesContactInput.style.color = '#1f2937';
-        cashSalesContactInput.style.fontWeight = '400'; // Normal weight
-        cashSalesContactInput.style.backgroundColor = '#f9fafb'; // Light background
         cashSalesContactInput.placeholder = '';
         
         console.log('Input value set to:', cashSalesContactInput.value);
@@ -1793,12 +1801,12 @@
         return;
       }
 
-      // Show loading overlay with "Creating Contact..." text
-      const loadingOverlay = document.getElementById('loadingOverlay');
-      const loadingText = loadingOverlay ? loadingOverlay.querySelector('span') : null;
-      const originalText = loadingText ? loadingText.textContent : 'Saving Settings...';
+      // The page's busy overlay while the contact is created in Xero (one click, one contact)
+      const loadingOverlay = document.getElementById('xeroLoadingOverlay');
+      const loadingText = document.getElementById('xeroLoadingText');
+      const originalText = loadingText ? loadingText.textContent : '';
       if (loadingText) {
-        loadingText.textContent = 'Creating Contact...';
+        loadingText.textContent = 'Creating contact…';
       }
       if (loadingOverlay) loadingOverlay.classList.remove('hidden');
 
@@ -2072,8 +2080,8 @@
         suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
-          <div class="text-xs text-gray-500">${account.Code}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(account.Name)}</div>
+          <div class="text-xs text-gray-500">${_escapeHtml(account.Code)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -2182,10 +2190,6 @@
         ownersAccountInput.value = newValue;
         ownersAccountInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        ownersAccountInput.style.color = '#1f2937';
-        ownersAccountInput.style.fontWeight = '400'; // Normal weight
-        ownersAccountInput.style.backgroundColor = '#f9fafb'; // Light background
         ownersAccountInput.placeholder = '';
         
         console.log('Input value set to:', ownersAccountInput.value);
@@ -2385,7 +2389,7 @@
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.setAttribute('data-type', 'contact');
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${contact.Name}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(contact.Name)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -2402,7 +2406,7 @@
         addNewContactOption.setAttribute('data-type', 'add-new');
         addNewContactOption.innerHTML = `
           <div class="text-gray-600 hover:text-gray-800">
-            + Add '${addNewContactQuery}' as a new contact
+            + Add '${_escapeHtml(addNewContactQuery)}' as a new contact
           </div>
         `;
         addNewContactOption.addEventListener('mousedown', function(e) {
@@ -2555,10 +2559,6 @@
         ownersContactInput.value = newValue;
         ownersContactInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        ownersContactInput.style.color = '#1f2937';
-        ownersContactInput.style.fontWeight = '400'; // Normal weight
-        ownersContactInput.style.backgroundColor = '#f9fafb'; // Light background
         ownersContactInput.placeholder = '';
         
         console.log('Input value set to:', ownersContactInput.value);
@@ -2631,12 +2631,12 @@
         return;
       }
 
-      // Show loading overlay with "Creating Contact..." text
-      const loadingOverlay = document.getElementById('loadingOverlay');
-      const loadingText = loadingOverlay ? loadingOverlay.querySelector('span') : null;
-      const originalText = loadingText ? loadingText.textContent : 'Saving Settings...';
+      // The page's busy overlay while the contact is created in Xero (one click, one contact)
+      const loadingOverlay = document.getElementById('xeroLoadingOverlay');
+      const loadingText = document.getElementById('xeroLoadingText');
+      const originalText = loadingText ? loadingText.textContent : '';
       if (loadingText) {
-        loadingText.textContent = 'Creating Contact...';
+        loadingText.textContent = 'Creating contact…';
       }
       if (loadingOverlay) loadingOverlay.classList.remove('hidden');
 
@@ -2911,8 +2911,8 @@
         suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
-          <div class="text-xs text-gray-500">${account.MaskedBankAccountNumber}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(account.Name)}</div>
+          <div class="text-xs text-gray-500">${_escapeHtml(account.MaskedBankAccountNumber)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -3022,10 +3022,6 @@
         discrepancyBankInput.value = newValue;
         discrepancyBankInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        discrepancyBankInput.style.color = '#1f2937';
-        discrepancyBankInput.style.fontWeight = '400'; // Normal weight
-        discrepancyBankInput.style.backgroundColor = '#f9fafb'; // Light background
         discrepancyBankInput.placeholder = '';
         
         console.log('Input value set to:', discrepancyBankInput.value);
@@ -3201,8 +3197,8 @@
         suggestionItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0';
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${account.Name}</div>
-          <div class="text-xs text-gray-500">${account.Code}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(account.Name)}</div>
+          <div class="text-xs text-gray-500">${_escapeHtml(account.Code)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -3311,10 +3307,6 @@
         discrepancyAccountInput.value = newValue;
         discrepancyAccountInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        discrepancyAccountInput.style.color = '#1f2937';
-        discrepancyAccountInput.style.fontWeight = '400'; // Normal weight
-        discrepancyAccountInput.style.backgroundColor = '#f9fafb'; // Light background
         discrepancyAccountInput.placeholder = '';
         
         console.log('Input value set to:', discrepancyAccountInput.value);
@@ -3514,7 +3506,7 @@
         suggestionItem.setAttribute('data-index', index);
         suggestionItem.setAttribute('data-type', 'contact');
         suggestionItem.innerHTML = `
-          <div class="text-sm font-medium text-gray-900">${contact.Name}</div>
+          <div class="text-sm font-medium text-gray-900">${_escapeHtml(contact.Name)}</div>
         `;
         suggestionItem.addEventListener('mousedown', function(e) {
           e.preventDefault();
@@ -3531,7 +3523,7 @@
         addNewContactOption.setAttribute('data-type', 'add-new');
         addNewContactOption.innerHTML = `
           <div class="text-gray-600 hover:text-gray-800">
-            + Add '${addNewContactQuery}' as a new contact
+            + Add '${_escapeHtml(addNewContactQuery)}' as a new contact
           </div>
         `;
         addNewContactOption.addEventListener('mousedown', function(e) {
@@ -3684,10 +3676,6 @@
         discrepancyContactInput.value = newValue;
         discrepancyContactInput.textContent = newValue; // Also set textContent as backup
         
-        // Apply visual changes
-        discrepancyContactInput.style.color = '#1f2937';
-        discrepancyContactInput.style.fontWeight = '400'; // Normal weight
-        discrepancyContactInput.style.backgroundColor = '#f9fafb'; // Light background
         discrepancyContactInput.placeholder = '';
         
         console.log('Input value set to:', discrepancyContactInput.value);
@@ -3760,12 +3748,12 @@
         return;
       }
 
-      // Show loading overlay with "Creating Contact..." text
-      const loadingOverlay = document.getElementById('loadingOverlay');
-      const loadingText = loadingOverlay ? loadingOverlay.querySelector('span') : null;
-      const originalText = loadingText ? loadingText.textContent : 'Saving Settings...';
+      // The page's busy overlay while the contact is created in Xero (one click, one contact)
+      const loadingOverlay = document.getElementById('xeroLoadingOverlay');
+      const loadingText = document.getElementById('xeroLoadingText');
+      const originalText = loadingText ? loadingText.textContent : '';
       if (loadingText) {
-        loadingText.textContent = 'Creating Contact...';
+        loadingText.textContent = 'Creating contact…';
       }
       if (loadingOverlay) loadingOverlay.classList.remove('hidden');
 

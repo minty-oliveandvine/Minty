@@ -40,9 +40,11 @@ follow on its later steps, and `POST /api/onboarding/finalize` flips the company
 
 ## Settings (`/entity/<id>/settings/…`)
 
-Tabs of their own templates (`settings.html`, `settings_entity.html`, `settings_users.html`,
-and the `*_bills_ui.html` dress when reached from the payments app with `?from=bills`; the Module
-tab is a hand-over to minty-web's page, [modules-and-subscriptions.md](modules-and-subscriptions.md)),
+Tabs of their own templates (`settings.html` and `settings_users.html`, with the `*_bills_ui.html`
+dress when reached from the payments app with `?from=bills`; Petty Cash Settings is ONE template,
+`settings_entity.html`, for both ways in - `?from=bills` changes only its way back and its tabs'
+links, [petty-cash-settings.md](petty-cash-settings.md); the Module tab is a hand-over to
+minty-web's page, [modules-and-subscriptions.md](modules-and-subscriptions.md)),
 each carrying the sidebar ([sidebar.md](sidebar.md)), whose module groups show
 only the modules the company has on (`data-module-nav`, hidden with an inline `display:none` — a
 `hidden` attribute loses to Tailwind's `.flex`). The sidebar's **Settings** opens the settings of
@@ -52,9 +54,9 @@ Payment Settings from the `?from=bills` ones.
 | Tab | Route | What it edits | Who |
 |---|---|---|---|
 | Entity & Integration | `GET/POST /entity/<id>/settings/xero` | the company name, country & currency, the Xero connection ([xero-integration.md](xero-integration.md)) | `ENTITY_UPDATE` / `XERO_SETTINGS_UPDATE` — accountant and up; others see it read-only (`settings-readonly`) |
-| Petty Cash Settings | `GET/POST /entity/settings/entity/<id>` (Petty Cash on only) | the sales settlement methods ([petty-cash-settings.md](petty-cash-settings.md)) and the petty-cash account codes - the accounts and contacts the dashboard's "Setup Required" asks for ([xero-integration.md](xero-integration.md) §3) | `ENTITY_UPDATE` / `COA_UPDATE` / `COA_CREATE` / `COA_DELETE` - as above |
+| Petty Cash Settings | `GET/POST /entity/settings/entity/<id>` (Petty Cash on only) | country & currency, the Xero account mapping - the accounts and contacts the dashboard's "Setup Required" asks for ([xero-integration.md](xero-integration.md) §3) - the sales settlement methods and the petty-cash account codes, at least one of which stays ticked ([petty-cash-settings.md](petty-cash-settings.md)) | `ENTITY_UPDATE` / `COA_UPDATE` / `COA_CREATE` / `COA_DELETE` - as above |
 | Users | `GET /entity/settings/users/<id>` | members with role, who pays for the company (the billing-group payer, looked up separately from the role), pending invitations, and who is signed in now (`…/presence`, polled every 20 s — [authentication.md](authentication.md) §8) | admins manage roles and invitations |
-| Modules | `GET /entity/settings/module/<id>` | the module switches ([modules-and-subscriptions.md](modules-and-subscriptions.md)) | admin |
+| Module | `GET /entity/settings/module/<id>` | a hand-over to minty-web's Module page (`?from=bills` travels on; [modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |
 
 Renaming the company is reflected in the header at once (`e2e/03_settings.spec.ts`).
 
