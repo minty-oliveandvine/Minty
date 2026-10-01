@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from flask import Flask, session
 from flask_cors import CORS
 from flask_login import LoginManager
-from flask_mail import Mail
+from services.app_runtime.mail import Mail
 from flask_migrate import Migrate
 from flask_session import Session
 from flask_wtf import CSRFProtect
@@ -207,6 +207,9 @@ def create_app():
     app.config["MAIL_DEBUG"] = (
         os.environ.get("MAIL_DEBUG", "False").lower() == "true"
     )
+    # Seconds each SMTP step may take (services/app_runtime/mail.py): without it a mail
+    # server that goes quiet hangs the request or the billing pass that is sending.
+    app.config["MAIL_TIMEOUT"] = float(os.environ.get("MAIL_TIMEOUT") or 10)
 
 
     flask_env = os.environ.get("FLASK_ENV", "production")
@@ -386,8 +389,9 @@ def create_app():
     csrf.exempt(email_request_code)
     csrf.exempt(email_verify_code)
 
+    # Once: Mail(app) already runs init_app, and a second call replaced the state it
+    # had just registered.
     mail = Mail(app)
-    mail.init_app(app)
 
     migrate = Migrate(app, db)
 

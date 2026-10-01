@@ -41,7 +41,10 @@ def _build_url(app, rule) -> str:
 
 def _call_route(client, url: str):
     # OPTIONS is safe for route existence checks and avoids triggering
-    # endpoint-specific business logic.
+    # endpoint-specific business logic. Which is also why it covers nothing: Flask answers
+    # it without calling the view, so the route-coverage gate does not count these
+    # requests (tests/conftest.py ``_install_route_recorder``) - this is a no-500 smoke
+    # test, not a test of any route.
     return client.options(url, follow_redirects=False)
 
 

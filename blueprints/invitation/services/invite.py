@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import secrets
 from datetime import datetime, timezone, timedelta
 
-from flask import current_app, url_for
+from flask import current_app, request, url_for
 from flask_mail import Message
 from loguru import logger
 
@@ -195,9 +196,17 @@ def send_invitation_email(
         inviter = (
             User.query.get(invitation.invited_by) if invitation.invited_by else None
         )
+        # Only the parts that are there: a blank or missing last name printed a stray
+        # space (or the word "None") in the inviter's place.
         inviter_name = (
-            f"{inviter.first_name} {inviter.last_name}" if inviter else "A team member"
-        )
+            " ".join(
+                part.strip()
+                for part in (inviter.first_name, inviter.last_name)
+                if part and part.strip()
+            )
+            if inviter
+            else ""
+        ) or "A team member"
 
         from urllib.parse import urlencode
 
@@ -233,13 +242,12 @@ def send_invitation_email(
             logger.error("Mail extension not configured")
             return False
 
-        base_url = public_url or url_for("static", filename="", _external=True).rstrip(
-            "/"
-        )
-        logo_url = _asset_url(base_url, "img/minty-mark.png")
+        logo_url = _asset_url(email_base_url(), "img/minty-mark.png")
 
         msg = Message(
-            subject=f"You've been invited to {entity_name} on Minty",
+            # One line: a company name carrying a line break is a header Flask-Mail
+            # refuses (BadHeaderError), and the except below would swallow the send.
+            subject=f"You've been invited to {' '.join(entity_name.split())} on Minty",
             sender=current_app.config.get("BREVO_EMAIL"),
             recipients=[invitation.email],
             html=_build_invitation_html(
@@ -507,6 +515,17 @@ def _is_user_in_xero_org(user: User, entity: Entity) -> bool:
 _ASSET_FINGERPRINTS: dict[str, str] = {}
 
 
+def email_base_url() -> str:
+    """The site root an emailed asset is served from: ``PUBLIC_URL``, else this request's.
+
+    Not ``url_for("static", filename="", _external=True)``: that already ends in
+    ``/static``, ``_asset_url`` adds another, and the logo 404'd wherever ``PUBLIC_URL``
+    was unset. Shared with the password-reset email. Needs a request when ``PUBLIC_URL`` is
+    unset; every sender of these emails runs inside one.
+    """
+    return os.environ.get("PUBLIC_URL", "").rstrip("/") or request.url_root.rstrip("/")
+
+
 def _asset_url(base_url: str, rel_path: str) -> str:
     """Return the absolute URL for a static asset, fingerprinted by content.
 
@@ -537,7 +556,13 @@ def _build_invitation_html(
     accept_url: str,
     logo_url: str = "",
 ) -> str:
-    role_display = role.replace("_", " ").title()
+    # Every value is escaped, once, here. A company or a person can be named anything -
+    # "<b>Acme</b>", or a script - and the email is HTML; the URLs carry "&".
+    role_display = html.escape(role.replace("_", " ").title())
+    entity_name = html.escape(entity_name)
+    inviter_name = html.escape(inviter_name)
+    accept_url = html.escape(accept_url)
+    logo_url = html.escape(logo_url)
     return f"""\
 <!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">

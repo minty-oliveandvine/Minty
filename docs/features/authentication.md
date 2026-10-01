@@ -44,15 +44,19 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
    row's `created_at` and clears itself. A code whose email fails to send is rolled back and
    the request answers 400, so the user can retry at once.
 3. `POST /auth/email/verify-code` — a correct code either signs the existing user in, or —
-   for a new address — returns a signed sign-up token (`itsdangerous`, 15 minutes) that
-   `POST /auth/email/complete` spends to create the passwordless user
-   (`_create_passwordless_user`), recording terms consent with source `signup_otp`, or
-   `signup_invite` when an invitation token rode along (section 2.4).
+   for a new address that came with a first and last name — creates the passwordless user
+   on the spot (`_create_passwordless_user`), recording terms consent with source
+   `signup_otp`, or `signup_invite` when an invitation token rode along (section 2.4). A new
+   address with no name answers 404 "please sign up". Either way the answer carries a
+   hand-off URL (step 4). (A separate "choose a username" step, `POST /auth/email/complete`,
+   had no client and was deleted on 2026-10-01.)
 4. `GET /auth/email/handoff` — the same-origin landing after a cross-origin verify: the
    onboarding app talks to Flask from another origin, so the verify answer carries a
    short-lived signed hand-off URL (`_HANDOFF_SALT`) that sets the cookie on Minty's origin.
 
-The mail goes out through Flask-Mail on Brevo SMTP (`MAIL_*` / `BREVO_EMAIL` in `.env`).
+The mail goes out through Flask-Mail on Brevo SMTP (`MAIL_*` / `BREVO_EMAIL` in `.env`); every
+SMTP step times out after `MAIL_TIMEOUT` seconds (10), so a stalled server fails the send - the
+code request's open transaction included - instead of hanging it (`services/app_runtime/mail.py`).
 
 ### 2.3 Sign in with Xero — `GET /xero_auth`
 `blueprints/xero/routes/routes.py::xero_auth`. Plain OpenID Connect against Xero with

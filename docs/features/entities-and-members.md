@@ -71,6 +71,13 @@ Renaming the company is reflected in the header at once (`e2e/03_settings.spec.t
   `…/cancel`. `GET /invitation/xero-not-connected/<entity>` is the page a person sees when
   they were added to a company that has no Xero connection yet. Invitation expiry and the
   superuser rules are in `tests/test_invitation*.py`, `tests/test_invite_superuser.py`.
+- **The invitation email** (`invite._build_invitation_html`) is hand-built HTML: every name and
+  URL in it is escaped once at the top (a company or person can be named `<b>…</b>`), the
+  subject is one line (a company name with a line break was refused by Flask-Mail and the send
+  swallowed), the inviter is the non-blank parts of their name, and the logo is served from
+  `email_base_url()` - `PUBLIC_URL`, else the request's own root (the old fallback doubled
+  `/static/` and 404'd). The password-reset email uses the same helper. Tested in
+  `tests/test_char_access.py`.
 - **Email input: English only.** The invite's email field (and the company's business email)
   takes printable ASCII only: it is `type="text" inputmode="email" data-email-ascii`, not
   `type="email"` (which accepts a Korean domain and hides it as punycode), strips anything

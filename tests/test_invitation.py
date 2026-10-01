@@ -399,7 +399,9 @@ class TestInvitationAPI:
             _make_user_entity(db_session, models["UserEntity"], _id(admin), eid, role="admin")
             _login(c, admin)
 
-            with patch("blueprints.invitation.services.invite.send_invitation_email", return_value=True):
+            # The name the ROUTE calls: it imports the function, so patching the
+            # service module's attribute never reached it (a real send was attempted).
+            with patch("blueprints.invitation.routes.api.send_invitation_email", return_value=True):
                 resp = c.post("/minty/api/invitation/send", json={
                     "entity_id": eid,
                     "email": "newperson@test.com",
@@ -409,6 +411,7 @@ class TestInvitationAPI:
             assert resp.status_code == 201
             assert data["status"] == "success"
             assert data["invitation"]["email"] == "newperson@test.com"
+            assert data["invitation"]["email_sent"] is True
             assert data["invitation"]["status"] == "pending"
 
     def test_send_duplicate_returns_409(self, app, db_session, models):
@@ -424,7 +427,9 @@ class TestInvitationAPI:
             create_invitation(eid, "dup_api@test.com", "cashier", admin_id)
 
             _login(c, admin)
-            with patch("blueprints.invitation.services.invite.send_invitation_email", return_value=True):
+            # The name the ROUTE calls: it imports the function, so patching the
+            # service module's attribute never reached it (a real send was attempted).
+            with patch("blueprints.invitation.routes.api.send_invitation_email", return_value=True):
                 resp = c.post("/minty/api/invitation/send", json={
                     "entity_id": eid, "email": "dup_api@test.com", "role": "cashier",
                 })

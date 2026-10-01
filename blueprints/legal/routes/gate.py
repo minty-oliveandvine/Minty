@@ -59,7 +59,6 @@ ALLOWED_ENDPOINTS = frozenset(
         "auth.email_request_code",
         "auth.email_verify_code",
         "auth.email_handoff",
-        "auth.email_complete_signup",
         "auth.reset_request",
         "auth.reset_token",
         # --- Getting out --------------------------------------------------

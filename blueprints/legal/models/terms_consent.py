@@ -34,11 +34,9 @@ SOURCE_GATE = "gate"                   # the post-login blocking screen
 SOURCE_HUB = "hub"                     # the same gate drawn by minty-web (its Terms modal)
 
 # NOTE: an earlier draft of the design listed a fourth source, `signup_token`,
-# for the "choose a username" flow behind POST /auth/email/complete. That route
-# has no client and is unreachable — `email_verify_code` never returns the
-# `choose_username` result to the browser, so no signup_token is ever minted for
-# a real user. It is deliberately absent here; adding a constant for a path that
-# cannot run would invite someone to wire consent capture into dead code.
+# for a "choose a username" flow behind POST /auth/email/complete. That route had
+# no client, could not be reached, and would have created an account with no
+# consent; it was deleted on 2026-10-01. There is no such source.
 CONSENT_SOURCES = (SOURCE_SIGNUP_OTP, SOURCE_SIGNUP_INVITE, SOURCE_GATE, SOURCE_HUB)
 
 

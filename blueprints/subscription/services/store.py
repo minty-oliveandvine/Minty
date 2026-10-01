@@ -906,19 +906,37 @@ def account_email(group, business_emails=None) -> str | None:
     return shared_business_email(business_emails)
 
 
-def _business_emails_on_account(group) -> list[str | None]:
+def _companies_on_account(group) -> set[str]:
+    """The companies on a billing account, as 08-B lists them: nominated onto it AND still
+    paid for by its payer. A nomination outlives a handover as history; a company that has
+    left is not on the account."""
     paid_for = {str(row.entity_id) for row in module_rows_for_payer(group.payer_user_id)}
-    companies = entity_ids_in_group(group.id) & paid_for
+    return entity_ids_in_group(group.id) & paid_for
+
+
+def _on_account(group, column) -> list:
+    """``column`` of every company on the account (``_companies_on_account``)."""
+    companies = _companies_on_account(group)
     if not companies:
         return []
     from models.db import Entity
 
     rows = (
         Entity.query.filter(Entity.id.in_(sorted(companies)))
-        .with_entities(Entity.business_email)
+        .with_entities(getattr(Entity, column))
         .all()
     )
-    return [row.business_email for row in rows]
+    return [row[0] for row in rows]
+
+
+def _business_emails_on_account(group) -> list[str | None]:
+    return _on_account(group, "business_email")
+
+
+def account_timezones(group) -> list[str | None]:
+    """The ``timezone`` column of every company on the account, as stored (None when unset).
+    ``notify.account_zone`` dates an account's emails in the one they share."""
+    return _on_account(group, "timezone")
 
 
 def groups_with_billing() -> list[PayerBillingGroup]:

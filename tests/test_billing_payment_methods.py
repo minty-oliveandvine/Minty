@@ -718,3 +718,78 @@ def test_a_method_that_is_not_yours_is_a_404_from_the_endpoint_too(app, wallet, 
 
     assert response.status_code == 404
     assert wallet["default"] is None
+
+
+# --- The three edit endpoints, through the route (route-coverage gate, 2026-10-01) -----------
+# Until then only an OPTIONS request and a 404 had ever reached these.
+
+
+def _bearer(app):
+    return {"Authorization": f"Bearer {_token(app, user_id='u1')}"}
+
+
+def test_the_default_card_moves_through_the_endpoint(app, wallet, signed_in):
+    wallet["methods"] = [_card("pm_1"), _card("pm_2", last4="1111")]
+    wallet["default"] = "pm_1"
+
+    response = app.test_client().post(
+        "/api/me/billing/payment-methods/default",
+        json={"payment_method": "pm_2"}, headers=_bearer(app),
+    )
+
+    assert response.status_code == 200, response.data[:300]
+    assert response.get_json()["default_id"] == "pm_2"
+    assert wallet["default"] == "pm_2"
+    assert "Access-Control-Allow-Origin" in response.headers
+
+
+def test_a_card_is_corrected_through_the_endpoint(app, wallet, signed_in):
+    """Exactly what Stripe allows on a saved card - expiry, name, address - reaches it, and
+    nothing else does."""
+    wallet["methods"] = [_card("pm_1")]
+    wallet["default"] = "pm_1"
+
+    response = app.test_client().post(
+        "/api/me/billing/payment-methods/update",
+        json={"payment_method": "pm_1", "exp_month": 9, "exp_year": 2031,
+              "name": "  Olive Payer ", "address": {"line1": "1 Queen's Road", "city": ""}},
+        headers=_bearer(app),
+    )
+
+    assert response.status_code == 200, response.data[:300]
+    assert wallet["updated"] == [("pm_1", {
+        "exp_month": 9, "exp_year": 2031,
+        "billing_details": {"name": "Olive Payer",
+                            "address": {"line1": "1 Queen's Road", "city": None}},
+    })]
+    assert response.get_json()["methods"][0]["id"] == "pm_1"
+
+
+def test_a_company_is_moved_onto_another_card_through_the_endpoint(app, wallet, signed_in,
+                                                                   monkeypatch):
+    """The per-company card: it moves, and the account's main card does not."""
+    pm = wallet["module"]
+    wallet["methods"] = [_card("pm_1"), _card("pm_2", last4="1111")]
+    wallet["default"] = "pm_1"
+    nominated = {"e1": "pm_1"}
+    monkeypatch.setattr(pm, "_payer_of", lambda user_id, entity_id, **_kw: user_id)
+    monkeypatch.setattr(
+        pm.sub_store, "billing_group_for_entity",
+        lambda entity_id, _user: SimpleNamespace(stripe_payment_method_id=nominated[entity_id]),
+    )
+    monkeypatch.setattr(
+        pm.sub_store, "nominate_card_for_entity",
+        lambda entity_id, _payer, pm_id, _source: nominated.update({entity_id: pm_id}),
+    )
+    client = app.test_client()
+
+    before = client.get("/api/me/billing/entity-payment-method?entity=e1", headers=_bearer(app))
+    after = client.post("/api/me/billing/entity-payment-method",
+                        json={"entity": "e1", "payment_method": "pm_2"}, headers=_bearer(app))
+
+    assert before.status_code == 200, before.data[:300]
+    assert before.get_json()["nominated_id"] == "pm_1"
+    assert after.status_code == 200, after.data[:300]
+    assert after.get_json()["nominated_id"] == "pm_2"
+    assert nominated == {"e1": "pm_2"}
+    assert wallet["default"] == "pm_1"

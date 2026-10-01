@@ -121,22 +121,6 @@
    "in_scope": false
   },
   {
-   "endpoint": "auth.email_complete_signup",
-   "rule": "/auth/email/complete",
-   "methods": [
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {
-    "complete_email_signup": [
-     "access_token",
-     "system_role",
-     "xero_token"
-    ]
-   },
-   "in_scope": true
-  },
-  {
    "endpoint": "auth.email_handoff",
    "rule": "/auth/email/handoff",
    "methods": [
@@ -821,16 +805,6 @@
     ]
    },
    "in_scope": true
-  },
-  {
-   "endpoint": "entity.delete_entity",
-   "rule": "/entity/<string:id>/delete",
-   "methods": [
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
   },
   {
    "endpoint": "entity.module_selector",
@@ -3608,10 +3582,118 @@
    "touches": [],
    "touches_via_service": {},
    "in_scope": false
+  },
+  {
+   "endpoint": "entity.entity_settings_payments",
+   "rule": "/entity/settings/payments/<string:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.handoff_minty_web",
+   "rule": "/handoff/minty-web",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "user_entity"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.my_entities_api",
+   "rule": "/api/me/entities",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "user_entity"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.open_profile",
+   "rule": "/profile",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "user_entity"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.sidebar_token",
+   "rule": "/me/sidebar-token",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "favicon",
+   "rule": "/favicon.ico",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legal.hub_terms_accept",
+   "rule": "/api/me/terms/accept",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "terms_consent"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "legal.hub_terms_status",
+   "rule": "/api/me/terms",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "terms_consent"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "user_management.my_profile_api",
+   "rule": "/api/me/profile",
+   "methods": [
+    "GET",
+    "PATCH"
+   ],
+   "touches": [
+    "users"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 194,
-  "in_scope": 122
+  "routes": 201,
+  "in_scope": 128
  }
 }

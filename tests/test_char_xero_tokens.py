@@ -192,6 +192,43 @@ def test_signed_in_user_can_refresh_their_own_token(connected, client, app, xero
     assert xero.refreshes()[0][2]["refresh_token"] == "refresh-1"
 
 
+
+def test_the_token_check_answers_for_a_fresh_token(connected, client, app, xero):
+    owner, entity = connected
+    F.login(client, owner)
+    resp = client.get("/check/token")
+    assert resp.status_code == 200, resp.data[:300]
+    assert resp.get_data(as_text=True) == "Valid Token"
+    assert xero.refreshes() == [], "a fresh token is checked without touching Xero"
+
+
+def test_the_token_check_says_expired_when_xero_refuses_to_renew(connected, client, app, db,
+                                                                 xero):
+    owner, entity = connected
+    with app.app_context():
+        F.age_xero_token(db, owner, seconds=3600)
+    xero.refresh_response = {"status": 400, "json": {"error": "invalid_grant"}}
+    F.login(client, owner)
+    resp = client.get("/check/token")
+    assert resp.status_code == 200, resp.data[:300]
+    assert resp.get_data(as_text=True) == "expired_token"
+
+
+def test_the_refresh_button_renews_an_aged_token(connected, client, app, db, xero):
+    """``POST /refresh_token``. The renewal may happen in the request middleware before the
+    view runs; the outcome is what is pinned - one refresh, presenting the stored refresh
+    token, and the new access token handed out from then on."""
+    owner, entity = connected
+    with app.app_context():
+        F.age_xero_token(db, owner, seconds=3600)
+    F.login(client, owner)
+    resp = client.post("/refresh_token")
+    assert resp.status_code == 200, resp.data[:300]
+    assert resp.get_json()["status"] == "success"
+    assert len(xero.refreshes()) == 1
+    assert xero.refreshes()[0][2]["refresh_token"] == "refresh-1"
+    assert internal_token(client, app, entity.id).get_json()["access_token"] == "access-2"
+
 def test_refresh_without_a_connection_is_an_error_not_a_crash(app, db, client, xero):
     with app.app_context():
         user = F.make_user(db, "nobody@test.com")

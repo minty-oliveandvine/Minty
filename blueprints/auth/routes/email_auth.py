@@ -10,7 +10,6 @@ from blueprints.legal.models.terms_consent import (SOURCE_SIGNUP_INVITE,
                                                    SOURCE_SIGNUP_OTP)
 from blueprints.auth.services.email_auth import (
     ERR_LOCKED,
-    complete_email_signup,
     request_email_otp,
     verify_email_otp,
 )
@@ -430,32 +429,6 @@ def _create_passwordless_user(
         db.session.rollback()
         logger.error(f"Failed to create passwordless User for {email}: {exc}")
         return None
-
-
-@auth_bp.route("/auth/email/complete", methods=["POST"])
-def email_complete_signup():
-    data = request.get_json(silent=True) or {}
-    user, error = complete_email_signup(
-        signup_token=data.get("signup_token") or "",
-        username=data.get("username") or "",
-        first_name=data.get("first_name") or "",
-        last_name=data.get("last_name") or "",
-    )
-    if error or user is None:
-        return (
-            jsonify(
-                {"status": "error", "message": error or "Could not complete sign-up."}
-            ),
-            400,
-        )
-    login_user(user)
-    return jsonify(
-        {
-            "status": "success",
-            "action": "login",
-            "redirect_url": _post_login_redirect(user),
-        }
-    )
 
 
 @auth_bp.route("/auth/email/handoff", methods=["GET"])

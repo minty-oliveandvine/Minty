@@ -196,7 +196,12 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   on it shares, else the payer (`store.account_email`, the same rule as the invoice's Bill to);
   trial ending goes to the company's business email, else the payer; the transfer notices go
   to the person. Dates are written in the company's time zone (`entities.timezone`, Hong Kong
-  when unset).
+  when unset); an email about a whole billing account uses the zone all its companies share,
+  else Hong Kong (`notify.account_zone`). The two payment-failed emails name the LAST FULL DAY
+  to pay - the day before the account's past-due access runs out (`dunning.suspension_at`:
+  `paid_through` + the past-due window), because from that moment "Pay now" is refused
+  (decided 2026-09-30). The app's own "Pay by" line still prints the day access ends, in UTC,
+  so it can read a day later than the email until Part 3's date work.
 
 ### Tooling
 `scripts/subscription/replay_scenarios.py` seeds scenarios by living them (a test clock);
