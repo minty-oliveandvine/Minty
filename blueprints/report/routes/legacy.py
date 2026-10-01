@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import current_app as app
@@ -18,21 +18,35 @@ from utils import verify_share_token
 
 @report_bp.route("/Minty_Report/<path:entity_and_date>/", methods=["GET"])
 def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
-    """Handle shared links with clean format: Minty_Report/EntityName/09_Jan_2026/."""
+    """Public share link: Minty_Report/{initials}/{date}/{secret}/.
+
+    Only the full path, secret included, finds a link. The old two-part form had no
+    secret and could be guessed, so it is refused even while its row still exists.
+    """
     try:
         from blueprints.report.services.ending import \
             report_ending as render_report_ending
+        from blueprints.report.services.share import is_share_path
 
-        # Look up token from database using path segment
+        if not is_share_path(entity_and_date):
+            logger.warning(
+                f"share link refused: malformed or old-form path, from {request.remote_addr}")
+            flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
+            return redirect(url_for("entity.entity_list"))
+
         share_link = ShareLink.query.filter_by(
-            path_segment=entity_and_date).first()
+            path_segment=entity_and_date.strip("/")).first()
 
         if not share_link:
+            logger.warning(f"share link refused: unknown secret, from {request.remote_addr}")
             flash("Hmm, I couldn't find that share link.", "danger")
             return redirect(url_for("entity.entity_list"))
 
-        # Check if expired
-        if datetime.now() > share_link.expires_at:
+        # expires_at is TIMESTAMPTZ; a naive value (a hand-made row) is local time.
+        expires_at = share_link.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.astimezone()
+        if datetime.now(timezone.utc) > expires_at:
             flash("This link has expired. Could you ask for a fresh one?", "warning")
             db.session.delete(share_link)
             db.session.commit()
@@ -58,8 +72,10 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
             flash("This link doesn't look right to me.", "danger")
             return redirect(url_for("entity.entity_list"))
 
-        # Verify entity_id matches
-        if token_entity_id != share_link.entity_id:
+        # The signed token must name the same company and day as the row.
+        if (str(token_entity_id) != str(share_link.entity_id)
+                or str(token_transaction_date) != str(share_link.transaction_date)):
+            logger.warning(f"share link refused: token does not match link {share_link.id}")
             flash("This link doesn't look right to me.", "danger")
             return redirect(url_for("entity.entity_list"))
 
@@ -80,6 +96,9 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
         ).first()
 
         if specific_report:
+            logger.info(
+                f"share link opened: link={share_link.id} entity={token_entity_id} "
+                f"date={token_transaction_date} from {request.remote_addr}")
             # Render ending page without login requirement
             return render_report_ending(
                 id=specific_report.id,
@@ -89,8 +108,10 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
             flash(f"I couldn't find a report for {token_transaction_date}.", "warning")
             return redirect(url_for("entity.entity_list"))
 
-    except Exception as e:
-        logger.error(f"Error processing share link: {str(e)}")
+    except Exception:
+        # logger.exception keeps the traceback: a crash here once hid that every
+        # link failed on Postgres (naive vs aware expires_at).
+        logger.exception("Error processing share link")
         flash("This link doesn't look right to me.", "danger")
         return redirect(url_for("entity.entity_list"))
     return redirect(url_for("entity.entity_list"))

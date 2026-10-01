@@ -403,3 +403,8 @@ Same call as xero/entity — `routes/api.py` (2025) and `services/ending.py`
   has **12 dead imports** (F401) already on HEAD — clean up in the entity pass.
 - Optional deeper dead-code sweep: `vulture` is **not installed**; would need
   `pip install vulture` (ask owner before adding to the env).
+- **Dead `?token=` share routes (found 2026-10-01).** `/Minty_Report_<x>/ending?token=`
+  (`report/routes/legacy.py`) and `entity_ending`'s `?token=` branch
+  (`report/services/ending.py`) verify an HMAC token carried in the URL. They can't be
+  guessed, but nothing generates those URLs any more. Remove them once no old link can
+  still be in use (tokens last 30 days).
