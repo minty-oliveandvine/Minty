@@ -95,6 +95,15 @@
         initializeDiscrepancyAccountSearch();
         initializeDiscrepancyContactSearch();
 
+        // A saved choice shows in its box but did not land in its hidden <select> (its
+        // option is missing): the save would refuse it ("Please select: ..."). Say so loudly.
+        REQUIRED_MAPPING_FIELDS.forEach(function (f) {
+          const shown = document.getElementById(f.inputId);
+          if (shown && shown.value.trim() && !_mappingSelectValue(f.selectId)) {
+            console.error('[petty cash settings] the saved ' + f.label + ' is not among its options');
+          }
+        });
+
         // Hide loading modal
         if (xeroLoadingOverlay) {
           xeroLoadingOverlay.classList.add('hidden');

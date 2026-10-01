@@ -57,6 +57,17 @@ offers the synced rows; `check_entity_xero_settings_complete` refuses a publish 
 is missing. The seed (`scripts/e2e_seed.py`) writes placeholders for an unconnected shop
 and leaves a connected shop's real mapping alone.
 
+**`account_info.status` means "still active in Xero", nothing else** (2026-10-01). Xero's
+ACTIVE accounts are upserted ACTIVE; an account archived in Xero is deleted by the sync. Petty
+Cash's expense-code ticks live only on `entity_account_xero.is_active`. Until 2026-10-01 the
+tick save also wrote `status`: it marked every non-bank/revenue account INACTIVE and brought back
+only the ticked codes. The mapping dropdowns list only ACTIVE rows, so the Director's liability
+accounts and any unticked Discrepancy code vanished whenever the background re-sync could not
+run (disconnected, token expired), and the save then said "Please select: Discrepancy account
+code". The mapping lists also always include each saved choice
+(`xero_mapping_form_context.py`), and the page logs a console error if a saved choice still
+fails to land in its field. Publish checks `status` only, so an unticked code still publishes.
+
 ## 4. Publishing a report
 
 `POST /report/submitted/publish_to_xero?entity_id=&report_id=` (`REPORT_PUBLISH` =

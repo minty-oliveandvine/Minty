@@ -292,14 +292,9 @@ def save_account_codes(user_id, entity_id, *, expense_codes, mapping):
 
         db.session.commit()
 
-        sync_expense_account_info_from_xero(
-            entity_id,
-            token_user.access_token,
-            xero_org_id,
-            selected_account_codes=expense_codes,
-        )
+        sync_expense_account_info_from_xero(entity_id, token_user.access_token, xero_org_id)
         db.session.commit()
-        sync_entity_account_xero_active(entity_id, xero_org_id)
+        sync_entity_account_xero_active(entity_id, xero_org_id, expense_codes)
 
         logger.info(
             "save_account_codes: entity=%s expense_codes=%s set_keys=%s cleared_keys=%s",

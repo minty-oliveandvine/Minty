@@ -3,9 +3,20 @@
 from flask import g
 from loguru import logger
 
-from models.db import AccountInfo, EntityPettycashSettings, XeroContactSync, db
+from models.db import AccountInfo, EntityPettycashSettings, XeroContactSync
 from services.app_runtime.legacy.xero_service import (
     account_info_to_xero_format, contact_sync_to_xero_format)
+
+
+def _with_saved(options, *saved, key="AccountID"):
+    """``options`` plus each saved choice it lacks (a new list; the request cache is shared)."""
+    have = {o.get(key) for o in options}
+    extra = []
+    for choice in saved:
+        if choice and choice.get(key) and choice.get(key) not in have:
+            have.add(choice.get(key))
+            extra.append(choice)
+    return list(options) + extra if extra else options
 
 
 def build_xero_mapping_form_context(entity_id, org, token_valid):
@@ -131,15 +142,22 @@ def build_xero_mapping_form_context(entity_id, org, token_valid):
             settings_row.discrepancy_contact_id
         )
 
-    current_setting_contact = (
-        db.session.query(XeroContactSync)
-        .filter(XeroContactSync.entity_id == entity_id)
-        .all()
-    )
+    # A saved choice is always one of its field's options. The page selects it by setting a
+    # hidden <select>'s value, which silently stays empty when the option is missing - and the
+    # save is then refused ("Please select: Discrepancy account code"). That happened while
+    # Petty Cash's ticks still wrote account_info.status; keep the guarantee regardless.
+    bank_accounts = _with_saved(bank_accounts, main_bank_account_default,
+                                deposit_bank_account_default, discrepancy_bank_default)
+    cashsale_account = _with_saved(cashsale_account, cashsale_account_default)
+    owners_account = _with_saved(owners_account, owners_account_default)
+    discrepancy_account = _with_saved(discrepancy_account, discrepancy_account_default)
+    contacts = _with_saved(contacts, cashsale_contact_default, owners_contact_default,
+                           discrepancy_contact_default, key="ContactID")
+
     logger.info(
         "xero mapping context loaded for entity %s contacts=%s",
         entity_id,
-        len(current_setting_contact or []),
+        len(contacts),
     )
     return {
         "bank_accounts": bank_accounts,

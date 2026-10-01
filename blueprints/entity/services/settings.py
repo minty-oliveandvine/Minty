@@ -792,31 +792,14 @@ def sync_chart_of_accounts_if_changed(entity_id, access_token, xero_org_id, user
         try:
             reconcile_account_info_status(entity_id, access_token, xero_org_id)
 
-            # Preserve the user's explicit ACTIVE/INACTIVE selections.
-            # Read currently ACTIVE codes from DB and pass them so that
-            # sync_expense_account_info_from_xero only re-activates what
-            # the user already had ticked.  New Xero accounts will be
-            # inserted but left INACTIVE (not in selected_set), which is
-            # the correct default — the user must explicitly enable them.
-            currently_active_codes = [
-                acc.xero_code
-                for acc in AccountInfo.query.filter(
-                    AccountInfo.entity_id == entity_id,
-                    ~AccountInfo.type.in_(list(COA_EXCLUDED_TYPES)),
-                    AccountInfo.status == "ACTIVE",
-                ).all()
-                if acc.xero_code
-            ]
-            sync_expense_account_info_from_xero(
-                entity_id, access_token, xero_org_id,
-                selected_account_codes=currently_active_codes,
-            )
+            # Refresh only: the petty cash ticks live on entity_account_xero.is_active,
+            # which this never touches.
+            sync_expense_account_info_from_xero(entity_id, access_token, xero_org_id)
             db.session.commit()
             result["module1_synced"] = True
             logger.info(
-                "sync_chart_of_accounts_if_changed: Module 1 synced entity=%s "
-                "preserving %s active codes",
-                entity_id, len(currently_active_codes),
+                "sync_chart_of_accounts_if_changed: Module 1 synced entity=%s",
+                entity_id,
             )
         except Exception:
             db.session.rollback()
@@ -1015,23 +998,27 @@ def saveable_account_codes(entity_id, *, listed_only=True) -> set[str]:
     return {str(code).strip() for (code,) in q.all() if code and str(code).strip()}
 
 
-def sync_entity_account_xero_active(entity_id, xero_org_id):
-    """Mirror petty-cash CoA tick state into ``entity_account_xero.is_active``.
+def sync_entity_account_xero_active(entity_id, xero_org_id, selected_codes):
+    """Save petty cash's code ticks onto ``entity_account_xero.is_active``.
 
-    Rows for ACTIVE ``account_info`` of a CoA-included type are set
-    ``is_active=true``; everything else (still in account_info, just unticked)
-    is set ``is_active=false``. Rows for newly-eligible accounts are inserted on
-    demand; nothing is deleted. Denormalized name/type/xero ids are refreshed so
-    the table can answer questions without joining account_info. Commits.
+    The tick lives ONLY here (``account_info.status`` is Xero's own "still active",
+    never the tick - 2026-10-01). Rows of a CoA-included type whose code is in
+    ``selected_codes`` are set ``is_active=true``, every other one ``false``. Rows
+    for newly-eligible accounts are inserted on demand; nothing is deleted.
+    Denormalized name/type/xero ids are refreshed so the table can answer
+    questions without joining account_info. Commits.
 
-    Shared by the Petty Cash CoA settings route and the onboarding Step 5 save so
-    both produce identical entity_account_xero state.
+    Used by the onboarding Step 5 save.
     """
+    wanted = {str(c).strip() for c in (selected_codes or []) if c and str(c).strip()}
     eligible_accounts = AccountInfo.query.filter(
         AccountInfo.entity_id == entity_id,
         AccountInfo.type.in_(list(COA_INCLUDED_TYPES)),
     ).all()
-    selected_ids = {acc.id for acc in eligible_accounts if acc.status == "ACTIVE"}
+    selected_ids = {
+        acc.id for acc in eligible_accounts
+        if acc.xero_code and acc.xero_code.strip() in wanted
+    }
 
     existing_eax = (
         db.session.query(EntityAccountXero)
@@ -1074,21 +1061,20 @@ def sync_entity_account_xero_active(entity_id, xero_org_id):
     )
 
 
-def sync_expense_account_info_from_xero(
-    entity_id, access_token, xero_org_id, selected_account_codes=None
-):
-    """Upsert chart of accounts rows in account_info from Xero.
-    
-    Syncs all account types except those in COA_EXCLUDED_TYPES (BANK, EQUITY, 
-    OTHERINCOME, SALES, REVENUE).
+def sync_expense_account_info_from_xero(entity_id, access_token, xero_org_id):
+    """Upsert the chart of accounts rows in account_info from Xero.
 
-    Args:
-        entity_id: internal entity UUID.
-        access_token: valid Xero bearer token.
-        xero_org_id: Xero tenant/org UUID.
-        selected_account_codes: list of Xero account codes to mark ACTIVE.
-            Pass None to activate every eligible account
-            (e.g. right after a fresh Xero connect/reconnect).
+    Syncs all account types except those in COA_EXCLUDED_TYPES (BANK, EQUITY,
+    OTHERINCOME, SALES, REVENUE): every account Xero reports ACTIVE is upserted
+    with ``status="ACTIVE"`` and its name/type/code refreshed.
+
+    ``account_info.status`` means "still active in Xero" and nothing else. Petty
+    cash's code ticks live on ``entity_account_xero.is_active``. Until 2026-10-01
+    this function also wrote the ticks here: every row outside the excluded types
+    went INACTIVE and only the ticked codes came back, so liability accounts (the
+    Director mapping) and unticked codes (a Discrepancy account) vanished from the
+    mapping dropdowns whenever the background re-sync could not run (disconnected,
+    token expired) and the save was refused.
 
     The caller is responsible for calling db.session.commit() after this returns.
     """
@@ -1139,29 +1125,7 @@ def sync_expense_account_info_from_xero(
         code_str = str(raw_code).strip()
         by_code[code_str] = xero_acc
 
-    if selected_account_codes is None:
-        # Activate every eligible account (connect / reconnect path).
-        selected_set = set(by_code.keys())
-    else:
-        selected_set = {
-            str(c).strip()
-            for c in selected_account_codes
-            if c and str(c).strip()
-        }
-
-    # Mark all existing chart of accounts rows for this entity INACTIVE first.
-    # Exclude accounts in COA_EXCLUDED_TYPES as they are managed separately.
-    existing_accounts = AccountInfo.query.filter(
-        AccountInfo.entity_id == entity_id,
-        ~AccountInfo.type.in_(list(COA_EXCLUDED_TYPES)),
-    ).all()
-    for acc in existing_accounts:
-        acc.status = "INACTIVE"
-
-    # Upsert selected accounts → ACTIVE.
     for code_str, xero_acc in by_code.items():
-        if code_str not in selected_set:
-            continue
         xero_account_id = xero_acc.get("AccountID", "")
         # Match on xero_account_id — the unique-constraint key. Matching on
         # xero_code here used to leave the AccountID free to collide: a row
@@ -1194,9 +1158,8 @@ def sync_expense_account_info_from_xero(
             })
 
     logger.info(
-        "sync_expense_account_info_from_xero: entity=%s activated=%s eligible=%s",
+        "sync_expense_account_info_from_xero: entity=%s refreshed=%s",
         entity_id,
-        len(selected_set),
         len(by_code),
     )
 
@@ -1554,12 +1517,7 @@ def sync_all_accounts_and_contacts_background(
 
         # --- Sync expense/direct-costs into account_info (own transaction) ---
         try:
-            sync_expense_account_info_from_xero(
-                entity_id,
-                access_token,
-                xero_org_id,
-                selected_account_codes=None,
-            )
+            sync_expense_account_info_from_xero(entity_id, access_token, xero_org_id)
             db.session.commit()
             logger.info(
                 "Background sync: expense account_info synced for entity %s", entity_id

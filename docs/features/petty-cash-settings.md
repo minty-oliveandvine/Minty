@@ -108,7 +108,12 @@ The pickers draw Xero's names as text.
 
 `entity_account_xero.is_active` decides which synced expense accounts the Expenses page
 offers (`COA_*` permissions to change); the bill module's own list is
-`entity_bill_account_xero` (billing-backend's, synced by Minty).
+`entity_bill_account_xero` (billing-backend's, synced by Minty). The tick is stored there ONLY:
+since 2026-10-01 a save (and onboarding Step 5, `sync_entity_account_xero_active`) never writes
+`account_info.status`, which is Xero's own "still active". Before, a save marked unticked codes
+and every liability account INACTIVE, so with Xero disconnected the Discrepancy and Director
+fields lost their saved choice and the save said "Please select: Discrepancy account code"
+(see `docs/features/xero-integration.md` §3). A save no longer calls Xero at all.
 
 **At least one stays ticked** (2026-10-01): a save that ticks none would switch every code off,
 and a petty cash expense can only use the codes ticked here. The page greys Save and says why
