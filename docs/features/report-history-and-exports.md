@@ -33,11 +33,29 @@ only the reports they created (`REPORT_VIEW_OWN`, `can_view_report`).
 
 ## Share links
 
-`POST /api/generate_share_link` creates (or renews) a `share_link` row for one company-day:
-a readable path segment plus a signed token, valid **30 days** (720 h). The public URLs
-`GET /Minty_Report/<entity_and_date>/` and `/Minty_Report_<entity_and_date>/ending`
-(`legacy.py`) look the segment up, verify the token and render the ending summary without
-a login. `legacy.py` also keeps `/insert_xero_transaction` and
+`POST /api/generate_share_link` (`services/share.py`) creates or renews **one `share_link`
+row per company-day**, looked up by `(entity_id, transaction_date)`. The link is valid for
+**30 days** (720 h); sharing the same day again renews it and keeps the same URL. The public
+URL is
+
+    /Minty_Report/{initials}/{dd_Mon_yyyy}/{secret}/
+
+`{secret}` is 32 random url-safe characters (`secrets.token_urlsafe(24)`), and it is what
+grants access. The initials and date are cosmetic: a name with no Latin letters gets
+`Report`. `GET /Minty_Report/<path>/` (`legacy.py`) finds a row only by the full path. It
+then checks the stored signed token against the row's company **and** day, and renders the
+ending summary of a submitted report without a login.
+
+Until 2026-10-01 the URL had no secret. Anyone could edit the date and open other days, and
+two companies with the same initials (e.g. "Dine at Venus" / "Dine at Venus 2") shared one
+row, so the second company to share took over the first one's link. Those two-part URLs are
+now refused outright (`is_share_path`), even while their row still exists. A refused or
+unknown path is logged as `share link refused` with the caller's IP, and a successful open
+as `share link opened` with the link id, so access is traceable from then on.
+
+`/Minty_Report_<entity_and_date>/ending?token=` and `entity_ending`'s `?token=` branch
+verify a signed token carried in the URL. Nothing generates those links any more (see
+CODE_CLEANSE_NOTES). `legacy.py` also keeps `/insert_xero_transaction` and
 `/api/check-dept-bank-yest/<entity_id>` for old integrations.
 
 ## Tests
