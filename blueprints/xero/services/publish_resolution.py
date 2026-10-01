@@ -18,7 +18,9 @@ Design goals:
     those rows can resolve as well.
 
 Account validity stays DB-only: archived accounts are removed from
-``account_info`` on sync, so an ``status == "ACTIVE"`` row reflects Xero.
+``account_info`` on sync, so an ``status == "ACTIVE"`` row reflects Xero. Petty
+cash's code ticks never write ``status`` (they live on
+``entity_account_xero.is_active``), so an unticked code still publishes.
 """
 
 from __future__ import annotations

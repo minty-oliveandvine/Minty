@@ -1,11 +1,10 @@
 """Entity settings and contact routes."""
 
 import html
-import uuid
 from typing import Protocol
 
 import requests
-from flask import (current_app, flash, g, jsonify, redirect, render_template,
+from flask import (current_app, flash, jsonify, redirect, render_template,
                    request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
@@ -17,7 +16,7 @@ from blueprints.entity.routes.modules import (billing_settings_app_url,
 from blueprints.entity.services.settings import (
     COA_INCLUDED_TYPES, saveable_account_codes,
     sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
-    sync_expense_account_info_from_xero, sync_xero_accounts_to_db_background,
+    sync_entity_account_xero_active, sync_xero_accounts_to_db_background,
     sync_xero_coa_pettycash)
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.entity.services.xero_account_mapping_post import (
@@ -26,9 +25,9 @@ from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.settings import sync_entity_xero_status
 from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
                        EntityAccountXero, EntityPettycashSettings, User,
-                       UserEntity, XeroContactSync, db)
+                       UserEntity, db)
 from services.app_runtime.legacy.xero_service import (
-    account_info_to_xero_format, contact_sync_to_xero_format)
+    account_info_to_xero_format)
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token,
                                          get_xero_token_user_for_entity,
@@ -356,8 +355,8 @@ def entity_settings(entity_id=None):
         # org.status reflects Xero's real connection state here.)
 
         # Sync chart of accounts from Xero in the background (non-blocking).
-        # Fetches ALL Xero accounts, upserts new ones, and sets status=ACTIVE /
-        # status=ARCHIVED on existing DB rows to match Xero's live state.
+        # Fetches Xero's ACTIVE accounts, upserts them as status=ACTIVE and deletes
+        # rows no longer active in Xero (account_info.status = "still in Xero" only).
         # Skipped gracefully if Xero tokens are missing or the entity is not connected.
         if org.status == "connected" and org.xero_org_id:
             try:
@@ -461,140 +460,30 @@ def entity_settings(entity_id=None):
             discrepancy_bank_default = None
             discrepancy_account_default = None
             discrepancy_contact_default = None
-            current_setting_contact = []
         else:
-            # Petty Cash settings dropdowns are always populated from the
-            # database, regardless of connection state. The background Xero ->
-            # DB sync above keeps account_info / xero_contact_sync current.
-            if not hasattr(g, "_xero_data_cache"):
-                g._xero_data_cache = {}
+            # The same lists and saved choices Petty Cash Settings renders (DB only; the
+            # background sync above keeps account_info / xero_contact_sync current).
+            from blueprints.entity.services.xero_mapping_form_context import                 build_xero_mapping_form_context
 
-            cache_key = f"{entity_id}_{org.xero_org_id}"
-
-            if cache_key not in g._xero_data_cache:
-                db_accounts = AccountInfo.query.filter(
-                    AccountInfo.entity_id == entity_id,
-                    AccountInfo.status == "ACTIVE",
-                ).all()
-                db_contacts = XeroContactSync.query.filter_by(
-                    entity_id=entity_id).all()
-
-                all_accounts = [
-                    account_info_to_xero_format(acc) for acc in db_accounts]
-                contacts = [
-                    contact_sync_to_xero_format(c) for c in db_contacts]
-
-                bank_accounts = [
-                    acc for acc in all_accounts if acc.get("Type") == "BANK"]
-                cashsale_account = [
-                    acc
-                    for acc in all_accounts
-                    if acc.get("Type") in ["SALES", "REVENUE", "INCOME"]
-                ]
-                owners_account = [
-                    acc
-                    for acc in all_accounts
-                    if acc.get("Type") in [
-                        "NONCURRENT",
-                        "CURRLIAB",
-                        "TERMLIAB",
-                        "FIXED",
-                        "INVENTORY",
-                        "DIRECTCOSTS",
-                        "EXPENSE",
-                    ]
-                    and not (
-                        isinstance(acc.get("SystemAccount"), str)
-                        and acc.get("SystemAccount", "").strip() != ""
-                    )
-                ]
-                discrepancy_account = [
-                    acc for acc in all_accounts
-                    if acc.get("Type") in ("EXPENSE", "DIRECTCOSTS")
-                ]
-
-                g._xero_data_cache[cache_key] = {
-                    "bank_accounts": bank_accounts,
-                    "cashsale_account": cashsale_account,
-                    "owners_account": owners_account,
-                    "discrepancy_account": discrepancy_account,
-                    "contacts": contacts,
-                }
-            else:
-                cached_data = g._xero_data_cache[cache_key]
-                bank_accounts = cached_data["bank_accounts"]
-                cashsale_account = cached_data["cashsale_account"]
-                owners_account = cached_data["owners_account"]
-                discrepancy_account = cached_data["discrepancy_account"]
-                contacts = cached_data["contacts"]
-
-            current_setting_contact = (
-                db.session.query(XeroContactSync)
-                .filter(XeroContactSync.entity_id == entity_id)
-                .all()
-            )
-
-            _settings_row = EntityPettycashSettings.query.filter_by(
-                entity_id=entity_id
-            ).first()
-
-            def _account_default(account_id):
-                if not account_id:
-                    return None
-                acc = AccountInfo.query.get(account_id)
-                return account_info_to_xero_format(acc) if acc else None
-
-            def _contact_default(contact_id):
-                if not contact_id:
-                    return None
-                c = XeroContactSync.query.get(contact_id)
-                return contact_sync_to_xero_format(c) if c else None
-
-            if _settings_row is None:
-                main_bank_account_default = None
-                deposit_bank_account_default = None
-                cashsale_account_default = None
-                owners_account_default = None
-                discrepancy_bank_default = None
-                discrepancy_account_default = None
-                cashsale_contact_default = None
-                discrepancy_contact_default = None
-                owners_contact_default = None
-            else:
-                main_bank_account_default = _account_default(
-                    _settings_row.pettycash_account_id
-                )
-                deposit_bank_account_default = _account_default(
-                    _settings_row.bank_account_id
-                )
-                cashsale_account_default = _account_default(
-                    _settings_row.cash_sale_account_id
-                )
-                owners_account_default = _account_default(
-                    _settings_row.director_account_id
-                )
-                discrepancy_bank_default = _account_default(
-                    _settings_row.discrepancy_bank_account_id
-                )
-                discrepancy_account_default = _account_default(
-                    _settings_row.discrepancy_account_id
-                )
-                cashsale_contact_default = _contact_default(
-                    _settings_row.cash_sale_contact_id
-                )
-                discrepancy_contact_default = _contact_default(
-                    _settings_row.discrepancy_contact_id
-                )
-                owners_contact_default = _contact_default(
-                    _settings_row.director_contact_id
-                )
+            _mapping = build_xero_mapping_form_context(entity_id, org, token_valid)
+            bank_accounts = _mapping["bank_accounts"]
+            cashsale_account = _mapping["cashsale_account"]
+            owners_account = _mapping["owners_account"]
+            discrepancy_account = _mapping["discrepancy_account"]
+            contacts = _mapping["contacts"]
+            main_bank_account_default = _mapping["main_bank_account_default"]
+            deposit_bank_account_default = _mapping["deposit_bank_account_default"]
+            cashsale_account_default = _mapping["cashsale_account_default"]
+            cashsale_contact_default = _mapping["cashsale_contact_default"]
+            owners_account_default = _mapping["owners_account_default"]
+            owners_contact_default = _mapping["owners_contact_default"]
+            discrepancy_bank_default = _mapping["discrepancy_bank_default"]
+            discrepancy_account_default = _mapping["discrepancy_account_default"]
+            discrepancy_contact_default = _mapping["discrepancy_contact_default"]
 
         if entity_id:
             logger.info(
                 f"Fetched current entity settings for entity ID: {entity_id}")
-        logger.info(
-            f"Fetched current entity settings contact for entity ID: {current_setting_contact}"
-        )
     except Exception as e:
         logger.error(f"Error getting entity settings: {str(e)}")
         return redirect(url_for("entity.entity_list"))
@@ -909,8 +798,8 @@ def entity_settings_entity(org_id):
                 )
             _from = request.form.get("_from") or request.args.get("from")
             # At least one account code stays ticked: a save with none switches every code off
-            # (entity_account_xero.is_active below, and account_info.status with Xero
-            # connected), and a petty cash expense can only use the codes ticked here. Refused
+            # (entity_account_xero.is_active below), and a petty cash expense can only use the
+            # codes ticked here. Refused
             # BEFORE anything is written - the mapping save commits on its own. A company with
             # no codes at all saves as before; the page greys Save in the same case.
             saveable = saveable_account_codes(org_id)
@@ -944,105 +833,29 @@ def entity_settings_entity(org_id):
 
                 apply_country_currency_selection(org, request.form)
 
-                selected_account_codes = request.form.getlist(
-                    "account_codes[]")
+                # The ticks live on entity_account_xero.is_active only; account_info.status is
+                # Xero's own "still active" and is never touched by a tick (2026-10-01).
+                selected_account_codes = request.form.getlist("account_codes[]")
                 logger.info(
                     f"Saving selected account codes for entity {org_id}: {selected_account_codes}"
                 )
-                if org.xero_org_id:
-                    try:
-                        token_user = get_xero_token_user_for_entity(org_id)
-                        if ensure_valid_token(token_user):
-                            sync_expense_account_info_from_xero(
-                                org_id,
-                                token_user.access_token,
-                                org.xero_org_id,
-                                selected_account_codes=selected_account_codes,
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to update expense account codes: {str(e)}"
-                        )
-
                 db.session.commit()
-
-                # Sync entity_account_xero to reflect the petty cash CoA tick
-                # state (shared with the onboarding Step 5 save).
                 try:
-                    eligible_accounts = AccountInfo.query.filter(
-                        AccountInfo.entity_id == org_id,
-                        AccountInfo.type.in_(list(COA_INCLUDED_TYPES)),
-                    ).all()
-                    # Drive is_active straight from the ticked checkboxes
-                    # (account_codes[]), NOT from account_info.status. The
-                    # status path filters out Xero system accounts (497/498/499)
-                    # and is also overwritten by the background Xero sync, so it
-                    # could not honor a tick on those accounts.
-                    selected_code_set = {
-                        str(c).strip()
-                        for c in selected_account_codes
-                        if c and str(c).strip()
-                    }
-                    selected_ids = {
-                        acc.id for acc in eligible_accounts
-                        if acc.xero_code
-                        and str(acc.xero_code).strip() in selected_code_set
-                    }
-
-                    existing_eax = (
-                        db.session.query(EntityAccountXero)
-                        .join(
-                            AccountInfo,
-                            EntityAccountXero.account_id == AccountInfo.id,
-                        )
-                        .filter(AccountInfo.entity_id == org_id)
-                        .all()
+                    sync_entity_account_xero_active(
+                        org_id, org.xero_org_id, selected_account_codes
                     )
-                    existing_by_account_id = {
-                        eax.account_id: eax for eax in existing_eax
-                    }
-
-                    for eax in existing_eax:
-                        eax.is_active = eax.account_id in selected_ids
-                        # Refresh denormalized fields so the table can answer
-                        # questions without joining account_info.
-                        info = next(
-                            (a for a in eligible_accounts if a.id == eax.account_id),
-                            None,
-                        )
-                        if info is not None:
-                            eax.name = info.name
-                            eax.type = info.type
-                            eax.xero_org_id = org.xero_org_id
-                            eax.xero_account_id = info.xero_account_id
-
-                    for acc in eligible_accounts:
-                        if acc.id in existing_by_account_id:
-                            continue
-                        db.session.add(
-                            EntityAccountXero(
-                                id=str(uuid.uuid4()),
-                                account_id=acc.id,
-                                name=acc.name,
-                                type=acc.type,
-                                xero_org_id=org.xero_org_id,
-                                xero_account_id=acc.xero_account_id,
-                                is_active=(acc.id in selected_ids),
-                            )
-                        )
-
-                    db.session.commit()
-                    logger.info(
-                        "entity_settings_entity POST: synced entity_account_xero "
-                        "for entity=%s active=%s total=%s",
-                        org_id, len(selected_ids), len(eligible_accounts),
-                    )
-                except Exception as eax_err:
+                except Exception:
                     db.session.rollback()
-                    logger.warning(
-                        "entity_settings_entity POST: failed to sync "
-                        "entity_account_xero entity=%s: %s",
-                        org_id, eax_err,
+                    logger.exception(
+                        "entity_settings_entity POST: the account code ticks were not saved "
+                        "entity=%s", org_id,
+                    )
+                    flash(
+                        "I couldn't save your account code ticks. Mind trying again?",
+                        "danger",
+                    )
+                    return _redirect_xero_mapping(
+                        org_id, _from, return_view="entity_settings_entity"
                     )
 
                 flash("Entity settings saved!", "success")

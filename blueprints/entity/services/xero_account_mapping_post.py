@@ -341,10 +341,7 @@ def process_xero_account_mapping_post(
             token_user = get_xero_token_user_for_entity(entity_id)
             if ensure_valid_token(token_user):
                 sync_expense_account_info_from_xero(
-                    entity_id,
-                    token_user.access_token,
-                    entity.xero_org_id,
-                    selected_account_codes=None,
+                    entity_id, token_user.access_token, entity.xero_org_id
                 )
                 db.session.commit()
                 logger.info(
