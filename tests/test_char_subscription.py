@@ -249,6 +249,7 @@ def test_a_trial_that_ends_without_a_card_expires_and_lapses(shop, client, app, 
     start_trial(client, entity)
     ended = module_row(app, entity.id).trial_end + timedelta(days=1)
     set_clock(monkeypatch, ended)
+    install_fake_stripe(monkeypatch)  # no card, so the sweep only searches Stripe for a customer
     from blueprints.subscription.services import checkout, consent
 
     with app.app_context():
