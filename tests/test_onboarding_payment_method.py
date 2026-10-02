@@ -571,14 +571,14 @@ def test_buy_now_endpoints_require_a_token(app, method, path):
 def test_buy_now_card_routes_answer_the_onboarding_origin(app, monkeypatch):
     """The whole reason these exist beside the payer portal's identical routes.
 
-    The portal's own ``/api/me/billing/payment-methods`` names FRONTEND_APP_URL in its
+    The portal's own ``/api/me/billing/payment-methods`` names PAYMENT_REQUEST_WEB_URL in its
     ``Access-Control-Allow-Origin``, so a browser on the onboarding origin is blocked
     before the bearer token is ever read. If this header ever comes back as the billing
     frontend, the Buy now sheet silently stops loading cards.
     """
     from blueprints.subscription.services import payment_methods
 
-    monkeypatch.setenv("ONBOARDING_APP_URL", "https://onboard.example.com")
+    monkeypatch.setenv("ONBOARDING_WEB_URL", "https://onboard.example.com")
     monkeypatch.setattr(
         payment_methods,
         "list_for_user",
@@ -904,7 +904,7 @@ def test_choosing_the_main_card_reaches_the_service(app, monkeypatch):
     account and the card, and answer the fresh list."""
     from blueprints.subscription.services import payment_methods
 
-    monkeypatch.setenv("ONBOARDING_APP_URL", "https://onboard.example.com")
+    monkeypatch.setenv("ONBOARDING_WEB_URL", "https://onboard.example.com")
     seen = {}
 
     def _set_default(user_id, payment_method):

@@ -1,8 +1,9 @@
 # Receipts and attachments
 
 Every expense line carries at least one receipt. The bytes live in the Backblaze B2 bucket
-(spoken to through the S3 API — `blueprints/report/services/s3_storage.py`, `S3_KEY` /
-`S3_SECRET` / `S3_REGION` / `S3_BUCKET`, endpoint `https://s3.<region>.backblazeb2.com`);
+(spoken to through the S3 API — `blueprints/report/services/s3_storage.py`, configured by one
+`S3_URL` = `https://KEY:SECRET@s3.<region>.backblazeb2.com/<bucket>`, which gives the key,
+secret, bucket, region and the endpoint `https://s3.<region>.backblazeb2.com`);
 the database holds one `attachment` row per file and a link row per expense line.
 
 ## The rows

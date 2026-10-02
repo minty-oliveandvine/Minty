@@ -1,5 +1,5 @@
 # S3 upload/download/delete helpers for report files (expenses). Use lazy
-# app import for s3_client/S3_BUCKET.
+# app import for the S3 client and bucket.
 import io
 import os
 import time
@@ -17,32 +17,29 @@ from werkzeug.utils import secure_filename
 
 from blueprints.report.services.file_downsize import downsize_bytes
 from blueprints.report.services.receipt_keys import safe_extension, safe_stem
+from services.app_runtime.env import parse_s3_url
+
+
+def _s3_settings():
+    """S3_URL, parsed: endpoint, bucket, key, secret and region all come from the one URL."""
+    return parse_s3_url(app.config["S3_URL"])
 
 
 def get_s3_bucket():
-    return app.config.get("S3_BUCKET") or os.environ.get(
-        "S3_BUCKET") or "pettycash"
+    return _s3_settings().bucket
 
 
 def get_s3_client():
     if not hasattr(g, "_report_s3_client"):
-        region = app.config.get("S3_REGION")
-        if region:
-            client = boto3.client(
-                "s3",
-                aws_access_key_id=app.config.get("S3_KEY"),
-                aws_secret_access_key=app.config.get("S3_SECRET"),
-                region_name=region,
-                endpoint_url=f"https://s3.{region}.backblazeb2.com",
-                config=Config(signature_version="s3v4"),
-            )
-        else:
-            client = boto3.client(
-                "s3",
-                aws_access_key_id=app.config.get("S3_KEY"),
-                aws_secret_access_key=app.config.get("S3_SECRET"),
-            )
-        g._report_s3_client = client
+        settings = _s3_settings()
+        g._report_s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.key,
+            aws_secret_access_key=settings.secret,
+            region_name=settings.region,
+            endpoint_url=settings.endpoint_url,
+            config=Config(signature_version="s3v4"),
+        )
     return g._report_s3_client
 
 

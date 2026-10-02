@@ -15,6 +15,17 @@ import pytest
 
 import pg_harness  # tests/ is on sys.path via rootdir conftest; no package __init__
 
+# The models' schema is DATABASE_URL's ?schema=, read when blueprints.shared.schema is first
+# imported - which is the collection-time import just below, long before the ``app`` fixture
+# sets the real URL. Point it at the test database now (the harness's schema, not whatever a
+# developer's .env says), so the first registry and the app's agree.
+try:
+    os.environ["DATABASE_URL"] = pg_harness.app_database_url(
+        pg_harness._with_database(pg_harness.admin_uri(), pg_harness.test_dbname())
+    )
+except RuntimeError:
+    pass  # no server configured: the database fixtures say so when a test needs one
+
 # Twenty-odd test modules import project code at collection time, so a FIRST declarative
 # registry exists before the session app fixture re-imports everything into a second one.
 # SQLAlchemy's configure_mappers() configures every registry it knows about, so if that
@@ -271,7 +282,7 @@ def built_database() -> Iterator[pg_harness.BuiltDatabase]:
 
     Built once per session (per xdist worker), dropped at the end unless
     MINTY_TEST_PG_KEEP=1. The server comes from MINTY_TEST_PG_URI, or failing that from
-    .env's LOCAL_DATABASE_URI. See tests/pg_harness.py for why there is no SQLite mode.
+    DATABASE_URL. See tests/pg_harness.py for why there is no SQLite mode.
     """
     built = pg_harness.build()
     try:
@@ -282,27 +293,16 @@ def built_database() -> Iterator[pg_harness.BuiltDatabase]:
 
 @pytest.fixture(scope="session")
 def app(built_database) -> Iterator:
-    db_uri = built_database.uri
-
     env = {
-        "FLASK_ENV": "development",
-        "ENV": "development",
+        "APP_ENV": "development",
         "SECRET_KEY": "test-secret-key",
-        "WTF_CSRF_SECRET_KEY": "test-csrf-secret-key",
-        "LOCAL_DATABASE_URI": db_uri,
-        "RDS_DATABASE_URI": db_uri,
-        "S3_BUCKET": "dummy-bucket",
-        "S3_KEY": "dummy-key",
-        "S3_SECRET": "dummy-secret",
-        "S3_REGION": "us-east-1",
+        "DATABASE_URL": pg_harness.app_database_url(built_database.uri),
+        "S3_URL": "https://dummy-key:dummy-secret@s3.us-east-1.backblazeb2.com/dummy-bucket",
         "XERO_CLIENT_ID": "dummy-xero-client-id",
         "XERO_CLIENT_SECRET": "dummy-xero-secret",
-        "XERO_REDIRECT_URI": "https://localhost/xero/callback",
         "SPIRE_KEY": "dummy-spire-key",
-        "XERO_API_BASE_URL": "https://api.xero.com",
-        "MAIL_SERVER": "localhost",
-        "MAIL_PORT": "587",
-        "FLASK_DEBUG": "False",
+        "SMTP_URL": "smtp://localhost:587",
+        "MAIL_FROM": "noreply@minty.test",
         # the entity list and the profile hand over to minty-web when this is on - a developer's
         # .env may say so (load_dotenv never overrides what is set here); the suite keeps the
         # Jinja list its tests describe, and tests/test_hub_*.py flip it per test
@@ -326,7 +326,7 @@ def app(built_database) -> Iterator:
         flask_app.config["DEBUG"] = False
         # No test opens an SMTP connection. Flask-Mail decides ``suppress`` from TESTING
         # when the app is built - before TESTING is set above - so an unpatched send dialled
-        # MAIL_SERVER (localhost:587). Suppressed sends still fire ``email_dispatched``, so
+        # SMTP_URL (localhost:587). Suppressed sends still fire ``email_dispatched``, so
         # ``record_messages`` works; the fakes in char_factories replace ``send`` outright.
         flask_app.extensions["mail"].suppress = True
 

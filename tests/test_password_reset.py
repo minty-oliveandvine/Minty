@@ -3,7 +3,7 @@
 ``POST /reset_password`` saves a uuid4 on ``user.reset_token`` with a one-hour
 ``reset_token_expiry`` and emails a link to ``/reset_password/<token>``, where the
 new password is set. Pinned here: the email is real HTML with its link on
-PUBLIC_URL, an unknown address gets exactly the answer a known one gets (no
+PETTY_CASH_URL, an unknown address gets exactly the answer a known one gets (no
 account-existence leak), and the expiry check works on Postgres's aware timestamps
 (comparing them with a naive now() raised TypeError, so every link answered 500).
 """
@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from werkzeug.security import check_password_hash, generate_password_hash
 
-PUBLIC_URL = "https://app.minty.test"
+PETTY_CASH_URL = "https://app.minty.test"
 
 
 @pytest.fixture
@@ -80,10 +80,10 @@ def test_reset_request_emails_an_html_link_on_public_url(
     app, client, db_session, mail, monkeypatch
 ):
     """A known address typed in another case gets ONE html email whose link is on
-    PUBLIC_URL and carries the token now saved on the account."""
+    PETTY_CASH_URL and carries the token now saved on the account."""
     from blueprints.auth.routes import password_reset
 
-    monkeypatch.setenv("PUBLIC_URL", PUBLIC_URL + "/")  # the trailing slash is trimmed
+    monkeypatch.setitem(app.config, "PETTY_CASH_URL", PETTY_CASH_URL + "/")  # the trailing slash is trimmed
     user_id = _make_user(db_session, email="Pat.Reset@Example.com")
 
     resp = client.post("/reset_password", data={"email": "pat.reset@EXAMPLE.com"})
@@ -102,19 +102,19 @@ def test_reset_request_emails_an_html_link_on_public_url(
     msg = mail.messages[0]
     assert msg.subject == "Reset your Minty password"
     assert msg.recipients == ["Pat.Reset@Example.com"]
-    assert f'href="{PUBLIC_URL}/reset_password/{token}"' in msg.html
-    assert f'src="{PUBLIC_URL}/static/img/minty-mark.png' in msg.html
+    assert f'href="{PETTY_CASH_URL}/reset_password/{token}"' in msg.html
+    assert f'src="{PETTY_CASH_URL}/static/img/minty-mark.png' in msg.html
     assert "expires in 1 hour" in msg.html
     # The old mail put "<br> <a href=...>" in the plain-text body, shown raw.
     assert "<" not in (msg.body or "")
 
 
-def test_reset_link_falls_back_to_the_request_host_without_public_url(
+def test_reset_link_falls_back_to_the_request_host_without_petty_cash_url(
     app, client, db_session, mail, monkeypatch
 ):
-    """No PUBLIC_URL: the link and the logo use the request host - and the logo is
+    """No PETTY_CASH_URL: the link and the logo use the request host - and the logo is
     /static/img/..., not the /static/static/img/... invite.py's fallback builds."""
-    monkeypatch.delenv("PUBLIC_URL", raising=False)
+    monkeypatch.setitem(app.config, "PETTY_CASH_URL", None)
     user_id = _make_user(db_session, email="no.public.url@example.com")
 
     client.post("/reset_password", data={"email": "no.public.url@example.com"})
@@ -131,7 +131,7 @@ def test_unknown_address_gets_the_same_answer_and_no_email(
     """Whether an address has an account must not show: an unknown one gets the
     same redirect and the same flash - words and category - as a known one, and
     no email goes out."""
-    monkeypatch.setenv("PUBLIC_URL", PUBLIC_URL)
+    monkeypatch.setitem(app.config, "PETTY_CASH_URL", PETTY_CASH_URL)
     _make_user(db_session, email="known@example.com")
 
     unknown = client.post("/reset_password", data={"email": "nobody@example.com"})

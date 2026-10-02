@@ -1,5 +1,4 @@
 import json
-import os
 import threading
 import time
 import uuid
@@ -19,6 +18,7 @@ from sqlalchemy import desc
 from blueprints.entity.services.settings import (
     invalidate_entity_xero_cache, sync_all_accounts_and_contacts_background)
 from blueprints.entity.services.shared import check_user_has_entities
+from blueprints.shared import bearer_api
 from blueprints.xero import xero_bp
 from blueprints.xero.services.integration import (
     _get_entity_xero_data_from_db, get_accounts_from_xero, get_auth_token,
@@ -76,9 +76,7 @@ def xero_auth():
 # --- Onboarding Xero handoff helpers --------------------------------------
 
 def _onboarding_app_url() -> str:
-    return os.environ.get(
-        "ONBOARDING_APP_URL", "http://localhost:3001"
-    ).rstrip("/")
+    return bearer_api.onboarding_origin()
 
 
 def _onboarding_xero_return(connected: bool, org_name: str = "",
@@ -794,9 +792,7 @@ def xero_callback():
                     invited_email = (
                         invitation.email if invitation else ""
                     )
-                    onboarding_base = os.environ.get(
-                        "ONBOARDING_APP_URL", "http://localhost:3001"
-                    ).rstrip("/")
+                    onboarding_base = bearer_api.onboarding_origin()
                     resume_qs = {"invite": invite_token}
                     if invited_email:
                         resume_qs["email"] = invited_email

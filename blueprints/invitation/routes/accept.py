@@ -1,4 +1,3 @@
-import os
 from urllib.parse import urlencode
 
 from flask import flash, redirect, render_template, request, url_for
@@ -7,6 +6,7 @@ from loguru import logger
 
 from blueprints.invitation import invitation_bp
 from blueprints.invitation.models.invitation import Invitation
+from blueprints.shared import bearer_api
 from blueprints.shared.entity_display import build_entity_acronym
 from models.db import Entity, db
 
@@ -53,9 +53,7 @@ def accept_invitation_page(token):
         invitation.email,
     )
 
-    onboarding_base = os.environ.get(
-        "ONBOARDING_APP_URL", "http://localhost:3001"
-    ).rstrip("/")
+    onboarding_base = bearer_api.onboarding_origin()
     params = {"invite": token, "email": invitation.email}
     fn = (request.args.get("fn") or "").strip()
     ln = (request.args.get("ln") or "").strip()

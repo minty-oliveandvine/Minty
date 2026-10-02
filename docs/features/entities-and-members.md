@@ -75,7 +75,7 @@ Renaming the company is reflected in the header at once (`e2e/03_settings.spec.t
   URL in it is escaped once at the top (a company or person can be named `<b>…</b>`), the
   subject is one line (a company name with a line break was refused by Flask-Mail and the send
   swallowed), the inviter is the non-blank parts of their name, and the logo is served from
-  `email_base_url()` - `PUBLIC_URL`, else the request's own root (the old fallback doubled
+  `email_base_url()` - `PETTY_CASH_URL`, else the request's own root (the old fallback doubled
   `/static/` and 404'd). The password-reset email uses the same helper. Tested in
   `tests/test_char_access.py`.
 - **Email input: English only.** The invite's email field (and the company's business email)

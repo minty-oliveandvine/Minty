@@ -26,7 +26,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: minty-ref-app
     restart: unless-stopped
-    # Load the project-root .env into the container (app secrets, S3 keys, etc.).
+    # Load the project-root .env into the container (app secrets, S3_URL, SMTP_URL, etc.).
     # Note: for ${VAR} substitution *inside this file* compose also needs
     # `--env-file ../.env`; the helper scripts and README use it.
     env_file:
@@ -35,27 +35,25 @@ services:
       db:
         condition: service_healthy
     environment:
-      FLASK_ENV: ${FLASK_ENV:-development}
-      FLASK_DEBUG: ${FLASK_DEBUG:-False}
+      # development | production. development turns on Flask debug and lets Xero's
+      # OAuth callback run over plain http://localhost.
+      APP_ENV: ${APP_ENV:-development}
       PYTHONUNBUFFERED: "1"
-      SESSION_SECRET: ${SESSION_SECRET:-minty_ref_session_secret}
       SECRET_KEY: ${SECRET_KEY:-minty_ref_secret_key}
-      WTF_CSRF_SECRET_KEY: ${WTF_CSRF_SECRET_KEY:-minty_ref_csrf_secret}
-      LOCAL_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-minty_ref_user}:${POSTGRES_PASSWORD:-minty_ref_pass}@db:5432/${POSTGRES_DB:-minty_ref}
-      RDS_DATABASE_URI: postgresql+psycopg2://${POSTGRES_USER:-minty_ref_user}:${POSTGRES_PASSWORD:-minty_ref_pass}@db:5432/${POSTGRES_DB:-minty_ref}
-      S3_BUCKET: ${S3_BUCKET:-dummy-bucket}
-      S3_KEY: ${S3_KEY:-dummy-key}
-      S3_SECRET: ${S3_SECRET:-dummy-secret}
-      S3_REGION: ${S3_REGION:-us-east-1}
+      # Built once from the db container's POSTGRES_* above; the schema rides in the URL
+      # (?schema=, default pettycashv3) and is never passed to the driver.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-minty_ref_user}:${POSTGRES_PASSWORD:-minty_ref_pass}@db:5432/${POSTGRES_DB:-minty_ref}?schema=${DB_SCHEMA:-pettycashv3}
+      # Dummy credentials let the app boot; uploads fail until ../.env has a real S3_URL.
+      S3_URL: ${S3_URL:-https://dummy-key:dummy-secret@s3.us-west-004.backblazeb2.com/dummy-bucket}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
     ports:
-      - "5001:5001"
+      - "8010:8010"
     command:
       - "gunicorn"
       - "-w"
       - "${GUNICORN_WORKERS:-4}"
       - "-b"
-      - "0.0.0.0:5001"
+      - "0.0.0.0:8010"
       - "main:app"
 
 volumes:

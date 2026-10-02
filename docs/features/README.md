@@ -7,11 +7,11 @@ notes in `docs/code_cleanse/`) are linked, not repeated.
 
 Minty is the Flask hub of a seven-app system. It owns identity, the companies, the daily
 petty-cash report and the Xero connection, and it launches the Next.js apps with a
-short-lived token: the onboarding wizard (`../onboarding` + `../onboarding-backend`), the
-payment-request module (`../billing-frontend` + `../billing-backend`) and, since Part 2 of
+short-lived token: the onboarding wizard (`../minty-onboarding-web` + `../minty-onboarding-api`), the
+payment-request module (`../minty-payment-request-web` + `../minty-payment-request-api`) and, since Part 2 of
 the modernisation plan (scaffolded 2026-09-21), the subscription pages, the profile and the
 entity list of
-the new hub (`../minty-web` + `../minty-billing-api`). Each of those repos has its own
+the new hub (`../minty-web` + `../minty-subscription-api`). Each of those repos has its own
 `docs/features/` folder in the same shape.
 
 | Feature | Document |

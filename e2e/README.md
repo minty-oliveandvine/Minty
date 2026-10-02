@@ -20,8 +20,8 @@ of inline JS that reads the field names and JSON keys the schema redesign rename
 
 | Service | Port | How |
 |---|---|---|
-| Flask (Minty) | 5001 | `.venv/Scripts/python.exe -m flask --app main.py run --port 5001` |
-| PostgreSQL | 5432 | the database Flask's `LOCAL_DATABASE_URI` points at |
+| Flask (Minty) | 8010 | `.venv/Scripts/python.exe -m flask --app main.py run --port 8010` |
+| PostgreSQL | 5432 | the database Flask's `DATABASE_URL` points at |
 
 Override the base URL with `E2E_BASE_URL` (a deployed host works: the seed then needs the
 deployment's database, so run it with the `.env` that points there).
@@ -59,13 +59,13 @@ every run. The Petty Cash shop keeps both modules ON for this suite and the sibl
 module already on is not trial-eligible, which is why the journeys need a company of their own.
 
 To run the C0.9 **baseline** against the old-schema database while `.env` points elsewhere,
-override the URIs for both the seed and Flask:
+override `DATABASE_URL` for both the seed and Flask:
 
 ```bash
 OLD=postgresql://postgres:***@localhost:5432/postgres
-LOCAL_DATABASE_URI=$OLD RDS_DATABASE_URI=$OLD .venv/Scripts/python.exe scripts/e2e_seed.py
-LOCAL_DATABASE_URI=$OLD RDS_DATABASE_URI=$OLD SUBSCRIPTION_SCHEDULER_ENABLED=0 \
-  .venv/Scripts/python.exe -m flask --app main.py run --port 5001
+DATABASE_URL=$OLD .venv/Scripts/python.exe scripts/e2e_seed.py
+DATABASE_URL=$OLD SUBSCRIPTION_SCHEDULER_ENABLED=0 \
+  .venv/Scripts/python.exe -m flask --app main.py run --port 8010
 ```
 
 ## The specs

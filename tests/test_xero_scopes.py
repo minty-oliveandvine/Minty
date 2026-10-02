@@ -182,9 +182,8 @@ class FakeXero:
     writes require the full scope — matching Xero's documented behaviour.
     """
 
-    # Matched on the endpoint family, not the base path: the test app config
-    # sets XERO_API_BASE_URL without the /api.xro/2.0 prefix, while some call
-    # sites hardcode the full URL. Ordered: the Attachments rule must run
+    # Matched on the endpoint family, not the base path: most call sites build on
+    # app.config["XERO_API_BASE_URL"], while some hardcode the full URL. Ordered: the Attachments rule must run
     # before the transactions rule because attachment URLs contain
     # "/BankTransactions/".
     RULES = (

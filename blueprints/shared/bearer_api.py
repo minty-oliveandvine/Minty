@@ -25,17 +25,18 @@ on dependency injection).
 """
 from __future__ import annotations
 
-import os
-
 import jwt
 from flask import current_app, request
 
-#: Where the Module 2 frontend is served from.
-FRONTEND_APP_URL_DEFAULT = "http://localhost:3000"
-#: Where the onboarding wizard is served from -- a different app on a different port.
-ONBOARDING_APP_URL_DEFAULT = "http://localhost:3001"
+from services.app_runtime.env import url_env
+
+#: Where the Module 2 frontend (minty-payment-request-web) is served from.
+PAYMENT_REQUEST_WEB_URL_DEFAULT = "http://localhost:3020"
+#: Where the onboarding wizard (minty-onboarding-web) is served from -- a different app on a
+#: different port.
+ONBOARDING_WEB_URL_DEFAULT = "http://localhost:3030"
 #: Where minty-web (the hub: subscriptions, a company's module settings page) is served from.
-MINTY_WEB_URL_DEFAULT = "http://localhost:3002"
+MINTY_WEB_URL_DEFAULT = "http://localhost:3000"
 
 #: What every one of these responses allows a caller to send. Not parametrised: a bearer
 #: token and a JSON body is the whole contract, and a surface needing more is a decision
@@ -50,17 +51,17 @@ def _origin(env_var: str, default: str) -> str:
     against the page's origin, and ``https://app.example/`` does not match
     ``https://app.example``.
     """
-    return os.environ.get(env_var, default).rstrip("/")
+    return url_env(env_var, default)
 
 
 def frontend_origin() -> str:
     """Origin of the Module 2 frontend (payer portal, subscription notices)."""
-    return _origin("FRONTEND_APP_URL", FRONTEND_APP_URL_DEFAULT)
+    return _origin("PAYMENT_REQUEST_WEB_URL", PAYMENT_REQUEST_WEB_URL_DEFAULT)
 
 
 def onboarding_origin() -> str:
     """Origin of the onboarding app."""
-    return _origin("ONBOARDING_APP_URL", ONBOARDING_APP_URL_DEFAULT)
+    return _origin("ONBOARDING_WEB_URL", ONBOARDING_WEB_URL_DEFAULT)
 
 
 def minty_web_origin() -> str:
