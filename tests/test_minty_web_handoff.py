@@ -133,4 +133,4 @@ def test_the_handoff_is_not_an_open_redirect_and_needs_a_login(shop, client, liv
 
 def test_the_default_origin_is_the_local_hub(monkeypatch):
     monkeypatch.delenv("MINTY_WEB_URL", raising=False)
-    assert bearer_api.minty_web_origin() == "http://localhost:3002"
+    assert bearer_api.minty_web_origin() == "http://localhost:3000"

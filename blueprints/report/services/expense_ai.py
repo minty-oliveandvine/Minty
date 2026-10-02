@@ -69,6 +69,8 @@ from decimal import Decimal, InvalidOperation
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
+from services.app_runtime.env import flag
+
 # --------------------------------------------------------------------------
 # Reason codes. One of these accompanies every "no suggestion" reply. They are
 # for our logs and the audit table; the page shows the user nothing (§7.4).
@@ -116,13 +118,6 @@ def _env(name, default=None):
     return default if value is None or value == "" else value
 
 
-def _env_bool(name, default=False):
-    raw = _env(name)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in ("1", "true", "yes", "on")
-
-
 def _env_int(name, default):
     try:
         return int(str(_env(name, default)).strip())
@@ -139,7 +134,7 @@ def _env_float(name, default):
 
 def is_enabled() -> bool:
     """The global kill switch (§11.1). Default off — the feature ships dark."""
-    return _env_bool("EXPENSE_AI_ENABLED", False)
+    return flag("EXPENSE_AI_ENABLED", False, blank_is_unset=True)
 
 
 def model_id() -> str:
@@ -186,7 +181,7 @@ def confidence_cutoffs() -> tuple[float, float]:
 def uses_vertex() -> bool:
     """Vertex is the route unless someone deliberately opted out of it."""
     if _env("GOOGLE_CLOUD_PROJECT"):
-        return _env_bool("EXPENSE_AI_USE_VERTEX", True)
+        return flag("EXPENSE_AI_USE_VERTEX", True, blank_is_unset=True)
     return False
 
 
@@ -543,7 +538,7 @@ def _get_client():
                 _env("GOOGLE_CLOUD_PROJECT"), location(),
             )
         else:
-            if not _env_bool("EXPENSE_AI_ALLOW_DIRECT_API", False):
+            if not flag("EXPENSE_AI_ALLOW_DIRECT_API", False, blank_is_unset=True):
                 raise RuntimeError(
                     "No GOOGLE_CLOUD_PROJECT configured and the direct Gemini "
                     "API is not opted in. Set GOOGLE_CLOUD_PROJECT for the "

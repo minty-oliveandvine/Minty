@@ -4,19 +4,20 @@ One command starts all seven repos and their shared database. If you only want
 the Flask app and its database, use [`../README.md`](../README.md) instead —
 that setup covers this repo alone.
 
-| Service | Repo | URL | What it is |
+| Service (hostname) | Repo | URL | What it is |
 |---------|------|-----|------------|
-| `minty` | `Minty` | <http://localhost:5001> | Module 1 — Flask app (owns the database schema) |
-| `billing-backend` | `billing-backend` | <http://localhost:8000> | Module 2 — Django API |
-| `billing-frontend` | `billing-frontend` | <http://localhost:3000> | Module 2 — Next.js UI |
-| `onboarding-backend` | `onboarding-backend` | <http://localhost:8001> | Onboarding API — Django, extracted from Minty |
-| `onboarding` | `onboarding` | <http://localhost:3001> | Onboarding — Next.js UI |
-| `billing-api` | `minty-billing-api` | <http://localhost:8004> | Subscriptions API — Django, Part 2 of the modernisation plan |
-| `minty-web` | `minty-web` | <http://localhost:3002> | The hub — Next.js, Part 2; subscriptions is its only feature until Part 3 |
-| `db` | — | `localhost:5432` | PostgreSQL 15, shared by every backend |
+| `minty-web` | `minty-web` | <http://localhost:3000> | The hub — Next.js |
+| `subscription-api` | `minty-subscription-api` | <http://localhost:8000> | Subscriptions API — Django |
+| `minty` | `Minty` | <http://localhost:8010> | Petty Cash — Flask app (owns the database schema) |
+| `payment-request-web` | `minty-payment-request-web` | <http://localhost:3020> | Payment Request — Next.js UI |
+| `payment-request-api` | `minty-payment-request-api` | <http://localhost:8020> | Payment Request — Django API |
+| `onboarding-web` | `minty-onboarding-web` | <http://localhost:3030> | Onboarding — Next.js UI |
+| `onboarding-api` | `minty-onboarding-api` | <http://localhost:8030> | Onboarding API — Django, extracted from Minty |
+| `db` | — | `localhost:5433` | PostgreSQL 15, shared by every backend (`db:5432` inside the network) |
 
-Ports follow the plan's rule 6 — one digit per domain, `800d` for a Django API and `300d`
-for its Next.js UI (`docs/modernisation/modernisation_plan.md`, Part 3 § cross-cutting rules).
+Ports follow one slot per domain: `30N0` for a web app, `80N0` for its API. Every variable
+each service reads, and the old → new rename table, are in
+[`docs/ENVIRONMENT.md`](../../docs/ENVIRONMENT.md).
 
 ---
 
@@ -28,16 +29,20 @@ for its Next.js UI (`docs/modernisation/modernisation_plan.md`, Part 3 § cross-
 
   ```
   C:\Github\
-    ├── Minty\              ← you are here
-    ├── billing-backend\
-    ├── billing-frontend\
-    ├── onboarding\
-    ├── onboarding-backend\
-    ├── minty-billing-api\  ← Part 2
-    └── minty-web\          ← Part 2
+    ├── Minty\                       ← you are here
+    ├── minty-web\
+    ├── minty-subscription-api\
+    ├── minty-payment-request-web\
+    ├── minty-payment-request-api\
+    ├── minty-onboarding-web\
+    └── minty-onboarding-api\
   ```
 
-  If your layout differs, set the `*_PATH` variables in `.env` (step 2).
+  If your layout differs — for instance a checkout still in a folder named after
+  the old repo name (`billing-backend`, `onboarding`, …) — set the `*_PATH`
+  variables in `.env` (step 2): `MINTY_PATH`, `MINTY_WEB_PATH`,
+  `SUBSCRIPTION_API_PATH`, `PAYMENT_REQUEST_API_PATH`, `PAYMENT_REQUEST_WEB_PATH`,
+  `ONBOARDING_API_PATH`, `ONBOARDING_WEB_PATH`.
 
 You do **not** need Python, Node, or Postgres installed.
 
@@ -58,13 +63,16 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 That one key is shared by Flask and Django — Flask signs the JWT that hands a
-signed-in user over to the billing module, and Django verifies it with the same
-key. If they differ, every module handoff fails with a 401.
+signed-in user over to another module, and the Django APIs verify it with the
+same key. If they differ, every module handoff fails with a 401.
 
-Everything else has a working local default. Secrets you already have in
-`../../.env` (Minty) and `../../../billing-backend/.env` are loaded
-automatically underneath this file, so you don't need to copy Stripe, Xero,
-mail or S3 values across — only override here what you want to change.
+Everything else has a working local default. The compose file builds one
+`DATABASE_URL` (`postgresql://…@db:5432/minty_ref?schema=pettycashv3`) from the
+`POSTGRES_*` / `DB_SCHEMA` values and hands it to every service, and sets each
+service URL itself. Secrets you already have in `../../.env` (Minty) and the
+sibling repos' `.env` files are loaded automatically underneath this file, so
+you don't need to copy Stripe, Xero, `SMTP_URL` or `S3_URL` values across — only
+override here what you want to change.
 
 ---
 
@@ -81,12 +89,12 @@ Startup is ordered, and that order matters:
 
 1. `db` comes up and passes its health check.
 2. `minty` creates the `pettycashv3` schema, then starts serving.
-3. `billing-backend`, `onboarding-backend` and `billing-api` wait for `minty` to
-   be **healthy** — they are tenants of Flask's schema and must never get there
-   first.
-4. The three frontends start.
+3. `payment-request-api`, `onboarding-api` and `subscription-api` wait for
+   `minty` to be **healthy** — they are tenants of Flask's schema and must never
+   get there first.
+4. The three Next.js apps start.
 
-You're ready when the logs settle. Open <http://localhost:5001>.
+You're ready when the logs settle. Open <http://localhost:8010>.
 
 The database comes up **empty** — see the next section.
 
@@ -116,7 +124,7 @@ docker compose exec db pg_restore -U minty_ref_user -d minty_ref /tmp/your.dump
 Then restart the backends so they pick it up:
 
 ```bash
-docker compose restart minty billing-backend onboarding-backend billing-api
+docker compose restart minty payment-request-api onboarding-api subscription-api
 ```
 
 Once you're on a database that is already past the broken revisions, you can set
@@ -135,13 +143,14 @@ you pick the repair up:
 
 ## 4. Editing code while it runs
 
-All seven services bind-mount their repo, so **save a file and it reloads.** No
-rebuild needed for ordinary code changes.
+The Next.js apps, `minty`, `payment-request-api` and `subscription-api` bind-mount
+their repo, so **save a file and it reloads.** No rebuild needed for ordinary
+code changes.
 
 Rebuild only when *dependencies* change:
 
 ```bash
-docker compose up --build <service>     # e.g. billing-frontend
+docker compose up --build <service>     # e.g. payment-request-web
 ```
 
 ---
@@ -156,10 +165,10 @@ Run these from this folder.
 | Start in the background | `docker compose up -d` |
 | Rebuild after a dependency change | `docker compose up --build` |
 | Follow one service's logs | `docker compose logs -f minty` |
-| Restart one service | `docker compose restart billing-backend` |
+| Restart one service | `docker compose restart payment-request-api` |
 | Shell inside a container | `docker compose exec minty sh` |
 | Run Flask migrations by hand | `docker compose exec minty flask --app main.py db upgrade` |
-| Run Django migrations by hand | `docker compose exec billing-backend python manage.py migrate` |
+| Run Django migrations by hand | `docker compose exec payment-request-api python manage.py migrate` |
 | Stop everything | `docker compose down` |
 | Stop **and wipe the database** | `docker compose down -v` |
 
@@ -167,8 +176,8 @@ Run these from this folder.
 
 ### Running the backends under gunicorn
 
-`docker-compose.override.yml` is applied automatically and swaps both Python
-services to their auto-reloading dev servers. To run them the way they run when
+`docker-compose.override.yml` is applied automatically and swaps `minty`,
+`payment-request-api` and `subscription-api` to their auto-reloading dev servers. To run them the way they run when
 deployed, skip it:
 
 ```bash
@@ -181,30 +190,34 @@ docker compose -f docker-compose.yml up
 
 Two kinds of URL, and mixing them up is the most common way to break this stack:
 
-- **Browser-facing** (`PUBLIC_URL`, `FRONTEND_APP_URL`, `ONBOARDING_APP_URL`,
-  every `NEXT_PUBLIC_*`) — these end up in the address bar or in a `fetch()`
-  the browser runs. They must be `http://localhost:<port>`. A container name
-  resolves inside Docker's network but not on your machine, so the page would
-  fail every request.
-- **Server-to-server** (`FLASK_APP_URL`, `XERO_TOKEN_SERVICE_URL`, the database
-  URIs) — these are dialled by one container to another. They use the compose
-  service name (`http://minty:5001`, `db:5432`) and never leave the network.
+- **Browser-facing** — every URL handed to a Next.js app, Flask's own
+  `PETTY_CASH_URL`, `subscription-api`'s `PETTY_CASH_PUBLIC_URL`, and the
+  `*_WEB_URL` redirect/CORS origins. These end up in the address bar or in a
+  `fetch()` the browser runs, so they are `http://localhost:<host port>`. A
+  container name resolves inside Docker's network but not on your machine, so
+  the page would fail every request.
+- **Server-to-server** — `PETTY_CASH_URL` on the three Django APIs, and
+  `DATABASE_URL`. These are dialled by one container to another, so they use the
+  compose service name (`http://minty:8010`, `db:5432`) and never leave the
+  network. That is why `subscription-api` carries both `PETTY_CASH_URL`
+  (internal) and `PETTY_CASH_PUBLIC_URL` (the one its emails link to).
 
-Both are already set correctly in `docker-compose.yml`; you only touch them if
-you change a host port, in which case update the matching `*_PUBLIC_URL` in
-`.env` too.
+All of them are set in `docker-compose.yml` and the browser-facing ones are
+built from the `*_HOST_PORT` values in `.env`, so changing a host port there is
+all it takes.
 
 **Xero:** the Flask app is the only service allowed to refresh Xero tokens.
-Billing asks it for one over the internal URL. Never give the billing backend
-its own `XERO_CLIENT_ID`/`SECRET` — Xero invalidates a refresh token the moment
-it is used, so a second refresher breaks the connection until someone
-reconnects by hand.
+The Django APIs ask it for one at `PETTY_CASH_URL/api/internal/xero/token` over
+the internal URL. Never give them their own Xero credentials — Xero invalidates
+a refresh token the moment it is used, so a second refresher breaks the
+connection until someone reconnects by hand. The redirect URI registered in the
+Xero app must be `http://localhost:8010/callback` (`PETTY_CASH_URL/callback`).
 
 **Subscriptions (Part 2):** always on - the dark switch (`SUBSCRIPTION_ENABLED`)
 was removed on 2026-10-01. The one switch left is the daily pass,
-`SUBSCRIPTION_SCHEDULER_ENABLED`, read by `minty` AND `billing-api`: never set it
-on both, they share the database. Stripe keys are read by `minty` today and by
-`billing-api`; from Part 2 step 5 only `billing-api` holds them.
+`SUBSCRIPTION_SCHEDULER_ENABLED`, read by `minty` AND `subscription-api`: never set it
+on both, they share the database. Stripe keys are read by `minty` and by
+`subscription-api`.
 
 ---
 
@@ -212,7 +225,7 @@ on both, they share the database. Stripe keys are read by `minty` today and by
 
 This stack uses its own volume (`minty-stack_postgres_data`), separate from the
 Flask-only setup in `../` (`docker_postgres_data`). Data does not carry over
-between the two, and that's deliberate — the single-repo setup has no billing
+between the two, and that's deliberate — the single-repo setup has no payment-request
 tables in it. Use one or the other consistently.
 
 ---
@@ -223,11 +236,13 @@ tables in it. Use one or the other consistently.
 → Docker Desktop isn't running. Start it and wait for the whale icon.
 
 **"port is already allocated"**
-→ Something on your machine already uses 5432/5001/8000/8001/8004/3000/3001/3002. Either stop
-it, or change the matching `*_HOST_PORT` in `.env` (and the `*_PUBLIC_URL` that
-goes with it).
+→ Something on your machine already uses 5433/3000/8000/8010/3020/8020/3030/8030. Either
+stop it, or change the matching `*_HOST_PORT` in `.env` (`DB_HOST_PORT`,
+`MINTY_WEB_HOST_PORT`, `SUBSCRIPTION_API_HOST_PORT`, `MINTY_HOST_PORT`,
+`PAYMENT_REQUEST_WEB_HOST_PORT`, `PAYMENT_REQUEST_API_HOST_PORT`,
+`ONBOARDING_WEB_HOST_PORT`, `ONBOARDING_API_HOST_PORT`); the URLs follow it.
 
-**`billing-backend` exits with "Database/schema not ready"**
+**`payment-request-api` exits with "Database/schema not ready"**
 → `minty` never got as far as creating the `pettycashv3` schema. Read its logs
 first: `docker compose logs minty`.
 
@@ -239,14 +254,15 @@ first: `docker compose logs minty`.
 today; see [Getting a schema](#3b-getting-a-schema-️).
 
 **Module handoff bounces you back to login / 401s**
-→ `SECRET_KEY` differs between the two backends. It is set once in `.env` and
-injected into both; check nothing in `../../.env` is shadowing it by confirming
+→ `SECRET_KEY` differs between the backends. It is set once in `.env` and
+injected into all of them; confirm
 `docker compose exec minty printenv SECRET_KEY` matches
-`docker compose exec billing-backend printenv SECRET_KEY`.
+`docker compose exec payment-request-api printenv SECRET_KEY`.
 
 **A frontend can't reach an API (CORS or connection refused)**
-→ Check the `NEXT_PUBLIC_*` values are `localhost` URLs:
-`docker compose exec billing-frontend printenv | grep NEXT_PUBLIC`.
+→ Check the URL values are `localhost` URLs:
+`docker compose exec payment-request-web printenv | grep _URL`. The Next.js apps
+read them when the dev server starts, so restart the service after a change.
 
 **Edits don't show up**
 → Polling is enabled for the frontends (`WATCHPACK_POLLING`). If a Python
@@ -271,15 +287,15 @@ docker compose up --build
 
 # the database starts EMPTY — load a schema into it:
 docker compose exec -T db psql -U minty_ref_user -d minty_ref < your_dump.sql
-docker compose restart minty billing-backend onboarding-backend billing-api
+docker compose restart minty payment-request-api onboarding-api subscription-api
 
-# Minty              http://localhost:5001
-# Billing API        http://localhost:8000
-# Onboarding API     http://localhost:8001
-# Subscriptions API  http://localhost:8004
-# Billing UI         http://localhost:3000
-# Onboarding UI      http://localhost:3001
-# Minty hub          http://localhost:3002
+# Minty hub                http://localhost:3000
+# Subscription API         http://localhost:8000
+# Petty Cash (Flask)       http://localhost:8010
+# Payment Request UI       http://localhost:3020
+# Payment Request API      http://localhost:8020
+# Onboarding UI            http://localhost:3030
+# Onboarding API           http://localhost:8030
 
 docker compose down           # stop
 ```

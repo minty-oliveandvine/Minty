@@ -4,8 +4,8 @@ Flask-Mail 0.10.0 opens ``smtplib.SMTP(server, port)`` with no timeout, so a mai
 accepts the connection and then goes quiet blocks the caller forever. Every caller is
 something that must not hang: the sign-in code request holds its database transaction open
 for the send (``auth.services.email_auth.request_email_otp``), and the billing jobs send
-inside the scheduler pass that holds the two-worker lock. ``MAIL_TIMEOUT`` (seconds, 10 by
-default) bounds each step - connect, STARTTLS, login, each command - and a stalled server
+inside the scheduler pass that holds the two-worker lock. ``MAIL_TIMEOUT`` (the app config
+key, set from ``SMTP_URL``'s ``?timeout=``; seconds, 10 by default) bounds each step - connect, STARTTLS, login, each command - and a stalled server
 then fails the send like a refused one, which every caller already handles.
 
 Three pieces, because Flask-Mail opens connections in two places. Every send in this app

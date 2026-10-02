@@ -10,16 +10,7 @@ deliberate ``flask subscriptions revoke-ungranted``. The daily pass keeps its ow
 
 from __future__ import annotations
 
-import os
-
-_TRUE = {"1", "true", "yes", "on"}
-
-
-def _flag(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in _TRUE
+from services.app_runtime.env import flag
 
 
 def minty_web_hub() -> bool:
@@ -31,4 +22,4 @@ def minty_web_hub() -> bool:
     **Off unless set**: ``/entity`` is the first page after every login, so switching this on
     in an environment where minty-web is not deployed would strand every sign-in. Turn it on
     per environment once minty-web answers there."""
-    return _flag("MINTY_WEB_HUB", False)
+    return flag("MINTY_WEB_HUB", False)

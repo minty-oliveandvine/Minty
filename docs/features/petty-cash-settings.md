@@ -16,7 +16,7 @@ app; Users and Entity & Integration move to minty-web later, the Module tab is m
 already). Since 2026-10-01 it is ONE template for every visit, built from the old
 `?from=bills` page; the classic page and `settings_entity_bills_ui.html` are gone.
 
-- **Chrome** = minty-web's Module page (`AppHeader` + `SettingsTabs`), which billing-frontend's
+- **Chrome** = minty-web's Module page (`AppHeader` + `SettingsTabs`), which minty-payment-request-web's
   Payment Settings wears too: the way back, "Settings", the company, the initials (My Profile)
   and the ≡ (the menu), then the sticky pills Users · Entity & Integration · **Petty Cash
   Settings** · Payment Settings (when the payments module is on) · Module.
@@ -108,7 +108,7 @@ The pickers draw Xero's names as text.
 
 `entity_account_xero.is_active` decides which synced expense accounts the Expenses page
 offers (`COA_*` permissions to change); the bill module's own list is
-`entity_bill_account_xero` (billing-backend's, synced by Minty). The tick is stored there ONLY:
+`entity_bill_account_xero` (minty-payment-request-api's, synced by Minty). The tick is stored there ONLY:
 since 2026-10-01 a save (and onboarding Step 5, `sync_entity_account_xero_active`) never writes
 `account_info.status`, which is Xero's own "still active". Before, a save marked unticked codes
 and every liability account INACTIVE, so with Xero disconnected the Discrepancy and Director
@@ -124,16 +124,16 @@ rows WITH a code — a row without one can never be ticked back on, so it never 
 offered). A company with no codes saves as before. Onboarding's Step 5 has the same rule since
 2026-10-01 (`save_account_codes` answers 400; it asks `listed_only=False`, because its codes
 have no `entity_account_xero` row yet), and Payment Settings keeps at least one bill code
-(billing-backend's PUT answers 409). Onboarding's Step 8 (the Payment Request codes) has it too:
+(minty-payment-request-api's PUT answers 409). Onboarding's Step 8 (the Payment Request codes) has it too:
 the wizard shows the same words and does not post, and Flask's `save_bill_codes`
 (`blueprints/entity/services/onboarding_bill_codes.py`) answers 400 when the company has codes
 and none is ticked.
 
 Step 8 is still answered by Flask (`/api/onboarding/bill-codes`, reached through
-onboarding-backend's pass-through), although the table it writes, `entity_bill_account_xero`, is
-billing-backend's. Kept there by decision (2026-10-01, "keep in flask for now"). When it moves
-to billing-backend, the agreed shape is: Xero connect (Step 3, Flask) fills
-`entity_bill_account_xero`, so billing-backend only ever reads its own table, and Flask's route
+minty-onboarding-api's pass-through), although the table it writes, `entity_bill_account_xero`, is
+minty-payment-request-api's. Kept there by decision (2026-10-01, "keep in flask for now"). When it moves
+to minty-payment-request-api, the agreed shape is: Xero connect (Step 3, Flask) fills
+`entity_bill_account_xero`, so minty-payment-request-api only ever reads its own table, and Flask's route
 plus the pass-through are deleted.
 
 **The first-ever save** (no `entity_pettycash_settings` row yet) used to switch every code on

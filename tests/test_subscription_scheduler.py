@@ -42,9 +42,13 @@ def daily(app):
 
 
 @pytest.fixture
-def scheduler(app):
+def scheduler(app, monkeypatch):
+    """The scheduler module, in the deployed service's environment: the suite's app runs with
+    APP_ENV=development, where start_scheduler would take this for the reloader's supervisor
+    (test_the_dev_reloaders_supervisor_gets_no_timer covers that guard)."""
     from services.app_runtime import scheduler as module
 
+    monkeypatch.setenv("APP_ENV", "production")
     return module
 
 
@@ -385,6 +389,22 @@ def test_the_scheduler_is_off_unless_the_environment_asks_for_it(
     assert scheduler.start_scheduler(app) is None
 
 
+def test_the_dev_reloaders_supervisor_gets_no_timer(app, scheduler, monkeypatch):
+    """In development the reloader's supervisor imports the app too; only the child it forks
+    (WERKZEUG_RUN_MAIN=true) may own a timer, or every code edit leaves another behind."""
+    monkeypatch.setenv("SUBSCRIPTION_SCHEDULER_ENABLED", "1")
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    assert scheduler.start_scheduler(app) is None
+
+    monkeypatch.setenv("WERKZEUG_RUN_MAIN", "true")
+    started = scheduler.start_scheduler(app)
+    try:
+        assert started is not None
+    finally:
+        started.shutdown(wait=False)
+
+
 def test_the_light_hours_are_every_hour_except_the_full_one(app, scheduler, monkeypatch):
     """The two jobs must never fire in the same minute.
 
@@ -497,10 +517,10 @@ def test_env_flags_survive_nonsense(scheduler, monkeypatch):
     monkeypatch.setenv("SUBSCRIPTION_SCHEDULER_HOUR", "not-a-number")
     assert scheduler._int("SUBSCRIPTION_SCHEDULER_HOUR", 2) == 2
     monkeypatch.setenv("SUBSCRIPTION_SCHEDULER_ENABLED", "yes")
-    assert scheduler._flag("SUBSCRIPTION_SCHEDULER_ENABLED", False) is True
+    assert scheduler.flag("SUBSCRIPTION_SCHEDULER_ENABLED", False) is True
     monkeypatch.setenv("SUBSCRIPTION_SCHEDULER_ENABLED", "off")
-    assert scheduler._flag("SUBSCRIPTION_SCHEDULER_ENABLED", False) is False
+    assert scheduler.flag("SUBSCRIPTION_SCHEDULER_ENABLED", False) is False
     monkeypatch.delenv("SUBSCRIPTION_SCHEDULER_ISSUE", raising=False)
     # The default that matters most: unset means BILL, because a scheduler that is on and
     # silently not charging looks identical to one that is working.
-    assert scheduler._flag("SUBSCRIPTION_SCHEDULER_ISSUE", True) is True
+    assert scheduler.flag("SUBSCRIPTION_SCHEDULER_ISSUE", True) is True

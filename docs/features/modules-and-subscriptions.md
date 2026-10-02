@@ -1,14 +1,14 @@
 # Modules and subscriptions
 
 Two modules can be on for a company: **Petty Cash** (this app's daily report) and
-**Payment Request** (`BILL` — the bills module served by `billing-frontend` +
-`billing-backend`). Whether a company *has* a module, and whether anyone *pays* for it, are
+**Payment Request** (`BILL` — the bills module served by `minty-payment-request-web` +
+`minty-payment-request-api`). Whether a company *has* a module, and whether anyone *pays* for it, are
 separate questions.
 
 > **Moving out (Part 2 of `docs/modernisation/modernisation_plan.md`, since 2026-09-21).** The
 > engine described in §3, the payer portal routes, the module settings page and the daily pass
-> move to two new repos: `../minty-billing-api` (Django, :8004 — `docs/features/subscriptions-api.md`
-> there is the route-by-route map) and `../minty-web` (Next.js, :3002 — `docs/features/subscriptions.md`).
+> move to two new repos: `../minty-subscription-api` (Django, :8000 — `docs/features/subscriptions-api.md`
+> there is the route-by-route map) and `../minty-web` (Next.js, :3000 — `docs/features/subscriptions.md`).
 > Step 1 (the scaffolds) and step 2 (the engine: all 24 service modules ported 1:1 with 762 of
 > their tests, slices A-D on 2026-09-21; the replay golden is slice E) are done; until step 5
 > removes them, everything on this page is still the running code and the spec the port is
@@ -25,14 +25,14 @@ separate questions.
 ## 1. No switch: subscriptions are always on
 
 The dark switch `SUBSCRIPTION_ENABLED` (off unless set; production was to cut over with the
-feature dark, 2026-09-18) was **removed on 2026-10-01** in every repo - Minty, onboarding-backend,
-onboarding, billing-frontend, minty-web and minty-billing-api - because the stack is deployed to
+feature dark, 2026-09-18) was **removed on 2026-10-01** in every repo - Minty, minty-onboarding-api,
+minty-onboarding-web, minty-payment-request-web, minty-web and minty-subscription-api - because the stack is deployed to
 a test site and nothing is dark any more. Its one rule outlives it: **turning the feature on
 wrote nothing** - no grant, no trial, no revocation - and taking access away from a module no
 subscription backs is still the separate, deliberate `flask subscriptions revoke-ungranted
 [--apply]` (`services/access_sweep.py`; dry by default). Migration `m1a01` is a no-op for the
 same reason. The daily pass keeps its own switch, `SUBSCRIPTION_SCHEDULER_ENABLED` (§3) - in
-Minty AND minty-billing-api, which share the database, so never on in both.
+Minty AND minty-subscription-api, which share the database, so never on in both.
 
 ## 2. Module access (always on)
 
@@ -43,7 +43,7 @@ context processors in
 `MODULE_BILL`) decide what the side panel, the settings tabs and the dashboard show; a
 page of a module that is off renders `entity_no_permission.html` (with a link to the
 module settings when the person may open them). The module token minted
-for the payment app carries `billing_enabled` / `petty_cash_enabled`, but billing-backend
+for the payment app carries `billing_enabled` / `petty_cash_enabled`, but minty-payment-request-api
 re-reads the map (`/api/auth/entitlements`) — the database decides, not the claim.
 
 ## 3. The subscription engine (when on)
@@ -70,7 +70,7 @@ owns every state. Models in `blueprints/subscription/models/`:
   "Change billing account"), `entity_billing_consent` (the payer's consent to be billed
   for this company; recorded before any charge). Since 2026-09-25 the accounts are read,
   renamed, re-carded and given companies from minty-web's payer portal, served by
-  minty-billing-api; Flask's copy of the services is not mirrored (Django replaces them -
+  minty-subscription-api; Flask's copy of the services is not mirrored (Django replaces them -
   see `flask-subscription-no-more-ports`).
 
 **Every charge names the billing account's card, and there is no fallback** (the
@@ -93,7 +93,7 @@ through `checkout._void_unpaid_invoice` on both failure paths. **Each Stripe ite
 own days** (same day, both engines): `billing_gateway._item_period` sends the line's recorded
 span (`billing.Line.period_start` / `period_end`) instead of the invoice's whole period, so
 Stripe's PDF no longer dates a prorated start, a credit or an access extension as a full month.
-Minty's own invoice PDF (Figma 09-A) is served by minty-billing-api
+Minty's own invoice PDF (Figma 09-A) is served by minty-subscription-api
 (`GET /api/me/invoices/{id}/pdf`); Flask has no copy of it.
 
 The rules the user chose deliberately (`subscription-pricing-decisions`,
@@ -110,10 +110,10 @@ crossed the limit) and `dunning._charge` re-issues the invoice with `billing_gat
 refresh_invoice` — its recorded lines and Stripe items copied, the period key moved over by
 `store.supersede_invoice`, the original voided only once the replacement is open — and charges
 the replacement in the same attempt. The whole mechanism, its crash windows and the `L2` replay
-that proves it are in minty-billing-api `docs/features/subscriptions-api.md` §6 and §8.
+that proves it are in minty-subscription-api `docs/features/subscriptions-api.md` §6 and §8.
 
 **Invoices after the fact, drafts, the API version and money mail (2026-09-30, both engines,
-byte-identical apart from imports).** The full account is minty-billing-api's §5 and §6; here,
+byte-identical apart from imports).** The full account is minty-subscription-api's §5 and §6; here,
 what each one is:
 - **A draft nobody finalized is loud and, for a renewal, finished.** An error or a crash between
   `Invoice.create` and `finalize_invoice` left a draft nothing touched again (dunning chases open
@@ -160,7 +160,7 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   `MINTY_WEB_URL/landing?next=/subscription/entities/<id>/modules` (`?from=bills` travels in
   `next`; `tests/test_minty_web_handoff.py`). The page is minty-web's (Part 2 step 4a,
   `../minty-web/docs/features/subscriptions.md` §9) and posts its 19 actions to
-  minty-billing-api. **Flask's Jinja module page, its partials (`module_*.html`), the lapsed-trial
+  minty-subscription-api. **Flask's Jinja module page, its partials (`module_*.html`), the lapsed-trial
   restart screen and the 20 session routes under `…/module/<id>/…` (the 19 actions and the
   dark-only `/toggle`) were deleted on 2026-10-01**; the engine services they called stay until
   Flask's engine goes as a whole. Two more doors exist for that page:
@@ -180,9 +180,9 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   The one button, "Go to subscription settings", is `/handoff/minty-web?next=<module page>
   &entity_id=` - a Minty path the payment app wraps in `buildMintyEnterUrl`, authenticated at
   the click (`minty_web_module_page_handoff`), landing on minty-web's Module page.
-- The **payer portal** lives in minty-web (`/subscription/*`, served by minty-billing-api's
+- The **payer portal** lives in minty-web (`/subscription/*`, served by minty-subscription-api's
   `/api/me/*`). Flask's `/api/me/*` (`blueprints/subscription/routes/portal.py`) has **no browser
-  caller since 2026-10-01** - billing-frontend's portal pages were deleted - and goes with the
+  caller since 2026-10-01** - minty-payment-request-web's portal pages were deleted - and goes with the
   engine. Every "open my profile" link (`bills_app_profile_url`, the sidebar) goes through
   `GET /profile` (`entity.open_profile`), which always hands over to minty-web's My Profile;
   the transfer emails link to minty-web's portal through `/handoff/minty-web`
@@ -207,7 +207,7 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
 `scripts/subscription/replay_scenarios.py` seeds scenarios by living them (a test clock);
 `scripts/subscription/copy_replay_to_rds.py`. Its catalogue is Figma 05·A: one company per
 module-status combination, named for its frame ("M44 Nexora Health Limited"). The table, the ten
-frames it cannot live and why, and its shelf life are in minty-billing-api
+frames it cannot live and why, and its shelf life are in minty-subscription-api
 `docs/features/subscriptions-api.md` §8, "The replay catalogue". The Django port there runs the
 same shapes.
 

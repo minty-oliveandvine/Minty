@@ -43,7 +43,7 @@ def db(app):
 @pytest.fixture
 def origins(monkeypatch):
     monkeypatch.setenv("MINTY_WEB_URL", HUB + "/")
-    monkeypatch.setenv("FRONTEND_APP_URL", PAYMENTS + "/")
+    monkeypatch.setenv("PAYMENT_REQUEST_WEB_URL", PAYMENTS + "/")
 
 
 @pytest.fixture
@@ -185,7 +185,7 @@ def test_the_dashboards_setup_links_open_the_petty_cash_settings():
 
 
 def test_the_reads_it_is_told_about(app, people, monkeypatch):
-    monkeypatch.setenv("BILLING_API_URL", "http://billing.minty.test/")
+    monkeypatch.setenv("SUBSCRIPTION_API_URL", "http://billing.minty.test/")
     html = _menu(app, "/entity", user_id=people["olive"].id)
 
     assert 'data-token-url="/me/sidebar-token"' in html

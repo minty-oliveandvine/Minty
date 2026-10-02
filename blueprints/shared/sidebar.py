@@ -24,17 +24,16 @@ template because the module settings page shows and hides those groups live
 
 from __future__ import annotations
 
-import os
-
 from flask import request, url_for
 from flask_login import current_user
 from loguru import logger
 
 from blueprints.user_management.services import profile
+from services.app_runtime.env import url_env
 
-#: Where minty-billing-api answers (the Subscriptions Overview's read) - minty-web's
-#: ``NEXT_PUBLIC_BILLING_API_URL``, under this app's name for it.
-BILLING_API_URL_DEFAULT = "http://localhost:8004"
+#: Where minty-subscription-api answers (the Subscriptions Overview's read) - the same
+#: ``SUBSCRIPTION_API_URL`` minty-web reads.
+SUBSCRIPTION_API_URL_DEFAULT = "http://localhost:8000"
 
 #: Pages where a person is CHOOSING a company rather than inside one: no company sections and
 #: no Settings there, whatever the page was handed (minty-web: never on the entity list).
@@ -53,9 +52,10 @@ CHOOSING_ENDPOINTS = frozenset(
 MINTY_WEB_SUBSCRIPTIONS_PATH = "/subscription"
 
 
-def billing_api_origin() -> str:
-    """minty-billing-api's origin, without a trailing slash (the browser compares it literally)."""
-    return os.environ.get("BILLING_API_URL", BILLING_API_URL_DEFAULT).rstrip("/")
+def subscription_api_origin() -> str:
+    """minty-subscription-api's origin, without a trailing slash (the browser compares it
+    literally)."""
+    return url_env("SUBSCRIPTION_API_URL", SUBSCRIPTION_API_URL_DEFAULT)
 
 
 def _petty_cash_on(entity_id: str) -> bool:
@@ -149,6 +149,6 @@ def sidebar_context(entity_id=None, *, from_bills: bool = False) -> dict:
         "api": {
             "token": url_for("entity.sidebar_token"),
             "profile": url_for("user_management.my_profile_api"),
-            "billing": billing_api_origin(),
+            "billing": subscription_api_origin(),
         },
     }

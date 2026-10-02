@@ -7,7 +7,7 @@ icon**: the label (Success / Error / Warning / Information) carries the type. Th
 the old coloured pill (5px border, rounded-full, a PNG icon per tone) in every app.
 
 The reference is minty-web's `components/ui/Toast.tsx`. Change all four together (minty-web,
-billing-frontend, onboarding, here).
+minty-payment-request-web, minty-onboarding-web, here).
 
 ## The look, value for value
 
@@ -28,7 +28,7 @@ only.
 | App | File | API | Behaviour |
 |---|---|---|---|
 | minty-web | `components/ui/Toast.tsx` | `useToast().showToast(message, type = "info")` | stacks; 4s |
-| billing-frontend | `components/Toast.tsx` | `useToast().showToast(message, type = "success")`, `dismissToast(id)` | stacks; 4s |
+| minty-payment-request-web | `components/Toast.tsx` | `useToast().showToast(message, type = "success")`, `dismissToast(id)` | stacks; 4s |
 | onboarding | `components/Toast.tsx` | `useToast().success/error/warning/info(message?)`, `show`, `hide` | one at a time (a new one replaces it); 4s; each type has a fallback sentence |
 | Minty (here) | `templates/components/flash_messages.html` | `showFlashMessages(message, type, durationMs)` + aliases | stacks; 4s, 12s for a flashed error/warning |
 

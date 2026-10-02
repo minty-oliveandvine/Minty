@@ -32,11 +32,13 @@ from pettycash.core.blueprint_loader import (register_blueprints,
                                              register_compat_alias)
 from pettycash.core.hooks import init_app as init_hooks
 from blueprints.shared.schema import SCHEMA
+from services.app_runtime.env import (database_url, is_development,
+                                      parse_s3_url, parse_smtp_url)
 
 load_dotenv()
 
-
-S3_BUCKET = "pettycash"
+#: Xero's accounting API. A constant: there is one Xero, and no environment points elsewhere.
+XERO_API_BASE_URL = "https://api.xero.com/api.xro/2.0"
 
 
 def _setup_file_logging() -> str:
@@ -154,9 +156,8 @@ def create_app():
 
     app.config["CLIENT_ID"] = os.environ.get("XERO_CLIENT_ID")
     app.config["CLIENT_SECRET"] = os.environ.get("XERO_CLIENT_SECRET")
-    app.config["REDIRECT_URI"] = os.environ.get("XERO_REDIRECT_URI")
     app.config["SPIRE_KEY"] = os.environ.get("SPIRE_KEY")
-    app.config["XERO_API_BASE_URL"] = os.environ.get("XERO_API_BASE_URL")
+    app.config["XERO_API_BASE_URL"] = XERO_API_BASE_URL
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_size": 15,
         "max_overflow": 5,
@@ -167,30 +168,25 @@ def create_app():
 
     required_env_vars = [
         "SECRET_KEY",
-        "WTF_CSRF_SECRET_KEY",
-        "LOCAL_DATABASE_URI",
-        "RDS_DATABASE_URI",
-        "S3_BUCKET",
-        "S3_KEY",
-        "S3_SECRET",
-        "S3_REGION",
+        "DATABASE_URL",
+        "S3_URL",
     ]
     missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
     if missing_vars:
         raise RuntimeError(f"Missing environment variables: {', '.join(missing_vars)}")
 
     s3 = boto3.client("s3")
+    s3_settings = parse_s3_url(app.config["S3_URL"])
     s3_client = boto3.client(
         "s3",
-        aws_access_key_id=app.config["S3_KEY"],
-        aws_secret_access_key=app.config["S3_SECRET"],
-        region_name=app.config["S3_REGION"],
-        endpoint_url=f"https://s3.{app.config['S3_REGION']}.backblazeb2.com",
+        aws_access_key_id=s3_settings.key,
+        aws_secret_access_key=s3_settings.secret,
+        region_name=s3_settings.region,
+        endpoint_url=s3_settings.endpoint_url,
         config=Config(signature_version="s3v4"),
     )
 
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY")
-    app.config["WTF_CSRF_SECRET_KEY"] = os.environ.get("WTF_CSRF_SECRET_KEY")
+    # SECRET_KEY comes from config.py; Flask-WTF signs CSRF tokens with it too.
     app.config["SESSION_COOKIE_SECURE"] = False
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -198,25 +194,26 @@ def create_app():
     app.config["WTF_CSRF_SSL_STRICT"] = True
     app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024
 
-    app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER")
-    app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", 587))
-    app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME")
-    app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD")
-    app.config["MAIL_USE_TLS"] = True
-    app.config["MAIL_USE_SSL"] = False
-    app.config["MAIL_DEBUG"] = (
-        os.environ.get("MAIL_DEBUG", "False").lower() == "true"
-    )
-    # Seconds each SMTP step may take (services/app_runtime/mail.py): without it a mail
-    # server that goes quiet hangs the request or the billing pass that is sending.
-    app.config["MAIL_TIMEOUT"] = float(os.environ.get("MAIL_TIMEOUT") or 10)
-
-
-    flask_env = os.environ.get("FLASK_ENV", "production")
-    if flask_env == "production":
-        app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("RDS_DATABASE_URI")
+    # SMTP_URL (services/app_runtime/env.parse_smtp_url) into Flask-Mail's settings. Unset,
+    # there is no server and a send fails like any other SMTP error, as it always has.
+    smtp_url = os.environ.get("SMTP_URL")
+    if smtp_url:
+        smtp = parse_smtp_url(smtp_url)
+        app.config["MAIL_SERVER"] = smtp.host
+        app.config["MAIL_PORT"] = smtp.port
+        app.config["MAIL_USERNAME"] = smtp.username
+        app.config["MAIL_PASSWORD"] = smtp.password
+        app.config["MAIL_USE_TLS"] = smtp.use_tls
+        app.config["MAIL_USE_SSL"] = smtp.use_ssl
+        # Seconds each SMTP step may take (services/app_runtime/mail.py; SMTP_URL's
+        # ?timeout=): without it a mail server that goes quiet hangs the request or the
+        # billing pass that is sending.
+        app.config["MAIL_TIMEOUT"] = smtp.timeout
     else:
-        app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("LOCAL_DATABASE_URI")
+        app.config["MAIL_SERVER"] = None
+
+    # DATABASE_URL, with its ?schema= popped (blueprints/shared/schema.SCHEMA reads it).
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url()
 
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -381,7 +378,7 @@ def create_app():
     # must belong to the token's payer (``payment_methods._owned``)
     csrf.exempt(onboarding_billing_accounts)
     # Onboarding /auth and /auth/confirm call these from a different origin
-    # (port 3001) — no session cookie, so they need CSRF exemption.
+    # (port 3030) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_check,
                                                     email_request_code,
                                                     email_verify_code)
@@ -403,11 +400,10 @@ def create_app():
     )
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24
     app.config["WTF_CSRF_TIME_LIMIT"] = 24 * 60 * 60
-    if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
-        app.config["SESSION_SQLALCHEMY_SCHEMA"] = SCHEMA
+    app.config["SESSION_SQLALCHEMY_SCHEMA"] = SCHEMA
     Session(app)
 
-    if app.config["ENV"] != "production":
+    if is_development():
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
     xero_sync_status = defaultdict(lambda: {"status": "idle", "message": ""})
@@ -459,7 +455,7 @@ def create_app():
         migrate,
         s3,
         s3_client,
-        S3_BUCKET,
+        s3_settings.bucket,
         xero_sync_status,
         tz,
     )

@@ -1,19 +1,18 @@
 """Copy one replay run's rows from the local database to RDS.
 
 `replay_scenarios.py` writes to exactly one database — whichever `main.app` bound at
-import, which is `RDS_DATABASE_URI` unless `FLASK_ENV=development`. Replaying twice to get
+import, which is `DATABASE_URL`. Replaying twice to get
 the data into both is the obvious way and it is slow twice over: every one of the five
 daily jobs round-trips to Supabase for every simulated day, on top of the Stripe test-clock
 advances the run has to pay for regardless. So: replay ONCE against local, then move the
 result.
 
-    # rehearse and seed locally
-    $env:FLASK_ENV='development'
+    # rehearse and seed locally (DATABASE_URL = the local database)
     python scripts/subscription/replay_scenarios.py --run angelika --setup --replay --report
 
-    # then move it (FLASK_ENV is irrelevant here — this script binds both URIs itself)
-    python scripts/subscription/copy_replay_to_rds.py --run angelika            # report only
-    python scripts/subscription/copy_replay_to_rds.py --run angelika --copy
+    # then move it (this script binds both URLs itself; --source-url defaults to DATABASE_URL)
+    python scripts/subscription/copy_replay_to_rds.py --run angelika --target-url $RDS   # report only
+    python scripts/subscription/copy_replay_to_rds.py --run angelika --target-url $RDS --copy
 
 WHAT MAKES THIS SAFE TO DO AT ALL. Every primary key in the subscription schema is a
 string uuid — there is not a sequence anywhere in the eleven tables below, so no
@@ -66,6 +65,9 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from services.app_runtime.env import parse_database_url  # noqa: E402
 
 # `replay_scenarios` does `from main import app` at module level, which boots Flask and
 # binds a database — the very thing this script exists to decide for itself. Stubbing the
@@ -77,7 +79,9 @@ sys.modules.setdefault("main", _stub)
 
 from replay_scenarios import RUNS, _clone_name  # noqa: E402
 
-SCHEMA = os.environ.get("MINTY_DB_SCHEMA", "pettycashv3")  # blueprints/shared/schema.py, without importing the app
+# The ?schema= of the source URL (blueprints/shared/schema.py's rule, without importing the
+# app); set in __main__ once the URLs are known.
+SCHEMA = parse_database_url(os.environ.get("DATABASE_URL") or "postgresql://").schema
 
 # Insert order is FK order; deletes run in reverse. `carrier=True` means "insert if
 # absent, never delete" — see the module docstring on the payer row.
@@ -255,23 +259,28 @@ if __name__ == "__main__":
     parser.add_argument("--copy", action="store_true", help="write; otherwise report only")
     parser.add_argument("--replace", action="store_true",
                         help="clear the run's rows on the destination first")
-    parser.add_argument("--source", default=os.environ.get("LOCAL_DATABASE_URI"))
-    parser.add_argument("--dest", default=os.environ.get("RDS_DATABASE_URI"))
+    parser.add_argument("--source-url", default=os.environ.get("DATABASE_URL"),
+                        help="the database the replay ran against (default: DATABASE_URL)")
+    parser.add_argument("--target-url", help="the database to copy into")
     args = parser.parse_args()
 
-    if not args.source or not args.dest:
-        raise SystemExit("need LOCAL_DATABASE_URI and RDS_DATABASE_URI (or --source/--dest)")
-    # The two URIs were identical in this repo until recently, and a copy that silently
-    # runs a table onto itself is worse than one that refuses.
-    if args.source == args.dest:
+    if not args.source_url or not args.target_url:
+        raise SystemExit("need --target-url, and --source-url or DATABASE_URL")
+    # A copy that silently runs a table onto itself is worse than one that refuses.
+    if args.source_url == args.target_url:
         raise SystemExit("source and destination are the same database — nothing to copy")
+    source_url = parse_database_url(args.source_url)
+    target_url = parse_database_url(args.target_url)
+    if source_url.schema != target_url.schema:
+        raise SystemExit(f"source schema {source_url.schema} != target schema {target_url.schema}")
+    SCHEMA = source_url.schema
 
     run = RUNS[args.run]
-    print(f"{run['label']}\n  from {args.source.split('@')[-1]}\n"
-          f"  to   {args.dest.split('@')[-1]}\n")
+    print(f"{run['label']}\n  from {args.source_url.split('@')[-1]}\n"
+          f"  to   {args.target_url.split('@')[-1]}\n")
 
-    source = create_engine(args.source)
-    dest = create_engine(args.dest)
+    source = create_engine(source_url.sqlalchemy)
+    dest = create_engine(target_url.sqlalchemy)
     if args.copy:
         copy(source, dest, run, replace=args.replace)
     else:

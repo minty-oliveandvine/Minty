@@ -7,13 +7,15 @@ customer keeps its invoices, its payment methods and its clock, and nothing in M
 references it again — but it is still there, and after a few days of iterating on a
 scenario the test account is mostly wreckage.
 
-    python scripts/subscription/prune_replay_stripe.py                 # report only
-    python scripts/subscription/prune_replay_stripe.py --delete
+    python scripts/subscription/prune_replay_stripe.py --target-url $RDS                # report only
+    python scripts/subscription/prune_replay_stripe.py --target-url $RDS --delete
 
 WHAT COUNTS AS ORPHANED. A customer is IN USE if any `user_stripe_customer` row in
-EITHER database names it — local and RDS are checked together, deliberately. They hold
-different runs (and RDS is currently behind), so trusting one would delete the other's
-live payer. A database that cannot be reached is a REFUSAL, not an empty set: "no rows
+EITHER database names it — `--source-url` (default `DATABASE_URL`, the local one) and
+`--target-url` (RDS) are checked together, deliberately. They hold different runs (and RDS
+is currently behind), so trusting one would delete the other's live payer; without
+`--target-url` only the source is checked, and the report says so. A database that cannot
+be reached is a REFUSAL, not an empty set: "no rows
 came back" and "no rows exist" must never be the same answer when the difference is
 whether a customer gets deleted.
 
@@ -64,6 +66,7 @@ from sqlalchemy import create_engine, text
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from blueprints.shared.schema import SCHEMA  # noqa: E402
+from services.app_runtime.env import parse_database_url  # noqa: E402
 
 
 UTC = timezone.utc
@@ -85,16 +88,27 @@ def _stripe():
     return stripe
 
 
-def _in_use() -> set[str]:
-    """Every customer id named by a payer row, in BOTH databases.
+def _databases(source_url: str | None = None, target_url: str | None = None) -> list[tuple[str, str]]:
+    """``(label, SQLAlchemy URL)`` for the source (default ``DATABASE_URL``) and, when given,
+    the target database."""
+    source_url = source_url or os.environ.get("DATABASE_URL")
+    if not source_url:
+        raise SystemExit("no database: pass --source-url or set DATABASE_URL")
+    found = [("source", parse_database_url(source_url).sqlalchemy)]
+    if target_url:
+        found.append(("target", parse_database_url(target_url).sqlalchemy))
+    return found
+
+
+def _in_use(databases: list[tuple[str, str]]) -> set[str]:
+    """Every customer id named by a payer row, in EVERY given database.
 
     Raises rather than skipping a database it cannot read — see the module docstring.
     """
     ids: set[str] = set()
-    for name in ("LOCAL_DATABASE_URI", "RDS_DATABASE_URI"):
-        uri = os.environ.get(name)
-        if not uri:
-            raise SystemExit(f"{name} is not set; cannot tell which customers are in use")
+    if len(databases) < 2:
+        print("  (only the source database is checked: pass --target-url to include the other)")
+    for name, uri in databases:
         try:
             with create_engine(uri).connect() as conn:
                 rows = conn.execute(text(
@@ -148,7 +162,7 @@ def _replay_payers() -> list[str]:
     return [run["user_id"] for run in RUNS.values()]
 
 
-def prune_dangling_rows(delete: bool) -> None:
+def prune_dangling_rows(delete: bool, databases: list[tuple[str, str]] | None = None) -> None:
     """Audit rows naming an entity that no longer exists, for replay payers only.
 
     Both databases: replay data is copied between them, so a dangling row copied to RDS
@@ -162,11 +176,7 @@ def prune_dangling_rows(delete: bool) -> None:
               SELECT 1 FROM {SCHEMA}.entities e WHERE e.id = a.entity_id
           )
     """
-    for name in ("LOCAL_DATABASE_URI", "RDS_DATABASE_URI"):
-        uri = os.environ.get(name)
-        if not uri:
-            print(f"  {name:<20} not set — skipped")
-            continue
+    for name, uri in databases or _databases():
         try:
             engine = create_engine(uri)
             with engine.begin() as conn:
@@ -194,14 +204,15 @@ def _ours(customer: dict, clock_ids: set[str]) -> bool:
     return bool(ref) and ref in clock_ids
 
 
-def survey(stripe, cutoff: datetime) -> tuple[list, list, list]:
+def survey(stripe, cutoff: datetime,
+           databases: list[tuple[str, str]] | None = None) -> tuple[list, list, list]:
     """Returns (deletable clocks, orphan customers with no deletable clock, kept)."""
     clocks = {}
     for clock in stripe.test_helpers.TestClock.list(limit=100).auto_paging_iter():
         if (clock.get("name") or "").startswith(CLOCK_PREFIX):
             clocks[clock["id"]] = clock
 
-    used = _in_use()
+    used = _in_use(databases or _databases())
 
     customers, seen = [], set()
     for clock_id in clocks:
@@ -258,12 +269,16 @@ if __name__ == "__main__":
     parser.add_argument("--delete", action="store_true", help="actually delete")
     parser.add_argument("--min-age-minutes", type=int, default=5,
                         help="never touch objects newer than this (default 5)")
+    parser.add_argument("--source-url", default=os.environ.get("DATABASE_URL"),
+                        help="the local database (default: DATABASE_URL)")
+    parser.add_argument("--target-url", help="the other database replay data is copied to (RDS)")
     args = parser.parse_args()
+    databases = _databases(args.source_url, args.target_url)
 
     stripe = _stripe()
     cutoff = datetime.now(UTC) - timedelta(minutes=args.min_age_minutes)
     print(f"in use:")
-    clocks, customers, kept = survey(stripe, cutoff)
+    clocks, customers, kept = survey(stripe, cutoff, databases)
 
     print(f"\nKEEPING {len(kept)}:")
     for customer, why in sorted(kept, key=lambda k: k[0]["created"]):
@@ -278,7 +293,7 @@ if __name__ == "__main__":
         print(f"  cust  {customer['id']:<28} {(customer.get('email') or '-')[:44]}")
 
     print("\nDANGLING ROWS:")
-    prune_dangling_rows(args.delete)
+    prune_dangling_rows(args.delete, databases)
 
     if not args.delete:
         print("\n(report only — add --delete to remove them)")

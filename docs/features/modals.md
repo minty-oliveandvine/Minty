@@ -7,8 +7,8 @@ beside it, the sentences, the secondary button and the confirming one in its ton
 `SheetFrame`-style sheets for forms. **Every new modal follows it; an existing one changes when
 its page is next worked on.** The sources are minty-web's
 `features/subscription/components/{ModalFrame,ConfirmDialog,InterruptedDialogs}.tsx` and
-`lib/changeModal.ts`; billing-frontend holds copies at the same paths. Change all three
-together (minty-web, billing-frontend, here).
+`lib/changeModal.ts`; minty-payment-request-web holds copies at the same paths. Change all three
+together (minty-web, minty-payment-request-web, here).
 
 ## The Flask port
 
@@ -55,7 +55,7 @@ page.", the "dont" Minty, **Discard changes** (teal outline) and **Go Back** (te
 - `saving()` before the page's own `form.submit()`; `ask(proceed)` for an exit that is not a
   link.
 
-billing-frontend's `lib/leaveGuard.ts` (`useLeaveGuard`, `guardLeave`) does the same with the
+minty-payment-request-web's `lib/leaveGuard.ts` (`useLeaveGuard`, `guardLeave`) does the same with the
 same rules, for its Payment Settings; there, Back/Forward inside the Next app are soft
 navigations and leave without asking (a documented gap).
 
@@ -64,7 +64,7 @@ navigations and leave without asking (a documented gap).
 - Petty Cash Settings ([petty-cash-settings.md](petty-cash-settings.md)): the leave guard, and
   the delete-method confirm ("Delete Electronic Method", the surprised Minty, Go back / a red
   Delete).
-- billing-frontend Payment Settings (its `docs/features/settings.md`): the leave guard, and its
+- minty-payment-request-web Payment Settings (its `docs/features/settings.md`): the leave guard, and its
   Logout asks first.
 
 Not yet: every other Flask modal (Users' and Entity & Integration's — those pages move to

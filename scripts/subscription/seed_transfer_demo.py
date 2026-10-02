@@ -1,7 +1,7 @@
 """Seed two logins and one entity, set up so "Change subscriber" can be clicked through.
 
-    FLASK_ENV=development python scripts/subscription/seed_transfer_demo.py
-    FLASK_ENV=development python scripts/subscription/seed_transfer_demo.py --teardown
+    python scripts/subscription/seed_transfer_demo.py
+    python scripts/subscription/seed_transfer_demo.py --teardown
 
 WHY A SEPARATE SCRIPT FROM replay_scenarios.py
 ``replay_scenarios`` simulates a lifecycle against a Stripe TEST CLOCK, which is the right
@@ -31,9 +31,8 @@ proves nothing:
 THE MONEY IS REAL, in Stripe's test mode. Accepting raises and pays an actual test invoice,
 so the amount on the accept screen can be checked against the invoice it produced.
 
-LOCAL ONLY. ``FLASK_ENV`` unset means ``bootstrap`` reads ``RDS_DATABASE_URI``, which in
-this checkout is real Supabase — so this refuses to run unless the resolved database is
-localhost. Seeding demo users into production is not a mistake worth leaving available.
+LOCAL ONLY. ``DATABASE_URL`` may well be real Supabase in a given checkout — so this
+refuses to run unless the resolved database is localhost. Seeding demo users into production is not a mistake worth leaving available.
 """
 from __future__ import annotations
 
@@ -68,7 +67,7 @@ def _require_local_and_test_mode(app) -> None:
         sys.exit(
             "Refusing to run: the resolved database is not local.\n"
             f"  {uri.split('@')[-1] or uri}\n"
-            "Re-run with FLASK_ENV=development so bootstrap reads LOCAL_DATABASE_URI."
+            "Re-run with DATABASE_URL pointing at a local database."
         )
     key = os.environ.get("STRIPE_SECRET_KEY", "")
     if "_test_" not in key:

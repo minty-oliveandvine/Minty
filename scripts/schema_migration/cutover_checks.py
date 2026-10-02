@@ -30,12 +30,15 @@ Exit status 1 on any mismatch, so the runbook can gate on it.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg2
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from services.app_runtime.env import parse_database_url  # noqa: E402
 
 OLD_DEFAULT, NEW_DEFAULT = "pettycashv2", "pettycashv3"
 
@@ -45,9 +48,11 @@ def _uri(args) -> str:
         return args.uri
     env = Path(__file__).resolve().parents[2] / ".env"
     for line in env.read_text(encoding="utf-8").splitlines():
-        if line.startswith("LOCAL_DATABASE_URI="):
-            return re.sub(r"/[^/]*$", "/" + args.db, line.split("=", 1)[1].strip())
-    raise SystemExit("no --uri and no LOCAL_DATABASE_URI in .env")
+        if line.startswith("DATABASE_URL="):
+            uri = parse_database_url(line.split("=", 1)[1].strip()).libpq
+            parts = urlsplit(uri)
+            return urlunsplit((parts.scheme, parts.netloc, "/" + args.db, parts.query, parts.fragment))
+    raise SystemExit("no --uri and no DATABASE_URL in .env")
 
 
 def cents(v) -> Decimal:

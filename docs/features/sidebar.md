@@ -17,7 +17,7 @@ screen on a phone — minty-web's sizes, colours and words.
 ## A port, not a copy to lift
 
 minty-web's sidebar is TypeScript (`components/ui/Sidebar.tsx`, `SideMenu.tsx`, `ViewerBadge.tsx`,
-`features/profile`), and billing-frontend carries copies of those files that `@minty/shared`
+`features/profile`), and minty-payment-request-web carries copies of those files that `@minty/shared`
 will replace at Part 3 step 4. Jinja cannot use a TypeScript package, so this one is a **port**:
 it retires with these pages when they move to Next (Part 3), and until then a change to
 minty-web's menu or profile is a change here too.
@@ -56,7 +56,7 @@ Top to bottom: the Minty mark; the person (avatar + name — opens My Profile); 
   on the Petty Cash pages, the **Petty Cash Settings** tab (`entity_settings_entity` — the
   accounts and contacts a report needs, the sales methods); on the Payment Request pages
   (`?from=bills`), the payments app's **Payment Settings** (`entity_settings_payments`, which
-  mints its token at the click — where billing-frontend's own Settings goes). A company without
+  mints its token at the click — where minty-payment-request-web's own Settings goes). A company without
   Petty Cash has no Petty Cash Settings tab (`require_module`), so it gets Entity & Integration.
   minty-web's own menu keeps its module page.
 - **On Petty Cash Settings with unsaved changes**, a link in the drawer — Logout included —
@@ -83,9 +83,9 @@ Drawn in the browser over the **same reads minty-web makes**, so the three apps 
    typed, with the hint under the field); a changed address must also pass
    `MintyEmail.isEmail` before it is sent, and the server refuses a non-English one with 422.
    PASSWORD · Change opens the Xero account page.
-4. The **Subscriptions Overview**: minty-billing-api's `GET /api/me/subscriptions`
-   (`BILLING_API_URL`, default `http://localhost:8004`), which lists this app's origin
-   (`MINTY_PUBLIC_URL`) in its CORS; a failed read (any status) shows the card's "didn't load"
+4. The **Subscriptions Overview**: minty-subscription-api's `GET /api/me/subscriptions`
+   (`SUBSCRIPTION_API_URL`, default `http://localhost:8000`), which lists this app's origin
+   (`PETTY_CASH_PUBLIC_URL`, defaulting to its `PETTY_CASH_URL`) in its CORS; a failed read (any status) shows the card's "didn't load"
    state with *Try again*. *Manage Subscription* goes to minty-web's portal.
 
 Every bearer call goes without this app's cookie (as minty-web's cross-origin calls do), so the
@@ -93,13 +93,13 @@ session-side hooks (Terms gate, read-only superuser block) see no one; a 401 fet
 token, then says so. A failed read shows its sentence with Try again and logs to the console.
 
 **Trade-off, accepted:** the page's script can read this token — as minty-web's and
-billing-frontend's cookie tokens already are, and as it already travels in every handoff URL.
+minty-payment-request-web's cookie tokens already are, and as it already travels in every handoff URL.
 
 ## Tests
 
 `tests/test_sidebar.py` — the menu on each kind of page (in a company, a module off, the entity
 list, the Payment Request pages, a company without Petty Cash), where every
-item leads, the token route, the hub answering billing-frontend's origin by name, the dashboard's
+item leads, the token route, the hub answering minty-payment-request-web's origin by name, the dashboard's
 setup links, every page family carrying the partial and none of the old drawers. The drawer's
 behaviour was checked live on 2026-09-30 (menu 353 px, profile 440 px and full width at 375,
 Escape and focus, edit-cancel, the overview's figures, the Petty-Cash-only and
