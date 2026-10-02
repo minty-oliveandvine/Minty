@@ -288,6 +288,47 @@ def test_switch_on_what_was_flashed_travels_with_it(app, client, people, hub, mo
         assert not session.get("_flashes")
 
 
+ONBOARDING = "http://onboarding.minty.test"
+
+
+def _queue_flash(client, *messages):
+    with client.session_transaction() as session:
+        session["_flashes"] = list(messages)
+
+
+@pytest.mark.parametrize("hop", ["onboarding", "minty-web"])
+def test_a_redirect_into_another_app_drops_the_flash_queue(app, client, people, hub, monkeypatch, hop):
+    """Onboarding's Xero connect flashed on every attempt, but the wizard reads the outcome
+    from the URL - so the queue sat in the session until finishing onboarding opened /entity,
+    and minty-web's list toasted all of it. A redirect into another app never carries it."""
+    monkeypatch.setenv("MINTY_WEB_HUB", "1")
+    monkeypatch.setenv("ONBOARDING_WEB_URL", ONBOARDING)
+    F.login(client, people["olive"])
+    _queue_flash(client, ("success", "Connected to Xero!"), ("danger", "Connection failed"))
+
+    if hop == "onboarding":
+        resp = client.get("/entity/create")
+        assert resp.headers["Location"].startswith(ONBOARDING + "/")
+    else:
+        resp = client.get(f"/handoff/minty-web?next=/subscription&entity_id={people['petty'].id}")
+        assert resp.headers["Location"].startswith(HUB + "/landing")
+
+    with client.session_transaction() as session:
+        assert not session.get("_flashes")
+    _, query = _landing(client.get("/entity"))
+    assert query["next"] == ["/entities"]  # no ?flash= - nothing left to toast
+
+
+def test_a_redirect_within_flask_keeps_the_flash_queue(app, client, people, hub, monkeypatch):
+    monkeypatch.delenv("MINTY_WEB_HUB", raising=False)
+    F.login(client, people["olive"])
+    _queue_flash(client, ("info", "Still here"))
+    resp = client.get(f"/handoff/minty-web?next=/subscription&entity_id={people['other'].id}")
+    assert resp.headers["Location"].endswith("/entity")
+    with client.session_transaction() as session:
+        assert ["info", "Still here"] in [list(f) for f in session["_flashes"]]
+
+
 def test_switch_on_terms_owed_minty_web_takes_the_acceptance(app, client, people, hub, monkeypatch):
     """minty-web draws the Terms panel itself (its TermsGate over legal/routes/hub.py), so
     the list hands over even while an acceptance is owed - the gate's redirect to /entity
