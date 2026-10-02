@@ -303,6 +303,10 @@ def app(built_database) -> Iterator:
         "SPIRE_KEY": "dummy-spire-key",
         "SMTP_URL": "smtp://localhost:587",
         "MAIL_FROM": "noreply@minty.test",
+        # empty = config.py's MAIL_FROM fallback; a developer's .env may name a real sender
+        "SUBSCRIPTION_EMAIL": "",
+        # empty = config.py's localhost:8010 default; the local .env runs Flask on 5001
+        "PETTY_CASH_URL": "",
         # the entity list and the profile hand over to minty-web when this is on - a developer's
         # .env may say so (load_dotenv never overrides what is set here); the suite keeps the
         # Jinja list its tests describe, and tests/test_hub_*.py flip it per test

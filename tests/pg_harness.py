@@ -48,11 +48,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from dotenv import dotenv_values
+
 from services.app_runtime.env import DEFAULT_SCHEMA, parse_database_url, with_schema
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA_SQL = REPO_ROOT / "docs" / "schema" / "01_schema_rebased.sql"
 BUILT_SCHEMA = "pettycash_test"  # what 01_schema_rebased.sql creates
+
+
+def _with_database(uri: str, dbname: str) -> str:
+    parts = urlsplit(uri)
+    return urlunsplit((parts.scheme, parts.netloc, "/" + dbname, parts.query, parts.fragment))
 
 
 def _server_uri() -> str | None:
@@ -65,9 +72,10 @@ def _server_uri() -> str | None:
     if not uri:
         env_file = REPO_ROOT / ".env"
         if env_file.exists():
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                if line.startswith("DATABASE_URL=") and line.split("=", 1)[1].startswith("postgres"):
-                    uri = line.split("=", 1)[1].strip()
+            # Read the way config.py's load_dotenv reads it: `?schema=${DB_SCHEMA}` expanded.
+            uri = dotenv_values(env_file).get("DATABASE_URL") or ""
+            if not uri.startswith("postgres"):
+                uri = None
     return _with_database(uri, "postgres") if uri else None
 
 
@@ -99,11 +107,6 @@ def app_database_url(db_uri: str) -> str:
 def enabled() -> bool:
     """Kept for callers; the harness is the only mode now."""
     return True
-
-
-def _with_database(uri: str, dbname: str) -> str:
-    parts = urlsplit(uri)
-    return urlunsplit((parts.scheme, parts.netloc, "/" + dbname, parts.query, parts.fragment))
 
 
 def _find_psql() -> str:

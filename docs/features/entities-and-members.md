@@ -20,7 +20,10 @@ in `blueprints/entity/services/entity_list.py::build_entity_list`, for two reade
   panel). Seventy-odd routes flash a message
   and redirect to `/entity`; the redirect drains those flashes, signs them (`itsdangerous`,
   salt `hub-flash`, five minutes) into `?flash=`, and the API hands them back as `notices`, so
-  none is lost on the way. `MINTY_WEB_HUB` is **off unless set** — `/entity` is the first page
+  none is lost on the way. A redirect INTO another app (onboarding, minty-web, the payments
+  app) drops the queue instead, logging each message (`pettycash/core/hooks.py::drop_flashes_leaving_flask`):
+  those apps never show it, and onboarding's Xero connect used to pile one up per attempt that
+  the list then toasted all at once when the wizard finished. `MINTY_WEB_HUB` is **off unless set** — `/entity` is the first page
   after every login, so it is switched on only where minty-web is deployed.
 - **the Jinja page** (`templates/entity/index.html`), everywhere else.
 

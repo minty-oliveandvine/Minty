@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from urllib.parse import urlsplit
 
 from flask import (flash, has_request_context, jsonify, redirect,
                    render_template, request, send_from_directory, session,
@@ -22,6 +23,43 @@ from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
 # a tab left open overnight would otherwise refresh its owner's presence all night
 # and keep them listed forever — defeating the whole point of last_seen_at.
 PRESENCE_INERT_ENDPOINTS = frozenset({"entity.entity_settings_users_presence"})
+
+
+def _sibling_app_origins() -> frozenset[str]:
+    """The front ends Flask hands people over to. None of them can read this app's session."""
+    from blueprints.shared import bearer_api
+
+    return frozenset({
+        bearer_api.onboarding_origin(),
+        bearer_api.minty_web_origin(),
+        bearer_api.frontend_origin(),
+    })
+
+
+def drop_flashes_leaving_flask(response):
+    """A redirect into another of our apps takes no flash queue with it.
+
+    A flash is only ever shown by a Flask page. One queued before a redirect to the
+    onboarding wizard, minty-web or the payments app is not seen there; it stays in the
+    session and surfaces at the next Flask page - in practice ``/entity``, whose minty-web
+    hand-over toasts the whole queue. Onboarding's Xero connect flashed on every attempt
+    (the wizard reads the outcome from ``?xero=`` instead), so finishing onboarding opened
+    the entity list under a stack of stale "Connected to Xero!" / "Connection failed"
+    toasts. The one hand-over that DOES carry them (``/entity``, ``sign_notices``) drains
+    the queue before it redirects, so it is untouched by this.
+
+    Dropped messages are logged, not shown: they belong to a page nobody will see.
+    """
+    # Werkzeug's Response has no ``is_redirect`` (that is requests'); a redirect is its status.
+    if response.status_code not in (301, 302, 303, 307, 308) or "_flashes" not in session:
+        return response
+    location = urlsplit(response.location or "")
+    if f"{location.scheme}://{location.netloc}" not in _sibling_app_origins():
+        return response
+    for category, message in session.pop("_flashes"):
+        log = logger.warning if category in ("danger", "error") else logger.info
+        log(f"Flash dropped on the way to {location.netloc} ({category}): {message}")
+    return response
 
 
 def _wants_json():
@@ -585,5 +623,7 @@ def init_app(app, db):
         except Exception as exc:
             logger.error(f"Error in after_request token check: {exc}")
         return response
+
+    app.after_request(drop_flashes_leaving_flask)
 
     return app

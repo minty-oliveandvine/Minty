@@ -39,6 +39,12 @@ template include it; it drains `get_flashed_messages()` on load (see
 `tests/test_flash_messages_drain.py`) and builds each card with `textContent` — never
 `innerHTML`, so server text cannot become markup.
 
+A `flash()` only reaches a Flask page. A redirect into another app (onboarding, minty-web, the
+payments app) drops the queue and logs it (`pettycash/core/hooks.py::drop_flashes_leaving_flask`).
+Without that, the queue waits for the next Flask page and pops up out of context.
+`/entity`'s minty-web hand-over is the one exception: it drains and signs the queue itself first
+([entities-and-members.md](entities-and-members.md)).
+
 - `showFlashMessages(message, type, durationMs)` — `type` is `success | error | danger |
   warning | info` (`danger` is error; anything else is success). `durationMs` defaults to
   4000; `0` keeps it until dismissed. Each card has its own timer, so toasts never cut each
