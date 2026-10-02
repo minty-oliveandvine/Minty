@@ -952,7 +952,7 @@ def onboarding_payment_method_complete():
 # The four payment-method routes below are deliberate MIRRORS of the payer portal's
 # ``/api/me/billing/payment-methods*``, not a refactor of them: same service functions
 # underneath, only the CORS header differs — and that difference is the entire reason
-# they exist. The portal's ``_cors`` names ONE origin (``FRONTEND_APP_URL``), so a
+# they exist. The portal's ``_cors`` names ONE origin (``PAYMENT_REQUEST_WEB_URL``), so a
 # browser on the onboarding origin is blocked before the request is even authenticated.
 # Widening the portal's header to a list would loosen the payer portal's surface for the
 # benefit of a different app; four thin wrappers don't touch it at all.

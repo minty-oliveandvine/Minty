@@ -40,6 +40,8 @@ import os
 import pytz
 from loguru import logger
 
+from services.app_runtime.env import flag, is_development
+
 # The hour that carries the FULL pass — the unscoped access sweep, the dunning retries and
 # the trial-ending warnings. 05:00 Hong Kong: the expensive sweep runs while the system is
 # quiet, and the whole thing has finished by the time anyone starts work, so the summary is
@@ -50,13 +52,6 @@ DEFAULT_TIMEZONE = "Asia/Hong_Kong"
 
 FULL_JOB_ID = "subscriptions-full"
 LIGHT_JOB_ID = "subscriptions-light"
-
-
-def _flag(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _int(name: str, default: int) -> int:
@@ -119,16 +114,14 @@ def start_scheduler(app):
     Called from ``create_app``. Returning None is the normal case: only the deployed web
     service sets ``SUBSCRIPTION_SCHEDULER_ENABLED``.
     """
-    if not _flag("SUBSCRIPTION_SCHEDULER_ENABLED", False):
+    if not flag("SUBSCRIPTION_SCHEDULER_ENABLED", False):
         logger.debug("scheduler: disabled (SUBSCRIPTION_SCHEDULER_ENABLED is not set)")
         return None
 
     # The Flask dev reloader runs a supervisor process that imports the app and then
     # forks the real one. Without this the supervisor gets a scheduler too, and every
     # code edit leaves another one behind.
-    if os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true"} and (
-        os.environ.get("WERKZEUG_RUN_MAIN") != "true"
-    ):
+    if is_development() and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         logger.debug("scheduler: skipping the reloader's supervisor process")
         return None
 
@@ -137,7 +130,7 @@ def start_scheduler(app):
     from blueprints.subscription.services.daily import FULL, LIGHT
 
     full_hour = _int("SUBSCRIPTION_SCHEDULER_FULL_HOUR", DEFAULT_FULL_HOUR) % 24
-    light = _flag("SUBSCRIPTION_SCHEDULER_LIGHT", True)
+    light = flag("SUBSCRIPTION_SCHEDULER_LIGHT", True)
     timezone = pytz.timezone(
         os.environ.get("SUBSCRIPTION_SCHEDULER_TZ") or DEFAULT_TIMEZONE
     )

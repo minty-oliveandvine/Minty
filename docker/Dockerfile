@@ -28,7 +28,10 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 5001
+# Hosts (Render) inject PORT; 8010 is Petty Cash's local port.
+EXPOSE 8010
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["gunicorn", "-w", "4", "--max-requests", "200", "--max-requests-jitter", "50", "-b", "0.0.0.0:5001", "main:app"]
+# Shell form so ${PORT} is expanded at start-up; `exec` makes gunicorn PID 1, so it
+# receives the container's stop signal.
+CMD exec gunicorn -w "${GUNICORN_WORKERS:-4}" --max-requests 200 --max-requests-jitter 50 -b "0.0.0.0:${PORT:-8010}" main:app

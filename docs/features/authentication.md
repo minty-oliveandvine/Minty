@@ -1,7 +1,7 @@
 # Authentication and access — how a person gets in, and what they may touch
 
 This is the system-wide description. Minty (Flask) is the only issuer of identity: every
-other service — `billing-backend`, `onboarding-backend`, `billing-frontend`, `onboarding` —
+other service — `minty-payment-request-api`, `minty-onboarding-api`, `minty-payment-request-web`, `minty-onboarding-web` —
 verifies what Minty minted and never signs anyone in itself. Each of those repos has a
 `docs/features/authentication.md` that covers its own half and links back here.
 
@@ -54,8 +54,8 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
    onboarding app talks to Flask from another origin, so the verify answer carries a
    short-lived signed hand-off URL (`_HANDOFF_SALT`) that sets the cookie on Minty's origin.
 
-The mail goes out through Flask-Mail on Brevo SMTP (`MAIL_*` / `BREVO_EMAIL` in `.env`); every
-SMTP step times out after `MAIL_TIMEOUT` seconds (10), so a stalled server fails the send - the
+The mail goes out through Flask-Mail on Brevo SMTP (`SMTP_URL` / `MAIL_FROM` in `.env`); every
+SMTP step times out after the URL's `?timeout=` seconds (10), so a stalled server fails the send - the
 code request's open transaction included - instead of hanging it (`services/app_runtime/mail.py`).
 
 ### 2.3 Sign in with Xero — `GET /xero_auth`
@@ -88,7 +88,7 @@ Password reset is the legacy `/login` page's "Forgot Password?" modal:
 password and clears both columns (`blueprints/auth/routes/password_reset.py`). The address
 is matched case-insensitively on `email` or `username`, and known or not it gets the same
 neutral flash, so the form cannot be used to find out who has an account; the link is built
-on `PUBLIC_URL` (the request host when that is unset).
+on `PETTY_CASH_URL` (the request host when that is unset).
 
 ### Email input: English only
 Every typed email address is printable ASCII (0x21-0x7E) and nothing else (2026-10-01).
@@ -173,16 +173,16 @@ state-changing route has no permission check.
 ## 6. Hand-off tokens — how the other apps know who you are
 
 Minty mints two kinds of HS256 JWT over the **shared `SECRET_KEY`** (the same value must be
-set on Minty, billing-backend and onboarding-backend; a mismatch 401s every call — see the
+set on Minty, minty-payment-request-api, minty-onboarding-api and minty-subscription-api; a mismatch 401s every call — see the
 `prod-secret-key-differs-from-local` note).
 
 | Token | Minted by | Lifetime | Claims | Verified by |
 |---|---|---|---|---|
-| module / billing | `blueprints/entity/routes/modules.py::_generate_module_token` when a person clicks **Payments** (`/entity/<id>/bills`, `/entity/<id>/modules`) | 30 min | `user_id`, `entity_id`, `xero_org_id`, `role`, `system_role`, `module: "billing"`, `sid` (the login session id, `LOGIN_SID_SESSION_KEY`), `billing_enabled`, `petty_cash_enabled`, `iat`, `exp` | billing-backend `core/auth.BearerAuth` |
-| onboarding | `blueprints/entity/routes/create.py::_mint_onboarding_token` when the wizard is launched | 60 min | `user_id`, `scope: "onboarding"`, `iat`, `exp` | onboarding-backend `core/auth.OnboardingBearerAuth`; Flask's own `/api/onboarding/*` routes |
+| module / billing | `blueprints/entity/routes/modules.py::_generate_module_token` when a person clicks **Payments** (`/entity/<id>/bills`, `/entity/<id>/modules`) | 30 min | `user_id`, `entity_id`, `xero_org_id`, `role`, `system_role`, `module: "billing"`, `sid` (the login session id, `LOGIN_SID_SESSION_KEY`), `billing_enabled`, `petty_cash_enabled`, `iat`, `exp` | minty-payment-request-api `core/auth.BearerAuth` |
+| onboarding | `blueprints/entity/routes/create.py::_mint_onboarding_token` when the wizard is launched | 60 min | `user_id`, `scope: "onboarding"`, `iat`, `exp` | minty-onboarding-api `core/auth.OnboardingBearerAuth`; Flask's own `/api/onboarding/*` routes |
 
-The browser is sent to `billing-frontend` `/landing?token=…&entity_id=…&entity_name=…`,
-which stores the token in the `billing_token` cookie (8 hours; billing-backend
+The browser is sent to `minty-payment-request-web` `/landing?token=…&entity_id=…&entity_name=…`,
+which stores the token in the `billing_token` cookie (8 hours; minty-payment-request-api
 `POST /api/auth/token/refresh` re-mints it before it lapses) and to the onboarding app
 with `?token=…`. minty-web (the hub, Part 2) is entered the same way through its `/landing`,
 and comes back for a fresh token through `GET /handoff/minty-web?next=&entity_id=` (login-gated,
@@ -190,7 +190,7 @@ and comes back for a fresh token through `GET /handoff/minty-web?next=&entity_id
 (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`) with that
 token — bearer only, and a token naming an unknown or switched-off (`approved` false) account is
 refused like a bad one. Its CORS names the caller when it is `MINTY_WEB_URL` or
-`FRONTEND_APP_URL` (billing-frontend, whose copy of the sidebar's My Profile reads and saves the
+`PAYMENT_REQUEST_WEB_URL` (minty-payment-request-web, whose copy of the sidebar's My Profile reads and saves the
 same profile since 2026-09-30), minty-web's otherwise. This app's own pages draw that sidebar
 too ([sidebar.md](sidebar.md)): `GET /me/sidebar-token` (session, same-origin, `no-store`, a 401
 rather than a redirect when signed out) hands the page an unscoped module token, and the page
@@ -198,12 +198,12 @@ calls the same routes with it. The profile's header avatar and the sidebar open 
 place; the avatar's `href` - `GET /profile?entity_id=&from=` (`modules.py::open_profile`) - is
 the way in when scripts are off, and still the payments app's old links (its `/profile*`
 addresses forward here): it mints the token at the click and hands over to minty-web's My Profile
-- always, since billing-frontend's profile page was deleted on 2026-10-01. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
+- always, since minty-payment-request-web's profile page was deleted on 2026-10-01. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
 re-establishes the Flask session) — `billing-relogin` is the legacy "my token ran out"
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).
 
-The entitlement claims in the token are a hint only: billing-backend re-reads
+The entitlement claims in the token are a hint only: minty-payment-request-api re-reads
 `entity_function_map` (`GET /api/auth/entitlements`) and the DB decides what the module
 shows.
 
@@ -221,11 +221,11 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
   old one, so two refreshers brick the connection. Refreshes are serialised per bearer with
   a Postgres advisory lock held across the HTTP call (`_xero_refresh_lock`), and the
   `after_request` hook refreshes an expired access token silently on normal traffic.
-- billing-backend never refreshes: when its stored copy is expired it calls
+- minty-payment-request-api never refreshes: when its stored copy is expired it calls
   `POST /api/internal/xero/token` with a 60-second assertion JWT (`scope:
   xero-access-token`, `entity_id` in the **signed claims**, never the body) and gets a live
-  access token back; 409 means "reconnect required". Its `XERO_TOKEN_SERVICE_URL` /
-  `FLASK_APP_URL` must point at the Minty host.
+  access token back; 409 means "reconnect required". Its `PETTY_CASH_URL` must point at the
+  Minty host (the token URL is derived from it: `PETTY_CASH_URL/api/internal/xero/token`).
 - Tokens are never logged: `tests/test_zz_no_token_logging.py` fails any logger f-string
   that formats a value named like a token.
 
@@ -235,22 +235,23 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
 once a minute on real traffic (`SEEN_REFRESH_SECONDS`), never by the Users tab's own
 20-second poll (`PRESENCE_INERT_ENDPOINTS`). The Users tab lists members seen in the last
 30 minutes (`DEFAULT_PRESENCE_WINDOW_SECONDS`, or `IDLE_TIMEOUT_SECONDS` when set);
-billing-backend's `POST /api/auth/logout` clears the stamps the same way, so leaving from
+minty-payment-request-api's `POST /api/auth/logout` clears the stamps the same way, so leaving from
 the payment module counts as leaving.
 
 ## 9. Configuration
 
 | Variable | Used for |
 |---|---|
-| `SECRET_KEY` | sessions, CSRF, both hand-off JWTs, the internal token assertion — **shared across the three backends** |
-| `WTF_CSRF_SECRET_KEY` | CSRF (falls back to `SECRET_KEY`) |
+| `SECRET_KEY` | sessions, CSRF, both hand-off JWTs, the internal token assertion — **shared with the three Django APIs** |
 | `SESSION_TYPE`, `SESSION_SQLALCHEMY_TABLE` | server-side sessions (`sqlalchemy`, `sessions`) |
-| `MAIL_*`, `BREVO_EMAIL` | OTP, invitation and reset mail |
-| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_REDIRECT_URI` | both OAuth flows |
-| `PUBLIC_URL` | absolute links in mail and hand-offs |
-| `MINTY_WEB_URL`, `FRONTEND_APP_URL` | minty-web's and billing-frontend's origins - the hand-offs, and the hub routes' CORS |
-| `BILLING_API_URL` | minty-billing-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8004`) |
+| `SMTP_URL`, `MAIL_FROM` | OTP, invitation and reset mail |
+| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | both OAuth flows (redirect URI `PETTY_CASH_URL/callback`) |
+| `PETTY_CASH_URL` | absolute links in mail and hand-offs, and the Xero redirect URI |
+| `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL` | minty-web's and minty-payment-request-web's origins - the hand-offs, and the hub routes' CORS |
+| `SUBSCRIPTION_API_URL` | minty-subscription-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8000`) |
 | `IDLE_TIMEOUT_SECONDS` | the presence window (there is no idle logout) |
+
+Every service's variables are listed in [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md).
 
 ## 10. Where it is tested
 

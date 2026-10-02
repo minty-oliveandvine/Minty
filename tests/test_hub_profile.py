@@ -39,7 +39,7 @@ def db(app):
 @pytest.fixture
 def hub(monkeypatch):
     monkeypatch.setenv("MINTY_WEB_URL", HUB + "/")
-    monkeypatch.setenv("FRONTEND_APP_URL", PAYMENTS)
+    monkeypatch.setenv("PAYMENT_REQUEST_WEB_URL", PAYMENTS)
 
 
 @pytest.fixture

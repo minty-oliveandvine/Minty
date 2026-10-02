@@ -48,7 +48,10 @@ cp .env.example .env
 ```
 
 That's it — the defaults work for local development. (On Windows PowerShell, use
-`copy .env.example .env` instead.)
+`copy .env.example .env` instead.) Inside Docker, the compose file replaces the
+`DATABASE_URL` from `.env` with one pointing at the database container, so you
+don't need to edit it. Every variable is explained in
+[`docs/ENVIRONMENT.md`](../docs/ENVIRONMENT.md).
 
 ---
 
@@ -73,7 +76,7 @@ the app.
 
 ### Open the app in your browser
 
-👉 <http://localhost:5001>
+👉 <http://localhost:8010>
 
 ---
 
@@ -138,7 +141,7 @@ but the extension is handy for watching logs and stopping things.
 
 | Service | Address | What it is |
 |---------|---------|------------|
-| App (website) | http://localhost:5001 | The Flask app you open in the browser |
+| App (website) | http://localhost:8010 | The Flask app you open in the browser |
 | Database | `localhost:5432` | PostgreSQL — connect a DB tool here if needed |
 
 ---
@@ -147,17 +150,23 @@ but the extension is handy for watching logs and stopping things.
 
 This repository is **one piece of a larger system** made of separate repos:
 
-| Repo | What it is | Typical local port |
+| Repo | What it is | Local port (URL variable) |
 |------|------------|--------------------|
-| **This repo** (pettycash) | Flask backend + database | app `5001`, db `5432` |
-| Billing backend | Django API (Module 2) | `8000` (`BILLING_APP_URL`) |
-| Billing frontend | Next.js UI (Module 2) | `3000` (`FRONTEND_APP_URL`) |
-| Onboarding frontend | Next.js UI | `3001` (`ONBOARDING_APP_URL`) |
+| `minty-web` | Next.js hub | `3000` (`MINTY_WEB_URL`) |
+| `minty-subscription-api` | Django API — subscriptions | `8000` (`SUBSCRIPTION_API_URL`) |
+| **This repo** (Minty / Petty Cash) | Flask backend + database | app `8010` (`PETTY_CASH_URL`), db `5432` |
+| `minty-payment-request-web` | Next.js UI — payment requests | `3020` (`PAYMENT_REQUEST_WEB_URL`) |
+| `minty-payment-request-api` | Django API — payment requests | `8020` (`PAYMENT_REQUEST_API_URL`) |
+| `minty-onboarding-web` | Next.js UI — sign-up wizard | `3030` (`ONBOARDING_WEB_URL`) |
+| `minty-onboarding-api` | Django API — the wizard's backend | `8030` (`ONBOARDING_API_URL`) |
+
+The full reference — every variable per service — is
+[`docs/ENVIRONMENT.md`](../docs/ENVIRONMENT.md).
 
 The Docker setup in **this** folder starts **only this repo** (the Flask app and
-its database) — handy when you're working on Module 1 alone.
+its database) — handy when you're working on Petty Cash alone.
 
-**Want all four at once?** Use [`stack/`](stack/README.md) instead:
+**Want all seven at once?** Use [`stack/`](stack/README.md) instead:
 
 ```bash
 cd docker/stack
@@ -165,15 +174,14 @@ cp .env.example .env
 docker compose up --build
 ```
 
-That brings up the Flask app, the billing backend, both Next.js UIs and one
-shared database, already wired to each other. It expects the four repos to be
-checked out side by side under a common parent folder.
+That brings up the Flask app, the three Django APIs, the three Next.js UIs and
+one shared database, already wired to each other. It expects the seven repos to
+be checked out side by side under a common parent folder.
 
-**Important — shared secret:** the billing backend must use the **same
-`SECRET_KEY`** as this repo, or JWTs won't verify across the two services. If you
-run billing locally too, make sure the `SECRET_KEY` in your `.env` here matches
-the one in the billing backend's config. (The `stack/` setup handles this for
-you — it injects one key into both.)
+**Important — shared secret:** the Django APIs must use the **same
+`SECRET_KEY`** as this repo, or JWTs won't verify across the services. If you
+run them locally too, make sure the `SECRET_KEY` in your `.env` here matches
+theirs. (The `stack/` setup handles this for you — it injects one key into all.)
 
 > The two setups use **separate database volumes**, so data does not carry over
 > between them. Pick one and stick with it.
@@ -186,7 +194,7 @@ you — it injects one key into both.)
 → Docker Desktop isn't running (or isn't installed). Open Docker Desktop and
 wait for the whale icon to say it's running, then try again.
 
-**"port is already allocated" or `5001`/`5432` in use**
+**"port is already allocated" or `8010`/`5432` in use**
 → Something else on your machine is using that port (maybe a previous run, or a
 local Postgres). Stop it, or run `docker compose down` first.
 
@@ -220,7 +228,7 @@ cp .env.example .env
 # every time (from the project root)
 cd docker
 docker compose up --build     # start
-# open http://localhost:5001
+# open http://localhost:8010
 # Ctrl + C to stop, or:
 docker compose down           # stop + clean up
 ```

@@ -210,7 +210,7 @@ def send_invitation_email(
 
         from urllib.parse import urlencode
 
-        public_url = os.environ.get("PUBLIC_URL", "").rstrip("/")
+        public_url = (current_app.config.get("PETTY_CASH_URL") or "").rstrip("/")
         accept_path = url_for(
             "invitation.accept_invitation_page",
             token=invitation.token,
@@ -248,7 +248,7 @@ def send_invitation_email(
             # One line: a company name carrying a line break is a header Flask-Mail
             # refuses (BadHeaderError), and the except below would swallow the send.
             subject=f"You've been invited to {' '.join(entity_name.split())} on Minty",
-            sender=current_app.config.get("BREVO_EMAIL"),
+            sender=current_app.config.get("MAIL_FROM"),
             recipients=[invitation.email],
             html=_build_invitation_html(
                 entity_name=entity_name,
@@ -516,14 +516,14 @@ _ASSET_FINGERPRINTS: dict[str, str] = {}
 
 
 def email_base_url() -> str:
-    """The site root an emailed asset is served from: ``PUBLIC_URL``, else this request's.
+    """The site root an emailed asset is served from: ``PETTY_CASH_URL``, else this request's.
 
     Not ``url_for("static", filename="", _external=True)``: that already ends in
-    ``/static``, ``_asset_url`` adds another, and the logo 404'd wherever ``PUBLIC_URL``
-    was unset. Shared with the password-reset email. Needs a request when ``PUBLIC_URL`` is
+    ``/static``, ``_asset_url`` adds another, and the logo 404'd wherever ``PETTY_CASH_URL``
+    was unset. Shared with the password-reset email. Needs a request when ``PETTY_CASH_URL`` is
     unset; every sender of these emails runs inside one.
     """
-    return os.environ.get("PUBLIC_URL", "").rstrip("/") or request.url_root.rstrip("/")
+    return (current_app.config.get("PETTY_CASH_URL") or "").rstrip("/") or request.url_root.rstrip("/")
 
 
 def _asset_url(base_url: str, rel_path: str) -> str:

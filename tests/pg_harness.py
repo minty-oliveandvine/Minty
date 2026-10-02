@@ -11,9 +11,12 @@ is the only mode.
 
 The server is ``MINTY_TEST_PG_URI`` (a superuser/owner URI to a Postgres *server*; its
 database part is only used as the maintenance connection), or, when that is unset, the
-server of ``LOCAL_DATABASE_URI`` in ``.env`` with the database swapped for ``postgres``::
+server of ``DATABASE_URL`` (the environment's, else ``.env``'s) with the database swapped for
+``postgres``. Either URI's ``?schema=`` names the schema the suite runs under (default
+``pettycashv3``); it is stripped before the URI reaches psql or psycopg2::
 
     MINTY_TEST_PG_URI=postgresql://postgres:***@localhost:5432/postgres pytest
+    MINTY_TEST_PG_URI='postgresql://postgres:***@localhost:5432/postgres?schema=pettycash_alt' pytest
     pytest                                   # the .env server
 
 Knobs:
@@ -45,30 +48,52 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from services.app_runtime.env import DEFAULT_SCHEMA, parse_database_url, with_schema
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA_SQL = REPO_ROOT / "docs" / "schema" / "01_schema_rebased.sql"
 BUILT_SCHEMA = "pettycash_test"  # what 01_schema_rebased.sql creates
-# What every model's __table_args__ says: blueprints/shared/schema.SCHEMA, read from the same
-# environment variable here (not imported: conftest evicts blueprints.* between app builds).
-# The build renames the schema to THIS, so the whole suite runs under whatever name the app
-# is configured for - `MINTY_DB_SCHEMA=pettycash_alt pytest` is the proof nothing is hardcoded.
-APP_SCHEMA = os.environ.get("MINTY_DB_SCHEMA", "pettycashv3")
 
 
-def admin_uri() -> str:
-    """The maintenance URI: MINTY_TEST_PG_URI, else .env's LOCAL_DATABASE_URI on ``postgres``."""
+def _server_uri() -> str | None:
+    """MINTY_TEST_PG_URI, else DATABASE_URL (environment, then .env) on ``postgres``; as given,
+    ``?schema=`` included. None when there is neither."""
     uri = os.environ.get("MINTY_TEST_PG_URI")
     if uri:
         return uri
-    env_file = REPO_ROOT / ".env"
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.startswith("LOCAL_DATABASE_URI=") and line.split("=", 1)[1].startswith("postgres"):
-                return _with_database(line.split("=", 1)[1].strip(), "postgres")
+    uri = os.environ.get("DATABASE_URL")
+    if not uri:
+        env_file = REPO_ROOT / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if line.startswith("DATABASE_URL=") and line.split("=", 1)[1].startswith("postgres"):
+                    uri = line.split("=", 1)[1].strip()
+    return _with_database(uri, "postgres") if uri else None
+
+
+# What every model's __table_args__ says: blueprints/shared/schema.SCHEMA, which is the app's
+# DATABASE_URL ?schema= - read here from the harness's own URI (not imported: conftest evicts
+# blueprints.* between app builds), and handed to the app on the test database's URL. The
+# build renames the schema to THIS, so the whole suite runs under whatever name the URI says -
+# `MINTY_TEST_PG_URI=...?schema=pettycash_alt pytest` is the proof nothing is hardcoded.
+APP_SCHEMA = parse_database_url(_server_uri()).schema if _server_uri() else DEFAULT_SCHEMA
+
+
+def admin_uri() -> str:
+    """The maintenance URI (libpq form, no ``?schema=``): MINTY_TEST_PG_URI, else
+    DATABASE_URL's server on ``postgres``."""
+    uri = _server_uri()
+    if uri:
+        return parse_database_url(uri).libpq
     raise RuntimeError(
         "no Postgres server for the test harness: set MINTY_TEST_PG_URI, or put a "
-        "postgresql:// LOCAL_DATABASE_URI in .env (the tests build their own database on it)"
+        "postgresql:// DATABASE_URL in .env (the tests build their own database on it)"
     )
+
+
+def app_database_url(db_uri: str) -> str:
+    """The test database as the app's DATABASE_URL: ``db_uri`` plus ``?schema=APP_SCHEMA``."""
+    return with_schema(db_uri, APP_SCHEMA)
 
 
 def enabled() -> bool:
@@ -182,16 +207,20 @@ def build_schema(db_uri: str, schema_sql: Path = DEFAULT_SCHEMA_SQL, rename_to: 
     return n_tables
 
 
+def test_dbname() -> str:
+    """The database this process builds: MINTY_TEST_PG_DBNAME (default ``minty_test``), one
+    per pytest-xdist worker (``-n auto``) - workers build and drop their own."""
+    dbname = os.environ.get("MINTY_TEST_PG_DBNAME", "minty_test")
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    return f"{dbname}_{worker}" if worker else dbname
+
+
 def build() -> BuiltDatabase:
     """Create the database, run the schema file, rename the schema. Returns its URI."""
     import psycopg2
 
     admin = admin_uri()
-    dbname = os.environ.get("MINTY_TEST_PG_DBNAME", "minty_test")
-    # one database per pytest-xdist worker (``-n auto``): workers build and drop their own
-    worker = os.environ.get("PYTEST_XDIST_WORKER")
-    if worker:
-        dbname = f"{dbname}_{worker}"
+    dbname = test_dbname()
     keep = os.environ.get("MINTY_TEST_PG_KEEP") == "1"
     schema_sql = Path(os.environ.get("MINTY_TEST_SCHEMA_SQL", DEFAULT_SCHEMA_SQL))
 
