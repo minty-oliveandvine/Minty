@@ -27,6 +27,7 @@ Outputs, beside this script's parent:
     00_enum_coverage_check.sql
 """
 import io, os, re, subprocess, sys
+from urllib.parse import unquote, urlsplit
 
 DB   = os.environ.get("GEN_DB",  "pcreh_20260915")
 SRC  = os.environ.get("GEN_SRC", "pettycashv2")
@@ -65,9 +66,11 @@ def psql(sql):
     return [l.split("\x01") for l in p.stdout.replace("\r", "").strip().split("\n") if l]
 
 
-PW = [l.split("=", 1)[1].strip() for l in io.open(os.path.join(OUT, "..", "..", ".env"), encoding="utf-8")
-      if l.startswith("LOCAL_DATABASE_URI=")][0]
-PW = re.match(r".*://[^:]+:([^@]+)@", PW).group(1)
+# The postgres password: DATABASE_URL's, from the environment or else Minty's .env.
+PW = os.environ.get("DATABASE_URL") or [
+    l.split("=", 1)[1].strip() for l in io.open(os.path.join(OUT, "..", "..", ".env"), encoding="utf-8")
+    if l.startswith("DATABASE_URL=")][0]
+PW = unquote(urlsplit(PW).password or "")
 
 # ============================================================================
 #  THE NON-MECHANICAL PART

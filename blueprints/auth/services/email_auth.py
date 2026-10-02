@@ -219,7 +219,7 @@ def _send_code_email(email: str, code: str) -> bool:
     try:
         msg = Message(
             subject="Your Minty sign-in code",
-            sender=current_app.config.get("BREVO_EMAIL"),
+            sender=current_app.config.get("MAIL_FROM"),
             recipients=[email],
             html=_code_email_html(code),
         )

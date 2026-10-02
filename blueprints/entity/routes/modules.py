@@ -20,7 +20,6 @@ login form otherwise. Picking a company there mints a fresh token through the
 handoff above. Module 2 does not ask to be returned to the page it was on: that
 path belongs to Module 2's origin, and replaying it here is what used to 404.
 """
-import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -40,6 +39,11 @@ from blueprints.shared.enums import ModuleCode
 
 #: How long every module token this app mints lives (``_generate_module_token``).
 MODULE_TOKEN_MINUTES = 30
+
+#: Where the Module 2 handoffs land inside minty-payment-request-web: its home, and its
+#: settings page (``billing_app_home_url`` / ``billing_settings_app_url``).
+PAYMENT_REQUEST_APP_HOME_PATH = "/"
+PAYMENT_REQUEST_SETTINGS_PATH = "settings"
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -156,7 +160,7 @@ def module_selector(entity_id):
         return redirect(billing_app_home_url(entity_id, org, current_user.id))
 
     # Both modules enabled — hand off to Module 2's /module-selection page.
-    frontend_app_url = os.environ.get("FRONTEND_APP_URL", "http://localhost:3000").rstrip("/")
+    frontend_app_url = _frontend_origin()
     token = _generate_module_token(
         current_user.id,
         entity_id,
@@ -536,12 +540,7 @@ def _frontend_origin() -> str:
 
 def billing_app_home_url(entity_id: str, org: Entity, user_id, *, from_bills: bool = False) -> str:
     """Handoff URL for Module 2 main app with entity pre-selected."""
-    home_seg = (
-        os.environ.get("PAYMENT_REQUEST_APP_HOME_PATH")
-        or os.environ.get("BILLING_APP_HOME_PATH")
-        or ""
-    ).strip("/")
-    next_arg = f"/{home_seg}" if home_seg else "/"
+    next_arg = PAYMENT_REQUEST_APP_HOME_PATH
     role = _resolve_user_entity_role(user_id, entity_id)
     billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
@@ -566,11 +565,7 @@ def billing_app_home_url(entity_id: str, org: Entity, user_id, *, from_bills: bo
 
 def billing_settings_app_url(entity_id: str, org: Entity, user_id, *, from_bills: bool = False) -> str:
     """Handoff URL for Module 2 settings page."""
-    settings_path = (
-        os.environ.get("PAYMENT_REQUEST_SETTINGS_PATH")
-        or os.environ.get("BILLING_SETTINGS_PATH")
-        or "settings"
-    ).strip("/") or "settings"
+    settings_path = PAYMENT_REQUEST_SETTINGS_PATH
     role = _resolve_user_entity_role(user_id, entity_id)
     billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
     petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")

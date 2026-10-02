@@ -15,9 +15,10 @@ production. Since phase C closed (2026-09-17) it reports 0 findings for the thre
 repos; tests/test_zz_schema_audit.py keeps it that way, and a repo that is not checked out is
 a finding (a missing path used to read as 0 findings).
 
-    AUDIT_URI      full postgres URI            default: localhost/AUDIT_DB as the .env user
+    AUDIT_URI      full postgres URI            default: DATABASE_URL (environment, else Minty's
+                                                .env) with its database swapped for AUDIT_DB
     AUDIT_DB       database name                default postgres        (ignored if AUDIT_URI)
-    AUDIT_SCHEMA   schema to read               default pettycashv3
+    AUDIT_SCHEMA   schema to read               default: DATABASE_URL's ?schema= (pettycashv3)
     AUDIT_REPOS    comma list of repo names     default Minty,billing-backend,onboarding-backend,minty-billing-api
     MINTY_REPOS_ROOT  the folder the repos sit in   default: this checkout's parent (C:\\Github)
     AUDIT_STRICT=1 exit 1 when there is any finding (for use as a test)
@@ -27,10 +28,29 @@ onboarding-backend was NOT in the original audit; its shared_models (585 lines) 
 same tables and drift the same way. minty-billing-api (Part 2, 2026-09-21) mirrors the 13
 subscription tables and the read-only rows it needs. Do not remove either from the default list.
 """
-import ast, glob, io, os, re, shutil, subprocess, sys
+import ast, glob, io, os, shutil, subprocess, sys
+from urllib.parse import urlsplit, urlunsplit
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+from services.app_runtime.env import DEFAULT_SCHEMA, parse_database_url  # noqa: E402
+
+
+def _database_url():
+    """DATABASE_URL from the environment, else from Minty's .env; None when neither has one."""
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))), ".env")
+    if os.path.exists(env_file):
+        for l in io.open(env_file, encoding="utf-8"):
+            if l.startswith("DATABASE_URL="):
+                return l.split("=", 1)[1].strip()
+    return None
+
 
 DB = os.environ.get("AUDIT_DB", "postgres")
-SCHEMA = os.environ.get("AUDIT_SCHEMA", "pettycashv3")
+SCHEMA = os.environ.get("AUDIT_SCHEMA") or (
+    parse_database_url(_database_url()).schema if _database_url() else DEFAULT_SCHEMA)
 # The repos live side by side (C:\Github since the 2026-09-21 move; the old C:\dev is dead).
 # MINTY_REPOS_ROOT overrides the parent; this file's own location is the fallback, so the
 # audit follows the checkout wherever it is.
@@ -65,11 +85,11 @@ def _target():
     uri = os.environ.get("AUDIT_URI")
     if uri:
         return [uri]
-    pw = re.match(r".*://[^:]+:([^@]+)@",
-                  [l for l in io.open(os.path.join(ALL_REPOS["Minty"], ".env"), encoding="utf-8")
-                   if l.startswith("LOCAL_DATABASE_URI=")][0]).group(1)
-    os.environ["PGPASSWORD"] = pw
-    return ["-h", "localhost", "-U", "postgres", "-d", DB]
+    base = _database_url()
+    if not base:
+        sys.exit("no AUDIT_URI, and no DATABASE_URL in the environment or Minty's .env")
+    parts = urlsplit(parse_database_url(base).libpq)
+    return [urlunsplit((parts.scheme, parts.netloc, "/" + DB, parts.query, parts.fragment))]
 
 
 def psql(sql):

@@ -31,9 +31,9 @@ def test_resend_uses_persisted_names(app, monkeypatch):
     with app.app_context():  # reading ``Model.query`` to replace it needs a context
         monkeypatch.setattr(inv.Entity, "query", MagicMock(get=lambda _id: None))
         monkeypatch.setattr(inv.User, "query", MagicMock(get=lambda _id: None))
-    monkeypatch.setattr(inv, "current_app", MagicMock(extensions={"mail": mail}))
+    monkeypatch.setattr(inv, "current_app", MagicMock(extensions={"mail": mail},
+                                                      config={"PETTY_CASH_URL": "http://x"}))
     monkeypatch.setattr(inv, "Message", MagicMock())
-    monkeypatch.setenv("PUBLIC_URL", "http://x")
 
     # Resend shape: no name args, exactly how api.py:205 calls it.
     inv.send_invitation_email(inv_obj)

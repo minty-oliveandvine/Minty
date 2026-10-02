@@ -287,7 +287,7 @@ def _module_name(code: str) -> str:
 def base_url() -> str:
     """Public origin for links, WITHOUT a request to derive it from.
 
-    ``PUBLIC_URL`` — the same setting the invitation email already uses, deliberately not
+    ``PETTY_CASH_URL`` — the same setting the invitation email already uses, deliberately not
     a second one of its own. Both are outbound mail that has to name a host it cannot
     look up, and two config keys meaning the same thing is how one of them ends up stale
     after a domain change while the other keeps working.
@@ -297,7 +297,7 @@ def base_url() -> str:
     ``http://localhost`` when it is unset — a link that is worse than no link, because it
     looks real. An unset value drops the button rather than shipping a dead one.
     """
-    value = (current_app.config.get("PUBLIC_URL") or "").rstrip("/")
+    value = (current_app.config.get("PETTY_CASH_URL") or "").rstrip("/")
     _warn_once_if_unreachable(value)
     return value
 
@@ -309,7 +309,7 @@ _warned_unreachable = False
 def _warn_once_if_unreachable(value: str) -> None:
     """Say something when the buttons in these emails cannot possibly work.
 
-    A developer's ``PUBLIC_URL`` reaching production mail is a silent failure otherwise:
+    A developer's ``PETTY_CASH_URL`` reaching production mail is a silent failure otherwise:
     every message goes out looking perfect and every button lands on a host only the
     sender can resolve. Cheap to detect, and worth one loud line per process — the alert
     emails are the ones whose whole purpose is getting somebody to click through.
@@ -324,13 +324,13 @@ def _warn_once_if_unreachable(value: str) -> None:
     if not value:
         _warned_unreachable = True
         logger.warning(
-            "notify: PUBLIC_URL is unset — billing emails will go out with no "
+            "notify: PETTY_CASH_URL is unset — billing emails will go out with no "
             "action buttons at all."
         )
     elif any(host in lowered for host in _LOCAL_HOSTS):
         _warned_unreachable = True
         logger.warning(
-            "notify: PUBLIC_URL is {!r}, which no recipient can reach. Billing emails "
+            "notify: PETTY_CASH_URL is {!r}, which no recipient can reach. Billing emails "
             "will ship buttons that go nowhere.", value,
         )
 
@@ -338,17 +338,17 @@ def _warn_once_if_unreachable(value: str) -> None:
 def billing_sender() -> str | None:
     """The From address for billing mail.
 
-    Its own address rather than the account-wide ``BREVO_EMAIL``: an invitation comes from
+    Its own address rather than the account-wide ``MAIL_FROM``: an invitation comes from
     a colleague, a dunning notice comes from the company about to switch your access off.
     Recipients filter and search on the sender, so those should not share one.
 
-    Falls back to ``BREVO_EMAIL`` when unset. An environment that has not yet verified the
+    Falls back to ``MAIL_FROM`` when unset. An environment that has not yet verified the
     dedicated sender with the relay keeps sending rather than silently failing — an
     unverified From is rejected or spam-filed, and ``notify`` swallows SMTP errors by
     design, so the failure would be invisible.
     """
     return (current_app.config.get("SUBSCRIPTION_EMAIL")
-            or current_app.config.get("BREVO_EMAIL"))
+            or current_app.config.get("MAIL_FROM"))
 
 
 def settings_url(entity_id) -> str:
@@ -360,7 +360,7 @@ def settings_url(entity_id) -> str:
 
 
 def handoff_url(next_path: str, *, entity_id=None) -> str:
-    """``{PUBLIC_URL}/handoff/minty-web?next=...[&entity_id=...]`` - a link into minty-web
+    """``{PETTY_CASH_URL}/handoff/minty-web?next=...[&entity_id=...]`` - a link into minty-web
     that this app authenticates at the click (login first for a cold recipient), so no
     token travels in an email. Empty when there is no public origin, like every other link
     here. minty-billing-api's ``notify.handoff_url`` builds the same link."""
@@ -387,13 +387,13 @@ def portal_url(next_path: str = "/subscription/subscriptions") -> str:
 #
 #   1. most clients — Gmail and Outlook included — block remote images by default until
 #      the reader clicks "show images", so the masthead is a grey box on first open;
-#   2. the host has to be publicly reachable. ``PUBLIC_URL`` is a developer's
-#      ``https://localhost:5001`` far more often than anyone intends, and mail sent that
+#   2. the host has to be publicly reachable. ``PETTY_CASH_URL`` is a developer's
+#      ``https://localhost:8010`` far more often than anyone intends, and mail sent that
 #      way carries a logo nobody outside that machine can load. That is exactly what the
 #      first live send did.
 #
 # A CID attachment is part of the message, so it renders offline, behind image blocking,
-# and whatever ``PUBLIC_URL`` says. The cost is ~14KB per email, which is nothing next to
+# and whatever ``PETTY_CASH_URL`` says. The cost is ~14KB per email, which is nothing next to
 # a masthead that is broken by default.
 
 LOGO_CID = "minty-logo"

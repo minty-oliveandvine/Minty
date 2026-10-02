@@ -25,7 +25,7 @@ does not survive the round-trip. `GET /callback`:
 3. starts the **background sync** (`sync_all_accounts_and_contacts_background`, one thread,
    three sections): contacts → `xero_contact_sync`, the chart of accounts → `account_info`
    (+ `entity_account_xero` for the expense picker) and the bill account codes →
-   `entity_bill_account_xero` (billing-backend's table; Minty writes it, there is no FK
+   `entity_bill_account_xero` (minty-payment-request-api's table; Minty writes it, there is no FK
    across that boundary by design). `GET /api/entity/<id>/xero-sync-status` reports the
    sync's progress for the settings page; the cached rows are also what the pages use when
    Xero is down.
@@ -41,7 +41,7 @@ connection" and `/debug/xero-settings/<id>` a read-only dump.
 Per-user bundles in `user_token`; a company publishes with its connector's token, the
 current user's as a logged fallback (`resolve_xero_token`). **Only Flask refreshes** and it
 serialises refreshes per bearer with a Postgres advisory lock held across the HTTP call;
-billing-backend obtains live tokens from `POST /api/internal/xero/token` (a 60-second
+minty-payment-request-api obtains live tokens from `POST /api/internal/xero/token` (a 60-second
 assertion JWT over the shared `SECRET_KEY`, scope `xero-access-token`, the entity in the
 claims). Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
 normal traffic. Details and the reasons in [authentication.md](authentication.md) §7.
@@ -101,7 +101,7 @@ different organisation is ignored, and objects removed from the report are swept
 (`_sweep_removed_objects`). Success sets `report.status = published`, `published_at`,
 `xero_integrated`, `publishing_status = completed`; any failure leaves `failed` with the
 per-module reasons, and the report can be published again. (`integration.get_organisation_lock_dates`
-exists but nothing calls it on this side — the lock-date check is billing-backend's, on
+exists but nothing calls it on this side — the lock-date check is minty-payment-request-api's, on
 bill publishes; a report dated inside a locked period is refused by Xero itself.)
 
 A report that has been to Xero and is then edited comes back to `submitted` with
@@ -117,7 +117,7 @@ the plain button — `publishing_status` is NOT NULL and `unpublished` is that s
 contacts as JSON; from the database when the token no longer works. A bank account carries
 only `MaskedBankAccountNumber`, `****` + the last four - the full number never leaves the
 server, since 2026-10-01), `POST /api/entities/<id>/billing/sync-*` (the three sync triggers
-billing-backend calls, JWT-authenticated — `blueprints/entity/routes/billing_sync.py`).
+minty-payment-request-api calls, JWT-authenticated — `blueprints/entity/routes/billing_sync.py`).
 
 ## 6. Tests
 

@@ -1,21 +1,23 @@
 #!/usr/bin/env sh
 set -eu
 
-DB_URI="${LOCAL_DATABASE_URI:-${RDS_DATABASE_URI:-}}"
-if [ -z "$DB_URI" ]; then
-  echo "Missing LOCAL_DATABASE_URI and RDS_DATABASE_URI."
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "Missing DATABASE_URL (postgresql://user:pass@host:5432/dbname?schema=pettycashv3)."
   exit 1
 fi
-
-export DB_URI
 
 python - <<'PY'
 import os
 import time
+
 from sqlalchemy import create_engine, text
 
+# The same parser the app uses: `?schema=` is popped off (default pettycashv3) and
+# never reaches the driver; every other query parameter (sslmode, ...) stays.
+from services.app_runtime.env import database_schema, database_url
 
-db_uri = os.environ["DB_URI"]
+db_uri = database_url()
+schema = database_schema()
 
 wait_seconds = int(os.environ.get("DB_WAIT_SECONDS", "60"))
 
@@ -31,7 +33,7 @@ for attempt in range(1, wait_seconds + 1):
         time.sleep(2)
 
 with engine.connect() as conn:
-    conn.execute(text("CREATE SCHEMA IF NOT EXISTS " + os.environ.get("MINTY_DB_SCHEMA", "pettycashv3")))
+    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
     conn.commit()
 PY
 

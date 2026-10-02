@@ -2,27 +2,28 @@ import os
 
 from dotenv import load_dotenv
 
+from services.app_runtime.env import app_env
+
 # Load environment variables
 load_dotenv()
 
-S3_BUCKET = os.environ.get("S3_BUCKET")  # Your Backblaze B2 bucket name
-S3_KEY = os.environ.get("S3_KEY")  # Your Backblaze B2 application key ID
-S3_SECRET = os.environ.get("S3_SECRET")  # Your Backblaze B2 application key
-S3_REGION = os.environ.get("S3_REGION")  # Your Backblaze B2 region (e.g., 'us-west-002')
+# Backblaze B2 (S3 API): https://KEY:SECRET@s3.<region>.backblazeb2.com/<bucket>. Parsed by
+# services/app_runtime/env.parse_s3_url - the endpoint, bucket, key and region all come from it.
+S3_URL = os.environ.get("S3_URL")
 
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
-WTF_CSRF_SECRET_KEY = os.environ.get('WTF_CSRF_SECRET_KEY')
+# ``development`` or ``production`` (the default, and what any other value means).
+APP_ENV = app_env()
 
-SQLALCHEMY_LOCAL_DATABASE_URI = os.environ.get('LOCAL_DATABASE_URI')
-
-SQLALCHEMY_RDS_DATABASE_URI = os.environ.get('RDS_DATABASE_URI')
-
-BREVO_EMAIL = os.environ.get('BREVO_EMAIL')
+# The default From address (OTP, password reset, invitations). Flask-Mail's own default
+# sender is the same address.
+MAIL_FROM = os.environ.get('MAIL_FROM')
+MAIL_DEFAULT_SENDER = MAIL_FROM
 
 # The From address for BILLING email only — trial warnings, payment failures and
 # recoveries, handovers.
-# Everything else (OTP, password reset, invitations) keeps BREVO_EMAIL.
+# Everything else (OTP, password reset, invitations) keeps MAIL_FROM.
 #
 # Split because the two are different conversations: an invitation comes from a colleague
 # and a dunning notice comes from the company that is about to switch your access off.
@@ -31,21 +32,23 @@ BREVO_EMAIL = os.environ.get('BREVO_EMAIL')
 #
 # MUST be a verified sender in Brevo. An unverified From is either rejected outright by
 # the relay or delivered straight to spam, and the failure is silent from here — the send
-# is logged and swallowed like any other SMTP error. Falls back to BREVO_EMAIL when unset,
+# is logged and swallowed like any other SMTP error. Falls back to MAIL_FROM when unset,
 # so an environment that has not added the sender yet keeps working.
-SUBSCRIPTION_EMAIL = os.environ.get('SUBSCRIPTION_EMAIL')
+SUBSCRIPTION_EMAIL = os.environ.get('SUBSCRIPTION_EMAIL') or MAIL_FROM
 
-# Public origin used to build links in outbound email — the same variable the
-# invitation email already reads (blueprints/invitation/services/invite.py), surfaced
-# through app.config so it can be overridden in tests.
+# This app's own public origin, used to build links in outbound email (the invitation,
+# password-reset and billing emails all read it from app.config).
 #
 # Set explicitly rather than derived: the billing emails are sent from `flask
 # subscriptions ...` CLI jobs, where there is no request to take a host from and
 # `url_for(_external=True)` quietly yields http://localhost — a link that is worse than
-# no link, because it looks real. Unset simply drops the buttons. e.g. https://app.minty.com
-PUBLIC_URL = os.environ.get('PUBLIC_URL')
+# no link, because it looks real. Unset, the emails sent from a request use that request's
+# host and the billing emails drop their buttons. e.g. https://app.minty.com
+PETTY_CASH_URL = (os.environ.get('PETTY_CASH_URL') or '').rstrip('/') or None
 
-ENV = os.environ.get('ENV')
+# Xero's OAuth callback (the xero blueprint's /callback), derived from this app's own URL;
+# registered with the Xero app as-is. The local default is the dev server's port.
+REDIRECT_URI = (PETTY_CASH_URL or 'http://localhost:8010') + '/callback'
 
 # Stripe — the payment RAIL, not the source of truth: the local tables own the catalog
 # and every entity's subscription and access state. The secret key authorizes API calls

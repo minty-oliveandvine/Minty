@@ -164,7 +164,7 @@ def send_all(address: str, chosen: dict[str, dict]) -> int:
 
     mail = current_app.extensions.get("mail")
     if mail is None or not current_app.config.get("MAIL_SERVER"):
-        print("No MAIL_SERVER configured — nothing was sent.", file=sys.stderr)
+        print("No SMTP_URL configured — nothing was sent.", file=sys.stderr)
         return 1
     if current_app.config.get("TESTING"):
         # MAIL_SUPPRESS_SEND follows TESTING, so this would silently swallow the batch

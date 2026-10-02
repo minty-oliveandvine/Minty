@@ -4,7 +4,7 @@ The Flask application behind Minty — companies, users, petty cash, Xero integr
 subscription/billing engine. Historically "pettycashv3", and still the repo the other services
 are being carved out of.
 
-Runs on **port 5001**.
+Runs on **port 8010** (or `$PORT` when the host sets it).
 
 ## The services around it
 
@@ -13,17 +13,21 @@ PostgreSQL database and `pettycashv3` schema:
 
 | Repo | What it is | Port |
 |---|---|---|
-| **Minty** (this one) | Flask. Auth, entities, petty cash, Xero, subscriptions | 5001 |
-| `billing-backend` | Django + django-ninja. Bills, payments, Xero bill sync | 8000 |
-| `billing-frontend` | Next.js. The payment-request module and the payer portal | 3000 |
-| `onboarding` | Next.js. The nine-step new-company wizard | 3001 |
-| `onboarding-backend` | Django + django-ninja. The wizard's API, extracted from this repo | 8001 |
+| `minty-web` | Next.js. The hub: entity list, My Profile, module pages, payer portal | 3000 |
+| `minty-subscription-api` | Django + django-ninja. Subscriptions and Stripe | 8000 |
+| **Minty** (this one) | Flask. Petty Cash: auth, entities, petty cash, Xero, subscriptions | 8010 |
+| `minty-payment-request-web` | Next.js. The payment-request module | 3020 |
+| `minty-payment-request-api` | Django + django-ninja. Bills, payments, Xero bill sync | 8020 |
+| `minty-onboarding-web` | Next.js. The nine-step new-company wizard | 3030 |
+| `minty-onboarding-api` | Django + django-ninja. The wizard's API, extracted from this repo | 8030 |
 
 The sibling repos live beside this one (`C:\Github\…`, as `CLAUDE.md`'s folder map lists them).
+Every service's environment variables, URLs and ports — and the old → new rename table — are in
+[`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 
 Two things hold them together and are easy to get wrong:
 
-- **`SECRET_KEY` must be identical across Minty, `billing-backend` and `onboarding-backend`.**
+- **`SECRET_KEY` must be identical across Minty and the three Django APIs.**
   Minty mints the HS256 JWTs; the others only verify them. A mismatch is not a loud failure —
   it is a 401 on every request, which the frontends report as an expired session.
 - **Alembic in this repo owns the schema.** The Django services map onto it with
@@ -38,9 +42,9 @@ Two things hold them together and are easy to get wrong:
 | Pre-staging | https://pre-staging-olive-and-vine-minty.onrender.com |
 | Development | https://development-olive-and-vine-minty.onrender.com |
 
-Taken from `billing-frontend/lib/mintyEnv.ts`, which is what the frontends actually call.
-**Which branch deploys to which environment is configured in the Render dashboard, not in this
-repo** — check there rather than trusting a list here.
+Each sibling reaches this app through its `PETTY_CASH_URL`. `main` deploys production and
+`development` deploys the development environment; the deploy settings themselves live in the
+Render / Vercel dashboards — see [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md#branches-and-deployments).
 
 ## Running with Docker (recommended)
 
@@ -58,12 +62,12 @@ docker compose up --build
 ```
 
 Builds the image, starts Postgres, waits for the DB, then serves the app on
-http://localhost:5001. Code reloads automatically via `docker-compose.override.yml`, which is
+http://localhost:8010. Code reloads automatically via `docker-compose.override.yml`, which is
 applied when you run compose from inside `docker/`.
 
 ### The whole stack
 
-`docker/stack/` brings up Minty, both Django services and both Next.js frontends together,
+`docker/stack/` brings up Minty, the three Django APIs and the three Next.js apps together,
 building the siblings from `../../../<repo>`. See [docker/stack/README.md](docker/stack/README.md).
 
 ```bash
@@ -108,14 +112,14 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-cp .env.example .env          # then fill in the database URIs and SECRET_KEY
+cp .env.example .env          # then fill in DATABASE_URL, SECRET_KEY and S3_URL
 flask --app main.py db upgrade
-flask run --host=localhost --port=5001 --debug
+flask run --host=localhost --port=8010 --debug
 ```
 
-`.env.example` documents every variable. The ones without defaults —  `SECRET_KEY`,
-`WTF_CSRF_SECRET_KEY`, `LOCAL_DATABASE_URI`, `RDS_DATABASE_URI`, `S3_*` — are required, and the
-app raises at startup if any is missing.
+`.env.example` documents every variable. `SECRET_KEY`, `DATABASE_URL` (schema in its
+`?schema=`, default `pettycashv3`) and `S3_URL` are required, and the app raises at startup if
+any is missing. `APP_ENV=development` turns on debug locally; anything else runs as production.
 
 ## Tests
 
@@ -139,6 +143,6 @@ as well as `FAILED`, since collection errors do not show as failures.
 
 ## Contributing
 
-Work happens on `Minty-*` branches (`Minty-PettyCash`, `Minty-BillingBackend`, …), not on
-`main`/`staging`/`dev` — an earlier version of this README described those, and they do not
-exist in this repository. Branch from the one you are working against and open a PR back to it.
+`main` is production and `development` is the development environment. Work happens on
+feature branches (`Minty-PettyCash`, …): branch from the one you are working against and open a
+PR back to it; `development` is merged into `main` to release.

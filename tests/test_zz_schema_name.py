@@ -1,8 +1,8 @@
 """The schema name is a setting, not a literal: ``blueprints/shared/schema.SCHEMA``.
 
-Every model, FK string, enum, raw query and the Flask-Session table read it from there, and
-``tests/pg_harness.py`` builds the schema under the same variable - so a full run with
-``MINTY_DB_SCHEMA=pettycash_alt`` is the proof. This test is the cheap guard between such
+Every model, FK string, enum, raw query and the Flask-Session table read it from there (it is
+``DATABASE_URL``'s ``?schema=``), and ``tests/pg_harness.py`` builds the schema under the same
+name - so a full run with ``MINTY_TEST_PG_URI=...?schema=pettycash_alt`` is the proof. This test is the cheap guard between such
 runs: no string constant in application code may carry the name. Comments and docstrings
 are free to say it; the Alembic revisions (the OLD ``pettycashv2`` database) and the schema
 SQL files are outside the rule by design.
@@ -17,9 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = "pettycashv3"
 DIRS = ["blueprints", "models", "services", "pettycash", "cli", "scripts"]
 ALLOWED = {
-    "blueprints/shared/schema.py",
-    # reads the same variable with the same default, deliberately without importing the app
-    "scripts/subscription/copy_replay_to_rds.py",
+    # the default when DATABASE_URL carries no ?schema= (blueprints/shared/schema.py reads it)
+    "services/app_runtime/env.py",
 }
 SKIP_PREFIXES = ("scripts/schema_migration/",)  # the pipeline names the schema it builds
 
@@ -61,10 +60,10 @@ def test_the_constant_follows_the_environment(monkeypatch):
 
     from blueprints.shared import schema
 
-    monkeypatch.setenv("MINTY_DB_SCHEMA", "pettycash_alt")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost:5432/db?sslmode=disable&schema=pettycash_alt")
     reloaded = importlib.reload(schema)
     try:
         assert reloaded.SCHEMA == "pettycash_alt" and reloaded.qualified("report") == "pettycash_alt.report"
     finally:
-        monkeypatch.delenv("MINTY_DB_SCHEMA")
+        monkeypatch.undo()
         importlib.reload(schema)

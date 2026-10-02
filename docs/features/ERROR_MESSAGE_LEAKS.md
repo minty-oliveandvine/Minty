@@ -67,12 +67,12 @@ itself.
 | Repo | Mechanism | Talks to |
 |---|---|---|
 | Minty (here) | `mintyErrorCopy` / `mintyApiError` in `templates/components/flash_messages.html` | itself |
-| billing-frontend | `normalizeApiErrorDetail` + `readsAsProse` in `lib/api.ts`; `lib/payerPortal.ts` | Django billing backend, and Minty |
+| minty-payment-request-web | `normalizeApiErrorDetail` + `readsAsProse` in `lib/api.ts`; `lib/payerPortal.ts` | Django billing backend, and Minty |
 | onboarding | `friendlyError` / `errorCopy` in `lib/errorCopy.js` | Minty only |
-| billing-backend | `core/exceptions.py` handlers | serves billing-frontend |
+| minty-payment-request-api | `core/exceptions.py` handlers | serves minty-payment-request-web |
 
 The cross-repo bug worth remembering: django-ninja answers a schema failure with
-`detail: [{type, loc, msg}, ...]`, and billing-frontend used to `JSON.stringify`
+`detail: [{type, loc, msg}, ...]`, and minty-payment-request-web used to `JSON.stringify`
 that into a toast. Neither side was unreasonable alone. Both ends are guarded now.
 
 ## The copy standard
@@ -188,7 +188,7 @@ buttons are commented out with `{# #}`) and `saveAndNext()` in
 
 - **`{"skipped": true}` semantics.** `blueprints/entity/routes/billing_sync.py`
   now returns **500** when it catches an exception, instead of 200. The consumer
-  (`billing-backend/bills/services/flask_billing_sync.py`) logs any `>= 400` at
+  (`minty-payment-request-api/bills/services/flask_billing_sync.py`) logs any `>= 400` at
   ERROR and still returns `True`, so nothing downstream changed shape — but the
   other `{"skipped": true, "reason": …}` 200s in that file are genuine skips and
   were left alone.

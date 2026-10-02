@@ -87,7 +87,7 @@ No new third-party services are needed. Nothing here calls out to the internet.
 ```
 ┌──────────────────────┐     ┌──────────────────────┐
 │  Onboarding app      │     │  Minty (Flask)       │
-│  (Next.js, port 3001)│     │  the main app        │
+│  (Next.js, port 3030)│     │  the main app        │
 │                      │     │                      │
 │  • sign-up screen    │────▶│  • checks agreement  │
 │  • invite screen     │     │  • saves the record  │

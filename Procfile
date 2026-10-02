@@ -1,5 +1,5 @@
 web: gunicorn app:app \
-  --bind 0.0.0.0:${PORT:-10000} \
+  --bind 0.0.0.0:${PORT:-8010} \
   --workers 2 \
   --threads 4 \
   --timeout 120 \

@@ -110,7 +110,6 @@ def main() -> int:
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env")
-    os.environ.setdefault("FLASK_ENV", "development")
     from werkzeug.security import generate_password_hash
 
     from main import app

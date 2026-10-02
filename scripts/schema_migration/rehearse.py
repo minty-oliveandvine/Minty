@@ -13,7 +13,7 @@ timed (the maintenance window is the total x 2):
                    aside (schema rehearse_pre_upgrade) - the upgrade drops two of
                    the three tables that hold expenses
     3. upgrade     flask db upgrade to alembic head, IN A SUBPROCESS whose
-                   RDS_DATABASE_URI is the scratch database, with the engine URL
+                   DATABASE_URL is the scratch database, with the engine URL
                    asserted inside the app context before anything runs
     4. upgrade-check  U1/U2 against the snapshot: no posted report's total needs an
                    expense row the upgrade dropped, and no posted total moved
@@ -31,7 +31,7 @@ timed (the maintenance window is the total x 2):
 
 Nothing here reads .env for the database: the scratch URI is built from
 --admin-uri (default postgresql://postgres:***@localhost:5432/postgres, password
-from LOCAL_DATABASE_URI in .env) and --db. The app's own database is never
+from DATABASE_URL in .env) and --db. The app's own database is never
 touched: step 3 checks its alembic_version before and after and stops if it moved.
 --db is DROPPED first: give each run a name no other session is using.
 
@@ -52,7 +52,9 @@ from urllib.parse import urlsplit, urlunsplit
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA_DIR = REPO / "docs" / "schema"
 sys.path.insert(0, str(REPO / "tests"))
+sys.path.insert(0, str(REPO))
 import pg_harness  # noqa: E402  (tests/ has no package __init__)
+from services.app_runtime.env import parse_database_url  # noqa: E402
 
 SRC, DST = "pettycashv2", "pettycash_test"
 
@@ -63,11 +65,21 @@ def _with_database(uri: str, dbname: str) -> str:
     return urlunsplit((p.scheme, p.netloc, "/" + dbname, p.query, p.fragment))
 
 
+def _dotenv_database_url() -> str | None:
+    """.env's DATABASE_URL in libpq form (``?schema=`` dropped), or None."""
+    env_file = REPO / ".env"
+    if not env_file.exists():
+        return None
+    for line in io.open(env_file, encoding="utf-8"):
+        if line.startswith("DATABASE_URL="):
+            return parse_database_url(line.split("=", 1)[1].strip()).libpq
+    return None
+
+
 def _default_admin_uri() -> str:
-    for line in io.open(REPO / ".env", encoding="utf-8"):
-        if line.startswith("LOCAL_DATABASE_URI="):
-            uri = line.split("=", 1)[1].strip()
-            return _with_database(uri, "postgres")
+    uri = _dotenv_database_url()
+    if uri:
+        return _with_database(uri, "postgres")
     return "postgresql://postgres@localhost:5432/postgres"
 
 
@@ -200,11 +212,8 @@ def step_restore(args, admin_uri, db_uri, log):
 UPGRADE_DRIVER = r"""
 import os, sys, time
 uri = sys.argv[1]
-# Both URIs: bootstrap reads LOCAL under FLASK_ENV=development (which .env may set and
-# load_dotenv() restores) and RDS otherwise. Binding both makes the branch irrelevant.
-os.environ["RDS_DATABASE_URI"] = uri
-os.environ["LOCAL_DATABASE_URI"] = uri
-os.environ.pop("FLASK_ENV", None)
+# Set before the app is imported, so load_dotenv() cannot restore .env's own DATABASE_URL.
+os.environ["DATABASE_URL"] = uri
 os.environ["SUBSCRIPTION_SCHEDULER_ENABLED"] = "0"
 # Flask-Session would CREATE TABLE pettycashv3.sessions on import, and the scratch
 # database has no pettycashv3 until the loaders have run; this driver only needs
@@ -230,12 +239,9 @@ with app.app_context():
 
 def step_upgrade(args, admin_uri, db_uri, log):
     # the app's own database must not move
-    app_uri = None
-    for line in io.open(REPO / ".env", encoding="utf-8"):
-        if line.startswith("RDS_DATABASE_URI="):
-            app_uri = line.split("=", 1)[1].strip()
+    app_uri = _dotenv_database_url()
     # The guard proves the upgrade did not run against the app's own database. When that
-    # database is unreachable from here (RDS_DATABASE_URI on a remote host this machine
+    # database is unreachable from here (DATABASE_URL on a remote host this machine
     # cannot resolve), the upgrade could not have reached it either - it would have failed
     # the same way - so a successful upgrade is itself the proof. Warn and carry on.
     guard_before = None
