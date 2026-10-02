@@ -80,6 +80,16 @@ postgresql://USER:PASSWORD@HOST:5432/DBNAME?schema=pettycashv3[&sslmode=require.
   so settings import locally and in tests; always set it in a deployment.
 - Helpers: Flask `services/app_runtime/env.py` (`database_url()`, `database_schema()`);
   Django `config/dburl.py` (`parse_database_url()`, `database_url()`).
+- In a `.env` file, keep the schema as its own line and fill it into the URL — every service
+  loads `.env` with python-dotenv, which expands `${...}`, and so does Docker Compose:
+
+  ```
+  DB_SCHEMA=pettycashv3
+  DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?schema=${DB_SCHEMA}
+  ```
+
+  `DB_SCHEMA` is only a `.env` helper; the apps read the schema from the URL. Render and Vercel
+  dashboards do **not** expand `${...}`, so there write the name into the URL itself.
 
 ### `SMTP_URL` and `MAIL_FROM`
 
