@@ -366,15 +366,30 @@
     var overlay = document.getElementById('xeroLoadingOverlay');
     var loadingText = document.getElementById('xeroLoadingText');
     var isConnected = btn.dataset.connected === 'true';
-    var targetUrl = isConnected
-      ? "{{ url_for('disconnect_from_xero') }}?entity_id={{ org.id }}&from=bills"
-      : "{{ url_for('xero_reconnect') }}?entity_id={{ org.id }}&from=bills";
+    var targetUrl = "{{ url_for('xero_reconnect') }}?entity_id={{ org.id }}&from=bills";
     var msg = isConnected ? 'Disconnecting from Xero…' : 'Connecting to Xero…';
     overlay.classList.remove('hidden');
     overlay.setAttribute('aria-hidden', 'false');
     loadingText.textContent = msg;
     btn.disabled = true;
-    window.location.href = targetUrl;
+    if (isConnected) postToXeroDisconnect();
+    else window.location.href = targetUrl;
+  }
+
+  // Disconnect changes data, so it is a CSRF-checked POST, never a link.
+  function postToXeroDisconnect() {
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = "{{ url_for('disconnect_from_xero') }}";
+    [['entity_id', "{{ org.id }}"], ['csrf_token', "{{ csrf_token() }}"]].forEach(function (pair) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = pair[0];
+      input.value = pair[1];
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
   }
 
   function escapeHtml(s) {

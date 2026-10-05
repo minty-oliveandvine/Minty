@@ -12,6 +12,8 @@ from flask_wtf.csrf import CSRFError
 from loguru import logger
 from werkzeug.exceptions import HTTPException
 
+from blueprints.shared.safe_redirect import safe_referrer
+from pettycash.core import http_hardening
 from models.db import Entity
 from services.auth.token_service import (auto_refresh_token,
                                          ensure_valid_token, token_expired)
@@ -407,7 +409,7 @@ def init_app(app, db):
                     "You have read-only access to this entity - you can look, but not edit.",
                     "warning",
                 )
-                return redirect(request.referrer or url_for("entity.entity_list"))
+                return redirect(safe_referrer(url_for("entity.entity_list")))
         except Exception:
             logger.exception("block_readonly_superuser_writes failed")
         return None
@@ -560,7 +562,7 @@ def init_app(app, db):
         flash(
             "This form went stale while you were away. Refresh and try again?",
             "warning")
-        return redirect(request.referrer or url_for("auth.home"))
+        return redirect(safe_referrer(url_for("auth.home")))
 
     @app.after_request
     def after_request_middleware(response):
@@ -625,5 +627,6 @@ def init_app(app, db):
         return response
 
     app.after_request(drop_flashes_leaving_flask)
+    http_hardening.init_app(app)
 
     return app

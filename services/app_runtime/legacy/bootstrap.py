@@ -58,7 +58,8 @@ def _setup_logging() -> None:
         level=level,
         format=fixed_width_format,
         backtrace=True,
-        diagnose=True,
+        # Variable values in tracebacks carry tokens and secrets: development only.
+        diagnose=is_development(),
         enqueue=True,
     )
 
@@ -71,7 +72,8 @@ def _setup_logging() -> None:
         encoding="utf-8",
         format=fixed_width_format,
         backtrace=True,
-        diagnose=True,
+        # Variable values in tracebacks carry tokens and secrets: development only.
+        diagnose=is_development(),
         enqueue=True,
     )
 
@@ -187,7 +189,8 @@ def create_app():
     )
 
     # SECRET_KEY comes from config.py; Flask-WTF signs CSRF tokens with it too.
-    app.config["SESSION_COOKIE_SECURE"] = False
+    # Secure everywhere but local development, which is plain http.
+    app.config["SESSION_COOKIE_SECURE"] = not is_development()
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["WTF_CSRF_ENABLED"] = True
@@ -385,6 +388,10 @@ def create_app():
     csrf.exempt(email_check)
     csrf.exempt(email_request_code)
     csrf.exempt(email_verify_code)
+    # The invite sign-in screen asks whether the invitee still owes the Terms; the
+    # invite token rides in the POST body, never the URL. No session, read-only.
+    from blueprints.legal.routes.documents import invite_terms_status
+    csrf.exempt(invite_terms_status)
 
     # Once: Mail(app) already runs init_app, and a second call replaced the state it
     # had just registered.

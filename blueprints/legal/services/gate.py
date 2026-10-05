@@ -21,13 +21,14 @@ from __future__ import annotations
 
 from flask import session
 
+from blueprints.shared.safe_redirect import safe_internal_path
 from legal import registry
 
 # Cached answer: the version this session has been confirmed against.
 TERMS_OK_SESSION_KEY = "terms_ok"
 
 # Where to send the person once they accept. Kept in the SESSION rather than in
-# the URL — see safe_internal_path below.
+# the URL — see remember_intended_destination below.
 TERMS_NEXT_SESSION_KEY = "terms_next"
 
 
@@ -56,33 +57,10 @@ def clear_session_agreement() -> None:
     session.pop(TERMS_NEXT_SESSION_KEY, None)
 
 
-def safe_internal_path(candidate: str | None) -> str | None:
-    """Return `candidate` if it is a path inside Minty, else None.
-
-    The destination is remembered in the session rather than round-tripped
-    through the URL, so this is defence in depth rather than the only defence —
-    but the rule is worth stating explicitly, because a redirect that can be
-    steered off-site turns the acceptance screen into a phishing hop.
-
-    Rejects, matching the rule already used for the billing portal's `next`
-    (blueprints/subscription/routes/portal.py):
-
-      * anything not starting with "/"      — absolute URLs, scheme-relative
-      * "//evil.example"                    — protocol-relative, leaves the site
-      * ".."                                — no reason to hand anyone a traversal
-
-    And additionally rejects backslashes: some browsers normalise "/\\evil.com"
-    to "//evil.com", which is protocol-relative again by another spelling.
-    """
-    if not candidate:
-        return None
-    if not candidate.startswith("/"):
-        return None
-    if candidate.startswith("//"):
-        return None
-    if ".." in candidate or "\\" in candidate:
-        return None
-    return candidate
+# The destination is remembered in the session rather than round-tripped through
+# the URL, so the check below is defence in depth: a redirect that can be steered
+# off-site turns the acceptance screen into a phishing hop. The rule itself is the
+# shared one (blueprints/shared/safe_redirect.py).
 
 
 def remember_intended_destination(path: str | None) -> None:

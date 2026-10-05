@@ -1,18 +1,20 @@
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import current_app as app
 from flask import flash, jsonify, redirect, request, url_for
 from flask.typing import ResponseReturnValue
+from flask_login import login_required
 from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import safe_float
 from blueprints.xero.services.publish import (update_after_deposit_change,
                                               update_xero_deposit_after_change)
-from models.db import Entity, Report, ShareLink, db, tz
+from models.db import Entity, Report, ShareLink, db
+from services.authz import require_entity_access, require_permission
 from services.helpers.xero_bridge import get_entity_account_settings
+from services.permission_policy import Permission
 from utils import verify_share_token
 
 
@@ -117,104 +119,14 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
     return redirect(url_for("entity.entity_list"))
 
 
-@report_bp.route("/Minty_Report_<path:entity_and_date>/ending",
-                 methods=["GET"])
-def minty_report_ending(entity_and_date: str) -> ResponseReturnValue:
-    """Handle shared links with readable format: Minty_Report_EntityName_dd_mm_yyyy."""
-    from blueprints.report.services.ending import \
-        report_ending as render_report_ending
-
-    token = request.args.get("token")
-    if not token:
-        flash("This link doesn't look right to me.", "danger")
-        return redirect(url_for("entity.entity_list"))
-
-    # Verify token
-    secret_key = app.config.get("SECRET_KEY")
-    if not secret_key:
-        flash("Something's not set up right on my end. Could you let us know?", "danger")
-        return redirect(url_for("entity.entity_list"))
-
-    is_valid, params = verify_share_token(token, secret_key)
-    if not is_valid or not params:
-        flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
-        return redirect(url_for("entity.entity_list"))
-
-    # Extract params from token (use token data, not URL data for security)
-    token_entity_id = params.get("entity_id")
-    token_transaction_date = params.get("transaction_date")
-    if not token_entity_id or not token_transaction_date:
-        flash("This link doesn't look right to me.", "danger")
-        return redirect(url_for("entity.entity_list"))
-
-    # Get the entity by ID from token (for security, we verify using token
-    # data)
-    org = Entity.query.get(token_entity_id)
-    if not org:
-        flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
-        return redirect(url_for("entity.entity_list"))
-
-    # Find the report for the transaction_date from token
-    try:
-        report_date = datetime.strptime(
-            token_transaction_date, "%Y-%m-%d").date()
-        specific_report = Report.query.filter(
-            # Share-link target: SUBMITTED reports only.
-            db.or_(Report.status.is_(None), Report.status != "draft"),
-            Report.company == str(token_entity_id),
-            Report.transaction_date == report_date,
-        ).first()
-
-        if specific_report:
-            # Render ending page without login requirement
-            return render_report_ending(
-                id=specific_report.id,
-                entity_id=token_entity_id,
-                skip_auth=True)
-        else:
-            flash(f"I couldn't find a report for {token_transaction_date}.", "warning")
-            return redirect(url_for("entity.entity_list"))
-    except ValueError:
-        flash("There's something wrong with the date in this link.", "warning")
-        return redirect(url_for("entity.entity_list"))
-    return redirect(url_for("entity.entity_list"))
-
-
-@report_bp.route("/insert_xero_transaction", methods=["GET"])
-def report_insert_xero_transaction() -> Any:
-    from models.db import XeroBankTransaction
-
-    xero_bank_transaction = XeroBankTransaction(
-        id=str(uuid.uuid4()),
-        sync_report_id="11111111-1111-1111-1111-111111111111",
-        type="Spend",
-        xero_contact_id="22222222-2222-2222-2222-222222222222",
-        xero_contact_name="ABC Supplies Co.",
-        unit_amount=1500.0,
-        quantity=1.0,
-        xero_account_id="33333333-3333-3333-3333-333333333333",
-        xero_account_code="200",
-        description="Expense Report for 2025-11-14",
-        xero_bank_account_id="44444444-4444-4444-4444-444444444444",
-        xero_bank_transaction_id="55555555-5555-5555-5555-555555555555",
-        subtotal=1500.0,
-        total_tax=0.0,
-        total=1500.0,
-        status="AUTHORISED",
-        created_at=datetime.now(tz),
-    )
-
-    # Insert into database
-    db.session.add(xero_bank_transaction)
-    db.session.commit()
-    return jsonify({"status": "success",
-                    "message": "Xero transaction inserted successfully."})
-
-
-@report_bp.route(
-    "/api/check-dept-bank-yest/<string:entity_id>", methods=["GET", "POST"]
-)
+@report_bp.route("/api/check-dept-bank-yest/<string:entity_id>", methods=["POST"])
+@login_required
+@require_entity_access(entity_arg="entity_id")
+@require_permission(Permission.REPORT_EDIT_ENTITY, entity_arg="entity_id")
 def report_check_dept_bank_yest(entity_id: str) -> Any:
+    # Rewrites a report's bank deposit and pushes the change to Xero, so it needs a
+    # signed-in member allowed to edit this company's reports. It used to take GET
+    # and no login at all.
     try:
         form_data = request.get_json() or {}
         logger.info(

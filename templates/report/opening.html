@@ -598,23 +598,6 @@
 
       // Add event listeners for real-time calculation
       document.addEventListener("DOMContentLoaded", function () {
-        // Check for URL parameters to show success toast
-        const urlParams = new URLSearchParams(window.location.search);
-        const bankTransferSuccess = urlParams.get('bank_transfer_success');
-        const bankTransferId = urlParams.get('bank_transfer_id');
-
-        if (bankTransferSuccess === 'true') {
-          // Update success message with bank transfer ID if available
-          showFlashMessages(bankTransferId ? 'Your bank transfer is created!' : 'Bank Transfer Created Successfully', 'success');
-          
-          // Clean up URL parameters
-          const newUrl = window.location.pathname + '?entity_id=' + urlParams.get('entity_id');
-          if (urlParams.get('transaction_date')) {
-            newUrl += '&transaction_date=' + urlParams.get('transaction_date');
-          }
-          window.history.replaceState({}, document.title, newUrl);
-        }
-        
         // Calculate opening balance on page load to update sticky summary
         calculateOpeningBalance();
         

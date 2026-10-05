@@ -72,8 +72,10 @@ see [xero-integration.md](xero-integration.md)).
 email link `GET /invitation/accept/<token>` bounces to the onboarding app's `/auth` page
 with the token; the OTP or Xero sign-in then carries it (`invite=` / state
 `auth:invite:`), the user is created if needed, the invitation is accepted and the
-`user_entity` row written. `GET /legal/invite-terms-status` tells the sign-up screen
-whether that person still owes terms consent. Pending invites can be listed, resent and
+`user_entity` row written. `POST /legal/invite-terms-status` (the invite token in the JSON
+body, never the URL) tells the sign-up screen whether that person still owes terms consent.
+The onboarding app clears the invite from `/auth`'s address bar on arrival and hands it to
+`/auth/confirm` in sessionStorage, not the query string. Pending invites can be listed, resent and
 cancelled from the entity's Users tab.
 
 ### Sign-up with approval (legacy)
@@ -132,6 +134,41 @@ only reset at login. What "still here" means for the Users tab is section 8.
 
 `GET /logout` clears the Xero token from the session, calls `logout_user()` and stamps
 `signed_in_at = NULL` (`services/user_presence.mark_signed_out`).
+
+The session cookie is `Secure` everywhere but local development (`APP_ENV=development`,
+plain http): `SESSION_COOKIE_SECURE = not is_development()`.
+
+### 3.1 Addresses, redirects and response headers (the URL security round, 2026-10-05)
+
+- **Redirect targets.** Every redirect to a value the request supplied - `?next=` on
+  `/entity/<id>/enter`, `/handoff/minty-web` and `/xero_auth` (checked when stored AND when
+  popped after the Xero round trip), the Terms gate's remembered page, the "back where you
+  came from" Referer redirects in `hooks.py` - goes through ONE rule,
+  `blueprints/shared/safe_redirect.py`: a path on this site, no `//host`, no backslash, no
+  control character (browsers drop tab/CR/LF, so `/%09/evil.com` arrived as `//evil.com`), no
+  `..`, nothing `urlsplit` reads as a scheme or host. The Next apps share the same rule as
+  `lib/safeNext.ts` (minty-web; copied in minty-payment-request-web).
+- **Headers** (`pettycash/core/http_hardening.py`, on every response): `Referrer-Policy:
+  same-origin` (not `no-referrer`: `WTF_CSRF_SSL_STRICT` needs a same-origin Referer on HTTPS
+  form posts), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, HSTS outside
+  development, and `Cache-Control: no-store` on any page whose path holds a secret
+  (`/reset_password/<token>`, `/invitation/accept/<token>`, share links). The three Next apps
+  send the same set from `next.config.ts` (`frame-ancestors 'self'` instead of a full CSP).
+- **Logs never hold a secret from an address.** gunicorn's access log (it printed the whole
+  request line) is off in the `Procfile`; `http_hardening` logs `METHOD path status ms` with
+  the query string dropped and secret path segments shown as `[redacted]`. The Datadog
+  browser logs send `origin + path` only (`static/js/datadog-logs.js`, also scrubbing the
+  SDK's own `view.url`/`view.referrer`), and a share-link path as `/Minty_Report/[redacted]`.
+  Loguru's `diagnose` (variable values in tracebacks) is on in development only, and the Xero
+  token refresh no longer logs its Basic `Authorization` header.
+- **No state change by GET**: publishing to Xero, disconnecting Xero (a CSRF-checked form
+  POST since 2026-10-05) and the invite Terms check (`POST`, the token in the body) all refuse
+  GET.
+- **Still open** (recorded, not built): the five-minute `/auth/email/handoff?h=` token can be
+  replayed inside its window (single use needs a store - a schema change); the Xero OAuth
+  `state` carries no per-session nonce (login CSRF); `/logout` and `/leave-entity` are GETs;
+  tokens still ride in query strings between the apps (a one-time-code exchange would end
+  that - also a schema change).
 
 ## 4. The terms gate
 
@@ -199,7 +236,10 @@ place; the avatar's `href` - `GET /profile?entity_id=&from=` (`modules.py::open_
 the way in when scripts are off, and still the payments app's old links (its `/profile*`
 addresses forward here): it mints the token at the click and hands over to minty-web's My Profile
 - always, since minty-payment-request-web's profile page was deleted on 2026-10-01. Coming back is `GET /entity/<id>/enter?token=…` (re-validates the JWT and
-re-establishes the Flask session) — `billing-relogin` is the legacy "my token ran out"
+re-establishes the Flask session). Since 2026-10-05 it takes a **module** token only (`module`
+claim = `MODULE_TOKEN_CLAIM`; the onboarding token is refused) and signs in only a member of
+`<id>` (or a superuser); before that ANY token signed with the key - the onboarding one
+included - became a session for any company. `billing-relogin` is the legacy "my token ran out"
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).
 
@@ -263,6 +303,8 @@ Every service's variables are listed in [`docs/ENVIRONMENT.md`](../ENVIRONMENT.m
 write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py`,
 `tests/test_billing_relogin_handback.py` (the return from the payment module),
 `tests/test_xero_scopes.py` (connect and reconnect request the same minimal scope set),
-`tests/test_zz_no_token_logging.py`, `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
+`tests/test_zz_no_token_logging.py`, `tests/test_url_security.py` (the redirect rule, `/enter`'s
+token and membership checks, the headers, the redacted access log, GET refusals, the deleted
+routes, the download and export guards), `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
 origins), `tests/test_email_english_only.py` (every path refuses a non-English address); in the browser, `e2e/01_login.spec.ts` (login, wrong
 password, the terms modal on first sign-in) and the two Next suites' hand-off specs.

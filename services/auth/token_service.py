@@ -58,7 +58,6 @@ def refresh_access_token_for_user(user, application=None):
             "utf-8"
         )
         authorization_header = f"Basic {base64_id_secret}"
-        _log(app, "info", f"Authorization Header: {authorization_header}")
 
         url = "https://identity.xero.com/connect/token"
         payload = {
@@ -91,11 +90,6 @@ def refresh_access_token_for_user(user, application=None):
     except Exception as exc:
         _log(app, "error", f"Error refreshing access token: {str(exc)}")
         return None
-
-
-def refresh_access_token(application=None):
-    user = current_user
-    return refresh_access_token_for_user(user, application=application)
 
 
 def token_expired(current_user, application=None, tz=None):

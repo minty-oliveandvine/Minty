@@ -1260,12 +1260,3 @@ def entity_contact_create():
                 }),
             500,
         )
-
-
-"""Entity settings service handlers extracted from legacy route implementations."""
-
-
-
-
-# Restored implementation from legacy history: def
-# debug_xero_settings(entity_id):

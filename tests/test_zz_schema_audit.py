@@ -1,7 +1,7 @@
 """The four repos' models match the schema the harness built - the phase C gate, as a test.
 
 ``docs/schema/generators/audit_models.py`` diffs every SQLAlchemy model in Minty and every
-Django model in billing-backend, onboarding-backend and minty-billing-api (Part 2, 2026-09-21)
+Django model in minty-payment-request-api, minty-onboarding-api and minty-billing-api (Part 2, 2026-09-21)
 against a live database: a table the schema no longer has, a column the schema no longer has
 (which breaks every SELECT on the model), a declared type that no longer matches - and a repo
 that is not checked out beside Minty (``MINTY_REPOS_ROOT``), which used to read as 0 findings.

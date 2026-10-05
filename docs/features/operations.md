@@ -57,6 +57,14 @@ sink receives the browser's own log. Two rules the tests enforce: no token in a 
 (`tests/test_zz_no_token_logging.py`) and no error message that leaks internals to the
 user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
 
+The access log is Flask's own since 2026-10-05 (`pettycash/core/http_hardening.py`):
+`METHOD path status ms`, no query string, secret path segments `[redacted]`. gunicorn's
+`--access-logfile` is gone from the `Procfile` because it printed the whole request line,
+tokens included. `diagnose` (variable values in tracebacks) is on in development only.
+On Windows, parallel pytest workers share `services/app_runtime/legacy/app.log`, and loguru's
+5 MB rotation then fails with `PermissionError: [WinError 32]` ("Logging error in Loguru
+Handler"). It is noise, not a test failure, and does not happen on the Linux host.
+
 ## The test suites
 
 - **pytest** (`tests/`, Postgres only since C10): `pytest -n auto` — about two minutes; each

@@ -709,7 +709,7 @@
       if (isConnected) {
         actionText = "Disconnecting from Xero...";
         loadingText = "Disconnecting from Xero...";
-        targetUrl = "{{ url_for('disconnect_from_xero') }}?entity_id={{ org.id }}";
+        targetUrl = null;  // a POST, see postToXeroDisconnect
        
       } else {
         actionText = "Connecting to Xero...";
@@ -736,8 +736,9 @@
       console.log(`Target URL: ${targetUrl}`);
       
       try {
-        // Navigate to the target URL
-        PageTransition.navigateWithFade(targetUrl);
+        // Disconnect is a POST; connecting navigates to the OAuth start.
+        if (isConnected) postToXeroDisconnect();
+        else PageTransition.navigateWithFade(targetUrl);
       } catch (error) {
         console.error('Error with Xero connection action:', error);
         if (window.sendLogToDataDog) {
@@ -751,6 +752,22 @@
         showFlashMessages("I couldn't finish connecting. Mind trying again?", 'error');
       }
     }
+
+  // Disconnect changes data, so it is a CSRF-checked POST, never a link.
+  function postToXeroDisconnect() {
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = "{{ url_for('disconnect_from_xero') }}";
+    [['entity_id', "{{ org.id }}"], ['csrf_token', "{{ csrf_token() }}"]].forEach(function (pair) {
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = pair[0];
+      input.value = pair[1];
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+  }
 
     // Initialize page transition
     PageTransition.init('.main-content', 'fadeIn', 10);

@@ -25,7 +25,6 @@ from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, Sale
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission, is_superuser)
-from utils import verify_share_token
 
 
 def entity_ending_with_report(entity_id, report_id):
@@ -192,61 +191,9 @@ def convert_report_to_draft(report_id):
 def entity_ending(entity_id):
     from datetime import datetime
 
-    # Check if token is provided for public access
-    token = request.args.get("token")
-    if token:
-        # Verify token
-        secret_key = app.config.get("SECRET_KEY")
-        if not secret_key:
-            flash("Something's not set up right on my end. Could you let us know?", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        is_valid, params = verify_share_token(token, secret_key)
-        if not is_valid or not params:
-            flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        # Extract params from token (use token params, not URL params for
-        # security)
-        token_entity_id = params.get("entity_id")
-        token_transaction_date = params.get("transaction_date")
-
-        # Verify entity_id matches
-        if token_entity_id != entity_id:
-            flash("This link doesn't look right to me.", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        # Get the entity
-        Entity.query.get_or_404(entity_id)
-
-        # Find the report for the transaction_date from token
-        try:
-            report_date = datetime.strptime(
-                token_transaction_date, "%Y-%m-%d").date()
-            specific_report = Report.query.filter(
-                # Share-link target: SUBMITTED reports only, never a draft.
-                db.or_(Report.status.is_(None), Report.status != "draft"),
-                Report.company == str(entity_id),
-                Report.transaction_date == report_date).first()
-
-            if specific_report:
-                # Render ending page without login requirement
-                return report_ending(
-                    id=specific_report.id,
-                    entity_id=entity_id,
-                    skip_auth=True,
-                )
-            else:
-                flash(
-                    f"I couldn't find a report for {token_transaction_date}.",
-                    "warning",
-                )
-                return redirect(url_for("entity.entity_list"))
-        except ValueError:
-            flash("There's something wrong with the date in this link.", "warning")
-            return redirect(url_for("entity.entity_list"))
-
-    # No token provided, require login
+    # Signed-in only. The old ?token= public branch is gone (2026-10-05): it took a
+    # 30-day HMAC token that ignored the ShareLink row, so revoking a link did nothing.
+    # Public sharing is /Minty_Report/<initials>/<date>/<secret>/ alone.
     try:
         if not current_user.is_authenticated:
             flash("You'll need to sign in to view this report.", "info")
@@ -306,15 +253,15 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     # own. Record what actually arrived so a lost query string, a stripped form
     # body and an expired session can be told apart from one another.
     logger.info(
-        "ENTITY-TRACE report_ending entry - method=%s path=%s id=%s passed=%r "
-        "args=%r form=%r referrer=%r xhr=%s auth=%s",
+        # The endpoint, not the path or the Referer: on a share link both carry its secret.
+        "ENTITY-TRACE report_ending entry - method=%s endpoint=%s id=%s passed=%r "
+        "args=%r form=%r xhr=%s auth=%s",
         request.method,
-        request.path,
+        request.endpoint,
         id,
         entity_id,
         request.args.get("entity_id"),
         request.form.get("entity_id"),
-        request.referrer,
         request.headers.get("X-Requested-With"),
         getattr(current_user, "is_authenticated", False),
     )
@@ -324,11 +271,10 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         entity_id = resolve_report_entity_id(id)
     if not skip_auth and not entity_id:
         logger.error(
-            "ENTITY-TRACE report_ending BOUNCE - method=%s args=%r form_keys=%r referrer=%r",
+            "ENTITY-TRACE report_ending BOUNCE - method=%s arg_keys=%r form_keys=%r",
             request.method,
-            dict(request.args),
+            list(request.args.keys()),
             list(request.form.keys()),
-            request.referrer,
         )
         flash("I need to know which entity we're working with first!", "danger")
         return redirect(url_for("entity.entity_list"))
