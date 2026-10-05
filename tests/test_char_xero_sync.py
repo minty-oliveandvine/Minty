@@ -165,7 +165,7 @@ def test_an_expense_line_shows_the_synced_account_code_and_contact_name(shop, cl
     assert body["expense"]["account_code"] == "400"
     assert body["expense"]["contact_name"] == "ABC Supplies"
 
-    page = client.get(f"{F.co(client, entity.id)}/reports/new/expense?transaction_date={F.iso(REPORT_DATE)}")
+    page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/expense?transaction_date={F.iso(REPORT_DATE)}")
     html = page.get_data(as_text=True)
     assert 'data-expense-account-code="400"' in html
     assert 'data-expense-account-id="acc-0001"' in html

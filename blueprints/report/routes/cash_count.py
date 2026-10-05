@@ -21,8 +21,8 @@ from services.permission_policy import Permission, has_permission
 from blueprints.shared.column_types import cents
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/new/cash-count", methods=["GET", "POST"])
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/cash-count", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/cash-count", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:id>/cash-count", methods=["GET"])
 @report_bp.route("/report/cash_count", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/cash_count", methods=["GET"])
 @login_required

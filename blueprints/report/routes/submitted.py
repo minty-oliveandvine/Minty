@@ -21,8 +21,8 @@ from services.permission_policy import (Permission, can_view_report,
                                         has_permission)
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/new/submitted", methods=["GET"])
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/submitted", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/submitted", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:id>/submitted", methods=["GET"])
 @report_bp.route("/report/submitted", methods=["GET"])
 @report_bp.route("/report/<string:id>/submitted", methods=["GET"])
 @login_required

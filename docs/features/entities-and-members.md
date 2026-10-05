@@ -28,7 +28,7 @@ in `blueprints/entity/services/entity_list.py::build_entity_list`, for two reade
 - **the Jinja page** (`templates/entity/index.html`), everywhere else.
 
 Opening one
-(`GET /entity/<id>`) is the **dashboard**: today's report state, the module cards and — when
+(`GET /entity/<co>/petty-cash`) is the **dashboard**: today's report state, the module cards and — when
 subscriptions are on — the subscription notices ([modules-and-subscriptions.md](modules-and-subscriptions.md)).
 A person with no company is sent to create one.
 

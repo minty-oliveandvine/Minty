@@ -116,7 +116,7 @@ const BFCache = (function(){
   }
 
   // The draft totals need the company and the day. Since 2026-10-05 the company is in the
-  // page's path (/entity/<shortid>/<name>/reports/...), not its query, so it is taken from the
+  // page's path (/entity/<shortid>/<name>/petty-cash/reports/...), not its query, so it is taken from the
   // form's hidden entity_id field and added to whatever query the page has.
   function draftTotalsUrl(){
     var params = new URLSearchParams(location.search);

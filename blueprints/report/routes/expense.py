@@ -80,8 +80,8 @@ def _trigger_xero_sync_background(entity_id, org):
         )
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/new/expense", methods=["GET", "POST"])
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/expense", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/expense", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:id>/expense", methods=["GET"])
 @report_bp.route("/report/expense", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/expense", methods=["GET"])
 @login_required

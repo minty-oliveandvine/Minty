@@ -191,10 +191,10 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
 
   | Page | Address |
   |---|---|
-  | Dashboard | `/entity/<co>` |
-  | Report history, CSV | `/entity/<co>/reports`, `/reports/download-csv` |
-  | Wizard step | `/entity/<co>/reports/new/<step>`, `/entity/<co>/reports/<report_id>/<step>` (`opening`, `sale`, `expense`, `deposit`, `cash-count`, `ending`, `submitted`) |
-  | Resume; summaries | `/entity/<co>/reports/resume`; `/reports/summary` (by day), `/reports/<report_id>/summary` |
+  | Dashboard | `/entity/<co>/petty-cash` (the bare `/entity/<co>` redirects there) |
+  | Report history, CSV | `/entity/<co>/petty-cash/reports`, `/petty-cash/reports/download-csv` |
+  | Wizard step | `/entity/<co>/petty-cash/reports/new/<step>`, `/entity/<co>/petty-cash/reports/<report_id>/<step>` (`opening`, `sale`, `expense`, `deposit`, `cash-count`, `ending`, `submitted`) |
+  | Resume; summaries | `/entity/<co>/petty-cash/reports/resume`; `/petty-cash/reports/summary` (by day), `/petty-cash/reports/<report_id>/summary` |
   | Settings tabs | `/entity/<co>/settings/users`, `/integration`, `/petty-cash`, `/modules` (minty-web), `/payment-request` (the payments app) |
   | Hand-overs | `/entity/<co>/enter`, `/payment-request`, `/modules`, `/xero-not-connected` |
 
@@ -207,7 +207,10 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
 - **Old addresses keep working** (`blueprints/shared/legacy_addresses.py`): each pre-2026-10-05 rule
   308s straight to the readable address (308 keeps a form's method and body). Old `/report/...`
   wizard GETs by a signed-in person move the same way (`report/routes/company_addresses.py`), which
-  also refuses (404, logged) a report shown under another company's address. JSON APIs, OAuth,
+  also refuses (404, logged) a report shown under another company's address. Petty Cash moved
+  under its module name the same day (the user's call, matching `/payment-request`): the bare
+  `/entity/<co>` and `/entity/<co>/reports[/...]` 308 to `/entity/<co>/petty-cash[/reports/...]`
+  (GET and POST, query kept). JSON APIs, OAuth,
   `/profile` and `/handoff/minty-web` keep the uuid.
 - Tests: `tests/test_entity_ref.py`; `F.co(app_or_client, entity_id)` gives a company's prefix.
 

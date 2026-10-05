@@ -443,7 +443,7 @@ def test_unconsented_user_is_sent_to_the_terms_page(company, client):
     owner, entity, superuser = company
     F.login(client, owner, accepted_terms=False)
 
-    resp = client.get(f"{F.co(client, entity.id)}")
+    resp = client.get(f"{F.co(client, entity.id)}/petty-cash")
 
     # HTML pages bounce to the entity list, which is where the terms modal is shown
     assert resp.status_code == 302 and resp.headers["Location"].endswith("/entity"), resp.headers.get("Location")
@@ -463,7 +463,7 @@ def test_accepting_the_terms_opens_the_app(company, client, app):
                                               "terms_version": registry.current_version(registry.TERMS)})
 
     assert resp.status_code == 200, resp.data[:300]
-    assert client.get(f"{F.co(client, entity.id)}").status_code == 200
+    assert client.get(f"{F.co(client, entity.id)}/petty-cash").status_code == 200
 
 
 def test_terms_must_be_ticked(company, client):
@@ -474,7 +474,7 @@ def test_terms_must_be_ticked(company, client):
     resp = client.post("/legal/accept", json={"accepted": False,
                                               "terms_version": registry.current_version(registry.TERMS)})
     assert resp.status_code == 400
-    assert client.get(f"{F.co(client, entity.id)}").status_code == 302
+    assert client.get(f"{F.co(client, entity.id)}/petty-cash").status_code == 302
 
 
 def test_consent_is_recorded_once_per_version(company, client, app, db):

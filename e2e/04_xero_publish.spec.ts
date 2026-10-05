@@ -20,13 +20,13 @@ test.describe('publish to Xero', () => {
     const entityId = creds.entityId;
     // the report the wizard spec posted: "View Report" on the history page opens its ending
     // summary, whose URL carries the report id
-    await page.goto(`/entity/${entityId}/reports`);
+    await page.goto(`/entity/${entityId}/petty-cash/reports`);
     await page.getByRole('link', { name: /view report/i }).first().click();
-    await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/reports\/([0-9a-f-]{36})\/summary/);
-    const reportId = page.url().match(/\/entity\/[0-9a-f]{8}\/[^/]+\/reports\/([0-9a-f-]{36})\/summary/)![1];
+    await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/);
+    const reportId = page.url().match(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/)![1];
 
     // the submitted page carries the Publish button
-    await page.goto(`/entity/${entityId}/reports/${reportId}/submitted`);
+    await page.goto(`/entity/${entityId}/petty-cash/reports/${reportId}/submitted`);
     // the button's accessible name starts with its logo's alt text; Republish is a different button
     const publish = page.getByRole('button', { name: /(^|\s)publish to xero$/i });
     await expect(publish).toBeVisible();
@@ -59,7 +59,7 @@ test.describe('publish to Xero', () => {
       .toBe('published');
 
     // and the detail page says so
-    await page.goto(`/entity/${entityId}/reports/${reportId}/submitted`);
+    await page.goto(`/entity/${entityId}/petty-cash/reports/${reportId}/submitted`);
     await expect(page.locator('#republishButton')).toBeVisible();
   });
 });

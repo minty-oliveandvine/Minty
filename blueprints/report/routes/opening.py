@@ -71,8 +71,8 @@ def _first_report_date_error(selected_date, today, entity_id):
     return None
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/new/opening", methods=["GET", "POST"])
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/opening", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/opening", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:id>/opening", methods=["GET"])
 @report_bp.route("/report/opening", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/opening", methods=["GET"])
 @login_required

@@ -55,3 +55,26 @@ def _redirect_view(target: str, arg_map: dict[str, str]):
 
 for _rule, _name, _target, _args, _methods in LEGACY_ADDRESSES:
     legacy_bp.add_url_rule(_rule, endpoint=_name, view_func=_redirect_view(_target, _args), methods=_methods)
+
+
+# Petty Cash under its module name (2026-10-05, the user's call - as the payments app is under
+# /payment-request): the dashboard moved from /entity/<co> to /entity/<co>/petty-cash and every
+# report page from /entity/<co>/reports/... to /entity/<co>/petty-cash/reports/... The bare
+# company address stays a way in to the dashboard.
+legacy_bp.add_url_rule("/entity/<entity:id>", endpoint="dashboard",
+                       view_func=_redirect_view("entity.report_dashboard", {"id": "id"}), methods=["GET"])
+
+
+def _reports_moved(entity_id, rest=""):
+    from blueprints.shared.entity_ref import canonical_ref
+
+    location = f"/entity/{canonical_ref(entity_id)}/petty-cash/reports" + (f"/{rest}" if rest else "")
+    if request.query_string:
+        location += "?" + request.query_string.decode("latin-1")
+    return redirect(location, code=308)
+
+
+legacy_bp.add_url_rule("/entity/<entity:entity_id>/reports", endpoint="reports",
+                       view_func=_reports_moved, methods=ALL_METHODS)
+legacy_bp.add_url_rule("/entity/<entity:entity_id>/reports/<path:rest>", endpoint="reports_page",
+                       view_func=_reports_moved, methods=ALL_METHODS)

@@ -77,7 +77,7 @@ def expense_page_files(client, entity) -> dict[str, list]:
     """expense id -> files list, as the expense page embeds it per line."""
     import re
 
-    html = client.get(f"{F.co(client, entity.id)}/reports/new/expense?transaction_date={F.iso(DAY)}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/expense?transaction_date={F.iso(DAY)}").get_data(as_text=True)
     out = {}
     for m in re.finditer(r'data-expense-id="([^"]+)"(.*?)data-expense-files="([^"]*)"', html, re.S):
         out[m.group(1)] = json.loads(m.group(3).replace("&quot;", '"').replace("&#34;", '"'))
