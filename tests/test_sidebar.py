@@ -99,12 +99,12 @@ def _is_current(html: str, label: str) -> bool:
 
 def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people):
     shop = people["both"].id
-    html = _menu(app, f"{F.co(app, shop)}", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}/petty-cash", user_id=people["olive"].id, org_id=shop)
 
     assert _link(html, "Select Entity") == "/entity"
     assert _link(html, "Manage subscriptions") == "/handoff/minty-web?next=/subscription"
-    assert _link(html, "Dashboard") == f"{F.co(app, shop)}"
-    assert _link(html, "Reports") == f"{F.co(app, shop)}/reports"
+    assert _link(html, "Dashboard") == f"{F.co(app, shop)}/petty-cash"
+    assert _link(html, "Reports") == f"{F.co(app, shop)}/petty-cash/reports"
     assert _link(html, "Bills") == f"{F.co(app, shop)}/payment-request"
     # this app's own settings - Petty Cash's (Settings opens the settings of the app it is in)
     assert _link(html, "Settings") == f"{F.co(app, shop)}/settings/petty-cash"
@@ -126,7 +126,7 @@ def test_the_person_is_at_the_top_and_opens_my_profile(app, people):
 
 def test_a_module_that_is_off_is_drawn_hidden_for_the_module_page_to_show(app, people):
     shop = people["petty"].id
-    html = _menu(app, f"{F.co(app, shop)}", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}/petty-cash", user_id=people["olive"].id, org_id=shop)
 
     assert 'data-module-nav="PETTY_CASH">' in html
     assert 'data-module-nav="PAYMENT_REQUEST" style="display:none">' in html

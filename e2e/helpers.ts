@@ -109,8 +109,8 @@ export async function login(page: Page, creds: Credentials): Promise<void> {
 export async function openEntity(page: Page, creds: Credentials): Promise<void> {
   await page.goto(`/entity/${creds.entityId}`);
   await failIfTermsOwed(page, creds);
-  // the company's own address since 2026-10-05: /entity/<shortid>/<name>
-  await expect(page).toHaveURL(new RegExp(`/entity/${creds.entityId.slice(0, 8)}/[^/?]+`));
+  // the company's own address since 2026-10-05: /entity/<shortid>/<name>/petty-cash
+  await expect(page).toHaveURL(new RegExp(`/entity/${creds.entityId.slice(0, 8)}/[^/?]+/petty-cash$`));
 }
 
 /** Yesterday in Hong Kong, the latest date the wizard accepts for a brand-new first report. */

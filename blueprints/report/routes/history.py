@@ -6,11 +6,12 @@ from flask_login import current_user, login_required
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.report import report_bp
 from blueprints.report.services.history_query import get_entity_report_history
+from models.db import Entity
 from services.authz import require_entity_access
 from services.permission_policy import Permission, has_permission
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="entity_id")
 def entity_report_history(entity_id):
@@ -63,6 +64,7 @@ def entity_report_history(entity_id):
         "report_history/report_history.html",
         report_history=report_data["report_history"],
         entity_id=entity_id,
+        entity_name=Entity.query.with_entities(Entity.name).filter(Entity.id == entity_id).scalar() or "",
         latest_transaction_date=report_data["latest_transaction_date"],
         latest_report_id=report_data["latest_report_id"],
         today_date=report_data["today_date"],

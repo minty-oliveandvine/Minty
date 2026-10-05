@@ -48,8 +48,8 @@ test.describe('login and terms', () => {
     const creds = requireCredentials();
     await login(page, creds);
     await page.goto(`/entity/${creds.entityId}`);
-    // the full id moves to the company's own address, /entity/<shortid>/<name> (2026-10-05)
-    await expect(page).toHaveURL(new RegExp(`/entity/${creds.entityId.slice(0, 8)}/[^/?]+$`));
+    // the full id moves to the company's own address, /entity/<shortid>/<name>/petty-cash (2026-10-05)
+    await expect(page).toHaveURL(new RegExp(`/entity/${creds.entityId.slice(0, 8)}/[^/?]+/petty-cash$`));
     // the dashboard: initials in the header, the wizard entry point, the quick actions
     await expect(page.getByRole('button', { name: /start new report/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /view history/i })).toBeVisible();

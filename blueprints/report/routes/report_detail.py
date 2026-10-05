@@ -665,7 +665,7 @@ def download_report(id):
         )
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/resume", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/resume", methods=["GET"])
 @report_bp.route("/report/resume", methods=["GET"])
 @login_required
 def resume_report(entity_id=None):

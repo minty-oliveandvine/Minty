@@ -29,9 +29,9 @@ test.describe.serial('report wizard', () => {
   });
 
   // The company's own address since 2026-10-05: the full id 308s to /entity/<shortid>/<name>/...
-  const stepUrl = (step: string) => `/entity/${entityId}/reports/new/${step}?transaction_date=${day}`;
+  const stepUrl = (step: string) => `/entity/${entityId}/petty-cash/reports/new/${step}?transaction_date=${day}`;
   /** A wizard step under the company's address, before (`new`) or after the report has an id. */
-  const atStep = (step: string) => new RegExp(`/entity/[0-9a-f]{8}/[^/]+/reports/(new|[0-9a-f-]{36})/${step}(\\?|$)`);
+  const atStep = (step: string) => new RegExp(`/entity/[0-9a-f]{8}/[^/]+/petty-cash/reports/(new|[0-9a-f-]{36})/${step}(\\?|$)`);
   const next = (page: Page) => page.getByRole('button', { name: /save.*next|next|continue/i }).first();
 
   test('opening: cash addition is accepted and the opening balance updates live', async ({ page }) => {
@@ -166,7 +166,7 @@ test.describe.serial('report wizard', () => {
   });
 
   test('history and detail show the posted report with the same figures', async ({ page }) => {
-    await page.goto(`/entity/${entityId}/reports`);
+    await page.goto(`/entity/${entityId}/petty-cash/reports`);
     const [y, m, d] = day.split('-').map(Number);
     const monthName = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][m - 1];
     const results = page.locator('body');
@@ -178,7 +178,7 @@ test.describe.serial('report wizard', () => {
     await expect(results).toContainText(/by Tess/);
     // "View Report" opens the ending summary of the posted report
     await page.getByRole('link', { name: /view report/i }).first().click();
-    await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/reports\/([0-9a-f-]{36})\/summary/);
+    await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/);
     const detail = page.locator('body');
     // the summary: total sales, the three-way split, total expenses, closing cash balance
     for (const amount of [CASH + VISA + ALIPAY + FOODPANDA, VISA + ALIPAY, FOODPANDA, CASH, EXPENSE, CLOSING]) {

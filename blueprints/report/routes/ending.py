@@ -5,8 +5,8 @@ from flask_login import login_required
 from blueprints.report import report_bp
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/new/ending", methods=["GET", "POST"])
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/ending", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/ending", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:id>/ending", methods=["GET"])
 @report_bp.route("/report/<string:id>/ending", methods=["GET"])
 @report_bp.route("/report/ending", methods=["GET", "POST"])
 @login_required
@@ -18,7 +18,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     return _impl(id=id, entity_id=entity_id, skip_auth=skip_auth)
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:report_id>/summary", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:report_id>/summary", methods=["GET"])
 @login_required
 def entity_ending_with_report(entity_id, report_id):
     from ..services.ending import entity_ending_with_report as _impl
@@ -34,7 +34,7 @@ def convert_report_to_draft(report_id):
     return _impl(report_id)
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/summary", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/summary", methods=["GET"])
 def entity_ending(entity_id):
     from ..services.ending import entity_ending as _impl
 

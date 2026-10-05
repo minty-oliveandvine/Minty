@@ -221,7 +221,7 @@ def test_back_leads_where_the_person_came_from_falling_back_to_the_dashboard(sho
     html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
     assert re.search(
-        rf'<a href="{F.co(client, entity.id)}" class="pcs-back" data-back-link>\s*<span[^>]*>chevron_left</span>Back', html
+        rf'<a href="{F.co(client, entity.id)}/petty-cash" class="pcs-back" data-back-link>\s*<span[^>]*>chevron_left</span>Back', html
     )
     assert "js/back_link.js" in html
     assert f'href="{F.co(client, entity.id)}/settings/users" class="pcs-pill">Users</a>' in html

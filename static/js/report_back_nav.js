@@ -11,7 +11,7 @@
   }
 
   // A report page: the old /report/... addresses, or anything BELOW a company's reports
-  // (/entity/<shortid>/<name>/reports/<id or new>/<step>, .../reports/<id>/summary). Keyed on
+  // (/entity/<shortid>/<name>/petty-cash/reports/<id or new>/<step>, .../reports/<id>/summary). Keyed on
   // what follows "reports" - a company named "Sale" must not make its dashboard look like one.
   function isReportPage(path) {
     var s = segs(path);

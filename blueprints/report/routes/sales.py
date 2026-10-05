@@ -63,8 +63,8 @@ def get_unique_sale_info_for_entity(entity_id):
     )
 
 
-@report_bp.route("/entity/<entity:entity_id>/reports/new/sale", methods=["GET", "POST"])
-@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/sale", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/sale", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/<string:id>/sale", methods=["GET"])
 @report_bp.route("/report/sale", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/sale", methods=["GET"])
 @login_required

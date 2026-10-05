@@ -118,7 +118,7 @@ test.describe('entity settings', () => {
 
   test('history CSV lists the posted day as movements', async ({ page }) => {
     const day = reportDate(-1);
-    const res = await page.request.get(`/entity/${entityId}/reports/download-csv?start_date=${day}&end_date=${day}`);
+    const res = await page.request.get(`/entity/${entityId}/petty-cash/reports/download-csv?start_date=${day}&end_date=${day}`);
     expect(res.status()).toBe(200);
     const text = await res.text();
     const rows = text.split(/\r?\n/).filter((r) => r.trim());

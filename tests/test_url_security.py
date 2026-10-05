@@ -113,7 +113,7 @@ def test_enter_never_redirects_off_site(shop, client):
         assert resp.status_code == 302
         location = resp.headers["Location"]
         assert "evil.com" not in location, (evil, location)
-        assert location.endswith(f"{F.co(client, entity.id)}"), location
+        assert location.endswith(f"{F.co(client, entity.id)}/petty-cash"), location
 
 
 def test_handoff_never_forwards_an_off_site_next(shop, client, monkeypatch):
@@ -149,7 +149,7 @@ def test_enter_logs_a_member_in_with_a_module_token(shop, client, app):
     token = _module_token(app, owner.id, entity.id)
     resp = client.get(f"{F.co(client, entity.id)}/enter?token={token}")
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"{F.co(client, entity.id)}")
+    assert resp.headers["Location"].endswith(f"{F.co(client, entity.id)}/petty-cash")
     assert _signed_in(client)
 
 
@@ -246,7 +246,7 @@ def test_deleted_routes_are_gone(client, path):
 
 def test_old_share_token_no_longer_opens_a_report(shop, client):
     _, entity, _ = shop
-    resp = client.get(f"{F.co(client, entity.id)}/reports/summary?token=anything")
+    resp = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/summary?token=anything")
     assert resp.status_code == 302
     assert "/login" in resp.headers["Location"]
 
