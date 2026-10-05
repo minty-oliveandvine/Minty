@@ -67,9 +67,9 @@
 
       <div class="flex min-h-10 min-w-0 flex-1 items-center sm:min-h-0">
         <div class="flex min-w-0 flex-1 flex-nowrap items-center gap-2 sm:gap-3">
-          <a href="{{ bill_settings_url }}" class="inline-flex shrink-0 items-center gap-0.5 text-sm font-medium text-[#656565] transition-colors hover:text-[#54d3da] sm:text-base">
+          <a data-back-link href="{{ company_home_url(org.id) }}" class="inline-flex shrink-0 items-center gap-0.5 text-sm font-medium text-[#656565] transition-colors hover:text-[#54d3da] sm:text-base">
             <span class="material-symbols-outlined leading-none" style="font-size:22px" aria-hidden="true">chevron_left</span>
-            Payments
+            Back
           </a>
           <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <span class="min-w-0 cursor-default truncate text-base font-semibold text-black sm:text-lg">Settings</span>
@@ -87,7 +87,7 @@
         {% set fn = (current_user.first_name or '')[:1] %}
         {% set ln = (current_user.last_name or '')[:1] %}
         {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
-        <a href="{{ bills_app_profile_url(org.id, from_bills=True) }}"
+        <a href="{{ bills_app_profile_url(org.id) }}"
            class="relative inline-flex shrink-0 cursor-pointer items-center pl-0.5 sm:pl-2 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54d3da]"
            data-sidebar-open="profile" aria-label="My Profile"
            title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
@@ -115,13 +115,13 @@
           Users
         </button>
 
-        <a href="{{ url_for('entity_settings', entity_id=org.id) }}?from=bills"
+        <a href="{{ url_for('entity_settings', entity_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Entity & Integration
         </a>
 
         {% if is_petty_cash_enabled(org.id) %}
-        <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}?from=bills"
+        <a href="{{ url_for('entity_settings_entity', org_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Petty Cash Settings
         </a>
@@ -135,7 +135,7 @@
         {% endif %}
 
         <!-- Module pill -->
-        <a href="{{ url_for('entity_settings_module', org_id=org.id) }}?from=bills"
+        <a href="{{ url_for('entity_settings_module', org_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Module
         </a>
@@ -149,29 +149,22 @@
     <!-- Pills + page content share one 1024px column -->
     <div class="relative mx-auto w-full max-w-[1024px] px-4 pb-28 pt-3 sm:px-6 sm:pt-4">
 
-      {% with bills_ui=true %}
       {% include 'entity/settings_users_modals.html' %}
-      {% endwith %}
 
-      {% with bills_ui=true %}
       {% include 'entity/settings_users_main_block.html' %}
-      {% endwith %}
 
     </div>
 
   </main>
 
-  {% with sidebar_from_bills=True %}
   {% include 'components/minty_sidebar.html' %}
-  {% endwith %}
 
 </div>
 
 <script>
 window.CURRENT_USER_ID = "{{ current_user.id }}";
-{% with bills_ui=true %}
 {% include 'entity/settings_users_scripts.html' %}
-{% endwith %}
 </script>
+<script src="{{ url_for('static', filename='js/back_link.js') }}"></script>
 </body>
 </html>

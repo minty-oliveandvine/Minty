@@ -23,10 +23,11 @@ already). Since 2026-10-01 it is ONE template for every visit, built from the ol
 - **Content** = Payment Settings' card (`AccountCodeSettings.tsx`), one per section, each
   collapsible: Country & currency · Xero account mapping · Electronic · Delivery · Petty Cash
   Account Code. One full-width **Save Changes** saves them all.
-- **`?from=bills`** (the Payment Request app sent the person here) changes only three things:
-  the way back ("‹ Payments" → `/entity/<id>/bills`, else "‹ Reports" → `/entity/<id>`), the
-  tabs' links (they keep `?from=bills`) and the sidebar's Settings (the payments app's). The
-  form posts `_from=bills` so the redirect after a save keeps it.
+- **"‹ Back"** returns to the page the person came from, whichever app
+  (`static/js/back_link.js`; its `href`, `company_home_url`, is the dashboard - or the payments
+  app when Petty Cash is off - for a new tab). The `?from=bills` flag, which used to pick
+  "‹ Payments" or "‹ Reports", the tabs' links and the sidebar's Settings, went on 2026-10-05; an
+  old link that still carries it opens the same page.
 - **Look**: plain CSS in `static/css/settings_page.css` under `#pc-settings`, with Tailwind v4's
   values written out (the page loads Tailwind v3 from a CDN only for the view-only notice and the
   classes the mapping script toggles; the shared toast styles itself).

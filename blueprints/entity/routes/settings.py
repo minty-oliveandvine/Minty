@@ -107,12 +107,11 @@ def _country_currency_choices(org):
     return country_code, currencies, selected_country, selected_currency
 
 
-def _redirect_xero_mapping(entity_id: str, _from: str | None, *, return_view: str):
+def _redirect_xero_mapping(entity_id: str, *, return_view: str):
     """Redirect after Xero mapping POST; return_view selects integration vs petty cash page."""
-    bills_kw = {"from": _from} if _from == "bills" else {}
     if return_view == "entity_settings_entity":
-        return redirect(url_for("entity_settings_entity", org_id=entity_id, **bills_kw))
-    return redirect(url_for("entity_settings", entity_id=entity_id, **bills_kw))
+        return redirect(url_for("entity_settings_entity", org_id=entity_id))
+    return redirect(url_for("entity_settings", entity_id=entity_id))
 
 
 def _xero_disconnected(org) -> bool:
@@ -164,7 +163,7 @@ def _flash_if_xero_disconnected(org) -> bool:
     return True
 
 
-def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None):
+def _integration_minimal_entity_settings_post(entity_id: str):
     """Save country/currency and (admin only) the entity name from the classic
     Xero integration page. No Xero mapping fields are handled here."""
     try:
@@ -182,20 +181,17 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             if name_form != (entity.name or ""):
                 if not name_form:
                     flash("I need a name for this entity before I can save it.", "danger")
-                    return _redirect_xero_mapping(
-                        entity_id, _from, return_view="entity_settings"
+                    return _redirect_xero_mapping(entity_id, return_view="entity_settings"
                     )
                 if len(name_form) > 100:
                     flash("That name goes on a bit! Please keep it to 100 characters or fewer.", "danger")
-                    return _redirect_xero_mapping(
-                        entity_id, _from, return_view="entity_settings"
+                    return _redirect_xero_mapping(entity_id, return_view="entity_settings"
                     )
                 if Entity.query.filter(
                     Entity.name == name_form, Entity.id != entity_id
                 ).first():
                     flash("Oh, someone got there first! Do you have another name in mind?", "danger")
-                    return _redirect_xero_mapping(
-                        entity_id, _from, return_view="entity_settings"
+                    return _redirect_xero_mapping(entity_id, return_view="entity_settings"
                     )
                 entity.name = name_form
 
@@ -225,7 +221,7 @@ def _integration_minimal_entity_settings_post(entity_id: str, _from: str | None)
             "I couldn't save your settings. Could you check your entries and try again?",
             "danger",
         )
-    return _redirect_xero_mapping(entity_id, _from, return_view="entity_settings")
+    return _redirect_xero_mapping(entity_id, return_view="entity_settings")
 @entity_bp.route("/entity/<string:entity_id>/settings/xero",
                  methods=["GET", "POST"])
 @login_required
@@ -254,7 +250,6 @@ def entity_settings(entity_id=None):
         logger.warning(f"Entity settings: status sync skipped for {entity_id}")
 
     if request.method == "POST":
-        _from = request.form.get("_from") or request.args.get("from")
         if request.form.get("_integration_minimal_save") == "1":
             if not has_permission(
                 current_user, Permission.XERO_SETTINGS_UPDATE, entity_id
@@ -263,7 +258,7 @@ def entity_settings(entity_id=None):
                     "You do not have permission to update Xero settings.",
                     entity_id=entity_id,
                 )
-            return _integration_minimal_entity_settings_post(entity_id, _from)
+            return _integration_minimal_entity_settings_post(entity_id)
 
         if not has_permission(current_user, Permission.XERO_SETTINGS_UPDATE, entity_id):
             return permission_denied(
@@ -284,7 +279,7 @@ def entity_settings(entity_id=None):
             flash(
                 "Please enter all default settings for this entity", "danger",
             )
-            return _redirect_xero_mapping(entity_id, _from, return_view=return_view)
+            return _redirect_xero_mapping(entity_id, return_view=return_view)
     try:
         org = Entity.query.get_or_404(entity_id)
 
@@ -444,43 +439,6 @@ def entity_settings(entity_id=None):
                         f"Failed to find owner user for entity {entity_id}: {str(e)}"
                     )
 
-        integration_bills_shell = request.args.get("from") == "bills"
-        if integration_bills_shell:
-            bank_accounts = []
-            cashsale_account = []
-            owners_account = []
-            discrepancy_account = []
-            contacts = []
-            main_bank_account_default = None
-            deposit_bank_account_default = None
-            cashsale_account_default = None
-            cashsale_contact_default = None
-            owners_account_default = None
-            owners_contact_default = None
-            discrepancy_bank_default = None
-            discrepancy_account_default = None
-            discrepancy_contact_default = None
-        else:
-            # The same lists and saved choices Petty Cash Settings renders (DB only; the
-            # background sync above keeps account_info / xero_contact_sync current).
-            from blueprints.entity.services.xero_mapping_form_context import                 build_xero_mapping_form_context
-
-            _mapping = build_xero_mapping_form_context(entity_id, org, token_valid)
-            bank_accounts = _mapping["bank_accounts"]
-            cashsale_account = _mapping["cashsale_account"]
-            owners_account = _mapping["owners_account"]
-            discrepancy_account = _mapping["discrepancy_account"]
-            contacts = _mapping["contacts"]
-            main_bank_account_default = _mapping["main_bank_account_default"]
-            deposit_bank_account_default = _mapping["deposit_bank_account_default"]
-            cashsale_account_default = _mapping["cashsale_account_default"]
-            cashsale_contact_default = _mapping["cashsale_contact_default"]
-            owners_account_default = _mapping["owners_account_default"]
-            owners_contact_default = _mapping["owners_contact_default"]
-            discrepancy_bank_default = _mapping["discrepancy_bank_default"]
-            discrepancy_account_default = _mapping["discrepancy_account_default"]
-            discrepancy_contact_default = _mapping["discrepancy_contact_default"]
-
         if entity_id:
             logger.info(
                 f"Fetched current entity settings for entity ID: {entity_id}")
@@ -511,23 +469,12 @@ def entity_settings(entity_id=None):
         current_user, Permission.ENTITY_RENAME, entity_id
     )
 
-    from_param = request.args.get("from")
-    template = (
-        "entity/settings_xero_bills_ui.html"
-        if from_param == "bills"
-        else "entity/settings.html"
-    )
-    if from_param == "bills":
-        logger.info(
-            "entity_settings: rendering bills UI template for entity_id=%s",
-            entity_id,
-        )
-
+    # One page for every visit, whichever app the person came from (the classic
+    # settings.html and its Xero mapping lists went 2026-10-05; the mapping lives on
+    # Petty Cash Settings).
     return render_template(
-        template,
-        bill_settings_url=billing_settings_app_url(
-            entity_id, org, current_user.id, from_bills=from_param == "bills"
-        ),
+        "entity/settings_xero_bills_ui.html",
+        bill_settings_url=billing_settings_app_url(entity_id, org, current_user.id),
         roles=roles,
         can_edit_xero_settings=can_edit_xero_settings,
         can_rename_entity=can_rename_entity,
@@ -535,21 +482,7 @@ def entity_settings(entity_id=None):
         currencies=currencies,
         selected_country=selected_country,
         selected_currency=selected_currency,
-        cashsale_account_default=cashsale_account_default,
-        cashsale_contact_default=cashsale_contact_default,
-        deposit_bank_account_default=deposit_bank_account_default,
-        discrepancy_bank_default=discrepancy_bank_default,
-        discrepancy_account_default=discrepancy_account_default,
-        discrepancy_contact_default=discrepancy_contact_default,
-        main_bank_account_default=main_bank_account_default,
-        owners_account_default=owners_account_default,
-        owners_contact_default=owners_contact_default,
-        cashsale_account=cashsale_account,
-        owners_account=owners_account,
-        discrepancy_account=discrepancy_account,
         org=org,
-        bank_accounts=bank_accounts,
-        contacts=contacts,
         last_connected_at=(
             org.last_connected_at if org.last_connected_at else org.created_at
         ),
@@ -631,7 +564,6 @@ def entity_settings_users_presence(org_id):
     message="You do not have permission to view all users for this entity.",
 )
 def entity_settings_users(org_id):
-    from_origin = request.args.get("from")
     try:
         # Get the entity by ID
         org = Entity.query.get_or_404(org_id)
@@ -694,32 +626,17 @@ def entity_settings_users(org_id):
         ]
         roles = entity_user_role_options
 
-        bills_settings_query = "?from=bills" if from_origin == "bills" else ""
-
-        template = (
-            "entity/settings_users_bills_ui.html"
-            if from_origin == "bills"
-            else "entity/settings_users.html"
-        )
-        if from_origin == "bills":
-            logger.info(
-                "entity_settings_users: rendering bills UI template for org_id=%s",
-                org_id,
-            )
-
+        # One page for every visit (the classic settings_users.html went 2026-10-05).
         return render_template(
-            template,
+            "entity/settings_users_bills_ui.html",
             org=org,
-            bill_settings_url=billing_settings_app_url(
-                org_id, org, current_user.id, from_bills=from_origin == "bills"
-            ),
+            bill_settings_url=billing_settings_app_url(org_id, org, current_user.id),
             users=users,
             signed_in=signed_in,
             entity_acronym=entity_acronym,
             subscriber_id=subscriber_id,
             roles=roles,
             entity_user_role_options=entity_user_role_options,
-            bills_settings_query=bills_settings_query,
             # THREE flags, because this page offers three actions behind three different
             # permissions — and it used to gate all of them on one.
             #
@@ -796,7 +713,6 @@ def entity_settings_entity(org_id):
                     "You do not have permission to delete CoA settings.",
                     entity_id=org_id,
                 )
-            _from = request.form.get("_from") or request.args.get("from")
             # At least one account code stays ticked: a save with none switches every code off
             # (entity_account_xero.is_active below), and a petty cash expense can only use the
             # codes ticked here. Refused
@@ -811,8 +727,7 @@ def entity_settings_entity(org_id):
                 }
                 if not posted & saveable:
                     flash("Pick at least one account code.", "danger")
-                    return _redirect_xero_mapping(
-                        org_id, _from, return_view="entity_settings_entity"
+                    return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                     )
             # The first mapping save sends the company to its dashboard (as it always has),
             # but only AFTER the ticks and country/currency below are saved.
@@ -854,8 +769,7 @@ def entity_settings_entity(org_id):
                         "I couldn't save your account code ticks. Mind trying again?",
                         "danger",
                     )
-                    return _redirect_xero_mapping(
-                        org_id, _from, return_view="entity_settings_entity"
+                    return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                     )
 
                 flash("Entity settings saved!", "success")
@@ -865,8 +779,7 @@ def entity_settings_entity(org_id):
                     return redirect(
                         url_for("entity.report_dashboard", id=org_id, success="true")
                     )
-                return _redirect_xero_mapping(
-                    org_id, _from, return_view="entity_settings_entity"
+                return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                 )
             except IntegrityError as e:
                 db.session.rollback()
@@ -877,8 +790,7 @@ def entity_settings_entity(org_id):
                     "your entries and try again?",
                     "danger",
                 )
-                return _redirect_xero_mapping(
-                    org_id, _from, return_view="entity_settings_entity"
+                return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                 )
             except Exception as e:
                 db.session.rollback()
@@ -888,8 +800,7 @@ def entity_settings_entity(org_id):
                     "entries and try again?",
                     "danger",
                 )
-                return _redirect_xero_mapping(
-                    org_id, _from, return_view="entity_settings_entity"
+                return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                 )
 
         # Handle GET request (display form)
@@ -1016,12 +927,9 @@ def entity_settings_entity(org_id):
         # entity was connected to Xero but is no longer live, so the user knows to
         # reconnect.
         xero_disconnected = _xero_disconnected(org)
-        # One template for every visit; ?from=bills (the Payment Request app sent the person
-        # here) changes only the way back, the tabs' links and the sidebar's Settings.
         return render_template(
             "entity/settings_entity.html",
             org=org,
-            from_bills=request.args.get("from") == "bills",
             country_code=country_code,
             currencies=currencies,
             selected_country=selected_country,
@@ -1057,14 +965,10 @@ def entity_settings_module(org_id):
     The page itself is minty-web's (Part 2 step 4a, built to its design). Flask's Jinja version
     and the session routes behind it were deleted on 2026-10-01; this address stays so the
     Petty Cash tab, the payments app's links (``SettingsPills``, ``ModuleGate``), the in-app
-    notice and old bookmarks still land. ``?from=bills`` travels on to minty-web.
+    notice and old bookmarks still land.
     """
     org = Entity.query.get_or_404(org_id)
-    return redirect(
-        minty_web_module_page_url(
-            org, current_user.id, from_bills=request.args.get("from") == "bills"
-        )
-    )
+    return redirect(minty_web_module_page_url(org, current_user.id))
 
 
 @entity_bp.route("/entity/settings/payments/<string:org_id>", methods=["GET"])
@@ -1076,14 +980,10 @@ def entity_settings_payments(org_id):
     The tab's target is the payments app's settings page behind a module token that only
     Flask mints (``billing_settings_app_url``). Flask's own settings pages compute that URL
     into the template; a page that is not Flask's - the module settings page in minty-web
-    (Part 2 step 4) - links here instead and is sent on. ``?from=bills`` travels with it.
+    (Part 2 step 4) - links here instead and is sent on.
     """
     org = Entity.query.get_or_404(org_id)
-    return redirect(
-        billing_settings_app_url(
-            org_id, org, current_user.id, from_bills=request.args.get("from") == "bills"
-        )
-    )
+    return redirect(billing_settings_app_url(org_id, org, current_user.id))
 
 
 @entity_bp.route("/entity/contact/create", methods=["POST"])

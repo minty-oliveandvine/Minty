@@ -157,8 +157,8 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
 ### What the pages do
 - The **Module tab** (`GET /entity/settings/module/<id>`) is a **hand-over**: the route mints
   the company's module token and redirects to
-  `MINTY_WEB_URL/landing?next=/subscription/entities/<id>/modules` (`?from=bills` travels in
-  `next`; `tests/test_minty_web_handoff.py`). The page is minty-web's (Part 2 step 4a,
+  `MINTY_WEB_URL/landing?next=/subscription/entities/<id>/modules` (`tests/test_minty_web_handoff.py`;
+  the page's Back returns to wherever the person came from, so nothing is carried). The page is minty-web's (Part 2 step 4a,
   `../minty-web/docs/features/subscriptions.md` §9) and posts its 19 actions to
   minty-subscription-api. **Flask's Jinja module page, its partials (`module_*.html`), the lapsed-trial
   restart screen and the 20 session routes under `…/module/<id>/…` (the 19 actions and the

@@ -7,14 +7,13 @@
   * the chrome is minty-web's Module page (AppHeader + SettingsTabs), which billing-frontend's
     Payment Settings wears too; the content is Payment Settings' card (AccountCodeSettings.tsx);
     plain CSS in static/css/settings_page.css;
-  * ?from=bills changes only the way back (Payments instead of Reports), the tabs' links (they
-    keep it) and the sidebar's Settings (the payments app's);
+  * "‹ Back" returns to the page the person came from, whichever app (static/js/back_link.js;
+    the ?from=bills flag that used to pick "Payments" or "Reports" went 2026-10-05);
   * one Save Changes saves every card; static/js/petty_cash_settings.js runs the page, and the
     Xero mapping pickers are partials/xero_mapping_classic_script_fragment.html's;
   * minty-web's modal design (components/minty_dialog.html) asks before unsaved changes are left
     behind and before a method is deleted.
 #}
-{% set bills = {'from': 'bills'} if from_bills else {} %}
 {% set fn = (current_user.first_name or '')[:1] %}
 {% set ln = (current_user.last_name or '')[:1] %}
 {% set viewer_name = ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or '')) | trim %}
@@ -40,22 +39,16 @@
   <header class="pcs-header">
     <div class="pcs-header-row">
       <div class="pcs-header-lead">
-        {% if from_bills %}
-        <a href="{{ url_for('entity.go_to_bills', entity_id=org.id) }}" class="pcs-back">
-          <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Payments
+        <a href="{{ company_home_url(org.id) }}" class="pcs-back" data-back-link>
+          <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Back
         </a>
-        {% else %}
-        <a href="{{ url_for('entity.report_dashboard', id=org.id) }}" class="pcs-back">
-          <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Reports
-        </a>
-        {% endif %}
         <h1 class="pcs-title">Settings</h1>
       </div>
       <div class="pcs-header-end">
         <span class="material-symbols-outlined pcs-company-icon" aria-hidden="true">corporate_fare</span>
         <span class="pcs-company">{{ org.name or '' }}</span>
         <div class="pcs-doors">
-          <a href="{{ bills_app_profile_url(org.id, from_bills=from_bills) }}" class="pcs-avatar"
+          <a href="{{ bills_app_profile_url(org.id) }}" class="pcs-avatar"
              data-sidebar-open="profile" aria-label="{{ viewer_name }}, My Profile" title="{{ viewer_name }}">
             <span aria-hidden="true">{{ ((fn ~ ln) | upper) if (fn or ln) else '?' }}</span>
           </a>
@@ -71,13 +64,13 @@
     <div class="pcs-column">
       <div class="pcs-tabs-bar">
         <nav class="pcs-tabs" aria-label="Settings sections">
-          <a href="{{ url_for('entity_settings_users', org_id=org.id, **bills) }}" class="pcs-pill">Users</a>
-          <a href="{{ url_for('entity_settings', entity_id=org.id, **bills) }}" class="pcs-pill">Entity &amp; Integration</a>
+          <a href="{{ url_for('entity_settings_users', org_id=org.id) }}" class="pcs-pill">Users</a>
+          <a href="{{ url_for('entity_settings', entity_id=org.id) }}" class="pcs-pill">Entity &amp; Integration</a>
           <span class="pcs-pill" aria-current="page">Petty Cash Settings</span>
           {% if is_billing_enabled(org.id) %}
-          <a href="{{ url_for('entity.entity_settings_payments', org_id=org.id, **bills) }}" class="pcs-pill">Payment Settings</a>
+          <a href="{{ url_for('entity.entity_settings_payments', org_id=org.id) }}" class="pcs-pill">Payment Settings</a>
           {% endif %}
-          <a href="{{ url_for('entity_settings_module', org_id=org.id, **bills) }}" class="pcs-pill">Module</a>
+          <a href="{{ url_for('entity_settings_module', org_id=org.id) }}" class="pcs-pill">Module</a>
         </nav>
       </div>
 
@@ -86,7 +79,6 @@
 
         <form method="POST" action="{{ url_for('entity_settings_entity', org_id=org.id) }}" id="entitySettingsForm" novalidate>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          {% if from_bills %}<input type="hidden" name="_from" value="bills">{% endif %}
           <input type="hidden" id="ci_country_code_hidden" name="country_code" value="{{ selected_country.country_code if selected_country else '' }}">
           <input type="hidden" id="ci_currency_id_hidden" name="currency_id" value="{{ selected_currency.currency_id if selected_currency else '' }}">
 
@@ -145,7 +137,7 @@
                 <div class="pcs-notice pcs-notice-alert" role="status">
                   <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
                   <span>This entity has been disconnected from Xero. Reconnect it in
-                    <a href="{{ url_for('entity_settings', entity_id=org.id, **bills) }}">Entity &amp; Integration</a>
+                    <a href="{{ url_for('entity_settings', entity_id=org.id) }}">Entity &amp; Integration</a>
                     to keep these lists in sync.</span>
                 </div>
                 {% endif %}
@@ -225,9 +217,7 @@
 
 {% include 'components/flash_messages.html' %}
 
-{% with sidebar_from_bills=from_bills %}
 {% include 'components/minty_sidebar.html' %}
-{% endwith %}
 
 <script type="application/json" id="pcs-config">{{ {
   'entityId': org.id,
@@ -239,5 +229,6 @@
 } | tojson }}</script>
 {% include 'entity/partials/xero_entity_mapping_scripts_classic.html' %}
 <script src="{{ url_for('static', filename='js/petty_cash_settings.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/back_link.js') }}"></script>
 </body>
 </html>

@@ -189,7 +189,7 @@ def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
     Scoped to ``org`` when given (the company's module settings page - the token names the
     company and its enabled modules, as the payments-app tokens do), unscoped otherwise (the
     payer portal). ``next_path`` is a path on minty-web's origin and travels URL-encoded, so a
-    query string of its own (``?from=bills``) survives.
+    query string of its own survives.
     """
     if org is not None:
         role = _resolve_user_entity_role(user_id, org.id)
@@ -217,12 +217,9 @@ def minty_web_module_page_path(entity_id) -> str:
     return f"/subscription/entities/{entity_id}/modules"
 
 
-def minty_web_module_page_url(org: Entity, user_id, *, from_bills: bool = False) -> str:
+def minty_web_module_page_url(org: Entity, user_id) -> str:
     """minty-web's module settings page of ``org`` (Part 2 step 4a), through the landing."""
-    path = minty_web_module_page_path(org.id)
-    if from_bills:
-        path += "?from=bills"
-    return minty_web_landing_url(path, org, user_id)
+    return minty_web_landing_url(minty_web_module_page_path(org.id), org, user_id)
 
 
 def minty_web_module_page_handoff(entity_id) -> str:
@@ -251,12 +248,11 @@ def minty_web_entity_list_url(user_id, *, notices: str | None = None) -> str:
     return minty_web_landing_url(path, None, user_id)
 
 
-def minty_web_profile_url(org: Entity | None, user_id, *, from_bills: bool = False) -> str:
+def minty_web_profile_url(org: Entity | None, user_id) -> str:
     """minty-web's My Profile: scoped to ``org`` when opened from inside a company (the
-    profile names it and the person's role there), unscoped from the entity list.
-    ``?from=bills`` sends its back arrow to the payments app rather than to Petty Cash."""
-    path = MINTY_WEB_PROFILE_PATH + ("?from=bills" if from_bills else "")
-    return minty_web_landing_url(path, org, user_id)
+    profile names it and the person's role there), unscoped from the entity list. Its back
+    arrow returns to the page the person came from (minty-web lib/backLink.ts)."""
+    return minty_web_landing_url(MINTY_WEB_PROFILE_PATH, org, user_id)
 
 
 @entity_bp.route("/handoff/minty-web")
@@ -318,7 +314,7 @@ def sidebar_token():
 @login_required
 def open_profile():
     """Every "open my profile" link in Minty and the payments app comes here:
-    ``?entity_id=<company it was opened from>&from=bills``.
+    ``?entity_id=<company it was opened from>``.
 
     Always minty-web's My Profile: billing-frontend's profile page was deleted on 2026-10-01
     (that app holds only Payment Request now), and its old ``/profile`` address forwards
@@ -326,7 +322,6 @@ def open_profile():
     renders - a link minted at render time held a 30-minute token, and a page left open
     longer than that sent its avatar to an expired landing.
     """
-    from_bills = request.args.get("from") == "bills"
     entity_id = (request.args.get("entity_id") or "").strip()
     org = None
     if entity_id:
@@ -337,7 +332,7 @@ def open_profile():
             flash("Hmm, it looks like you don't have permission to look there.", "danger")
             return redirect(url_for("entity.entity_list"))
 
-    return redirect(minty_web_profile_url(org, current_user.id, from_bills=from_bills))
+    return redirect(minty_web_profile_url(org, current_user.id))
 
 
 @entity_bp.route("/entity/<string:entity_id>/enter")
@@ -549,7 +544,7 @@ def _frontend_origin() -> str:
     return bearer_api.frontend_origin()
 
 
-def billing_app_home_url(entity_id: str, org: Entity, user_id, *, from_bills: bool = False) -> str:
+def billing_app_home_url(entity_id: str, org: Entity, user_id) -> str:
     """Handoff URL for Module 2 main app with entity pre-selected."""
     next_arg = PAYMENT_REQUEST_APP_HOME_PATH
     role = _resolve_user_entity_role(user_id, entity_id)
@@ -569,12 +564,10 @@ def billing_app_home_url(entity_id: str, org: Entity, user_id, *, from_bills: bo
         f"?next={next_arg}"
         f"&entity_id={entity_id}&entity_name={entity_name}&token={token}"
     )
-    if from_bills:
-        url += "&from=bills"
     return url
 
 
-def billing_settings_app_url(entity_id: str, org: Entity, user_id, *, from_bills: bool = False) -> str:
+def billing_settings_app_url(entity_id: str, org: Entity, user_id) -> str:
     """Handoff URL for Module 2 settings page."""
     settings_path = PAYMENT_REQUEST_SETTINGS_PATH
     role = _resolve_user_entity_role(user_id, entity_id)
@@ -594,8 +587,6 @@ def billing_settings_app_url(entity_id: str, org: Entity, user_id, *, from_bills
         f"?next=/{settings_path}"
         f"&entity_id={entity_id}&entity_name={entity_name}&token={token}"
     )
-    if from_bills:
-        url += "&from=bills"
     return url
 
 

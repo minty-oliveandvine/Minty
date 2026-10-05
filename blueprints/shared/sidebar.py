@@ -71,19 +71,14 @@ def _petty_cash_on(entity_id: str) -> bool:
         return True
 
 
-def _settings(company: str, from_bills: bool) -> tuple[str, str]:
+def _settings(company: str) -> tuple[str, str]:
     """``(href, endpoint)`` of the Settings item: the settings of THE APP it is pressed in (the
-    user's call, 2026-09-30 - minty-web's menu keeps its module page).
-
-    * The Payment Request pages (``?from=bills``): the payments app's Payment Settings, through
-      the route that mints its token at the click - where billing-frontend's own Settings goes.
-    * Everywhere else, Petty Cash: its Petty Cash Settings tab, where the accounts and contacts a
-      report needs are set (the dashboard's "Setup Required" lists exactly those). A company
-      without Petty Cash has no such tab (``require_module``), so it gets Entity & Integration.
+    user's call, 2026-09-30 - minty-web's menu keeps its module page). On Flask that is Petty
+    Cash: its Petty Cash Settings tab, where the accounts and contacts a report needs are set
+    (the dashboard's "Setup Required" lists exactly those). A company without Petty Cash has no
+    such tab (``require_module``), so it gets Entity & Integration. (Until 2026-10-05 a
+    ``?from=bills`` visit sent it to the payments app's Payment Settings instead.)
     """
-    if from_bills:
-        endpoint = "entity.entity_settings_payments"
-        return url_for(endpoint, org_id=company, **{"from": "bills"}), endpoint
     if _petty_cash_on(company):
         endpoint = "entity.entity_settings_entity"
         return url_for(endpoint, org_id=company), endpoint
@@ -105,16 +100,14 @@ def _current(endpoint: str, settings_endpoint: str | None) -> str | None:
     return None
 
 
-def sidebar_context(entity_id=None, *, from_bills: bool = False) -> dict:
+def sidebar_context(entity_id=None) -> dict:
     """Everything ``components/minty_sidebar.html`` draws, for the page being rendered.
 
     ``entity_id`` is the company the page is about (the template's ``org.id`` or
-    ``entity_id``); ``from_bills`` marks the Payment Request settings pages, whose Settings and
-    profile keep ``?from=bills`` so the way back leads to the payments app.
+    ``entity_id``).
     """
     endpoint = request.endpoint or ""
     company = str(entity_id) if entity_id and endpoint not in CHOOSING_ENDPOINTS else ""
-    bills = {"from": "bills"} if from_bills else {}
 
     settings_endpoint = None
     links = {
@@ -122,10 +115,10 @@ def sidebar_context(entity_id=None, *, from_bills: bool = False) -> dict:
         "subscriptions": url_for("entity.handoff_minty_web", next=MINTY_WEB_SUBSCRIPTIONS_PATH),
         "logout": url_for("auth.logout"),
         # the initials' href when scripts are off: the profile router, as before
-        "profile": url_for("entity.open_profile", **({"entity_id": company} if company else {}), **bills),
+        "profile": url_for("entity.open_profile", **({"entity_id": company} if company else {})),
     }
     if company:
-        links["settings"], settings_endpoint = _settings(company, from_bills)
+        links["settings"], settings_endpoint = _settings(company)
         links.update(
             {
                 "dashboard": url_for("entity.report_dashboard", id=company),

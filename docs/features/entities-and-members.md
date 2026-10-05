@@ -43,23 +43,28 @@ follow on its later steps, and `POST /api/onboarding/finalize` flips the company
 
 ## Settings (`/entity/<id>/settings/…`)
 
-Tabs of their own templates (`settings.html` and `settings_users.html`, with the `*_bills_ui.html`
-dress when reached from the payments app with `?from=bills`; Petty Cash Settings is ONE template,
-`settings_entity.html`, for both ways in - `?from=bills` changes only its way back and its tabs'
-links, [petty-cash-settings.md](petty-cash-settings.md); the Module tab is a hand-over to
-minty-web's page, [modules-and-subscriptions.md](modules-and-subscriptions.md)),
+One template per tab since 2026-10-05: Users = `settings_users_bills_ui.html`, Entity &
+Integration = `settings_xero_bills_ui.html` (the classic `settings.html` / `settings_users.html`
+are deleted; the names stay because phase 2 moves these two tabs to minty-web), Petty Cash
+Settings = `settings_entity.html` ([petty-cash-settings.md](petty-cash-settings.md)); the Module
+tab is a hand-over to minty-web's page ([modules-and-subscriptions.md](modules-and-subscriptions.md)).
+**One look, and a real Back (2026-10-05).** The `?from=bills` flag is gone: every Flask settings
+page has one look, whichever app the person came from, and its "‹ Back" returns to the page they
+came from (`static/js/back_link.js`: the last entry in this tab's history outside
+`/entity/settings/*` and `/entity/<id>/settings/*`, through the Navigation API; the link's `href` -
+the company's home, `company_home_url` - is the fallback for a new tab). The tabs are
 each carrying the sidebar ([sidebar.md](sidebar.md)), whose module groups show
 only the modules the company has on (`data-module-nav`, hidden with an inline `display:none` — a
 `hidden` attribute loses to Tailwind's `.flex`). The sidebar's **Settings** opens the settings of
-the app it is pressed in: Petty Cash Settings from the Petty Cash pages, the payments app's
-Payment Settings from the `?from=bills` ones.
+the app it is pressed in - on Flask, Petty Cash Settings (Entity & Integration for a company
+without Petty Cash); the payments app's own sidebar opens its Payment Settings.
 
 | Tab | Route | What it edits | Who |
 |---|---|---|---|
 | Entity & Integration | `GET/POST /entity/<id>/settings/xero` | the company name, country & currency, the Xero connection ([xero-integration.md](xero-integration.md)) | `ENTITY_UPDATE` / `XERO_SETTINGS_UPDATE` — accountant and up; others see it read-only (`settings-readonly`) |
 | Petty Cash Settings | `GET/POST /entity/settings/entity/<id>` (Petty Cash on only) | country & currency, the Xero account mapping - the accounts and contacts the dashboard's "Setup Required" asks for ([xero-integration.md](xero-integration.md) §3) - the sales settlement methods and the petty-cash account codes, at least one of which stays ticked ([petty-cash-settings.md](petty-cash-settings.md)) | `ENTITY_UPDATE` / `COA_UPDATE` / `COA_CREATE` / `COA_DELETE` - as above |
 | Users | `GET /entity/settings/users/<id>` | members with role, who pays for the company (the billing-group payer, looked up separately from the role), pending invitations, and who is signed in now (`…/presence`, polled every 20 s — [authentication.md](authentication.md) §8) | admins manage roles and invitations |
-| Module | `GET /entity/settings/module/<id>` | a hand-over to minty-web's Module page (`?from=bills` travels on; [modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |
+| Module | `GET /entity/settings/module/<id>` | a hand-over to minty-web's Module page ([modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |
 
 Renaming the company is reflected in the header at once (`e2e/03_settings.spec.ts`).
 

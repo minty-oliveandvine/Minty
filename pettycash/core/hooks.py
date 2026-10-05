@@ -190,32 +190,20 @@ def init_app(app, db):
 
             return billing_app_home_url(entity_id, org, current_user.id)
 
-        def bills_app_profile_url(entity_id, *, from_bills: bool = False):
+        def bills_app_profile_url(entity_id):
             """The profile, opened from inside ``entity_id`` - through ``entity.open_profile``,
-            which decides whether that is minty-web's (``MINTY_WEB_HUB``) or the payments
-            app's, and mints the token at the click rather than at this page's render.
-
-            ``from_bills`` records WHICH MODULE the user left, so the profile's back link
-            can return them to it. It defaults to False because twelve of the sixteen
-            templates that link here are the Petty Cash UI — the dashboard, its settings
-            pages and every report — and only the four ``*_bills_ui.html`` ones are
-            Payment Request, which pass it explicitly.
-
-            It used to default True, which meant a Petty Cash user's profile offered
-            "‹ Payments" and dropped them into a module their company may not even have
-            bought.
+            which hands over to minty-web's My Profile and mints the token at the click
+            rather than at this page's render. Its back arrow returns to the page the person
+            came from (no ``?from=`` flag since 2026-10-05).
             """
             if not entity_id:
                 return url_for("entity.entity_list")
-            params = {"entity_id": entity_id}
-            if from_bills:
-                params["from"] = "bills"
-            return url_for("entity.open_profile", **params)
+            return url_for("entity.open_profile", entity_id=entity_id)
 
-        def bills_app_profile_unscoped_url(*, from_bills: bool = False):
+        def bills_app_profile_unscoped_url():
             """The profile with no company in context (the Select Company header) - through
             ``entity.open_profile``, as ``bills_app_profile_url``."""
-            return url_for("entity.open_profile", **({"from": "bills"} if from_bills else {}))
+            return url_for("entity.open_profile")
 
         def onboarding_launch_url():
             """Launch URL into the onboarding wizard (Step 1) for the current user.
@@ -327,6 +315,15 @@ def init_app(app, db):
                 logger.error(f"is_readonly_for failed entity={entity_id}: {exc}")
                 return False
 
+        def company_home_url(entity_id):
+            """Where a settings page's "‹ Back" goes when there is no history to go back
+            through (a new tab, a bookmark): the company's home - its Petty Cash dashboard,
+            or the payments app when Petty Cash is off (the choice ``sidebar._settings``
+            makes too). static/js/back_link.js does the rest."""
+            if is_petty_cash_enabled(entity_id):
+                return url_for("entity.report_dashboard", id=entity_id)
+            return url_for("entity.go_to_bills", entity_id=entity_id)
+
         return {
             "DD_CLIENT_TOKEN": os.environ.get(
                 "DD_CLIENT_TOKEN", "pub8127bb0367f2b74cbba93dad6f012b90"
@@ -337,6 +334,7 @@ def init_app(app, db):
             "onboarding_launch_url": onboarding_launch_url,
             "is_billing_enabled": is_billing_enabled,
             "is_petty_cash_enabled": is_petty_cash_enabled,
+            "company_home_url": company_home_url,
             "is_readonly_for": is_readonly_for,
             # the sidebar's menu and links (components/minty_sidebar.html)
             "sidebar_context": sidebar_context,

@@ -1,8 +1,8 @@
 # The sidebar — the menu and My Profile
 
 Every Petty Cash page with a header — the dashboard, the report wizard, report history, the
-settings tabs (Users and Entity & Integration in both dresses, Petty Cash and `?from=bills`;
-Petty Cash Settings, one template for both), the entity list while
+settings tabs (Users, Entity & Integration and Petty Cash Settings, one template each), the
+entity list while
 `MINTY_WEB_HUB` is off, create and no-permission — carries the same sidebar minty-web draws:
 **one drawer, two views** (the user's call, 2026-09-29; brought here 2026-09-30).
 
@@ -31,8 +31,8 @@ minty-web's menu or profile is a change here too.
 | The email field's English-only rule ([authentication.md](authentication.md) §2) | `static/js/email_input.js` |
 | Icons and the caped cat (minty-web's `public/menu`, `public/profile`) | `static/img/sidebar/` |
 
-A page includes the partial once, anywhere in its body (`{% include 'components/minty_sidebar.html' %}`;
-the Payment Request pages inside `{% with sidebar_from_bills=True %}`), and marks its openers:
+A page includes the partial once, anywhere in its body (`{% include 'components/minty_sidebar.html' %}`),
+and marks its openers:
 `data-sidebar-open="menu"` on the ≡, `data-sidebar-open="profile"` on the initials, whose `href`
 (the `/profile` router) stays the way in when scripts are off. The script moves the drawer to the
 end of the body, so no ancestor's transform or overflow clips it. `toggleMenu()`,
@@ -54,9 +54,9 @@ Top to bottom: the Minty mark; the person (avatar + name — opens My Profile); 
   groups shows only while both do.
 - **Settings opens the settings of the app it is pressed in** (the user's call, 2026-09-30):
   on the Petty Cash pages, the **Petty Cash Settings** tab (`entity_settings_entity` — the
-  accounts and contacts a report needs, the sales methods); on the Payment Request pages
-  (`?from=bills`), the payments app's **Payment Settings** (`entity_settings_payments`, which
-  mints its token at the click — where minty-payment-request-web's own Settings goes). A company without
+  accounts and contacts a report needs, the sales methods), on every Flask page - the
+  `?from=bills` exception (the payments app's Payment Settings) went with the flag on
+  2026-10-05; minty-payment-request-web's own sidebar opens its Payment Settings. A company without
   Petty Cash has no Petty Cash Settings tab (`require_module`), so it gets Entity & Integration.
   minty-web's own menu keeps its module page.
 - **On Petty Cash Settings with unsaved changes**, a link in the drawer — Logout included —

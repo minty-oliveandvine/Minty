@@ -5,7 +5,7 @@ identity, [authentication.md](authentication.md) §2.3) and **connecting a compa
 Xero organisation** (this document). Code: `blueprints/xero/` (routes, `services/publish.py`,
 `services/integration.py`, `services/settings.py`, `services/publish_record.py`),
 `services/auth/token_service.py` (tokens), `blueprints/entity/services/settings.py` (the
-sync), templates `entity/settings.html` and `report/submitted.html`.
+sync), templates `entity/settings_xero_bills_ui.html` (Entity & Integration) and `report/submitted.html`.
 
 ## 1. Connecting
 
