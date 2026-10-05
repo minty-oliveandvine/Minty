@@ -1530,10 +1530,10 @@ document.addEventListener('submit', function(e){
           <span id="cash_count_balance" class="text-sm font-medium text-gray-700">{{ currency_symbol }}0.00</span>
         </div>
 
-        <!-- Add Button -->
+        <!-- Save Button -->
         <div class="flex justify-center">
           <button type="button" id="applyCalculatorTotal" {% if current_draft and current_draft.status != 'draft' %}disabled{% endif %} class="w-full px-4 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-100 text-gray-300 cursor-not-allowed{% else %}bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80{% endif %} rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA]">
-            Add
+            Save
           </button>
         </div>
       </div>
