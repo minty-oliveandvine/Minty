@@ -1,9 +1,9 @@
 /**
  * minty-web's modal family on this app's Jinja pages (2026-10-01). The user, 2026-09-30: "use
  * modals designed in minty web. that should be how modals is going to be designed accross
- * repos". The sources are minty-web's features/subscription/components/ModalFrame.tsx,
- * ConfirmDialog.tsx and InterruptedDialogs.tsx (LeaveDialog, Figma A-11); billing-frontend holds
- * copies at the same paths. This is a PORT, not a copy - @minty/shared is TypeScript and cannot
+ * repos". The sources are minty-web's components/ui/ModalFrame.tsx and ConfirmDialog.tsx and
+ * features/subscription/components/InterruptedDialogs.tsx (LeaveDialog, Figma A-11);
+ * minty-payment-request-web holds copies under features/subscription/components/. This is a PORT, not a copy - @minty/shared is TypeScript and cannot
  * serve Jinja - so change all three together (minty-web, billing-frontend, here). The look is
  * static/css/minty_dialog.css.
  *

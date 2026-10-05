@@ -307,10 +307,6 @@ def app(built_database) -> Iterator:
         "SUBSCRIPTION_EMAIL": "",
         # empty = config.py's localhost:8010 default; the local .env runs Flask on 5001
         "PETTY_CASH_URL": "",
-        # the entity list and the profile hand over to minty-web when this is on - a developer's
-        # .env may say so (load_dotenv never overrides what is set here); the suite keeps the
-        # Jinja list its tests describe, and tests/test_hub_*.py flip it per test
-        "MINTY_WEB_HUB": "0",
         # the app starts the daily billing jobs when this is on - a developer's .env may say so;
         # a test app must never run them (tests/test_subscription_scheduler.py flips it per test)
         "SUBSCRIPTION_SCHEDULER_ENABLED": "0",

@@ -265,11 +265,9 @@ def test_the_profile_is_minty_webs(app, client, people, hub):
     assert claims["entity_id"] == shop.id and claims["role"] == "shop_manager"
 
 
-def test_whatever_the_hub_switch_says(app, client, people, hub, monkeypatch):
+def test_the_profile_is_minty_webs_with_or_without_a_company(app, client, people, hub, monkeypatch):
     """billing-frontend's profile page was deleted on 2026-10-01 (that app holds only
-    Payment Request), so ``MINTY_WEB_HUB`` - which still decides the ENTITY LIST - no longer
-    has a say here: off, the profile is minty-web's all the same."""
-    monkeypatch.delenv("MINTY_WEB_HUB", raising=False)
+    Payment Request): the profile is minty-web's, scoped to a company when one is named."""
     F.login(client, people["olive"])
 
     parts, query = _landing(client.get("/profile"))
@@ -282,7 +280,6 @@ def test_whatever_the_hub_switch_says(app, client, people, hub, monkeypatch):
 
 
 def test_a_company_the_person_is_not_in_opens_no_profile(app, client, people, hub, monkeypatch):
-    monkeypatch.setenv("MINTY_WEB_HUB", "1")
     F.login(client, people["olive"])
 
     resp = client.get(f"/profile?entity_id={people['theirs'].id}")

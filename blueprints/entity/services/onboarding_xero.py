@@ -1,9 +1,9 @@
 """Token-authenticated Xero connection actions for the onboarding app.
 
 Onboarding runs cross-origin with a short-lived Bearer JWT (no Flask session
-cookie), so it can't hit the session-authenticated ``/entity/settings/xero/*``
-routes. This module mirrors ``disconnect_from_xero`` (blueprints/xero/routes/
-routes.py) as a service returning ``(data, status)`` for the onboarding API.
+cookie). This module mirrors ``disconnect_entity_from_xero``
+(blueprints/xero/services/disconnect.py) as a service returning ``(data, status)`` for the
+onboarding API.
 
 It performs the same two-sided disconnect:
   1. Remote: revoke the connection on Xero (GET /connections to find the
@@ -30,7 +30,7 @@ _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
 def disconnect_entity_xero(user_id, entity_id):
     """Disconnect ``entity_id`` from Xero during onboarding.
 
-    Mirrors ``disconnect_from_xero``: revokes the connection on Xero's side and
+    Mirrors ``xero.services.disconnect.disconnect_entity_from_xero``: revokes the connection on Xero's side and
     clears the local connection + token state. Returns ``(data, status)``.
     """
     entity_id = (entity_id or "").strip()
@@ -58,7 +58,7 @@ def disconnect_entity_xero(user_id, entity_id):
                 )
 
         # 1. Revoke on Xero's side (best-effort — local state is cleared even if
-        #    the remote call fails, matching disconnect_from_xero).
+        #    the remote call fails, matching disconnect_entity_from_xero).
         if connector is not None and org.xero_org_id:
             try:
                 if ensure_valid_token(connector):

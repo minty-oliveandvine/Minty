@@ -32,8 +32,8 @@ inject markup into the page.
 | Route | What |
 |---|---|
 | `GET /legal/terms`, `/legal/terms/<version>`, `/legal/privacy[/<version>]` | the rendered documents |
-| `GET /legal/current` | which versions are live — the sign-up screens send that name back |
-| `GET /legal/content/<kind>` | the rendered document as JSON, for a client that must show it inline (the onboarding app's terms modal) |
+| `GET /legal/current` | which versions are live (no app reads it since phase 2: minty-web's sign-up takes the version from the document it showed) |
+| `GET /legal/content/<kind>` | the rendered document as JSON, for a client that must show it inline (minty-web's sign-up: the read-to-agree panel, `components/ui/TermsModal`) |
 | `GET /legal/accept` / `POST /legal/accept` | the acceptance screen (scroll to the end, tick, accept) and the record |
 | `POST /legal/invite-terms-status` | whether the person an invite was sent to still owes consent (the invite token in the JSON body; GET refused since 2026-10-05, when the token stopped riding in the URL) |
 | `GET /minty/api/users/<id>/consents` | a person's consent history (superuser) |
@@ -67,7 +67,7 @@ files — the load-bearing ones are listed in the module with the reason each mu
 
 ## minty-web's panel (2026-09-29)
 
-With `MINTY_WEB_HUB` on, `/entity` hands the browser to minty-web's `/entities` whether or not
+`/entity` hands the browser to minty-web's `/entities` (always, since phase 2) whether or not
 an acceptance is owed, so minty-web draws the same panel itself - a port of
 `templates/legal/_terms_panel.html`, over every page of that app (`minty-web/docs/features/
 authentication.md`, the Terms gate). It reads and posts through two bearer routes

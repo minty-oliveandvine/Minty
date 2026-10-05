@@ -104,6 +104,30 @@ def login(client, user, *, accepted_terms=True) -> None:
 # ---- reference data ------------------------------------------------------------
 
 
+def hub_headers(app, user_id, origin="http://hub.minty.test") -> dict:
+    """What minty-web sends Flask's bearer hub routes: the token it holds (unscoped - the hub
+    names a company with ``?entity=``) and its origin."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt
+
+    token = jwt.encode(
+        {"user_id": user_id, "entity_id": "", "exp": datetime.now(timezone.utc) + timedelta(minutes=30)},
+        app.config["SECRET_KEY"],
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}", "Origin": origin}
+
+
+def hub_list(client, app, user_id) -> list[dict]:
+    """The entity list as the person sees it - minty-web's, read from Flask's bearer API
+    (``GET /api/me/entities``) with the token minty-web would hold. Flask's own Jinja list went
+    in phase 2 (2026-10-05)."""
+    resp = client.get("/api/me/entities", headers=hub_headers(app, user_id))
+    assert resp.status_code == 200, resp.data[:300]
+    return resp.get_json()["entities"]
+
+
 def seed_currency(db, code="HKD", *, denominations=(1000, 500, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1)):
     """A currency with its cash denominations (what a cash count is made of).
 

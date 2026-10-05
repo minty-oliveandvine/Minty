@@ -65,8 +65,9 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
     parts, query = _landing(client.get(f"{F.co(client, entity.id)}/settings/modules"))
 
     assert (parts.scheme, parts.netloc, parts.path) == ("http", "hub.minty.test", "/landing")
-    # the company by short id and name, as minty-web's lib/companyRef.ts builds it
-    assert query["next"] == [f"/subscription/entities/{F.co(client, entity.id)[len('/entity/'):]}/modules"]
+    # the company by short id and name, as minty-web's lib/companyRef.ts builds it - the
+    # Module tab among its settings since phase 2
+    assert query["next"] == [f"/entities/{F.co(client, entity.id)[len('/entity/'):]}/settings/modules"]
     assert query["entity_id"] == [entity.id]
     assert query["entity_name"] == [entity.name]
     claims = _claims(app, query["token"][0])
@@ -78,7 +79,7 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
     # an old link's ?from=bills is ignored (2026-10-05): the module page's Back goes where the
     # person came from, so nothing is carried
     _, query = _landing(client.get(f"{F.co(client, entity.id)}/settings/modules?from=bills"))
-    assert query["next"] == [f"/subscription/entities/{F.co(client, entity.id)[len('/entity/'):]}/modules"]
+    assert query["next"] == [f"/entities/{F.co(client, entity.id)[len('/entity/'):]}/settings/modules"]
 
 
 def test_there_is_no_jinja_module_page_any_more(app):

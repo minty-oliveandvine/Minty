@@ -1631,7 +1631,7 @@ def onboarding_xero_disconnect():
     POST {entity_id} → revokes the entity's connection on Xero
     (DELETE /connections) and clears the local connection + token state, then
     leaves the entity in the onboarding flow with Xero shown as not connected.
-    Mirrors the session-authenticated ``disconnect_from_xero`` route. Same
+    Mirrors ``xero.services.disconnect.disconnect_entity_from_xero``. Same
     JWT/CORS contract as the other onboarding endpoints.
     """
     if request.method == "OPTIONS":

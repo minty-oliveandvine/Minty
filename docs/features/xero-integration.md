@@ -5,7 +5,7 @@ identity, [authentication.md](authentication.md) §2.3) and **connecting a compa
 Xero organisation** (this document). Code: `blueprints/xero/` (routes, `services/publish.py`,
 `services/integration.py`, `services/settings.py`, `services/publish_record.py`),
 `services/auth/token_service.py` (tokens), `blueprints/entity/services/settings.py` (the
-sync), templates `entity/settings_xero_bills_ui.html` (Entity & Integration) and `report/submitted.html`.
+sync), the Entity & Integration tab (minty-web's since phase 2, over `entity/routes/hub_settings.py`) and `report/submitted.html`.
 
 ## 1. Connecting
 
@@ -32,9 +32,11 @@ does not survive the round-trip. `GET /callback`:
 
 The sync **replaces** the cached rows, and `entity_pettycash_settings` has nine FKs into
 them (`ON DELETE SET NULL`), so a re-sync after an organisation switch clears the petty-cash
-mapping — it must be picked again (§3). `POST /entity/settings/xero/disconnect` (a form with
-the CSRF token; a GET until 2026-10-05, so any link could disconnect a company) clears the
-tenant and the cache. `/remove/connections/all` (a GET that dropped EVERY Xero organisation of
+mapping — it must be picked again (§3). Disconnecting (`xero/services/disconnect.py`, from
+minty-web's Entity & Integration tab through `POST /api/me/company/xero/disconnect` since phase 2 -
+the session `POST /entity/settings/xero/disconnect` is gone; it was a GET until 2026-10-05, so any
+link could disconnect a company) revokes the grant at Xero, clears the tenant and the cache, and
+now asks first in the tab. `/remove/connections/all` (a GET that dropped EVERY Xero organisation of
 the user), `/api/refresh_xero_token` (a GET that rotated the refresh token and never stored
 the new one) and `/debug/xero-settings/<id>` were deleted on 2026-10-05; none had a caller.
 
@@ -54,8 +56,7 @@ normal traffic. Details and the reasons in [authentication.md](authentication.md
 petty cash (the cash-on-hand bank account), the bank account for deposits, the cash-sale
 revenue account, the discrepancy account and its bank account, the director's account for
 floats; and three contacts — the cash-sale customer, the director, the discrepancy
-contact. The settings page (`/entity/<co>/settings/integration`, "Petty cash settings" tab)
-offers the synced rows; `check_entity_xero_settings_complete` refuses a publish while any
+contact. Petty Cash Settings (`/entity/<co>/settings/petty-cash`) offers the synced rows; `check_entity_xero_settings_complete` refuses a publish while any
 is missing. The seed (`scripts/e2e_seed.py`) writes placeholders for an unconnected shop
 and leaves a connected shop's real mapping alone.
 

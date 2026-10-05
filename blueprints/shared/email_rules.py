@@ -16,10 +16,36 @@ Only new input is checked. Addresses already stored are not rewritten.
 
 from __future__ import annotations
 
+import re
+
 from wtforms.validators import ValidationError
 
 #: The frontends' ``EMAIL_ASCII_HINT``, word for word.
 EMAIL_ASCII_MESSAGE = "Email can only contain English letters, numbers and symbols."
+
+#: An address that is English but not an address - or one too long to store.
+EMAIL_FORMAT_MESSAGE = "That doesn't look like an email address."
+
+#: ``user.email`` and ``invitation.email`` are VARCHAR(150).
+EMAIL_MAX_LENGTH = 150
+
+#: One ``@`` between a local part and a dotted domain, and none of the characters that are
+#: markup or quoting rather than address (``<>"'`()[],;:\``). The frontends' ``EMAIL_RE`` lets
+#: those through, so an invitation once stored ``<svg/onload=…>@x.co`` and a page drew it.
+_ADDRESS = re.compile(r"^[^@\s<>\"'`()\[\],;:\\]+@[^@\s<>\"'`()\[\],;:\\]+\.[^@\s<>\"'`()\[\],;:\\]+$")
+
+
+def invite_address_error(value: str | None) -> str | None:
+    """The sentence refusing ``value`` as an address to INVITE (every invite path: the
+    company's Users tab, onboarding's invite step, the payer's invite-admin), or None when it
+    is one. An invitation's address is shown back to other people, so it must be an address
+    and nothing else."""
+    address = (value or "").strip()
+    if not is_ascii_email(address):
+        return EMAIL_ASCII_MESSAGE
+    if len(address) > EMAIL_MAX_LENGTH or not _ADDRESS.match(address):
+        return EMAIL_FORMAT_MESSAGE
+    return None
 
 
 def is_ascii_email(value: str | None) -> bool:

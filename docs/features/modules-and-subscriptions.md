@@ -157,7 +157,7 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
 ### What the pages do
 - The **Module tab** (`GET /entity/<co>/settings/modules`) is a **hand-over**: the route mints
   the company's module token and redirects to
-  `MINTY_WEB_URL/landing?next=/subscription/entities/<shortid>/<name>/modules` (`tests/test_minty_web_handoff.py`;
+  `MINTY_WEB_URL/landing?next=/entities/<shortid>/<name>/settings/modules` (`modules.py::minty_web_company_path`; `/subscription/entities/…/modules` until phase 2) (`tests/test_minty_web_handoff.py`;
   the page's Back returns to wherever the person came from, so nothing is carried). The page is minty-web's (Part 2 step 4a,
   `../minty-web/docs/features/subscriptions.md` §9) and posts its 19 actions to
   minty-subscription-api. **Flask's Jinja module page, its partials (`module_*.html`), the lapsed-trial
@@ -166,7 +166,7 @@ run; **off unless `SUBSCRIPTION_SCHEDULER_ENABLED`**). The same jobs are the
   Flask's engine goes as a whole. Two more doors exist for that page:
   `GET /handoff/minty-web?next=&entity_id=` (login-gated re-entry when minty-web's token
   lapses - a scoped token with `entity_id`, unscoped without; `next` is a path only) and
-  `GET /entity/<co>/settings/payment-request` (the Payment Settings tab as a URL: the redirect
+  `GET /entity/<co>/settings/payment-request` (the Payment Request Settings tab as a URL: the redirect
   `billing_settings_app_url` builds, since only Flask mints the payments-app token;
   `tests/test_settings_payments_redirect.py`).
 - The **in-app notices** (`services/notices.py`; the Petty Cash dashboard's once-per-login

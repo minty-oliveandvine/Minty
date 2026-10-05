@@ -27,7 +27,8 @@ def db_session(app):
 def test_register_post_does_not_create_user_without_otp(app, client, db_session):
     """Registration is OTP-gated: a plain form POST to /register must NOT create
     an account (that would be an unverified-email bypass). The account is only
-    created after the emailed code is verified — see the OTP verify test below."""
+    created after the emailed code is verified — see the OTP verify test below.
+    Since phase 2 the route only forwards to minty-web's sign-up."""
     from models.db import User
 
     response = client.post(
@@ -40,8 +41,9 @@ def test_register_post_does_not_create_user_without_otp(app, client, db_session)
         follow_redirects=False,
     )
 
-    # The page just re-renders so the JS OTP flow can run; no user is created.
-    assert response.status_code == 200
+    # Forwarded to the hub's sign-up; no user is created.
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login?mode=signup")
     with app.app_context():
         assert User.query.filter_by(email="new.user@test.com").first() is None
 
@@ -186,9 +188,9 @@ def test_request_code_saves_nothing_when_the_email_fails(app, client, db_session
     with app.app_context():
         assert EmailOtp.query.filter_by(email=email).first() is None
 
-    # ...so the login page's check still reads the address as unknown.
-    check = client.post("/auth/email/check", json={"email": email})
-    assert check.get_json()["exists"] is False
+    # ...so log-in mode still reads the address as unknown.
+    check = client.post("/auth/email/request-code", json={"email": email, "mode": "login"})
+    assert check.status_code == 404
 
 
 def test_failed_code_email_keeps_the_previous_code_and_allows_a_retry(
@@ -241,15 +243,6 @@ def test_failed_code_email_keeps_the_previous_code_and_allows_a_retry(
         assert len(rows) == 1
         assert rows[0].id != previous_id
         assert rows[0].attempts == 2
-
-
-def test_register_page_no_longer_exposes_role_or_company_input(client):
-    response = client.get("/register")
-
-    assert response.status_code == 200
-    assert b'name="role"' not in response.data
-    assert b'name="company"' not in response.data
-    assert b"Select your role" not in response.data
 
 
 def test_login_redirects_superuser_to_admin(app, client, db_session):

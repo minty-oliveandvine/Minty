@@ -21,7 +21,7 @@ cherry-pick. Four things were changed on the way across — see
 > build_entity_list` — no `status != "deleted"` filter (`entity_status` has no such value) and
 > the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has two readers: the Jinja
 > page, and `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the
-> browser to while `MINTY_WEB_HUB` is on ([entities-and-members.md](entities-and-members.md)).
+> browser to (always, since phase 2) ([entities-and-members.md](entities-and-members.md)).
 > The API sends the instant as ISO; minty-web renders it in the viewer's zone.
 
 > **Current state (2026-09-29) — read this before sections 5a and 5b, which describe the
@@ -33,7 +33,7 @@ cherry-pick. Four things were changed on the way across — see
 > build_entity_list` — no `status != "deleted"` filter (`entity_status` has no such value) and
 > the module codes are `PETTY_CASH` / `PAYMENT_REQUEST` — and it has two readers: the Jinja
 > page, and `GET /api/me/entities` for minty-web's list, which Flask's `/entity` sends the
-> browser to while `MINTY_WEB_HUB` is on ([entities-and-members.md](entities-and-members.md)).
+> browser to (always, since phase 2) ([entities-and-members.md](entities-and-members.md)).
 > The API sends the instant as ISO; minty-web renders it in the viewer's zone.
 
 ---

@@ -27,6 +27,19 @@ The entity roles, lowest to highest: `entity_base` → `cashier` → `shop_manag
 
 All four end in Flask-Login's `login_user()`; the session is the same afterwards.
 
+**The sign-in PAGE is minty-web's `/login` since phase 2 (2026-10-05)** - log in, sign up
+(`?mode=signup`) and invitations (`?invite=&email=&fn=&ln=`), with the code on `/login/confirm`
+(`minty-web/features/auth`, its `docs/features/authentication.md`). Until then they were Flask's
+`/` (`templates/login/index.html`) and `/register` (`register.html`) plus minty-onboarding-web's
+`/auth` + `/auth/confirm`; those pages are deleted, and `/register` and onboarding's `/auth*` only
+forward. Flask stays the identity behind the page (2.2-2.4) and every way TO it goes through
+`blueprints/auth/services/hub_login.hub_login_url`: the front door `GET /` (Flask-Login's
+`login_view`, so every `login_required` redirect), `/register`, an invitation link, Xero's
+wrong-account bounce. It keeps `next` when it is a path on this site (`safe_internal_path`) and
+drains the flashes into a signed `?flash=` (the entity list's `hub-flash` hand-over,
+`services/entity_list.sign_notices`), which the page reads back from the public
+`GET /auth/notices`. Flask-Login's "Please log in to access this page." is category `info`.
+
 ### 2.1 Email + password — `POST /login`
 `blueprints/auth/routes/login.py`. Looks the user up by `username`, refuses an unapproved
 account, checks the hash. Superusers land on `/admin`, everyone else on `/index`.
@@ -34,10 +47,13 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
 ### 2.2 Email OTP — the passwordless path (also the sign-up path)
 `blueprints/auth/routes/email_auth.py` + `blueprints/auth/services/email_auth.py`:
 
-1. `POST /auth/email/check` — is this address known? (`user.username`, then the `email_otp`
-   table). In login mode an unknown address is refused **before** a code is sent — see
-   `minty-otp-identity-gate` in the notes: the check reads only `User.username`, so an
-   account that only Xero could resolve gets "Please sign up first".
+1. Is this address known? Asked by `POST /auth/email/request-code` itself in login mode
+   (`mode: "login"`): an unknown address is refused **before** a code is sent (404 "Please sign
+   up first"), by the same rule verify signs in by - `identity.resolve_user_by_email`
+   (`user.email` or `user.xero_email`). Until 2026-10-05 the gate read `user.username` and the
+   `email_otp` table, so an account only Xero could resolve was refused;
+   `tests/test_otp_identity_gate.py` pins the rule. (`POST /auth/email/check` served only
+   Flask's login page and went with it.)
 2. `POST /auth/email/request-code` — a 6-digit code, valid **60 s**, resend cooldown 60 s.
    Failed attempts are carried forward across resends (`email_otp.attempts`); at 5 the
    address is locked for **15 minutes** (HTTP 429, `ERR_LOCKED`). The lock is anchored to the
@@ -48,11 +64,13 @@ account, checks the hash. Superusers land on `/admin`, everyone else on `/index`
    on the spot (`_create_passwordless_user`), recording terms consent with source
    `signup_otp`, or `signup_invite` when an invitation token rode along (section 2.4). A new
    address with no name answers 404 "please sign up". Either way the answer carries a
-   hand-off URL (step 4). (A separate "choose a username" step, `POST /auth/email/complete`,
+   hand-off URL (step 4), with the page's `next` signed into it. (A separate "choose a username" step, `POST /auth/email/complete`,
    had no client and was deleted on 2026-10-01.)
 4. `GET /auth/email/handoff` — the same-origin landing after a cross-origin verify: the
-   onboarding app talks to Flask from another origin, so the verify answer carries a
-   short-lived signed hand-off URL (`_HANDOFF_SALT`) that sets the cookie on Minty's origin.
+   sign-in page talks to Flask from another origin, so the verify answer carries a
+   short-lived signed hand-off URL (`_HANDOFF_SALT`) that sets the cookie on Minty's origin,
+   then goes to the signed `next` when it is a path on this site (checked again), else
+   `/admin` or `/index` (`tests/test_hub_sign_in.py`).
 
 The mail goes out through Flask-Mail on Brevo SMTP (`SMTP_URL` / `MAIL_FROM` in `.env`); every
 SMTP step times out after the URL's `?timeout=` seconds (10), so a stalled server fails the send - the
@@ -68,19 +86,20 @@ company's Xero *connection* is a different flow with different scopes (`/xero_co
 see [xero-integration.md](xero-integration.md)).
 
 ### 2.4 Invitation
-`blueprints/invitation/`: an admin sends an invite (`POST /minty/api/invitation/send`), the
-email link `GET /invitation/accept/<token>` bounces to the onboarding app's `/auth` page
-with the token; the OTP or Xero sign-in then carries it (`invite=` / state
+`blueprints/invitation/`: someone sends an invite from the company's Users tab (minty-web;
+`POST /api/me/company/invitations`, `entity/routes/hub_settings.py`), the
+email link `GET /invitation/accept/<token>` bounces to the sign-in page (`hub_login_url`)
+with the token, the invited address and the inviter's names; the OTP or Xero sign-in then carries it (`invite=` / state
 `auth:invite:`), the user is created if needed, the invitation is accepted and the
 `user_entity` row written. `POST /legal/invite-terms-status` (the invite token in the JSON
 body, never the URL) tells the sign-up screen whether that person still owes terms consent.
-The onboarding app clears the invite from `/auth`'s address bar on arrival and hands it to
-`/auth/confirm` in sessionStorage, not the query string. Pending invites can be listed, resent and
-cancelled from the entity's Users tab.
+The sign-in page clears the invite from its address bar on arrival and hands it to
+`/login/confirm` in sessionStorage, not the query string. Pending invites can be listed, resent and
+cancelled from the company's Users tab (minty-web, phase 2).
 
 ### Sign-up with approval (legacy)
-`GET/POST /register` no longer creates an account — a plain form POST only re-renders the
-page, and sign-up runs through the OTP path above. The approval gate remains for older
+`GET/POST /register` creates nothing - it forwards to the sign-in page's `?mode=signup` (phase
+2), and sign-up runs through the OTP path above. The approval gate remains for older
 accounts that were never approved (`POST /approve_user/<id>` / `reject_user` on the
 `/admin` list).
 
@@ -101,14 +120,16 @@ Every typed email address is printable ASCII (0x21-0x7E) and nothing else (2026-
   see it. `static/js/email_input.js` (minty-web `lib/emailInput.ts`'s twin) strips anything
   else as it is typed (after an IME composition ends), keeps the caret, and shows "Email can
   only contain English letters, numbers and symbols." under the field; the pages check the
-  shape with `MintyEmail.isEmail`. The fields: sign-in (`/`), `/register`, the legacy
-  `/login` reset modal, the Users tab's invite, `/entity/create` and the sidebar's My Profile.
+  shape with `MintyEmail.isEmail`. The fields: the legacy `/login` reset modal, the Users
+  tab's invite, `/entity/create` and the sidebar's My Profile - and minty-web's `/login`
+  (sign-in and sign-up, `lib/emailInput.ts`).
 - **The server** refuses one loudly in the same words (`blueprints/shared/email_rules.py`):
   `POST /auth/email/request-code` 400 (login mode too, before its 404), the invite
-  (`/minty/api/invitation/send`, `/api/onboarding/invite`) 400, the business email
+  (`/api/me/company/invitations`, `/api/onboarding/invite`) 400 - an invite's address must also
+  be an address with no markup (`invite_address_error`) - the business email
   (`/api/onboarding/create`, `PUT /api/onboarding/entity/<id>`, the `/entity/create` form) 400,
   the onboarding billing email (`…/billing/payment-methods/confirm`, `…/billing/accounts`) 400,
-  the register form's field error, and My Profile (`PATCH /api/me/profile`) and the payer
+  and My Profile (`PATCH /api/me/profile`) and the payer
   portal's invite-admin 422 - those two answer every refused address with 422.
 - Stored addresses are not rewritten.
 
@@ -198,8 +219,8 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
   | Settings tabs | `/entity/<co>/settings/users`, `/integration`, `/petty-cash`, `/modules` (minty-web), `/payment-request` (the payments app) |
   | Hand-overs | `/entity/<co>/enter`, `/payment-request`, `/modules`, `/xero-not-connected` |
 
-  Module names are `petty-cash` and `payment-request` (the user's call). minty-web's module page is
-  `/subscription/entities/<shortid>/<name>/modules` too, and the payments app's pages are
+  Module names are `petty-cash` and `payment-request` (the user's call). minty-web's company pages are
+  `/entities/<shortid>/<name>/…` too (the module page `…/settings/modules` since phase 2), and the payments app's pages are
   `/entity/<shortid>/<name>/payment-request[/<id>]` and `/settings/payment-request` on its origin -
   the hand-overs land there (`billing_app_home_url`; `/payment-request?request=<id>` lands on one
   request), and its middleware sends another company's page back here
@@ -217,11 +238,11 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
 ## 4. The terms gate
 
 `blueprints/legal/routes/gate.py::require_terms_acceptance` runs on every request: a
-signed-in user who has not accepted the current terms version is redirected to `/entity`,
-whose acceptance panel is a modal over the Select Company list (JSON callers get a JSON 403
-instead of a redirect; `/legal/accept` is the standalone fallback). With `MINTY_WEB_HUB` on,
-`/entity` hands the browser to minty-web whether or not terms are owed, and minty-web's own
-gate draws the same panel over every page of that app, recording through
+signed-in user who has not accepted the current terms version is redirected to `/entity`
+(JSON callers get a JSON 403 instead of a redirect; `/legal/accept` is the standalone fallback).
+`/entity` hands the browser to minty-web whether or not terms are owed (always, since phase 2 -
+the Jinja list and its panel are gone), and minty-web's own gate draws the panel over every
+page of that app, recording through
 `POST /api/me/terms/accept` (bearer, `source = "hub"`). The allow-list is keyed on **endpoint
 names**, not paths: the legal routes (minty-web's two included), the login/OTP endpoints,
 logout and `leave-entity`, static files. Versions, pinning and consent records are in
@@ -245,8 +266,10 @@ own wording.
   `USER_ROLE_DELETE` need **accountant**; report editing/deleting has an *own* and an
   *entity* variant; `can_view_report` allows the creator or anyone with
   `REPORT_VIEW_ENTITY`.
-- The `/admin` pages and `/minty/api/users/*` are superuser-only
-  (`blueprints/user_management/`).
+- The `/admin` pages and `/minty/api/users/create` / `…/<id>/consents` are superuser-only
+  (`blueprints/user_management/`); `/minty/api/users/me` is the person's own. A company's members
+  are managed per company - minty-web's Users tab over `/api/me/company/*` (each action its
+  permission and the rank rule; [entities-and-members.md](entities-and-members.md)).
 
 `tests/test_user_permission_matrix_coverage.py` walks every route and fails when a
 state-changing route has no permission check.
@@ -316,9 +339,11 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
 ## 8. Who is signed in (presence)
 
 `services/user_presence.py`: `signed_in_at` is stamped at login, `last_seen_at` at most
-once a minute on real traffic (`SEEN_REFRESH_SECONDS`), never by the Users tab's own
-20-second poll (`PRESENCE_INERT_ENDPOINTS`). The Users tab lists members seen in the last
-30 minutes (`DEFAULT_PRESENCE_WINDOW_SECONDS`, or `IDLE_TIMEOUT_SECONDS` when set);
+once a minute on real traffic (`SEEN_REFRESH_SECONDS`). "Signed in" means seen in the last
+30 minutes (`DEFAULT_PRESENCE_WINDOW_SECONDS`, or `IDLE_TIMEOUT_SECONDS` when set). Nothing
+shows the list now: the Users tab's "Online Users" section was switched off, and its poll
+(`/entity/settings/users/<id>/presence`, `PRESENCE_INERT_ENDPOINTS`) went with Flask's Users
+page in phase 2 (2026-10-05);
 minty-payment-request-api's `POST /api/auth/logout` clears the stamps the same way, so leaving from
 the payment module counts as leaving.
 

@@ -20,13 +20,6 @@ from services.auth.token_service import (auto_refresh_token,
 from services.user_presence import (SEEN_REFRESH_SECONDS, mark_signed_in,
                                     mark_signed_out, refresh_presence)
 
-# Requests the browser makes on its own, which say nothing about whether a person
-# is still there. The Users tab polls for the signed-in list every 20 seconds, so
-# a tab left open overnight would otherwise refresh its owner's presence all night
-# and keep them listed forever — defeating the whole point of last_seen_at.
-PRESENCE_INERT_ENDPOINTS = frozenset({"entity.entity_settings_users_presence"})
-
-
 def _sibling_app_origins() -> frozenset[str]:
     """The front ends Flask hands people over to. None of them can read this app's session."""
     from blueprints.shared import bearer_api
@@ -205,27 +198,6 @@ def init_app(app, db):
             ``entity.open_profile``, as ``bills_app_profile_url``."""
             return url_for("entity.open_profile")
 
-        def onboarding_launch_url():
-            """Launch URL into the onboarding wizard (Step 1) for the current user.
-
-            fresh=True for the same reason ``entity.entity_create`` passes it: this
-            global backs a "create entity" button (the empty-state page), so it must
-            start a BRAND-NEW onboarding. Without ``?fresh=1`` the wizard rehydrates
-            its single global session blob from localStorage and drops the user back
-            into the last in-progress entity. A user with no entities only ever sees
-            the empty state, so for them that was every attempt.
-
-            Resuming an in-progress entity is a different path entirely: clicking the
-            entity row, which passes ``entity_id`` (see ``entity.entity_detail``).
-            """
-            if not current_user.is_authenticated:
-                return url_for("auth.home")
-            from blueprints.entity.routes.create import (
-                onboarding_launch_url as _onboarding_launch_url,
-            )
-
-            return _onboarding_launch_url(current_user, fresh=True)
-
         def is_billing_enabled(entity_id):
             """Check if billing module is enabled for the given entity."""
             if not entity_id:
@@ -331,7 +303,6 @@ def init_app(app, db):
             "bills_app_handoff_url": bills_app_handoff_url,
             "bills_app_profile_url": bills_app_profile_url,
             "bills_app_profile_unscoped_url": bills_app_profile_unscoped_url,
-            "onboarding_launch_url": onboarding_launch_url,
             "is_billing_enabled": is_billing_enabled,
             "is_petty_cash_enabled": is_petty_cash_enabled,
             "company_home_url": company_home_url,
@@ -498,8 +469,6 @@ def init_app(app, db):
         list on their very next page rather than a minute into it.
         """
         try:
-            if request.endpoint in PRESENCE_INERT_ENDPOINTS:
-                return
             entity_id = _request_entity_id()
             last = session.get("presence_seen_at")
             now_ts = time.time()

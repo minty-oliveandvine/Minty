@@ -2,10 +2,9 @@ from flask import current_app, flash, jsonify, redirect, request, url_for
 from flask_login import login_user
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from loguru import logger
-from sqlalchemy import func
 
 from blueprints.auth import auth_bp
-from blueprints.auth.models.email_otp import EmailOtp
+from blueprints.auth.services.identity import resolve_user_by_email
 from blueprints.legal.models.terms_consent import (SOURCE_SIGNUP_INVITE,
                                                    SOURCE_SIGNUP_OTP)
 from blueprints.auth.services.email_auth import (
@@ -14,28 +13,26 @@ from blueprints.auth.services.email_auth import (
     verify_email_otp,
 )
 from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
+from blueprints.shared.safe_redirect import safe_internal_path
 from models.db import User
 
 _HANDOFF_SALT = "auth-email-handoff"
 
 
 def _email_is_registered(email: str) -> bool:
-    """Whether `email` belongs to a known account, for the login-page gate.
+    """Whether `email` belongs to a known account, for login mode's gate in
+    ``email_request_code`` (``/auth/email/check`` went with Flask's login page, 2026-10-05).
 
-    Checks in order:
-      1. User table, ``username`` column (the primary signal — email signups
-         store the email as the username).
-      2. ``email_otp`` table, ``email`` column (fallback: an address that has
-         been issued a code before).
+    The same rule the verify step signs in by (`resolve_user_by_email`: the
+    ``email`` or ``xero_email`` column), so a code is sent exactly when its
+    verify can find the account. Until 2026-10-05 this read ``username`` and
+    the ``email_otp`` table instead, which told an account only Xero could
+    resolve "Please sign up first".
     """
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         return False
-    if User.query.filter(func.lower(User.username) == email).first():
-        return True
-    if EmailOtp.query.filter(func.lower(EmailOtp.email) == email).first():
-        return True
-    return False
+    return resolve_user_by_email(email) is not None
 
 
 # Window for the browser to GET the handoff URL after a verify. 60s was too
@@ -54,15 +51,17 @@ def _handoff_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(current_app.config["SECRET_KEY"])
 
 
-def _mint_handoff_url(user_id: str, invite_token: str = "") -> str:
+def _mint_handoff_url(user_id: str, invite_token: str = "", next_path: str = "") -> str:
     """Sign a one-shot token and return the full handoff URL.
 
     The handoff is a same-origin GET so Flask's Set-Cookie sticks in the
     browser — cross-origin POST responses can't reliably set the session
-    cookie on localhost without HTTPS + SameSite=None.
+    cookie on localhost without HTTPS + SameSite=None. ``next_path`` is where the
+    sign-in was headed (the sign-in page carries Flask's ``?next=``); it is signed in,
+    and checked again on the way out.
     """
     token = _handoff_serializer().dumps(
-        {"user_id": str(user_id), "invite": invite_token},
+        {"user_id": str(user_id), "invite": invite_token, "next": next_path},
         salt=_HANDOFF_SALT,
     )
     return url_for("auth.email_handoff", h=token, _external=True)
@@ -142,20 +141,6 @@ def _terms_consent_for_signup(data: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-@auth_bp.route("/auth/email/check", methods=["POST"])
-def email_check():
-    """Tell the login page whether an email belongs to an existing account.
-
-    The page calls this before sending an OTP so an unregistered email is
-    stopped on the login page ("Please sign up first") and never advances to
-    the OTP step or creates a user.
-    """
-    data = request.get_json(silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    exists = _email_is_registered(email)
-    return jsonify({"status": "success", "exists": exists})
-
-
 @auth_bp.route("/auth/email/request-code", methods=["POST"])
 def email_request_code():
     data = request.get_json(silent=True) or {}
@@ -202,6 +187,8 @@ def email_verify_code():
     invite_token = (data.get("invite") or "").strip()
     first_name = (data.get("first_name") or "").strip()
     last_name = (data.get("last_name") or "").strip()
+    # Where the sign-in was headed; only ever a path on this site.
+    next_path = safe_internal_path(data.get("next") if isinstance(data.get("next"), str) else None) or ""
     result, error, err_code = verify_email_otp(
         data.get("email") or "", data.get("code") or ""
     )
@@ -278,7 +265,7 @@ def email_verify_code():
         # POST response. Mint a same-origin handoff URL; the browser GETs it,
         # Flask logs the user in there and the cookie is set on a same-origin
         # response that the browser keeps.
-        handoff_url = _mint_handoff_url(user.id, invite_token=invite_token)
+        handoff_url = _mint_handoff_url(user.id, invite_token=invite_token, next_path=next_path)
         return jsonify(
             {"status": "success", "action": "login", "redirect_url": handoff_url}
         )
@@ -352,7 +339,7 @@ def email_verify_code():
             ),
             400,
         )
-    handoff_url = _mint_handoff_url(new_user.id)
+    handoff_url = _mint_handoff_url(new_user.id, next_path=next_path)
     return jsonify(
         {"status": "success", "action": "login", "redirect_url": handoff_url}
     )
@@ -381,7 +368,6 @@ def _create_passwordless_user(
 
     from werkzeug.security import generate_password_hash
 
-    from blueprints.auth.services.identity import resolve_user_by_email
     from blueprints.legal.services.consent import record_consent
     from models.db import db
 
@@ -498,4 +484,4 @@ def email_handoff():
 
     login_user(user)
     logger.info(f"Handoff: logged in user {user.id}.")
-    return redirect(_post_login_redirect(user))
+    return redirect(safe_internal_path(payload.get("next")) or _post_login_redirect(user))

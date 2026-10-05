@@ -4,11 +4,12 @@ Flow when a user clicks an entity in the entity list:
   1. Browser hits ``/entity/<entity_id>/modules`` (``module_selector`` below).
   2. If billing isn't enabled for the entity, redirect to the petty cash
      dashboard (existing behaviour).
-  3. If billing IS enabled, issue a short-lived HS256 JWT signed with
+  3. If only billing is enabled, issue a short-lived HS256 JWT signed with
      Flask ``SECRET_KEY`` and hand off to the Module 2 Next.js frontend with
-     the JWT in the query string — to its ``/module-selection`` page when petty
-     cash is enabled too, and straight into the app itself when it isn't. The
-     picker only appears when there is actually something to pick.
+     the JWT in the query string, straight into the app itself.
+  4. Both enabled: minty-web's module choice (``/entities/<shortid>/<name>``, phase 2 -
+     2026-10-05; it was Module 2's ``/module-selection`` page), with a token scoped to the
+     company. The picker only appears when there is actually something to pick.
 
 Module 2 (the payment-request app) consumes the JWT, stores it in a cookie,
 and uses ``Authorization: Bearer <jwt>`` + ``X-Entity-Id`` for all calls to
@@ -134,10 +135,6 @@ def module_selector(entity_id):
     # loads must NOT do this — see resume_presence for why.
     resume_presence(current_user, entity_id)
 
-    # Superusers viewing an entity they aren't a member of get a view-only
-    # super_admin role in the JWT so Module 2 can identify them.
-    effective_role = user_entity.role if user_entity else Role.SUPER_ADMIN.value
-
     # No access resync here any more. It re-read live Stripe on every page view to
     # catch a webhook that never arrived; the gate is now written by the app itself
     # whenever access changes, and the daily sweep closes it when a grace window
@@ -158,31 +155,19 @@ def module_selector(entity_id):
     if not petty_cash_enabled:
         # Mirror image of the branch above: with only one module switched on there
         # is nothing to choose between, so the picker is a dead click. Send the
-        # user straight into Module 2's app instead of its /module-selection page.
+        # user straight into Module 2's app instead of the module choice.
         current_app.logger.info(
             f"Only billing enabled - redirecting directly to Module 2 for entity {entity_id}"
         )
         return redirect(billing_app_home_url(entity_id, org, current_user.id))
 
-    # Both modules enabled — hand off to Module 2's /module-selection page.
-    frontend_app_url = _frontend_origin()
-    token = _generate_module_token(
-        current_user.id,
-        entity_id,
-        org.xero_org_id,
-        effective_role,
-        billing_enabled=billing_enabled,
-        petty_cash_enabled=petty_cash_enabled,
+    # Both modules enabled — minty-web's module choice, with a token scoped to the company
+    # (the same token the module settings page gets; a superuser outside it is view-only there
+    # as everywhere). Never log the URL itself: it carries the token.
+    current_app.logger.info(f"Handing over to minty-web's module choice for entity {entity_id}")
+    return redirect(
+        minty_web_landing_url(minty_web_company_path(entity_id), org, current_user.id)
     )
-    entity_name = quote(org.name or "", safe="")
-    frontend_url = (
-        f"{frontend_app_url}/module-selection"
-        f"?entity_id={quote(str(entity_id), safe='')}&entity_name={entity_name}&token={token}"
-    )
-
-    # Never log the URL itself: it carries the token.
-    current_app.logger.info(f"Redirecting to Module 2 module selection for entity {entity_id}")
-    return redirect(frontend_url)
 
 
 def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
@@ -214,13 +199,24 @@ def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
     )
 
 
-def minty_web_module_page_path(entity_id) -> str:
-    """minty-web's module settings page of one company, as a path on minty-web's origin:
-    ``/subscription/entities/<shortid>/<name>/modules`` since 2026-10-05 (the same address
-    minty-web's ``lib/companyRef.ts`` builds)."""
+def minty_web_company_path(entity_id, sub: str = "") -> str:
+    """One company's pages on minty-web's origin: ``/entities/<shortid>/<name><sub>`` (phase 2,
+    2026-10-05 - minty-web's ``lib/hubPaths.ts::companyPath``). An id that names no company
+    keeps its full form with the placeholder name ``company``; minty-web puts the company's
+    own name in the address bar once it knows it."""
     from blueprints.shared.entity_ref import canonical_ref
 
-    return f"/subscription/entities/{canonical_ref(entity_id)}/modules"
+    ref = canonical_ref(entity_id)
+    if "/" not in ref:
+        ref = f"{ref}/company"
+    return f"/entities/{ref}{sub}"
+
+
+def minty_web_module_page_path(entity_id) -> str:
+    """minty-web's module settings page of one company - the Module tab among its settings,
+    ``/entities/<shortid>/<name>/settings/modules`` since phase 2 (it was
+    ``/subscription/entities/<shortid>/<name>/modules``; minty-web 307s the old address)."""
+    return minty_web_company_path(entity_id, "/settings/modules")
 
 
 def minty_web_module_page_url(org: Entity, user_id) -> str:
@@ -241,7 +237,7 @@ def minty_web_module_page_handoff(entity_id) -> str:
     )
 
 
-#: minty-web's hub pages (``MINTY_WEB_HUB``): the entity list and My Profile.
+#: minty-web's hub pages: the entity list and My Profile.
 MINTY_WEB_ENTITIES_PATH = "/entities"
 MINTY_WEB_PROFILE_PATH = "/profile"
 

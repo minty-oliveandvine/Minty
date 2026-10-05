@@ -12,7 +12,8 @@ never by reading a column:
 * ``POST /refresh_token`` - the signed-in user's own refresh (``GET /api/refresh_xero_token``
   was deleted 2026-10-05: no caller, a GET that rotated the refresh token and never stored
   the new one, so any link could break a connection);
-* ``POST /entity/settings/xero/disconnect``.
+* ``POST /api/me/company/xero/disconnect`` (minty-web's Entity & Integration tab; it was the
+  session ``POST /entity/settings/xero/disconnect`` until phase 2, 2026-10-05).
 """
 
 from __future__ import annotations
@@ -259,16 +260,15 @@ def test_two_members_hold_separate_tokens(connected, client, app, db, xero):
 
 def test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect(connected, client, app, xero):
     owner, entity = connected
-    F.login(client, owner)
 
-    resp = client.post("/entity/settings/xero/disconnect", data={"entity_id": entity.id})
+    resp = client.post("/api/me/company/xero/disconnect", query_string={"entity": entity.id},
+                       headers=F.hub_headers(app, owner.id))
 
-    assert resp.status_code == 302, resp.data[:300]
+    assert resp.status_code == 200, resp.data[:300]
     assert any(c[0] == "DELETE" and "connections/conn-1" in c[1] for c in xero.calls), xero.calls
     assert internal_token(client, app, entity.id).status_code == 409
-    page = client.get(f"{F.co(client, entity.id)}/settings/integration")
-    assert page.status_code == 200
-    assert "connect to xero" in page.get_data(as_text=True).lower()
+    # what the tab shows next: not connected, nothing to reconnect
+    assert resp.get_json()["xero"] == {**resp.get_json()["xero"], "connected": False, "needs_reconnect": False}
 
 
 def test_only_a_member_with_xero_rights_can_disconnect(connected, client, app, db, xero):
@@ -279,8 +279,8 @@ def test_only_a_member_with_xero_rights_can_disconnect(connected, client, app, d
 
         db.session.add(UserEntity(user_id=cashier.id, entity_id=entity.id, role="cashier", approved=True))
         db.session.commit()
-    F.login(client, cashier)
-    resp = client.post("/entity/settings/xero/disconnect", data={"entity_id": entity.id})
-    assert resp.status_code in (302, 403)
+    resp = client.post("/api/me/company/xero/disconnect", query_string={"entity": entity.id},
+                       headers=F.hub_headers(app, cashier.id))
+    assert resp.status_code == 403
     assert not any(c[0] == "DELETE" for c in xero.calls)
     assert internal_token(client, app, entity.id).status_code == 200, "still connected"

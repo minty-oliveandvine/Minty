@@ -598,7 +598,7 @@ def test_notice_api_returns_the_items_and_a_minty_settings_path(app, notice_api)
     parts = urlsplit(body["settings_path"])
     assert (parts.scheme, parts.netloc, parts.path) == ("", "", "/handoff/minty-web")
     assert parse_qs(parts.query) == {
-        "next": ["/subscription/entities/entity-1/modules"],
+        "next": ["/entities/entity-1/company/settings/modules"],
         "entity_id": ["entity-1"],
     }
 

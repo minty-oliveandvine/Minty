@@ -111,8 +111,7 @@ def test_creating_a_company_makes_the_creator_its_admin_and_seeds_every_module_o
     assert set(state) == {MODULE_PETTY_CASH, MODULE_BILL}
     assert all(enabled is False for enabled, _ in state.values()), "creation grants nothing; a trial or subscription switches a module on"
 
-    page = client.get("/entity").get_data(as_text=True)
-    assert "Corner Shop" in page
+    assert "Corner Shop" in [row["name"] for row in F.hub_list(client, app, admin.id)]
 
 
 def test_the_module_rows_a_creation_seeds_carry_the_creator(world, client, app):
@@ -240,10 +239,9 @@ def test_finalizing_takes_the_company_out_of_onboarding_and_the_list_stops_offer
     assert resp.status_code == 200, resp.data[:300]
     assert entity_row(app, entity_id).status != "onboarding"
 
-    F.login(client, admin)
-    page = client.get("/entity").get_data(as_text=True)
-    assert "Wizard Co" in page
-    assert "Setup in progress" not in page
+    rows = {row["name"]: row for row in F.hub_list(client, app, admin.id)}
+    # "Setup in progress" is a row still onboarding
+    assert rows["Wizard Co"]["status"] != "onboarding"
 
 
 # ---- settings -----------------------------------------------------------------------------------
@@ -259,14 +257,14 @@ def company(app, db, world):
 
 def test_the_settings_pages_render_for_an_admin(world, company, client):
     F.login(client, world["admin"])
-    for url in (f"{F.co(client, company.id)}/settings/petty-cash",
-                f"{F.co(client, company.id)}/settings/users", f"{F.co(client, company.id)}/settings/integration",
-                f"{F.co(client, company.id)}/modules"):
+    for url in (f"{F.co(client, company.id)}/settings/petty-cash", f"{F.co(client, company.id)}/modules"):
         resp = client.get(url, follow_redirects=True)
         assert resp.status_code == 200, (url, resp.status_code, resp.data[:200])
-    # the Module tab is minty-web's page: a hand-over, not a render (test_minty_web_handoff)
-    resp = client.get(f"{F.co(client, company.id)}/settings/modules")
-    assert resp.status_code == 302 and "/landing?next=" in resp.headers["Location"]
+    # the Module, Users and Entity & Integration tabs are minty-web's pages: hand-overs, not
+    # renders (test_minty_web_handoff, test_hub_company_settings)
+    for tab in ("modules", "users", "integration"):
+        resp = client.get(f"{F.co(client, company.id)}/settings/{tab}")
+        assert resp.status_code == 302 and "/landing?next=" in resp.headers["Location"], tab
 
 
 def test_a_cashier_cannot_change_the_company_settings(world, company, client, app, db):
@@ -301,9 +299,11 @@ def test_xero_disconnect_flips_the_company_to_disconnected(world, company, clien
                        tokens={"access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 1800})
     assert entity_row(app, company.id).status == "connected"
 
-    F.login(client, world["admin"])
-    resp = client.post("/entity/settings/xero/disconnect", data={"entity_id": company.id})
-    assert resp.status_code == 302, resp.data[:300]
+    # minty-web's Entity & Integration tab, through Flask's bearer route (phase 2)
+    resp = client.post("/api/me/company/xero/disconnect", query_string={"entity": company.id},
+                       headers=F.hub_headers(app, world["admin"].id))
+    assert resp.status_code == 200, resp.data[:300]
+    assert calls == ["https://api.xero.com/connections/conn-1"], "the grant is revoked at Xero"
     row = entity_row(app, company.id)
     assert row.status == "disconnected"
     assert row.xero_org_id is None

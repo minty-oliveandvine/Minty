@@ -54,8 +54,8 @@ ALLOWED_ENDPOINTS = frozenset(
         "auth.home",
         "auth.login",
         "auth.register",
-        "auth.validate_register",
-        "auth.email_check",
+        # the sign-in page's messages (minty-web's /login, phase 2)
+        "auth.auth_notices",
         "auth.email_request_code",
         "auth.email_verify_code",
         "auth.email_handoff",

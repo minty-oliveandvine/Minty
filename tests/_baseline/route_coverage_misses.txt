@@ -1,7 +1,7 @@
 # Known gaps: in-scope routes no test reaches with a real request yet (tests/test_zz_route_coverage.py).
 # The gate fails on a route missing from this list AND on a listed route that a test now reaches.
 # Rewrite only on a complete run: MINTY_ROUTE_BASELINE=update (drop covered) or =add (also add misses).
-# 29 of 118 in-scope routes
+# 28 of 120 in-scope routes
 
 entity.billing_relogin                                  GET       /entity/<entity:entity_id>/billing-relogin         company
 entity.billing_sync_chart_accounts                      POST      /api/entities/<string:entity_id>/billing/sync-chart-accounts via ensure_valid_token
@@ -28,7 +28,6 @@ report.report_expense_update                            POST      /report/expens
 report.report_publishing_status                         GET       /api/report/<report_id>/publishing_status          company, xero_integrated_yes
 report.report_screenshot                                GET       /report/<string:id>/screenshot                     via can_view_report, remove
 user_management.deactivate_my_account                   DELETE    /minty/api/users/me                                access_token, company, expires_in, id_token, refresh_token
-user_management.update_user_details                     PATCH     /minty/api/users/<string:user_id>                  via check_role_change_or_error
 xero.get_latest_xero_bank_transactions                  GET       /api/xero/bank-transactions/latest/<entity_id>     access_token, date
 xero.update_bank_transaction                            POST      /api/xero/bank-transactions/update/<entity_id>     access_token, bank_deposit, company, date
 xero.xero_callback                                      GET       /callback                                          access_token, expires_in, id_token, refresh_token, token_created_at, xero_entity_id

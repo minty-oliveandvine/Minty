@@ -91,16 +91,6 @@
    "in_scope": true
   },
   {
-   "endpoint": "auth.email_check",
-   "rule": "/auth/email/check",
-   "methods": [
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
    "endpoint": "auth.email_request_code",
    "rule": "/auth/email/request-code",
    "methods": [
@@ -235,17 +225,6 @@
    "in_scope": false
   },
   {
-   "endpoint": "auth.validate_register",
-   "rule": "/validate_register",
-   "methods": [
-    "GET",
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
    "endpoint": "auth.check_token",
    "rule": "/check/token",
    "methods": [
@@ -274,6 +253,16 @@
     ]
    },
    "in_scope": true
+  },
+  {
+   "endpoint": "auth.auth_notices",
+   "rule": "/auth/notices",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
   },
   {
    "endpoint": "entity.billing_sync_chart_accounts",
@@ -932,8 +921,7 @@
    "endpoint": "entity.entity_settings",
    "rule": "/entity/<entity:entity_id>/settings/integration",
    "methods": [
-    "GET",
-    "POST"
+    "GET"
    ],
    "touches": [
     "access_token",
@@ -962,16 +950,6 @@
     ]
    },
    "in_scope": true
-  },
-  {
-   "endpoint": "entity.entity_settings_users_presence",
-   "rule": "/entity/settings/users/<string:org_id>/presence",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
   },
   {
    "endpoint": "entity.entity_settings_users",
@@ -2626,54 +2604,6 @@
    "in_scope": false
   },
   {
-   "endpoint": "user_management.update_user_details",
-   "rule": "/minty/api/users/<string:user_id>",
-   "methods": [
-    "PATCH"
-   ],
-   "touches": [],
-   "touches_via_service": {
-    "check_role_change_or_error": [
-     "company"
-    ]
-   },
-   "in_scope": true
-  },
-  {
-   "endpoint": "user_management.update_user_role",
-   "rule": "/minty/api/users/<string:user_id>/role",
-   "methods": [
-    "PATCH"
-   ],
-   "touches": [],
-   "touches_via_service": {
-    "check_role_change_or_error": [
-     "company"
-    ]
-   },
-   "in_scope": true
-  },
-  {
-   "endpoint": "user_management.delete_user_role",
-   "rule": "/minty/api/users/<string:user_id>/role",
-   "methods": [
-    "DELETE"
-   ],
-   "touches": [],
-   "touches_via_service": {
-    "check_not_last_admin_or_error": [
-     "company"
-    ],
-    "check_not_subscription_payer_or_error": [
-     "company"
-    ],
-    "check_not_pending_subscriber_or_error": [
-     "company"
-    ]
-   },
-   "in_scope": true
-  },
-  {
    "endpoint": "user_management.deactivate_my_account",
    "rule": "/minty/api/users/me",
    "methods": [
@@ -2837,28 +2767,6 @@
    "in_scope": false
   },
   {
-   "endpoint": "xero.disconnect_from_xero",
-   "rule": "/entity/settings/xero/disconnect",
-   "methods": [
-    "POST"
-   ],
-   "touches": [
-    "access_token",
-    "expires_in",
-    "id_token",
-    "refresh_token",
-    "token_created_at",
-    "xero_entity_id"
-   ],
-   "touches_via_service": {
-    "ensure_valid_token": [
-     "access_token",
-     "refresh_token"
-    ]
-   },
-   "in_scope": true
-  },
-  {
    "endpoint": "xero.get_entity_xero_data",
    "rule": "/api/entity/<string:entity_id>/xero-data",
    "methods": [
@@ -2900,46 +2808,6 @@
    "rule": "/entity/<entity:entity_id>/xero-not-connected",
    "methods": [
     "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "invitation.send_invitation",
-   "rule": "/minty/api/invitation/send",
-   "methods": [
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "invitation.list_pending",
-   "rule": "/minty/api/invitation/<string:entity_id>/pending",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "invitation.cancel_invite",
-   "rule": "/minty/api/invitation/<string:invitation_id>/cancel",
-   "methods": [
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "invitation.resend_invite",
-   "rule": "/minty/api/invitation/<string:invitation_id>/resend",
-   "methods": [
-    "POST"
    ],
    "touches": [],
    "touches_via_service": {},
@@ -3260,8 +3128,7 @@
    "endpoint": "entity_settings",
    "rule": "/entity/<entity:entity_id>/settings/integration",
    "methods": [
-    "GET",
-    "POST"
+    "GET"
    ],
    "touches": [
     "access_token",
@@ -3422,17 +3289,6 @@
    "in_scope": true
   },
   {
-   "endpoint": "validate_register",
-   "rule": "/validate_register",
-   "methods": [
-    "GET",
-    "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
    "endpoint": "xero_auth",
    "rule": "/xero_auth",
    "methods": [
@@ -3461,28 +3317,6 @@
    "touches": [],
    "touches_via_service": {},
    "in_scope": false
-  },
-  {
-   "endpoint": "disconnect_from_xero",
-   "rule": "/entity/settings/xero/disconnect",
-   "methods": [
-    "POST"
-   ],
-   "touches": [
-    "access_token",
-    "expires_in",
-    "id_token",
-    "refresh_token",
-    "token_created_at",
-    "xero_entity_id"
-   ],
-   "touches_via_service": {
-    "ensure_valid_token": [
-     "access_token",
-     "refresh_token"
-    ]
-   },
-   "in_scope": true
   },
   {
    "endpoint": "approve_admins",
@@ -3565,6 +3399,78 @@
    "touches": [],
    "touches_via_service": {},
    "in_scope": false
+  },
+  {
+   "endpoint": "entity.hub_company_users",
+   "rule": "/api/me/company/users",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.hub_company_invite",
+   "rule": "/api/me/company/invitations",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.hub_company_invitation_cancel",
+   "rule": "/api/me/company/invitations/<invitation_id>/cancel",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.hub_company_invitation_resend",
+   "rule": "/api/me/company/invitations/<invitation_id>/resend",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.hub_company_member",
+   "rule": "/api/me/company/users/<member_id>",
+   "methods": [
+    "DELETE",
+    "PATCH"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.hub_company_integration",
+   "rule": "/api/me/company/integration",
+   "methods": [
+    "GET",
+    "PATCH"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "entity.hub_company_xero_disconnect",
+   "rule": "/api/me/company/xero/disconnect",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": true
   },
   {
    "endpoint": "favicon",
@@ -3750,7 +3656,7 @@
   }
  ],
  "summary": {
-  "routes": 208,
-  "in_scope": 125
+  "routes": 203,
+  "in_scope": 127
  }
 }

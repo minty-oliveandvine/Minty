@@ -172,11 +172,14 @@ class TestCallersAreWiredUp:
     """The helper no-ops on a falsy old org, so a dropped call fails silently."""
 
     def test_all_three_org_write_sites_invalidate(self):
+        """Connect and reconnect in the OAuth routes; disconnect in its service (moved there in
+        phase 2, 2026-10-05, when the Entity & Integration tab became minty-web's)."""
         import inspect
 
         from blueprints.xero.routes import routes
+        from blueprints.xero.services import disconnect
 
-        source = inspect.getsource(routes)
+        source = inspect.getsource(routes) + inspect.getsource(disconnect)
         calls = [
             line.strip()
             for line in source.splitlines()
