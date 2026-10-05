@@ -32,9 +32,11 @@ does not survive the round-trip. `GET /callback`:
 
 The sync **replaces** the cached rows, and `entity_pettycash_settings` has nine FKs into
 them (`ON DELETE SET NULL`), so a re-sync after an organisation switch clears the petty-cash
-mapping — it must be picked again (§3). `GET /entity/settings/xero/disconnect` clears the
-tenant and the cache; `/remove/connections/all` is the superuser's "forget every Xero
-connection" and `/debug/xero-settings/<id>` a read-only dump.
+mapping — it must be picked again (§3). `POST /entity/settings/xero/disconnect` (a form with
+the CSRF token; a GET until 2026-10-05, so any link could disconnect a company) clears the
+tenant and the cache. `/remove/connections/all` (a GET that dropped EVERY Xero organisation of
+the user), `/api/refresh_xero_token` (a GET that rotated the refresh token and never stored
+the new one) and `/debug/xero-settings/<id>` were deleted on 2026-10-05; none had a caller.
 
 ## 2. Tokens
 

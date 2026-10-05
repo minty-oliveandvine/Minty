@@ -63,7 +63,7 @@ def privacy_version(version):
     return _render(registry.PRIVACY, version)
 
 
-@legal_bp.route("/legal/invite-terms-status")
+@legal_bp.route("/legal/invite-terms-status", methods=["POST"])
 def invite_terms_status():
     """Whether the person an invite was sent to still owes a Terms acceptance.
 
@@ -81,6 +81,10 @@ def invite_terms_status():
     whoever holds it received the invitation — so answering for that address
     reveals nothing they did not already have.
 
+    POST, WITH THE TOKEN IN THE BODY (2026-10-05). As a GET query it landed in every
+    access log and proxy log on the way. Read-only, keyed on a secret, no session: so it
+    is CSRF-exempt (bootstrap.py) like the other onboarding-origin calls.
+
     FAILS SAFE. Anything unclear — no token, unknown token, no such user —
     answers "yes, still required". Asking someone to accept twice is a small
     annoyance; skipping someone who never agreed is a missing consent record,
@@ -91,7 +95,7 @@ def invite_terms_status():
     from blueprints.legal.services.consent import has_consent
 
     required = True
-    token = (request.args.get("invite") or "").strip()
+    token = str((request.get_json(silent=True) or {}).get("invite") or "").strip()
 
     if token:
         try:

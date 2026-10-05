@@ -19,6 +19,7 @@ from blueprints.entity.services.settings import (
     invalidate_entity_xero_cache, sync_all_accounts_and_contacts_background)
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.shared import bearer_api
+from blueprints.shared.safe_redirect import safe_internal_path, safe_next
 from blueprints.xero import xero_bp
 from blueprints.xero.services.integration import (
     _get_entity_xero_data_from_db, get_accounts_from_xero, get_auth_token,
@@ -33,8 +34,6 @@ from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity,
                                          resolve_entity_access_token_for_service,
                                          upsert_user_token)
-from services.auth.token_service import \
-    refresh_access_token as refresh_access_token_service
 from services.permission_policy import Permission, has_permission
 from blueprints.auth.services.identity import normalize_email, resolve_user_by_email
 from blueprints.invitation.models.invitation import Invitation
@@ -46,7 +45,9 @@ from utils import decode_jwt
 
 @xero_bp.route("/xero_auth")
 def xero_auth():
-    next_url = request.args.get("next")
+    # A path on this site only: an outside address here was an open redirect run
+    # straight after a successful sign-in.
+    next_url = safe_internal_path((request.args.get("next") or "").strip())
     if next_url:
         session["next_after_login"] = next_url
     scope = "openid profile email offline_access"
@@ -820,8 +821,7 @@ def xero_callback():
             # Same defensive pattern used in auth/logout.py and register.py.
             get_flashed_messages()
             flash("You're signed in with Xero.", "success")
-            next_url = session.pop("next_after_login", None)
-            return redirect(next_url or url_for("entity.entity_list"))
+            return redirect(safe_next(session.pop("next_after_login", None), url_for("entity.entity_list")))
         else:
             db.session.rollback()
             logger.error(f"Error in xero auth with user: {user}")
@@ -1322,18 +1322,6 @@ def xero_callback():
     return redirect(url_for("entity_settings", entity_id=entity_id))
 
 
-@xero_bp.route("/api/refresh_xero_token", methods=["GET"])
-@login_required
-def refresh_access_token() -> ResponseReturnValue:
-    token_response = refresh_access_token_service()
-    if token_response:
-        return jsonify(token_response), 200
-    return (
-        jsonify({"status": "error", "message": "Xero wouldn't renew your session. Mind reconnecting to Xero?"}),
-        500,
-    )
-
-
 # Scope claim required on the service JWT. Narrow, so a token minted for one
 # purpose cannot be replayed against this endpoint.
 _INTERNAL_TOKEN_SCOPE = "xero-access-token"
@@ -1591,7 +1579,7 @@ def get_xero_sync_status(entity_id):
     return jsonify(status)
 
 
-@xero_bp.route("/entity/settings/xero/disconnect", methods=["GET"])
+@xero_bp.route("/entity/settings/xero/disconnect", methods=["POST"])
 @login_required
 @require_entity_access(entity_keys=("entity_id",))
 @require_permission(
@@ -1600,7 +1588,9 @@ def get_xero_sync_status(entity_id):
     message="You do not have permission to disconnect Xero for this entity.",
 )
 def disconnect_from_xero():
-    entity_id = request.args.get("entity_id")
+    # POST with the CSRF token: a GET let any link on another site disconnect a
+    # company and wipe its cached Xero data.
+    entity_id = request.form.get("entity_id")
 
     if not entity_id:
         # Nothing has touched Xero at this point — the request just arrived

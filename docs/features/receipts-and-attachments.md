@@ -42,10 +42,12 @@ back as a JPEG, and the stored `mime_type` reflects the bytes actually stored).
 ## Reading them back
 
 - The expense page's *view* modal and the report detail page link `GET /download/<key>`,
-  which redirects to a presigned URL (1 hour; `blueprints/report/routes/download.py`). The
+  which redirects to a presigned URL (1 hour; `blueprints/report/routes/download.py`) - only
+  for a receipt of a report the person may see (`can_view_report`, via the attachment row or
+  the `expenses/<report_id>/` key prefix). The
   API paths that create a line return a 15-minute presigned `preview_url`.
 - `POST /download_attachments` (`start_date`, `end_date`, `company`) zips every receipt of
-  the period as `<date>/<filename>`.
+  the period as `<date>/<filename>`. Superuser only: a blank `company` means every company.
 - The Xero publish uploads each receipt to the **Files API** and associates it with the
   bank transaction it belongs to (`upload_each_file`; stateless — it asks Xero what is
   already attached rather than tracking ids, see `minty-xero-publish-overwrite`).

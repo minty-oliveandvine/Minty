@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Diff every model in Minty, billing-backend, onboarding-backend and minty-billing-api against
+"""Diff every model in Minty, minty-payment-request-api, minty-onboarding-api and minty-billing-api against
 the schema.
 
 Reports, with file:line:
@@ -19,12 +19,12 @@ a finding (a missing path used to read as 0 findings).
                                                 .env) with its database swapped for AUDIT_DB
     AUDIT_DB       database name                default postgres        (ignored if AUDIT_URI)
     AUDIT_SCHEMA   schema to read               default: DATABASE_URL's ?schema= (pettycashv3)
-    AUDIT_REPOS    comma list of repo names     default Minty,billing-backend,onboarding-backend,minty-billing-api
+    AUDIT_REPOS    comma list of repo names     default Minty,minty-payment-request-api,minty-onboarding-api,minty-billing-api
     MINTY_REPOS_ROOT  the folder the repos sit in   default: this checkout's parent (C:\\Github)
     AUDIT_STRICT=1 exit 1 when there is any finding (for use as a test)
     PG_BIN         directory holding psql       default: PATH
 
-onboarding-backend was NOT in the original audit; its shared_models (585 lines) mirror the
+minty-onboarding-api was NOT in the original audit; its shared_models (585 lines) mirror the
 same tables and drift the same way. minty-billing-api (Part 2, 2026-09-21) mirrors the 13
 subscription tables and the read-only rows it needs. Do not remove either from the default list.
 """
@@ -59,7 +59,7 @@ ROOT = os.environ.get("MINTY_REPOS_ROOT") or os.path.dirname(os.path.dirname(os.
 # minty-billing-api (Part 2 of the modernisation plan) mirrors the 13 subscription tables and
 # the read-only rows it needs; it drifts the same way the other two Django repos do.
 ALL_REPOS = {name: os.path.join(ROOT, name) for name in
-             ("Minty", "billing-backend", "onboarding-backend", "minty-billing-api")}
+             ("Minty", "minty-payment-request-api", "minty-onboarding-api", "minty-billing-api")}
 REPOS = {k: ALL_REPOS[k] for k in
          os.environ.get("AUDIT_REPOS", ",".join(ALL_REPOS)).split(",") if k}
 # A repo that is not checked out is a finding, not a silent pass: os.walk on a missing path

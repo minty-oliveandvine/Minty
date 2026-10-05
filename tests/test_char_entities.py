@@ -302,7 +302,7 @@ def test_xero_disconnect_flips_the_company_to_disconnected(world, company, clien
     assert entity_row(app, company.id).status == "connected"
 
     F.login(client, world["admin"])
-    resp = client.get(f"/entity/settings/xero/disconnect?entity_id={company.id}")
+    resp = client.post("/entity/settings/xero/disconnect", data={"entity_id": company.id})
     assert resp.status_code == 302, resp.data[:300]
     row = entity_row(app, company.id)
     assert row.status == "disconnected"

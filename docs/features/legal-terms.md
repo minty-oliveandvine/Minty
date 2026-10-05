@@ -35,7 +35,7 @@ inject markup into the page.
 | `GET /legal/current` | which versions are live — the sign-up screens send that name back |
 | `GET /legal/content/<kind>` | the rendered document as JSON, for a client that must show it inline (the onboarding app's terms modal) |
 | `GET /legal/accept` / `POST /legal/accept` | the acceptance screen (scroll to the end, tick, accept) and the record |
-| `GET /legal/invite-terms-status` | whether the person an invite was sent to still owes consent |
+| `POST /legal/invite-terms-status` | whether the person an invite was sent to still owes consent (the invite token in the JSON body; GET refused since 2026-10-05, when the token stopped riding in the URL) |
 | `GET /minty/api/users/<id>/consents` | a person's consent history (superuser) |
 | `GET /api/me/terms` / `POST /api/me/terms/accept` | minty-web's Terms panel (bearer, `routes/hub.py`) - what is owed, and the record; below |
 

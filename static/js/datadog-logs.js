@@ -12,12 +12,34 @@
     return;
   }
 
+  // What a log may say about the page: no query string (tokens, ?h=, ?flash=) and no
+  // share-link path (its last segment is the secret). Applied to our own fields and,
+  // through beforeSend, to the view.url / view.referrer the SDK attaches by itself.
+  function scrubUrl(href) {
+    try {
+      var u = new URL(href, window.location.origin);
+      var path = /^\/Minty_Report\//.test(u.pathname) ? '/Minty_Report/[redacted]' : u.pathname;
+      return u.origin + path;
+    } catch (e) {
+      return '[unparseable url]';
+    }
+  }
+
   var initOptions = Object.assign({
     clientToken: clientToken,
     site: 'ap1.datadoghq.com',
     forwardErrorsToLogs: true,
     sessionSampleRate: 100
-  }, config);
+  }, config, {
+    beforeSend: function (log) {
+      if (log.view) {
+        if (log.view.url) log.view.url = scrubUrl(log.view.url);
+        if (log.view.referrer) log.view.referrer = scrubUrl(log.view.referrer);
+      }
+      if (log.http && log.http.url) log.http.url = scrubUrl(log.http.url);
+      return config.beforeSend ? config.beforeSend(log) : true;
+    }
+  });
 
   if (!window.DD_LOGS) {
     window.DD_LOGS = { q: [], onReady: function(cb) { this.q.push(cb); } };
@@ -78,7 +100,7 @@
     if (window.DD_LOGS && window.DD_LOGS.logger) {
       try {
         var logData = Object.assign({}, extra, {
-          url: window.location.href,
+          url: scrubUrl(window.location.href),
           userAgent: navigator.userAgent,
           timestamp: new Date().toISOString()
         });
@@ -162,6 +184,6 @@
       });
     });
 
-    sendLogToDataDog('info', 'Page loaded', { path: window.location.pathname });
+    sendLogToDataDog('info', 'Page loaded', { path: new URL(scrubUrl(window.location.href)).pathname });
   });
 })();

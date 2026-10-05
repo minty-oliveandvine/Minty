@@ -570,7 +570,13 @@ def test_every_receipt_the_detail_page_shows_is_an_object_the_bucket_holds(shop,
     resp = client.get(links[0])
     assert resp.status_code == 302 and resp.headers["Location"] == f"https://fake-s3.test/{legacy_key}", resp.headers.get("Location")
 
-    # the attachments download: the same receipt, whole, inside the zip
+    # the attachments download: the same receipt, whole, inside the zip. It spans every
+    # company, so only a superuser may run it (2026-10-05).
+    from models.db import User
+
+    with app.app_context():
+        root = F.make_user(db, "root@test.com", system_role=User.SYSTEM_ROLE_SUPERUSER)
+    F.login(client, root)
     resp = client.post("/download_attachments", data={"start_date": F.iso(REPORT_DATE), "end_date": F.iso(REPORT_DATE),
                                                        "company": entity.id})
     assert resp.status_code == 200, resp.data[:300]

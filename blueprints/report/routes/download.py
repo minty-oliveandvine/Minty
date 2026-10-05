@@ -2,6 +2,7 @@
 # Report download: file (S3 presigned), report Excel, statements,
 # attachments ZIP, CSV export. Logic moved from app.
 import os
+import uuid
 import zipfile
 from datetime import datetime
 from io import BytesIO
@@ -17,14 +18,61 @@ from blueprints.report import report_bp
 from blueprints.report.services.shared import split_receipt_keys
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
 from blueprints.shared.enums import DiscrepancyType
+from blueprints.report.models.shop_expense import (Attachment, ReportExpense,
+                                                    ReportExpenseAttachment)
 from models.db import Report, ShopExpense, db
 from services.helpers.xero_bridge import get_entity_account_settings
-from services.permission_policy import Permission, has_permission
+from services.permission_policy import (Permission, can_view_report,
+                                        has_permission, is_superuser)
+
+
+def _superuser_only() -> Any:
+    """None for a superuser, else a logged 403. The statement and attachment exports
+    span EVERY company, so only a superuser may run them."""
+    if is_superuser(current_user):
+        return None
+    logger.warning(f"all-company export refused for user {current_user.id}")
+    return jsonify({"status": "error", "message": "Hmm, I can't let you in there."}), 403
+
+
+def _report_owning_key(s3_key: str) -> Report | None:
+    """The report a receipt key belongs to, or None.
+
+    An expense line's attachment row says it directly. A file uploaded but not yet on a
+    line has no row, but every key Minty writes is ``expenses/<report_id>/...``
+    (``s3_storage.upload_file_to_s3`` and ``api.expense_upload_files``).
+    """
+    report_id = (
+        db.session.query(ReportExpense.report_id)
+        .join(ReportExpenseAttachment, ReportExpenseAttachment.report_expense_id == ReportExpense.id)
+        .join(Attachment, Attachment.id == ReportExpenseAttachment.attachment_id)
+        .filter(Attachment.file_path == s3_key)
+        .limit(1)
+        .scalar()
+    )
+    if report_id is None:
+        parts = s3_key.split("/")
+        if len(parts) < 3 or parts[0] != "expenses":
+            return None
+        try:
+            report_id = str(uuid.UUID(parts[1]))
+        except ValueError:
+            return None
+    return db.session.get(Report, report_id)
 
 
 @report_bp.route("/download/<path:filename>", methods=["GET"])
 @login_required
 def download_file(filename):
+    # Hands out a presigned S3 link, so it must be a receipt of a report this user may
+    # see. It used to sign ANY key for any signed-in user (other companies' receipts).
+    report = _report_owning_key(filename)
+    if report is None:
+        logger.warning(f"download refused: no report owns key {filename!r} (user {current_user.id})")
+        return jsonify({"status": "error", "message": "I couldn't find that file."}), 404
+    if not can_view_report(current_user, report):
+        logger.warning(f"download refused: user {current_user.id} may not view report {report.id}")
+        return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to look there."}), 403
     try:
         bucket = get_s3_bucket()
         s3_client = get_s3_client()
@@ -53,6 +101,9 @@ def download_file(filename):
 @report_bp.route("/admin/download_statements", methods=["GET", "POST"])
 @login_required
 def download_statements():
+    denied = _superuser_only()
+    if denied:
+        return denied
     if request.method == "GET":
         companies = db.session.query(Report.company).distinct().all()
         return render_template(
@@ -192,6 +243,9 @@ def download_statements():
 @report_bp.route("/download_attachments", methods=["POST"])
 @login_required
 def download_attachments():
+    denied = _superuser_only()
+    if denied:
+        return denied
     try:
         from blueprints.report.services.s3_storage import download_file_from_s3
 
@@ -317,13 +371,10 @@ def download_reports_csv(entity_id):
                     404,
                 )
 
-            report_entity_id = report.company if hasattr(report, "company") else entity_id
-            if (
-                report.uploaded_by != current_user.username
-                and not has_permission(
-                    current_user, Permission.REPORT_VIEW_ENTITY, report_entity_id
-                )
-            ):
+            # can_view_report, not "uploader OR permission": an uploader whose
+            # membership was removed must lose access too.
+            report_entity_id = report.company
+            if not can_view_report(current_user, report):
                 return (
                     jsonify(
                         {

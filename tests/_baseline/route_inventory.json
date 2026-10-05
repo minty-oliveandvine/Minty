@@ -246,26 +246,6 @@
    "in_scope": false
   },
   {
-   "endpoint": "auth.mytoken",
-   "rule": "/mytoken",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "auth.event_id",
-   "rule": "/event_id",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
    "endpoint": "auth.check_token",
    "rule": "/check/token",
    "methods": [
@@ -1982,39 +1962,9 @@
    "in_scope": true
   },
   {
-   "endpoint": "report.minty_report_ending",
-   "rule": "/Minty_Report_<path:entity_and_date>/ending",
-   "methods": [
-    "GET"
-   ],
-   "touches": [
-    "company",
-    "date"
-   ],
-   "touches_via_service": {},
-   "in_scope": true
-  },
-  {
-   "endpoint": "report.report_insert_xero_transaction",
-   "rule": "/insert_xero_transaction",
-   "methods": [
-    "GET"
-   ],
-   "touches": [
-    "create_at"
-   ],
-   "touches_via_service": {
-    "now": [
-     "date"
-    ]
-   },
-   "in_scope": true
-  },
-  {
    "endpoint": "report.report_check_dept_bank_yest",
    "rule": "/api/check-dept-bank-yest/<string:entity_id>",
    "methods": [
-    "GET",
     "POST"
    ],
    "touches": [
@@ -2535,7 +2485,6 @@
    "endpoint": "report.report_submitted_publish_to_xero",
    "rule": "/report/submitted/publish_to_xero",
    "methods": [
-    "GET",
     "POST"
    ],
    "touches": [
@@ -2820,16 +2769,6 @@
    "in_scope": true
   },
   {
-   "endpoint": "xero.refresh_access_token",
-   "rule": "/api/refresh_xero_token",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
    "endpoint": "xero.internal_xero_access_token",
    "rule": "/api/internal/xero/token",
    "methods": [
@@ -2891,7 +2830,7 @@
    "endpoint": "xero.disconnect_from_xero",
    "rule": "/entity/settings/xero/disconnect",
    "methods": [
-    "GET"
+    "POST"
    ],
    "touches": [
     "access_token",
@@ -2931,33 +2870,6 @@
     ]
    },
    "in_scope": true
-  },
-  {
-   "endpoint": "xero.remove_connections_all",
-   "rule": "/remove/connections/all",
-   "methods": [
-    "GET"
-   ],
-   "touches": [
-    "access_token"
-   ],
-   "touches_via_service": {
-    "ensure_valid_token": [
-     "access_token",
-     "refresh_token"
-    ]
-   },
-   "in_scope": true
-  },
-  {
-   "endpoint": "xero.debug_xero_settings",
-   "rule": "/debug/xero-settings/<string:entity_id>",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
   },
   {
    "endpoint": "invitation.accept_invitation_page",
@@ -3101,7 +3013,7 @@
    "endpoint": "legal.invite_terms_status",
    "rule": "/legal/invite-terms-status",
    "methods": [
-    "GET"
+    "POST"
    ],
    "touches": [],
    "touches_via_service": {},
@@ -3544,7 +3456,7 @@
    "endpoint": "disconnect_from_xero",
    "rule": "/entity/settings/xero/disconnect",
    "methods": [
-    "GET"
+    "POST"
    ],
    "touches": [
     "access_token",
@@ -3693,7 +3605,7 @@
   }
  ],
  "summary": {
-  "routes": 201,
-  "in_scope": 128
+  "routes": 194,
+  "in_scope": 125
  }
 }

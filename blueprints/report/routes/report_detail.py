@@ -546,10 +546,9 @@ def download_report(id):
             return jsonify({"status": "error", "message": "Hmm, I couldn't find that report."}), 404
 
         entity_id = report.company
-        if (
-            report.uploaded_by != current_user.username
-            and not has_permission(current_user, Permission.REPORT_VIEW_ENTITY, entity_id)
-        ):
+        # can_view_report, not "uploader OR permission": an uploader whose
+        # membership was removed must lose access too.
+        if not can_view_report(current_user, report):
             return jsonify({"status": "error", "message": "Not authorized."}), 403
         expenses = ShopExpense.query.filter_by(report_id=report.id).all()
         rows = []

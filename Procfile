@@ -4,5 +4,4 @@ web: gunicorn app:app \
   --threads 4 \
   --timeout 120 \
   --keepalive 120 \
-  --access-logfile - \
   --error-logfile -

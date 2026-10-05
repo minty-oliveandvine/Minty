@@ -90,7 +90,7 @@ def report_submitted(id=None):
     )
 
 
-@report_bp.route("/report/submitted/publish_to_xero", methods=["GET", "POST"])
+@report_bp.route("/report/submitted/publish_to_xero", methods=["POST"])
 @login_required
 @require_entity_access(entity_keys=("entity_id",))
 @require_permission(

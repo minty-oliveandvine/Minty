@@ -30,6 +30,7 @@ from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
 from blueprints.shared import bearer_api
+from blueprints.shared.safe_redirect import safe_next
 from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY, MODULE_BILL
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity, db)
@@ -39,6 +40,8 @@ from blueprints.shared.enums import ModuleCode
 
 #: How long every module token this app mints lives (``_generate_module_token``).
 MODULE_TOKEN_MINUTES = 30
+#: The ``module`` claim every module token carries; ``/entity/<id>/enter`` accepts no other token.
+MODULE_TOKEN_CLAIM = "billing"
 
 #: Where the Module 2 handoffs land inside minty-payment-request-web: its home, and its
 #: settings page (``billing_app_home_url`` / ``billing_settings_app_url``).
@@ -172,21 +175,12 @@ def module_selector(entity_id):
     entity_name = quote(org.name or "", safe="")
     frontend_url = (
         f"{frontend_app_url}/module-selection"
-        f"?entity_id={entity_id}&entity_name={entity_name}&token={token}"
+        f"?entity_id={quote(str(entity_id), safe='')}&entity_name={entity_name}&token={token}"
     )
 
-    current_app.logger.info(f"Redirecting to Module 2 module selection: {frontend_url}")
+    # Never log the URL itself: it carries the token.
+    current_app.logger.info(f"Redirecting to Module 2 module selection for entity {entity_id}")
     return redirect(frontend_url)
-
-
-def _safe_next(raw: str, default: str) -> str:
-    """A single-slash absolute path, or ``default``.
-
-    ``//evil.example`` is a protocol-relative URL, not a path. Letting one through
-    would make these routes an open redirect that arrives carrying a token.
-    """
-    nxt = (raw or "").strip()
-    return nxt if nxt.startswith("/") and not nxt.startswith("//") else default
 
 
 def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
@@ -273,10 +267,10 @@ def handoff_minty_web():
     minty-web has no login and no refresh of its own - its 30-minute token comes from here, and
     when it lapses the app sends the browser back to this route for another (lib/handoff.ts).
     Login-gated, so a person whose Flask session also ran out logs in first and then lands
-    where they were going. ``next`` is a path only (``_safe_next``): this route hands out a
+    where they were going. ``next`` is a path only (``safe_next``): this route hands out a
     token, and must never be an open redirect.
     """
-    destination = _safe_next(request.args.get("next", ""), "/subscription")
+    destination = safe_next(request.args.get("next"), "/subscription")
     entity_id = (request.args.get("entity_id") or "").strip()
     org = None
     if entity_id:
@@ -354,9 +348,13 @@ def module_reenter(entity_id):
     ``next`` here is a path on THIS origin — the payer portal's ``buildEnterUrl``
     sends users to entity settings. Module 2 paths go through ``billing_relogin``
     instead, which hands them back to Module 2's own origin.
+
+    The token turns into a full session, so only a MODULE token (``module`` claim, minted
+    by ``_generate_module_token``) is accepted - not the onboarding token, which is meant
+    for the onboarding API alone - and only for a company the person belongs to.
     """
-    destination = _safe_next(
-        request.args.get("next", ""), url_for("entity.report_dashboard", id=entity_id)
+    destination = safe_next(
+        request.args.get("next"), url_for("entity.report_dashboard", id=entity_id)
     )
 
     if current_user.is_authenticated:
@@ -370,9 +368,22 @@ def module_reenter(entity_id):
     try:
         secret = current_app.config.get("SECRET_KEY")
         decoded = jwt.decode(token, secret, algorithms=["HS256"])
+        if decoded.get("module") != MODULE_TOKEN_CLAIM:
+            current_app.logger.warning(
+                f"/enter refused a non-module token (scope={decoded.get('scope')!r}) for entity {entity_id}"
+            )
+            flash("Something's off with your session. Mind logging back in?", "warning")
+            return redirect(url_for("auth.home"))
         user = User.query.get(decoded["user_id"])
         if not user:
             flash("Hmm, that name doesn't seem to be in my list.", "danger")
+            return redirect(url_for("auth.home"))
+
+        from services.permission_policy import has_entity_access
+
+        if not (is_superuser(user) or has_entity_access(user, entity_id)):
+            current_app.logger.warning(f"/enter refused user {user.id}: not a member of entity {entity_id}")
+            flash("Hmm, it looks like you don't have permission to look there.", "danger")
             return redirect(url_for("auth.home"))
 
         login_user(user)
@@ -453,7 +464,7 @@ def _generate_module_token(
         "xero_org_id": str(xero_org_id or ""),
         "role": role or "",
         "system_role": system_role,
-        "module": "billing",
+        "module": MODULE_TOKEN_CLAIM,
         # Which sign-in this token belongs to. Module 2 cannot see the Flask session,
         # so this is how it honours "once per login" for the subscription notice: it
         # keys its own per-tab flag by this value, and a fresh login mints a new one.

@@ -26,7 +26,6 @@ from blueprints.report.routes import sales as sales_routes
 from blueprints.report.services import ending as ending_service
 from blueprints.user_management.routes import find_user as find_user_routes
 from blueprints.user_management.routes import roles as roles_routes
-from blueprints.xero.routes import settings as xero_settings_routes
 from blueprints.user_management.routes import admin_dashboard as admin_dashboard_routes
 
 
@@ -246,22 +245,6 @@ def test_get_draft_totals_requires_explicit_entity_id(monkeypatch):
         "/api/get_draft_totals?transaction_date=2025-03-02", method="GET"
     ):
         response, status = api_routes.get_draft_totals.__wrapped__()
-
-    assert status == 400
-    assert response.get_json()["message"] == "I need to know which entity we're working with first!"
-
-
-def test_remove_connections_all_requires_explicit_entity_id(monkeypatch):
-    app = _build_app()
-
-    monkeypatch.setattr(
-        xero_settings_routes,
-        "current_user",
-        SimpleNamespace(is_authenticated=True, id="user-1", company="legacy-entity"),
-    )
-
-    with app.test_request_context("/remove/connections/all", method="GET"):
-        response, status = xero_settings_routes.remove_connections_all.__wrapped__()
 
     assert status == 400
     assert response.get_json()["message"] == "I need to know which entity we're working with first!"

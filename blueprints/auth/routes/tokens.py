@@ -7,43 +7,6 @@ from blueprints.auth import auth_bp
 from services.auth.token_service import ensure_valid_token
 
 
-@auth_bp.route("/mytoken")
-def mytoken():
-    try:
-        obtain = getattr(current_app, "obtain_xero_oauth2_token", None)
-        if obtain:
-            return obtain()
-        return jsonify({"error": "Xero OAuth not configured"}), 501
-    except Exception:
-        logger.exception("mytoken failed")
-        return (
-            jsonify(
-                {"error": "I couldn't refresh your Xero connection. Mind reconnecting?"}
-            ),
-            500,
-        )
-
-
-@auth_bp.route("/event_id")
-def event_id():
-    try:
-        xero = getattr(current_app, "xero", None)
-        if xero:
-            response = xero.authorized_response()
-            from xero_python.api_client import serialize
-
-            return serialize(response)
-        return jsonify({"error": "Xero OAuth not configured"}), 501
-    except Exception:
-        logger.exception("event_id failed")
-        return (
-            jsonify(
-                {"error": "I couldn't refresh your Xero connection. Mind reconnecting?"}
-            ),
-            500,
-        )
-
-
 @auth_bp.route("/check/token", methods=["GET"])
 @login_required
 def check_token():

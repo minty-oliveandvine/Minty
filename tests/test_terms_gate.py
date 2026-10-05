@@ -411,9 +411,9 @@ def test_invite_terms_status_defaults_to_required(app, client, db_session):
     skipping someone who never agreed is a missing consent record, which is the
     thing this feature exists to prevent.
     """
-    assert client.get("/legal/invite-terms-status").get_json()["terms_required"] is True
+    assert client.post("/legal/invite-terms-status", json={}).get_json()["terms_required"] is True
     assert (
-        client.get("/legal/invite-terms-status?invite=not-a-real-token")
+        client.post("/legal/invite-terms-status", json={"invite": "not-a-real-token"})
         .get_json()["terms_required"]
         is True
     )
@@ -425,7 +425,7 @@ def test_invite_terms_status_defaults_to_required(app, client, db_session):
         "blueprints.invitation.models.invitation.Invitation.query",
         new_callable=lambda: property(lambda self: (_ for _ in ()).throw(RuntimeError("db down"))),
     ):
-        response = client.get("/legal/invite-terms-status?invite=anything")
+        response = client.post("/legal/invite-terms-status", json={"invite": "anything"})
     assert response.status_code == 200
     assert response.get_json()["terms_required"] is True
 
@@ -466,14 +466,14 @@ def test_invite_terms_status_is_false_once_that_user_has_agreed(
         token = Invitation.query.filter_by(email=email).first().token
 
         # Before agreeing: still required.
-        assert client.get(
-            f"/legal/invite-terms-status?invite={token}"
+        assert client.post(
+            "/legal/invite-terms-status", json={"invite": token}
         ).get_json()["terms_required"] is True
 
         record_consent(user_id, source="gate")
         db_session.session.commit()
 
         # After agreeing: not required — no second tick box.
-        assert client.get(
-            f"/legal/invite-terms-status?invite={token}"
+        assert client.post(
+            "/legal/invite-terms-status", json={"invite": token}
         ).get_json()["terms_required"] is False

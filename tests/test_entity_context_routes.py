@@ -15,7 +15,6 @@ sys.modules.setdefault(
 from blueprints.auth.routes import dashboard as dashboard_routes
 from blueprints.report.routes import api as report_api_routes
 from blueprints.report.routes import report_detail as report_detail_routes
-from blueprints.xero.routes import settings as xero_settings_routes
 
 
 def _build_app() -> Flask:
@@ -62,25 +61,6 @@ def test_report_expense_create_contact_requires_explicit_entity_id(monkeypatch):
         json={"name": "Supplier"},
     ):
         response, status = report_api_routes.report_expense_create_contact.__wrapped__()
-
-    assert status == 400
-    assert response.get_json()["message"] == "I need to know which entity we're working with first!"
-
-
-def test_xero_remove_connections_requires_explicit_entity_id(monkeypatch):
-    app = _build_app()
-    monkeypatch.setattr(
-        xero_settings_routes,
-        "current_user",
-        SimpleNamespace(
-            is_authenticated=True,
-            company="legacy-company",
-            access_token="access-token",
-        ),
-    )
-
-    with app.test_request_context("/remove/connections/all"):
-        response, status = xero_settings_routes.remove_connections_all.__wrapped__()
 
     assert status == 400
     assert response.get_json()["message"] == "I need to know which entity we're working with first!"

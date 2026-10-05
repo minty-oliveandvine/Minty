@@ -9,8 +9,10 @@ never by reading a column:
 * ``POST /api/internal/xero/token`` - what billing-backend and onboarding-backend call
   (they never refresh; Minty is the only service that may, because Xero rotates the
   refresh token on use);
-* ``GET /api/refresh_xero_token`` - the signed-in user's own refresh;
-* ``GET /entity/settings/xero/disconnect``.
+* ``POST /refresh_token`` - the signed-in user's own refresh (``GET /api/refresh_xero_token``
+  was deleted 2026-10-05: no caller, a GET that rotated the refresh token and never stored
+  the new one, so any link could break a connection);
+* ``POST /entity/settings/xero/disconnect``.
 """
 
 from __future__ import annotations
@@ -183,16 +185,6 @@ def test_service_endpoint_rejects_bad_tokens(connected, client, app):
 # ---- the signed-in user's own refresh ---------------------------------------------------------
 
 
-def test_signed_in_user_can_refresh_their_own_token(connected, client, app, xero):
-    owner, entity = connected
-    F.login(client, owner)
-    resp = client.get("/api/refresh_xero_token")
-    assert resp.status_code == 200, resp.data[:300]
-    assert resp.get_json()["access_token"] == "access-2"
-    assert xero.refreshes()[0][2]["refresh_token"] == "refresh-1"
-
-
-
 def test_the_token_check_answers_for_a_fresh_token(connected, client, app, xero):
     owner, entity = connected
     F.login(client, owner)
@@ -234,8 +226,8 @@ def test_refresh_without_a_connection_is_an_error_not_a_crash(app, db, client, x
         user = F.make_user(db, "nobody@test.com")
         F.make_entity(db, user)
     F.login(client, user)
-    resp = client.get("/api/refresh_xero_token")
-    assert resp.status_code == 500
+    resp = client.post("/refresh_token")
+    assert resp.status_code == 401
     assert "reconnect" in resp.get_json()["message"].lower()
 
 
@@ -254,9 +246,11 @@ def test_two_members_hold_separate_tokens(connected, client, app, db, xero):
 
     assert internal_token(client, app, entity.id).get_json()["access_token"] == "access-2"
 
+    with app.app_context():
+        F.age_xero_token(db, other, seconds=3600)
     F.login(client, other)
-    resp = client.get("/api/refresh_xero_token")
-    assert resp.status_code == 200
+    resp = client.post("/refresh_token")
+    assert resp.status_code == 200, resp.data[:300]
     assert xero.refreshes()[-1][2]["refresh_token"] == "other-refresh", "the other member's own bundle was used"
 
 
@@ -267,7 +261,7 @@ def test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect(conne
     owner, entity = connected
     F.login(client, owner)
 
-    resp = client.get(f"/entity/settings/xero/disconnect?entity_id={entity.id}")
+    resp = client.post("/entity/settings/xero/disconnect", data={"entity_id": entity.id})
 
     assert resp.status_code == 302, resp.data[:300]
     assert any(c[0] == "DELETE" and "connections/conn-1" in c[1] for c in xero.calls), xero.calls
@@ -286,7 +280,7 @@ def test_only_a_member_with_xero_rights_can_disconnect(connected, client, app, d
         db.session.add(UserEntity(user_id=cashier.id, entity_id=entity.id, role="cashier", approved=True))
         db.session.commit()
     F.login(client, cashier)
-    resp = client.get(f"/entity/settings/xero/disconnect?entity_id={entity.id}")
+    resp = client.post("/entity/settings/xero/disconnect", data={"entity_id": entity.id})
     assert resp.status_code in (302, 403)
     assert not any(c[0] == "DELETE" for c in xero.calls)
     assert internal_token(client, app, entity.id).status_code == 200, "still connected"

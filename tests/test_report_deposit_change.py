@@ -174,6 +174,15 @@ def _patch_db_helper(monkeypatch, legacy, report, helper_calls, *, updated_closi
     )
 
 
+
+def _deposit_view(legacy):
+    """The correction itself, past its login/membership/permission guards: these tests
+    pin the money logic; who may call it is pinned in test_url_security.py."""
+    import inspect
+
+    return inspect.unwrap(legacy.report_check_dept_bank_yest)
+
+
 def test_report_check_dept_bank_yest_unpublished_change_skips_xero(app, monkeypatch):
     from blueprints.report.routes import legacy
 
@@ -198,7 +207,7 @@ def test_report_check_dept_bank_yest_unpublished_change_skips_xero(app, monkeypa
                 "kind": "change",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     assert helper_calls == {
@@ -239,7 +248,7 @@ def test_report_check_dept_bank_yest_unpublished_no_deposit_zeros_out(app, monke
                 "kind": "no",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     assert helper_calls["amount"] == 0.0
@@ -275,7 +284,7 @@ def test_report_check_dept_bank_yest_published_change_calls_xero_with_prev_amoun
                 "kind": "change",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     assert len(xero_calls) == 1
@@ -310,7 +319,7 @@ def test_report_check_dept_bank_yest_published_no_deposit_reverses_xero(app, mon
                 "kind": "no",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     assert len(xero_calls) == 1
@@ -345,7 +354,7 @@ def test_report_check_dept_bank_yest_published_xero_failure_returns_warning(
                 "kind": "change",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     # DB update still happened; Xero failure surfaces as warning, not error.
@@ -391,7 +400,7 @@ def test_report_check_dept_bank_yest_blocks_when_bank_setting_missing(app, monke
                 "kind": "change",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     # Critical: no DB mutation, no Xero call. Hard-stop before either.
@@ -426,7 +435,7 @@ def test_report_check_dept_bank_yest_blocks_when_both_settings_missing(app, monk
                 "kind": "no",
             },
         ):
-            response = legacy.report_check_dept_bank_yest("entity-1")
+            response = _deposit_view(legacy)("entity-1")
 
     payload = response.get_json()
     assert helper_calls == {}
