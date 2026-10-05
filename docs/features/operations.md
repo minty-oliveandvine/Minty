@@ -12,7 +12,9 @@ once per worker (`services/app_runtime/legacy/bootstrap.py` builds the app; `mai
 `app.py` expose it). There is no worker dyno and no cron: the subscription scheduler is an
 in-process APScheduler thread (`services/app_runtime/scheduler.py`), off unless
 `SUBSCRIPTION_SCHEDULER_ENABLED` - and minty-subscription-api has the same timer behind the same
-name against the same database, so never on in both.
+name against the same database, so never on in both. In dev it is OFF here and ON in the API
+since 2026-10-05: Flask's engine is being deleted and lacks the API's fixes (a replay-scoped
+renewal key made Flask's runner bill a period twice).
 `docker/` has a Dockerfile, an entrypoint that creates the schema if missing, and
 `docker/stack/` a compose file for the whole seven-app stack.
 
