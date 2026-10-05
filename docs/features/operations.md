@@ -9,7 +9,10 @@ the cutover runbook).
 
 `Procfile`: `web: gunicorn app:app` on `${PORT:-8010}` with two workers, no `--preload` — `create_app` runs
 once per worker (`services/app_runtime/legacy/bootstrap.py` builds the app; `main.py` /
-`app.py` expose it). There is no worker dyno and no cron: the subscription scheduler is an
+`app.py` expose it). **A route module that fails to import stops the start-up** with its
+traceback (`pettycash/core/blueprint_loader.py`, `blueprints/report/routes/__init__.py`, since
+2026-10-05): until then the failure was skipped at DEBUG and the app ran with those pages
+missing, so a deploy that lacks a package now fails its boot instead. There is no worker dyno and no cron: the subscription scheduler is an
 in-process APScheduler thread (`services/app_runtime/scheduler.py`), off unless
 `SUBSCRIPTION_SCHEDULER_ENABLED` - and minty-subscription-api has the same timer behind the same
 name against the same database, so never on in both. In dev it is OFF here and ON in the API

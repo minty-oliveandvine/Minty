@@ -139,14 +139,6 @@ def report_opening(id=None, entity_id=None):
 
     deposit_type = request.args.get("deposit_type") or ""
 
-    _pettycash_settings = (
-        get_entity_account_settings(entity_id, "pettycash") or {}
-    )
-    main_bank_account = _pettycash_settings.get("xero_account_id")
-
-    _bank_settings = get_entity_account_settings(entity_id, "bank") or {}
-    company_bank = _bank_settings.get("xero_account_id")
-
     # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
         flash(
@@ -503,11 +495,10 @@ def report_opening(id=None, entity_id=None):
                 )
 
             withdrawal = request.form.get("withdrawal")
-            bank_account = request.form.get("bank_account")
             action_type = request.form.get("action_type", "save_next")
 
             logger.info(
-                f"Form data parsed - opening_balance: {opening_balance}, cash_addition: {cash_addition}, withdrawal: {withdrawal}, bank_account: {bank_account}, action_type: {action_type}"
+                f"Form data parsed - opening_balance: {opening_balance}, cash_addition: {cash_addition}, withdrawal: {withdrawal}, action_type: {action_type}"
             )
 
             # Check if any report already exists for this (entity, date) ??one
@@ -807,13 +798,13 @@ def report_opening(id=None, entity_id=None):
             logger.info(f"  Status: {report_draft.status}")
 
             # Store withdrawal information for later use when publishing to
-            # Xero
-            if withdrawal and bank_account:
+            # Xero. The only place an existing draft's source is updated; it waited for a
+            # hidden bank_account field until 2026-10-05, which was empty when the company
+            # had no petty-cash account set, and the choice was then dropped. The bank account
+            # is the one on entity_pettycash_settings (schema item 13), not per report.
+            if withdrawal:
                 report_draft.cash_addition_type = withdrawal
-                # the bank account is the one on entity_pettycash_settings (schema item 13)
-                logger.info(
-                    f"Set withdrawal info: type={withdrawal}, bank_account={bank_account}"
-                )
+                logger.info(f"Set withdrawal info: type={withdrawal}")
 
             # Update progress tracking
             update_draft_progress(
@@ -1211,8 +1202,6 @@ def report_opening(id=None, entity_id=None):
         datenow=datetime.now(),
         is_draft=template_data["is_draft"],
         draft_id=template_data["draft_id"],
-        main_bank_account=main_bank_account,
-        company_bank=company_bank,
         # Add stepper data for dynamic progress display
         current_section="opening",  # Always set to current page regardless of database value
         completed_sections=(existing_draft.completed_sections or []) if existing_draft else [],

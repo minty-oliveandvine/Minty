@@ -254,7 +254,7 @@ hooks.py holds the Datadog token fallback and 10 blind catches.
 | Pri | File | Ruff | What to do |
 | --- | --- | --- | --- |
 | P2 | pettycash/core/hooks.py | BLE001(10) C901(2) PLR0915(2) | also holds the Datadog token fallback |
-| P3 | pettycash/core/blueprint_loader.py | BLE001(3) | Narrow 3 blind `except Exception`: name the exception each one expects, or log a reason before swallowing. |
+| ~~P3~~ | pettycash/core/blueprint_loader.py | ~~BLE001(3)~~ | Done 2026-10-05: nothing is caught any more; a failed import stops the start-up (`tests/test_blueprint_loader.py`). |
 
 *The other 3 files in this area are clean - formatter pass only.*
 

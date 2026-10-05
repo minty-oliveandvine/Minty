@@ -16,7 +16,7 @@ that JavaScript; the pytest suite renders the templates but executes none of it.
 | Deposit | `.../reports/new/deposit`, `.../reports/<id>/deposit` | the cash banked today (the page shows the cash on hand before it) | `report.bank_deposit` |
 | Cash count | `.../reports/new/cash-count`, `.../reports/<id>/cash-count` | denominations counted (the calculator modal), the actual cash balance, a discrepancy reason when the count and the book disagree | `report_cash_count` rows, `discrepancy_*` |
 | Ending | `.../reports/new/ending`, `.../reports/<id>/ending` | the summary; **Finish** posts the report | `status = submitted`, `submitted_at` |
-| Submitted | `/report/<id>/submitted?entity_id=…` | export, share, **Publish to Xero** | see [xero-integration.md](xero-integration.md) |
+| Submitted | `.../reports/<id>/submitted` | export, share, **Publish to Xero** | see [xero-integration.md](xero-integration.md) |
 
 A day starts as a **draft** (`report.status = draft`, `ReportStatus` in
 `blueprints/shared/enums.py`): `GET /create` and `/entity/<co>/reports/resume` open or resume the
@@ -25,6 +25,14 @@ current draft, `GET /report/<id>/<page>` re-opens a page of a specific report, a
 figures. The draft is one row that fills in page by page; **there is no separate draft
 table** any more (the redesign folded `shop_expense_draft` etc. into the live tables — the
 expense line *is* the `report_expense` row from the moment it is added).
+
+**Opening's withdrawal source** (`withdrawal` = `company` / `personal`, stored as
+`report.cash_addition_type`) is saved on every save of the page. The bank account is the
+company's petty-cash setting, never per report. Until 2026-10-05 a hidden `bank_account` field
+had to be non-empty for a re-save to store the choice, so a company without that setting kept
+its first choice. The page's script also threw at load on a removed "Opening Cash Balance" input,
+skipping the rest of its start-up (scroll-to-centre on focus, as the other steps have); both
+are gone, and e2e `02` fails on any page error there.
 
 The next report's date is the day after the last submitted one (`next_transaction_date`);
 a company cannot skip or duplicate a day. `POST /report/<id>/convert-to-draft` reopens a
