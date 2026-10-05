@@ -33,6 +33,30 @@ test.describe('entity settings', () => {
     await expect(page.getByRole('checkbox', { name: '429' })).toBeChecked();
   });
 
+  test('save stays off until something changed, and off again when it is put back (phone)', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.goto(`/entity/settings/entity/${entityId}`);
+    await page.waitForFunction(() => (window as unknown as { xeroDataReady?: boolean }).xeroDataReady === true);
+    await expect(page.locator('#paymentMethodsList')).toContainText('Visa');
+    const save = page.getByRole('button', { name: /save changes/i });
+    await expect(save).toBeDisabled();
+    // a tick
+    const code = page.getByRole('checkbox', { name: '429' });
+    await code.uncheck();
+    await expect(save).toBeEnabled();
+    await code.check();
+    await expect(save).toBeDisabled();
+    // a mapping picker, which writes its hidden <select> from script (no input event)
+    const contact = page.locator('#cashsale_contact_input');
+    const saved = await contact.inputValue();
+    const other = fixtures().mappingContacts.find((name) => name !== saved) as string;
+    for (const [name, enabled] of [[other, true], [saved, false]] as const) {
+      await contact.click();
+      await page.locator('#cashsaleContactSuggestions').getByText(name, { exact: true }).first().dispatchEvent('mousedown');
+      await expect(save)[enabled ? 'toBeEnabled' : 'toBeDisabled']();
+    }
+  });
+
   test('adding an electronic method through the page makes it available to the sales form', async ({ page }) => {
     await page.goto(`/entity/settings/entity/${entityId}`);
     // "Add New Method" under Electronic opens a small form: pick from the catalogue or type a name

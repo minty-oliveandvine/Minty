@@ -21,7 +21,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Petty Cash Settings</title>
+  <title>Petty Cash Settings - {{ org.name }}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -193,8 +193,8 @@
               <span id="saveBtnText">Save Changes</span>
             </button>
             {% else %}
-            {# Off until the page has loaded what it saves (the Xero lists), and while no account
-               code is ticked - static/js/petty_cash_settings.js turns it on. #}
+            {# Off until the page has loaded what it saves (the Xero lists), while no account code is
+               ticked, and while nothing has changed - static/js/petty_cash_settings.js turns it on. #}
             <button type="submit" id="saveChangesBtn" class="pcs-save-btn" disabled>
               <span id="saveBtnText">Save Changes</span>
               <span id="saveBtnSpinner" hidden>Saving…</span>

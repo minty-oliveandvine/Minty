@@ -54,7 +54,11 @@ app; Users, Entity & Integration and the Module tab are minty-web's - since phas
 4. The form `POST /entity/<co>/settings/petty-cash`: country and currency, the mapping, and the
    ticked codes.
 
-Save stays off until the Xero lists have loaded, and while no account code is ticked. An Enter
+Save stays off until the Xero lists have loaded, while no account code is ticked, and while
+nothing has changed (2026-10-05): the page measures its changes the way "Leave without saving?"
+does (`isDirty` - the form's fields, the ticks and the sales methods against what it loaded), so
+an edit put back by hand turns Save off again. The mapping pickers write their hidden `<select>`s
+from script, which fires no event, so any click, key or blur on the page re-checks Save. An Enter
 in a text box no longer submits the page (the boxes' own Enter still works: add a method, pick
 a suggestion, finish a rename).
 

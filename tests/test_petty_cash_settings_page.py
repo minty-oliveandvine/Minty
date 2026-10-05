@@ -258,8 +258,10 @@ def test_the_codes_reach_the_page_as_data_not_markup(shop, app, db, client):
         {"code": "404", "name": "Bank Fees", "selected": False},
     ]
     assert config["canEditCodes"] is True
-    # Save starts off: the page script turns it on once the Xero lists have loaded
+    # Save starts off: the page script turns it on once the Xero lists have loaded and something changed
     assert re.search(r'<button type="submit" id="saveChangesBtn" class="pcs-save-btn" disabled>', html)
+    # the browser tab names the company, as every app's company pages do
+    assert f"<title>Petty Cash Settings - {entity.name}</title>" in html
 
 
 def test_a_view_only_member_gets_no_working_save(shop, app, db, client):
