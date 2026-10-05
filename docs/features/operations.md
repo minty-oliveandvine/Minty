@@ -72,7 +72,9 @@ Handler"). It is noise, not a test failure, and does not happen on the Linux hos
 - **pytest** (`tests/`, Postgres only since C10): `pytest -n auto` — about two minutes; each
   xdist worker builds `docs/schema/01_schema_rebased.sql` into its own database
   (`tests/pg_harness.py`, `MINTY_TEST_PG_URI` or the `.env` URI) and renames it to the
-  schema named in the URL's `?schema=`. The `test_zz_*` files are the guards that run last: the schema audit
+  schema named in the URL's `?schema=`. The three Django APIs load the same harness by path
+  from their own conftest, without Minty on `sys.path`, so it imports nothing from the app:
+  `services/app_runtime/env.py` (stdlib-only) is loaded by file path too. The `test_zz_*` files are the guards that run last: the schema audit
   against the harness build, the schema-name literal guard, route coverage, the
   token-logging guard. **Route coverage** counts a route only when a request ran its view
   (never OPTIONS, never a refusal) and fails on an in-scope route that is neither reached nor
