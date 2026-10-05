@@ -60,13 +60,14 @@ def test_a_member_is_sent_to_the_payments_app_settings_with_a_token(shop, client
     assert "from" not in query
 
 
-def test_from_bills_travels_with_the_handoff(shop, client):
+def test_an_old_from_bills_is_not_passed_on(shop, client):
+    # the payments app never read it; the flag went 2026-10-05
     owner, entity, _ = shop
     F.login(client, owner)
 
     _, query = _landing(client.get(f"/entity/settings/payments/{entity.id}?from=bills"))
 
-    assert query["from"] == ["bills"]
+    assert "from" not in query
 
 
 def test_anonymous_and_non_members_do_not_get_a_token(shop, client):

@@ -9,8 +9,9 @@ Pins:
   on the code), and a company with no codes saves as before;
 * the first-ever save keeps the ticks (it used to switch every code on) and still opens the
   dashboard;
-* one template serves both ways in: ``?from=bills`` changes only the way back (Payments, not
-  Reports), the tabs' links (they keep it) and the posted ``_from``;
+* one page whichever way in: its "‹ Back" (static/js/back_link.js) returns to the page the
+  person came from, falling back to the company's home; an old link's ``?from=bills`` changes
+  nothing (the flag went 2026-10-05);
 * the account codes reach the page as data (the page script draws them as text), never as
   markup; a view-only member gets no working Save; a company disconnected from Xero is told so
   inside the mapping card rather than by a toast.
@@ -114,14 +115,13 @@ def test_a_save_with_no_code_ticked_is_refused_and_writes_nothing(shop, app, db,
     F.login(client, owner)
 
     resp = client.post(f"/entity/settings/entity/{entity.id}", data={
-        "_from": "bills",
         "country_code": "SG",
         "main_bank": "acc-bank",
         "deposit_bank": "acc-other",
     })
 
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/entity/settings/entity/{entity.id}?from=bills")
+    assert resp.headers["Location"].endswith(f"/entity/settings/entity/{entity.id}")
     assert ("danger", "Pick at least one account code.") in flashes(client)
     assert ticks(app, entity.id) == {"400": True, "404": True}
     assert company_country(app, entity.id) == "HK"
@@ -214,13 +214,16 @@ def test_the_first_ever_save_keeps_the_ticks_and_opens_the_dashboard(shop, app, 
 # ---- one page, two ways in --------------------------------------------------------------------
 
 
-def test_the_page_from_petty_cash_leads_back_to_reports(shop, app, db, client):
+def test_back_leads_where_the_person_came_from_falling_back_to_the_dashboard(shop, app, db, client):
     owner, entity = shop
     F.login(client, owner)
 
     html = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
 
-    assert re.search(rf'<a href="/entity/{entity.id}" class="pcs-back">\s*<span[^>]*>chevron_left</span>Reports', html)
+    assert re.search(
+        rf'<a href="/entity/{entity.id}" class="pcs-back" data-back-link>\s*<span[^>]*>chevron_left</span>Back', html
+    )
+    assert "js/back_link.js" in html
     assert f'href="/entity/settings/users/{entity.id}" class="pcs-pill">Users</a>' in html
     assert f'href="/entity/settings/module/{entity.id}" class="pcs-pill">Module</a>' in html
     assert '<span class="pcs-pill" aria-current="page">Petty Cash Settings</span>' in html
@@ -228,19 +231,16 @@ def test_the_page_from_petty_cash_leads_back_to_reports(shop, app, db, client):
     assert "?from=bills" not in html
 
 
-def test_the_page_from_payments_leads_back_to_payments(shop, app, db, client):
+def test_an_old_from_bills_link_opens_the_same_page(shop, app, db, client):
     owner, entity = shop
     F.login(client, owner)
 
-    html = client.get(f"/entity/settings/entity/{entity.id}?from=bills").get_data(as_text=True)
+    plain = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
+    old = client.get(f"/entity/settings/entity/{entity.id}?from=bills").get_data(as_text=True)
 
-    assert re.search(rf'<a href="/entity/{entity.id}/bills" class="pcs-back">\s*<span[^>]*>chevron_left</span>Payments', html)
-    assert f'href="/entity/settings/users/{entity.id}?from=bills" class="pcs-pill">Users</a>' in html
-    assert f'href="/entity/{entity.id}/settings/xero?from=bills" class="pcs-pill">' in html
-    assert f'href="/entity/settings/module/{entity.id}?from=bills" class="pcs-pill">Module</a>' in html
-    assert '<input type="hidden" name="_from" value="bills">' in html
-    # the sidebar's Settings is the payments app's on a page the payments app sent the person to
-    assert f'/entity/settings/payments/{entity.id}?from=bills' in html
+    strip_csrf = lambda html: re.sub(r'name="csrf_token" value="[^"]*"', "", html)
+    assert strip_csrf(old) == strip_csrf(plain)
+    assert "from=bills" not in old and 'name="_from"' not in old
 
 
 def test_the_codes_reach_the_page_as_data_not_markup(shop, app, db, client):

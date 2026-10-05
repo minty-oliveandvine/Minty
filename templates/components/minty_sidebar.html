@@ -8,11 +8,10 @@
   data-sidebar-open="profile" on the header's initials (whose href - the profile router - stays
   the way in when scripts are off).
 
-  Expects `org` or `entity_id` for the company the page is about (neither on the entity list),
-  and `sidebar_from_bills` on the Payment Request settings pages.
+  Expects `org` or `entity_id` for the company the page is about (neither on the entity list).
 #}
 {% set _sb_entity = entity_id if entity_id is defined and entity_id else (org.id if org is defined and org else None) %}
-{% set sb = sidebar_context(_sb_entity, from_bills=(sidebar_from_bills is defined and sidebar_from_bills)) %}
+{% set sb = sidebar_context(_sb_entity) %}
 {% set _img = 'img/sidebar/' %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

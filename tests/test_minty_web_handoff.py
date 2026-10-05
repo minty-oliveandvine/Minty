@@ -62,10 +62,10 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
     owner, entity, _ = shop
     F.login(client, owner)
 
-    parts, query = _landing(client.get(f"/entity/settings/module/{entity.id}?from=bills"))
+    parts, query = _landing(client.get(f"/entity/settings/module/{entity.id}"))
 
     assert (parts.scheme, parts.netloc, parts.path) == ("http", "hub.minty.test", "/landing")
-    assert query["next"] == [f"/subscription/entities/{entity.id}/modules?from=bills"]
+    assert query["next"] == [f"/subscription/entities/{entity.id}/modules"]
     assert query["entity_id"] == [entity.id]
     assert query["entity_name"] == [entity.name]
     claims = _claims(app, query["token"][0])
@@ -74,8 +74,9 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
     assert claims["role"] == "admin"
     assert claims["petty_cash_enabled"] is True
 
-    # without ?from=bills the way back is Minty's, and next carries no query
-    _, query = _landing(client.get(f"/entity/settings/module/{entity.id}"))
+    # an old link's ?from=bills is ignored (2026-10-05): the module page's Back goes where the
+    # person came from, so nothing is carried
+    _, query = _landing(client.get(f"/entity/settings/module/{entity.id}?from=bills"))
     assert query["next"] == [f"/subscription/entities/{entity.id}/modules"]
 
 

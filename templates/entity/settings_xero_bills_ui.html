@@ -74,10 +74,10 @@
       <!-- Left: back link + title -->
       <div class="flex min-h-10 min-w-0 flex-1 items-center sm:min-h-0">
         <div class="flex min-w-0 flex-1 flex-nowrap items-center gap-2 sm:gap-3">
-          <!-- Back to Bills -->
-          <a data-nav-guard href="{{ bill_settings_url }}" class="inline-flex shrink-0 items-center gap-0.5 text-sm font-medium text-[#656565] transition-colors hover:text-[#54d3da] sm:text-base">
+          <!-- Back to wherever the person came from (static/js/back_link.js) -->
+          <a data-nav-guard data-back-link href="{{ company_home_url(org.id) }}" class="inline-flex shrink-0 items-center gap-0.5 text-sm font-medium text-[#656565] transition-colors hover:text-[#54d3da] sm:text-base">
             <span class="material-symbols-outlined leading-none" style="font-size:22px" aria-hidden="true">chevron_left</span>
-            Payments
+            Back
           </a>
           <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <span class="min-w-0 cursor-default truncate text-base font-semibold text-black sm:text-lg">Settings</span>
@@ -96,7 +96,7 @@
         {% set fn = (current_user.first_name or '')[:1] %}
         {% set ln = (current_user.last_name or '')[:1] %}
         {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
-        <a href="{{ bills_app_profile_url(org.id, from_bills=True) }}"
+        <a href="{{ bills_app_profile_url(org.id) }}"
            class="relative inline-flex shrink-0 cursor-pointer items-center pl-0.5 sm:pl-2 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54d3da]"
            data-sidebar-open="profile" aria-label="My Profile"
            title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
@@ -119,7 +119,7 @@
       <div class="flex flex-wrap gap-2">
 
         <!-- Users pill -->
-        <a data-nav-guard href="{{ url_for('entity_settings_users', org_id=org.id) }}?from=bills"
+        <a data-nav-guard href="{{ url_for('entity_settings_users', org_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Users
         </a>
@@ -133,7 +133,7 @@
 
         {% if is_petty_cash_enabled(org.id) %}
         <!-- Petty Cash Settings pill -->
-        <a data-nav-guard href="{{ url_for('entity_settings_entity', org_id=org.id) }}?from=bills"
+        <a data-nav-guard href="{{ url_for('entity_settings_entity', org_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Petty Cash Settings
         </a>
@@ -148,7 +148,7 @@
         {% endif %}
         
         <!-- Module pill -->
-        <a data-nav-guard href="{{ url_for('entity_settings_module', org_id=org.id) }}?from=bills"
+        <a data-nav-guard href="{{ url_for('entity_settings_module', org_id=org.id) }}"
            class="flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-gray-200 px-4 py-2 text-center text-sm font-medium text-gray-700 transition-colors hover:bg-gray-300">
           Module
         </a>
@@ -175,7 +175,6 @@
             id="xeroSettingsForm"
             novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <input type="hidden" name="_from" value="bills" />
         <input type="hidden" name="_integration_minimal_save" value="1" />
 
         <!-- Entity name (admin only) -->
@@ -323,9 +322,7 @@
 
   </main>
 
-  {% with sidebar_from_bills=True %}
   {% include 'components/minty_sidebar.html' %}
-  {% endwith %}
 
   <!-- Full-page loading (connect / disconnect OAuth navigation) -->
   <div id="xeroLoadingOverlay" class="fixed inset-0 z-[300] hidden flex items-center justify-center bg-black/50 pointer-events-auto" aria-hidden="true">
@@ -366,7 +363,7 @@
     var overlay = document.getElementById('xeroLoadingOverlay');
     var loadingText = document.getElementById('xeroLoadingText');
     var isConnected = btn.dataset.connected === 'true';
-    var targetUrl = "{{ url_for('xero_reconnect') }}?entity_id={{ org.id }}&from=bills";
+    var targetUrl = "{{ url_for('xero_reconnect') }}?entity_id={{ org.id }}";
     var msg = isConnected ? 'Disconnecting from Xero…' : 'Connecting to Xero…';
     overlay.classList.remove('hidden');
     overlay.setAttribute('aria-hidden', 'false');
@@ -591,6 +588,7 @@
       return c ? c.value : '';
     })();
     var pendingNavUrl = null;
+    var pendingNavLink = null;
 
     function hasUnsavedChanges() {
       var nameInput = document.getElementById('entity_name');
@@ -607,7 +605,7 @@
 
     var modal = document.getElementById('unsavedChangesModal');
     function showModal() { if (modal) modal.classList.remove('hidden'); }
-    function hideModal() { if (modal) modal.classList.add('hidden'); pendingNavUrl = null; }
+    function hideModal() { if (modal) modal.classList.add('hidden'); pendingNavUrl = null; pendingNavLink = null; }
 
     document.addEventListener('click', function (e) {
       var link = e.target.closest('a[data-nav-guard]');
@@ -616,6 +614,7 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       pendingNavUrl = link.href;
+      pendingNavLink = link;
       showModal();
     }, true);
 
@@ -624,13 +623,16 @@
     if (stayBtn) stayBtn.addEventListener('click', hideModal);
     if (leaveBtn) leaveBtn.addEventListener('click', function () {
       var url = pendingNavUrl;
+      var link = pendingNavLink;
       hideModal();
-      if (url) window.location.href = url;
+      if (link && link.hasAttribute('data-back-link') && window.MintyBack) window.MintyBack.go(link);
+      else if (url) window.location.href = url;
     });
     if (modal) modal.addEventListener('click', function (e) {
       if (e.target === modal) hideModal();
     });
   })();
 </script>
+<script src="{{ url_for('static', filename='js/back_link.js') }}"></script>
 </body>
 </html>

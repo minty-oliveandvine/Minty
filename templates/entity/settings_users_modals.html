@@ -1,7 +1,7 @@
       <!-- #emailAddress is English only (data-email-ascii); the scripts check it with MintyEmail.isEmail -->
       <script src="{{ url_for('static', filename='js/email_input.js') }}" defer></script>
       <!-- Add New User Modal -->
-      <div id="addUserModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeAddUserModal()">
+      <div id="addUserModal" class="fixed inset-0 bg-black bg-opacity-50 z-[300] hidden flex items-center justify-center p-4" onclick="closeAddUserModal()">
         <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto relative z-10" onclick="event.stopPropagation()">
           <!-- Modal Header -->
           <div class="flex items-center justify-between mb-6">
@@ -74,7 +74,7 @@
       </div>
       
       <!-- Edit User Modal -->
-      <div id="editUserModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeEditUserModal()">
+      <div id="editUserModal" class="fixed inset-0 bg-black bg-opacity-50 z-[300] hidden flex items-center justify-center p-4" onclick="closeEditUserModal()">
         <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto relative z-10" onclick="event.stopPropagation()">
           <div class="flex items-center justify-between mb-6">
             <h3 class="text-xl font-bold text-gray-900">Edit User</h3>
@@ -127,7 +127,7 @@
       </div>
 
       <!-- Delete User Confirmation Modal -->
-      <div id="deleteUserModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeDeleteUserModal()">
+      <div id="deleteUserModal" class="fixed inset-0 bg-black bg-opacity-50 z-[300] hidden flex items-center justify-center p-4" onclick="closeDeleteUserModal()">
         <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-4 relative z-10" onclick="event.stopPropagation()">
           <div class="text-center mb-6">
             <div class="mx-auto w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -147,7 +147,7 @@
       </div>
 
       <!-- Cancel Invitation Confirmation Modal -->
-      <div id="cancelInvitationModal" class="{% if bills_ui %}fixed{% else %}absolute{% endif %} inset-0 bg-black bg-opacity-50 {% if bills_ui %}z-[300]{% else %}z-50{% endif %} hidden flex items-center justify-center p-4" onclick="closeCancelInvitationModal()">
+      <div id="cancelInvitationModal" class="fixed inset-0 bg-black bg-opacity-50 z-[300] hidden flex items-center justify-center p-4" onclick="closeCancelInvitationModal()">
         <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-4 relative z-10" onclick="event.stopPropagation()">
           <div class="text-center mb-6">
             <div class="mx-auto w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-4">

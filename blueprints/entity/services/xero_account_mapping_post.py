@@ -18,11 +18,10 @@ from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
 
 
-def _mapping_redirect(entity_id: str, _from: str | None, *, return_view: str):
-    bills_kw = {"from": _from} if _from == "bills" else {}
+def _mapping_redirect(entity_id: str, *, return_view: str):
     if return_view == "entity_settings_entity":
-        return redirect(url_for("entity_settings_entity", org_id=entity_id, **bills_kw))
-    return redirect(url_for("entity_settings", entity_id=entity_id, **bills_kw))
+        return redirect(url_for("entity_settings_entity", org_id=entity_id))
+    return redirect(url_for("entity_settings", entity_id=entity_id))
 
 
 def apply_country_currency_selection(entity, form) -> None:
@@ -203,7 +202,6 @@ def process_xero_account_mapping_post(
     returns a Flask ``Response`` (redirect or JSON error).
     """
 
-    _from = request.form.get("_from") or request.args.get("from")
     if not request.form.get("main_bank"):
         return None
     try:
@@ -221,7 +219,7 @@ def process_xero_account_mapping_post(
             flash(
                 "Main Bank Account and Deposit Bank Account can't be the same — please pick a different one for each.", "danger",
             )
-            return _mapping_redirect(entity_id, _from, return_view=return_view)
+            return _mapping_redirect(entity_id, return_view=return_view)
 
         # Collect any missing fields and report them by name, so the user knows
         # exactly which setting to fill instead of a generic "enter all" error.
@@ -239,7 +237,7 @@ def process_xero_account_mapping_post(
         missing = [label for value, label in required_fields if not value]
         if missing:
             flash("Please select: " + ", ".join(missing), "danger")
-            return _mapping_redirect(entity_id, _from, return_view=return_view)
+            return _mapping_redirect(entity_id, return_view=return_view)
 
         entity = Entity.query.get_or_404(entity_id)
 
@@ -309,7 +307,7 @@ def process_xero_account_mapping_post(
                 "please retry once the Xero sync has finished.",
                 "danger",
             )
-            return _mapping_redirect(entity_id, _from, return_view=return_view)
+            return _mapping_redirect(entity_id, return_view=return_view)
 
         settings_row = EntityPettycashSettings.query.filter_by(
             entity_id=entity_id
@@ -361,7 +359,7 @@ def process_xero_account_mapping_post(
             logger.info(f"Entity settings updated for entity ID: {entity_id}")
 
         if has_existing_settings:
-            return _mapping_redirect(entity_id, _from, return_view=return_view)
+            return _mapping_redirect(entity_id, return_view=return_view)
         else:
             return redirect(
                 url_for(

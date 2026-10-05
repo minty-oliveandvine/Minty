@@ -133,11 +133,6 @@
       console.log(`Switched to ${tabName} tab`);
     }
 
-    // Initialize page transition (classic settings shell only)
-    {% if not bills_ui %}
-    PageTransition.init('.main-content', 'fadeIn', 10);
-    {% endif %}
-
     // Add event listeners for tab switching
     document.addEventListener('DOMContentLoaded', function() {
       const tabs = document.querySelectorAll('[data-tab]');

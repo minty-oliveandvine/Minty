@@ -256,8 +256,10 @@ def test_the_profile_is_minty_webs(app, client, people, hub):
     assert jwt.decode(query["token"][0], app.config["SECRET_KEY"], algorithms=["HS256"])["entity_id"] == ""
 
     shop = people["shop"]
+    # an old link's ?from=bills is ignored (2026-10-05): the profile's Back goes where the
+    # person came from, so nothing is carried
     _, query = _landing(client.get(f"/profile?entity_id={shop.id}&from=bills"))
-    assert query["next"] == ["/profile?from=bills"]
+    assert query["next"] == ["/profile"]
     assert query["entity_id"] == [shop.id]
     claims = jwt.decode(query["token"][0], app.config["SECRET_KEY"], algorithms=["HS256"])
     assert claims["entity_id"] == shop.id and claims["role"] == "shop_manager"
@@ -275,8 +277,8 @@ def test_whatever_the_hub_switch_says(app, client, people, hub, monkeypatch):
     assert query["next"] == ["/profile"]
 
     shop = people["shop"]
-    _, query = _landing(client.get(f"/profile?entity_id={shop.id}&from=bills"))
-    assert query["next"] == ["/profile?from=bills"] and query["entity_id"] == [shop.id]
+    _, query = _landing(client.get(f"/profile?entity_id={shop.id}"))
+    assert query["next"] == ["/profile"] and query["entity_id"] == [shop.id]
 
 
 def test_a_company_the_person_is_not_in_opens_no_profile(app, client, people, hub, monkeypatch):
@@ -297,9 +299,7 @@ def test_the_avatar_links_go_through_it_and_carry_no_token(app, people):
     shop = people["shop"]
     cases = {
         "{{ bills_app_profile_unscoped_url() }}": "/profile",
-        "{{ bills_app_profile_unscoped_url(from_bills=True) }}": "/profile?from=bills",
         "{{ bills_app_profile_url(eid) }}": f"/profile?entity_id={shop.id}",
-        "{{ bills_app_profile_url(eid, from_bills=True) }}": f"/profile?entity_id={shop.id}&amp;from=bills",
         "{{ bills_app_profile_url('') }}": "/entity",
     }
     with app.test_request_context():

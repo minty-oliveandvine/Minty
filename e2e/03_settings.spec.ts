@@ -101,11 +101,11 @@ test.describe('entity settings', () => {
     // Flask's Jinja module page was deleted on 2026-10-01: the address is a hand-over to
     // minty-web's Module page. Read the redirect itself rather than following it - the
     // minty-web dev server is not part of this stack.
-    const resp = await page.request.get(`/entity/settings/module/${entityId}?from=bills`, { maxRedirects: 0 });
+    const resp = await page.request.get(`/entity/settings/module/${entityId}`, { maxRedirects: 0 });
     expect(resp.status()).toBe(302);
     const location = new URL(resp.headers()['location']);
     expect(location.pathname).toBe('/landing');
-    expect(location.searchParams.get('next')).toBe(`/subscription/entities/${entityId}/modules?from=bills`);
+    expect(location.searchParams.get('next')).toBe(`/subscription/entities/${entityId}/modules`);
     expect(location.searchParams.get('entity_id')).toBe(entityId);
     expect(location.searchParams.get('token')).toBeTruthy();
   });

@@ -145,15 +145,14 @@ def test_on_the_entity_list_there_is_no_company_and_no_settings(app, people):
     assert _link(html, "Logout") == "/logout"
 
 
-def test_on_the_payment_request_pages_settings_is_the_payments_apps(app, people):
-    # Flask's settings tabs in the Payment Request dress: that app's Payment Settings, where
-    # billing-frontend's own Settings goes too (through the route that mints the token)
+def test_on_the_users_tab_settings_is_this_apps_own(app, people):
+    # One look since 2026-10-05: Flask's Settings is Petty Cash Settings on every Flask page,
+    # whichever app the person came from (the payments app's sidebar has its own Settings)
     shop = people["both"].id
-    html = _menu(app, f"/entity/settings/users/{shop}", user_id=people["olive"].id, org_id=shop,
-                 sidebar_from_bills=True)
+    html = _menu(app, f"/entity/settings/users/{shop}", user_id=people["olive"].id, org_id=shop)
 
-    assert _link(html, "Settings") == f"/entity/settings/payments/{shop}?from=bills"
-    assert not _is_current(html, "Settings")
+    assert _link(html, "Settings") == f"/entity/settings/entity/{shop}"
+    assert "from=bills" not in html
 
 
 def test_on_the_petty_cash_settings_page_settings_is_the_page_shown(app, people):
@@ -260,9 +259,7 @@ PAGES = [
     "entity/entity_list_empty.html",
     "entity/entity_no_permission.html",
     "entity/index.html",
-    "entity/settings.html",
     "entity/settings_entity.html",
-    "entity/settings_users.html",
     "entity/settings_users_bills_ui.html",
     "entity/settings_xero_bills_ui.html",
     "report/cash_count.html",
@@ -284,8 +281,7 @@ def test_every_header_opens_the_sidebar(page):
     assert source.count('data-sidebar-open="menu"') == 1
     assert source.count('data-sidebar-open="profile"') == 1
     assert 'onclick="toggleMenu()"' not in source
-    if page.endswith("_bills_ui.html"):
-        assert "{% with sidebar_from_bills=True %}" in source
+    assert "from_bills" not in source
 
 
 def test_the_old_drawers_are_gone_everywhere():
