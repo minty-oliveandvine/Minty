@@ -150,11 +150,9 @@ def create_app():
             "report.entity_report_history": ["entity_report_history"],
             "entity_report_history": ["report.entity_report_history"],
             "report.delete_report": ["delete_report"],
-            "auth.validate_register": ["validate_register"],
             "xero.xero_auth": ["xero_auth"],
             "xero.xero_connect_entity": ["xero_connect_entity"],
             "xero.xero_reconnect": ["xero_reconnect"],
-            "xero.disconnect_from_xero": ["disconnect_from_xero"],
             "user_management.admin": ["approve_admins"],
         },
     )
@@ -233,6 +231,9 @@ def create_app():
     login_manager = LoginManager()
     login_manager.init_app(app)
     cast(Any, login_manager).login_view = "auth.home"
+    # "Please log in to access this page." is news, not a success: the sign-in page (minty-web,
+    # which reads flashes by category) shows it as information.
+    cast(Any, login_manager).login_message_category = "info"
 
     # Per-sign-in state: reset the "already shown" flags, and stamp a new login id.
     #
@@ -330,6 +331,18 @@ def create_app():
     # token's own user row - there is no id in the request to forge.
     from blueprints.user_management.routes.me_api import my_profile_api
     csrf.exempt(my_profile_api)
+    # A company's Users and Entity & Integration tabs (minty-web, phase 2): bearer only, the
+    # company from ?entity= checked against membership, each action behind its permission and
+    # the rank rule (blueprints/entity/routes/hub_settings.py). No session cookie is read.
+    from blueprints.entity.routes.hub_settings import (hub_company_integration,
+                                                       hub_company_invitation_cancel,
+                                                       hub_company_invitation_resend,
+                                                       hub_company_invite, hub_company_member,
+                                                       hub_company_xero_disconnect)
+    for hub_write in (hub_company_invite, hub_company_invitation_cancel,
+                      hub_company_invitation_resend, hub_company_member,
+                      hub_company_integration, hub_company_xero_disconnect):
+        csrf.exempt(hub_write)
     # minty-web's Terms modal records the acceptance the same way: bearer only, and the row
     # can only ever be the token's own user's (blueprints/legal/routes/hub.py).
     from blueprints.legal.routes.hub import hub_terms_accept
@@ -387,12 +400,10 @@ def create_app():
     # opening a billing account: the same bearer-only call, and the payment method it names
     # must belong to the token's payer (``payment_methods._owned``)
     csrf.exempt(onboarding_billing_accounts)
-    # Onboarding /auth and /auth/confirm call these from a different origin
-    # (port 3030) — no session cookie, so they need CSRF exemption.
-    from blueprints.auth.routes.email_auth import (email_check,
-                                                    email_request_code,
+    # minty-web's /login and /login/confirm call these from a different origin (port
+    # 3000) — no session cookie, so they need CSRF exemption.
+    from blueprints.auth.routes.email_auth import (email_request_code,
                                                     email_verify_code)
-    csrf.exempt(email_check)
     csrf.exempt(email_request_code)
     csrf.exempt(email_verify_code)
     # The invite sign-in screen asks whether the invitee still owes the Terms; the

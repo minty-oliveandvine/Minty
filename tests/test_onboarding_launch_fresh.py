@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
-import pytest
 
 
 class _User:
@@ -70,30 +69,3 @@ def test_default_launch_does_not_claim_fresh(app):
     assert "fresh" not in _params(url)
 
 
-def test_empty_state_template_global_is_fresh(app):
-    """The template global backing entity_list_empty.html must pass fresh=True.
-
-    This is the actual regression: the global existed and worked, it just didn't
-    ask for a fresh session, so the empty-state button resumed the last wizard.
-    It is exposed via a context processor (not jinja_env.globals), so resolve it
-    the way a render would.
-    """
-    import flask_login
-
-    with app.test_request_context("/entity"):
-        with pytest.MonkeyPatch.context() as mp:
-            # The global short-circuits to auth.home for anonymous users.
-            mp.setattr(flask_login.utils, "_get_user", lambda: _User())
-
-            ctx = {}
-            for proc in app.template_context_processors[None]:
-                ctx.update(proc())
-
-            global_fn = ctx.get("onboarding_launch_url")
-            assert global_fn is not None, "template global not registered"
-            url = global_fn()
-
-    assert _params(url).get("fresh") == ["1"], (
-        "empty-state launch must emit ?fresh=1 or the wizard resumes the last "
-        "in-progress entity"
-    )

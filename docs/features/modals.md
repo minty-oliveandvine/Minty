@@ -56,7 +56,7 @@ page.", the "dont" Minty, **Discard changes** (teal outline) and **Go Back** (te
   link.
 
 minty-payment-request-web's `lib/leaveGuard.ts` (`useLeaveGuard`, `guardLeave`) does the same with the
-same rules, for its Payment Settings; there, Back/Forward inside the Next app are soft
+same rules, for its Payment Request Settings; there, Back/Forward inside the Next app are soft
 navigations and leave without asking (a documented gap).
 
 ## Where it is used
@@ -64,8 +64,8 @@ navigations and leave without asking (a documented gap).
 - Petty Cash Settings ([petty-cash-settings.md](petty-cash-settings.md)): the leave guard, and
   the delete-method confirm ("Delete Electronic Method", the surprised Minty, Go back / a red
   Delete).
-- minty-payment-request-web Payment Settings (its `docs/features/settings.md`): the leave guard, and its
+- minty-payment-request-web Payment Request Settings (its `docs/features/settings.md`): the leave guard, and its
   Logout asks first.
 
-Not yet: every other Flask modal (Users' and Entity & Integration's — those pages move to
-minty-web), the report pages' modals. They change when their page is next worked on.
+Not yet: the report pages' modals. (Users' and Entity & Integration's went with their pages
+to minty-web in phase 2, where they are minty-web's own `ConfirmDialog`.) They change when their page is next worked on.

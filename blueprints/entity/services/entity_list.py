@@ -1,10 +1,9 @@
 """The select-company list: every company a person may pick, in the list's order.
 
-ONE BUILDER, TWO READERS. The Jinja page (``routes/list.py::entity_list``) draws it while
-``MINTY_WEB_HUB`` is off, and while the person still owes a Terms acceptance; minty-web's list
-reads it through ``GET /api/me/entities`` (``routes/me_api.py``). Values leave here raw - the
-last access as an aware UTC datetime, modules as codes - and each reader formats its own, so
-the two pages cannot disagree about which companies there are or which badges they carry.
+minty-web's list reads it through ``GET /api/me/entities`` (``routes/me_api.py``) - the only
+list since phase 2 (2026-10-05), when the Jinja page and its ``MINTY_WEB_HUB`` switch went.
+Values leave here raw - the last access as an aware UTC datetime, modules as codes - and the
+page formats its own.
 
 THE FLASH HAND-OVER. Seventy-odd routes ``flash()`` a message and redirect to ``/entity``
 ("I looked everywhere but couldn't find that one", "you don't have permission to look
@@ -162,13 +161,13 @@ def read_notices(token: str | None) -> list[dict]:
     try:
         data = _serializer().loads(token, max_age=NOTICE_MAX_AGE_SECONDS)
     except SignatureExpired:
-        logger.info("Entity list notices: the hand-over had expired, nothing shown")
+        logger.info("Hub notices: the hand-over had expired, nothing shown")
         return []
     except BadSignature:
-        logger.warning("Entity list notices: the hand-over's signature did not verify, nothing shown")
+        logger.warning("Hub notices: the hand-over's signature did not verify, nothing shown")
         return []
     if not isinstance(data, list):
-        logger.warning("Entity list notices: a signed hand-over that is not a list, nothing shown")
+        logger.warning("Hub notices: a signed hand-over that is not a list, nothing shown")
         return []
     return [
         {"category": _category(str(item.get("category", ""))), "message": str(item["message"])}

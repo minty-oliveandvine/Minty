@@ -687,15 +687,14 @@ def invite_admin_to_entity(user_id, entity_id, email: str) -> tuple[bool, str]:
     """
     from blueprints.invitation.services.invite import (create_invitation,
                                                        send_invitation_email)
-    from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
+    from blueprints.shared.email_rules import invite_address_error
     from blueprints.subscription.services import store as sub_store
     from services.permission_policy import Permission, has_permission
 
     address = (email or "").strip()
-    if not address or " " in address or address.count("@") != 1 or not all(address.split("@")):
-        return False, "That doesn't look like an email address."
-    if not is_ascii_email(address):
-        return False, EMAIL_ASCII_MESSAGE
+    refusal = invite_address_error(address) if address else "That doesn't look like an email address."
+    if refusal:
+        return False, refusal
 
     entity = Entity.query.get(str(entity_id)) if entity_id else None
     if entity is None:

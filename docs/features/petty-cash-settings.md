@@ -12,15 +12,16 @@ Models: `blueprints/entity/models/` (`currency_info`, `cash_info`, `entity_cash_
 ## The page
 
 The one Flask settings page that stays (the user, 2026-09-30: app settings stay in their own
-app; Users and Entity & Integration move to minty-web later, the Module tab is minty-web's
-already). Since 2026-10-01 it is ONE template for every visit, built from the old
+app; Users, Entity & Integration and the Module tab are minty-web's - since phase 2,
+2026-10-05, for the first two). Since 2026-10-01 it is ONE template for every visit, built from the old
 `?from=bills` page; the classic page and `settings_entity_bills_ui.html` are gone.
 
 - **Chrome** = minty-web's Module page (`AppHeader` + `SettingsTabs`), which minty-payment-request-web's
-  Payment Settings wears too: the way back, "Settings", the company, the initials (My Profile)
+  Payment Request Settings wears too: the way back, "Settings", the company, the initials (My Profile)
   and the ≡ (the menu), then the sticky pills Users · Entity & Integration · **Petty Cash
-  Settings** · Payment Settings (when the payments module is on) · Module.
-- **Content** = Payment Settings' card (`AccountCodeSettings.tsx`), one per section, each
+  Settings** · Payment Request Settings (when the payments module is on) · Modules - the Users, Entity &
+  Integration and Module pills go through Flask's addresses, which hand over to minty-web.
+- **Content** = Payment Request Settings' card (`AccountCodeSettings.tsx`), one per section, each
   collapsible: Country & currency · Xero account mapping · Electronic · Delivery · Petty Cash
   Account Code. One full-width **Save Changes** saves them all.
 - **"‹ Back"** returns to the page the person came from, whichever app
@@ -124,7 +125,7 @@ words); the route refuses it too, before anything is written
 rows WITH a code — a row without one can never be ticked back on, so it never counts and is not
 offered). A company with no codes saves as before. Onboarding's Step 5 has the same rule since
 2026-10-01 (`save_account_codes` answers 400; it asks `listed_only=False`, because its codes
-have no `entity_account_xero` row yet), and Payment Settings keeps at least one bill code
+have no `entity_account_xero` row yet), and Payment Request Settings keeps at least one bill code
 (minty-payment-request-api's PUT answers 409). Onboarding's Step 8 (the Payment Request codes) has it too:
 the wizard shows the same words and does not post, and Flask's `save_bill_codes`
 (`blueprints/entity/services/onboarding_bill_codes.py`) answers 400 when the company has codes

@@ -49,7 +49,7 @@ and must never be surfaced. **When you add a `fetch()`, tag its throw.**
 ### No page keeps its own toast
 
 Until 2026-10-01 `templates/entity/settings.html` and
-`templates/entity/settings_users_scripts.html` redefined `showErrorToast` over their own DOM
+`templates/entity/settings_users_scripts.html` (both deleted since; the Users tab is minty-web's) redefined `showErrorToast` over their own DOM
 (`#settingsNotification` / `#errorToast`), and eight other pages had toast copies of their
 own, some putting server text in with `innerHTML`. All of them now call the shared
 `showFlashMessages`, so every error and warning toast goes through `mintyErrorCopy` and is set

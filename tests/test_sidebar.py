@@ -256,12 +256,8 @@ def test_the_hub_names_the_caller_it_allows(app, client, people, origins, origin
 PAGES = [
     "entity/entity_create.html",
     "entity/entity_dashboard_v2.html",
-    "entity/entity_list_empty.html",
     "entity/entity_no_permission.html",
-    "entity/index.html",
     "entity/settings_entity.html",
-    "entity/settings_users_bills_ui.html",
-    "entity/settings_xero_bills_ui.html",
     "report/cash_count.html",
     "report/deposit.html",
     "report/ending.html",

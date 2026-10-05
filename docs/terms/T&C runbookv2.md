@@ -33,7 +33,7 @@ The work has three parts:
    It renders as a **modal over the Select Company list** (`/entity`), not as a
    separate page — see §2 Flow B. `/legal/accept` still exists as the fallback
    route and as the canonical URL for the flow. **Since 2026-09-29, with
-   `MINTY_WEB_HUB` on**, `/entity` hands the browser to minty-web's list, and
+   always since phase 2**, `/entity` hands the browser to minty-web's list, and
    minty-web draws the same panel over every page of its own — see §4.8.
 
 Part 3 sounds like a backup plan. It is not. It is the only part that covers
@@ -481,7 +481,7 @@ users in that business.
 
 ### 4.8 `GET /api/me/terms` and `POST /api/me/terms/accept` *(minty-web's panel, 2026-09-29)*
 
-With `MINTY_WEB_HUB` on, Flask's `/entity` sends the browser to minty-web whether or
+Flask's `/entity` sends the browser to minty-web (always, since phase 2) whether or
 not an acceptance is owed, and minty-web draws the panel (a port of
 `_terms_panel.html`) over every page of its own. These two routes are what it reads
 and posts (`blueprints/legal/routes/hub.py`). Bearer token, not the session; CORS for

@@ -243,7 +243,10 @@ def test_state_changing_routes_refuse_get(shop, client):
     owner, entity, _ = shop
     F.login(client, owner)
     assert client.get(f"/report/submitted/publish_to_xero?entity_id={entity.id}").status_code == 405
-    assert client.get(f"/entity/settings/xero/disconnect?entity_id={entity.id}").status_code == 405
+    # (Disconnecting is minty-web's tab since phase 2: bearer POST /api/me/company/xero/disconnect,
+    # no GET and no session route at all.)
+    assert client.get(f"/entity/settings/xero/disconnect?entity_id={entity.id}").status_code == 404
+    assert client.get(f"/api/me/company/xero/disconnect?entity={entity.id}").status_code == 405
     assert client.get("/legal/invite-terms-status?invite=x").status_code == 405
 
 

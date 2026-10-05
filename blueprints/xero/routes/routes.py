@@ -780,28 +780,23 @@ def xero_callback():
                     )
                     # Accept-time identity mismatch on a fresh Xero login. Do
                     # NOT log this (wrong) user in. Send them back to the invited
-                    # /auth page to re-authenticate. We do NOT end the Xero SSO
+                    # sign-in page (minty-web's /login) to re-authenticate. We do NOT end the Xero SSO
                     # session: the Xero login uses ``prompt=login`` (see
                     # xero_auth), so Xero re-prompts and the user can sign in as
                     # the correct account even if a different Xero session is
                     # active — no force-logout, and no Xero-homepage dead-end.
-                    from urllib.parse import urlencode
+                    from blueprints.auth.services.hub_login import hub_login_url
 
                     invitation = Invitation.query.filter_by(
                         token=invite_token
                     ).first()
-                    invited_email = (
-                        invitation.email if invitation else ""
-                    )
-                    onboarding_base = bearer_api.onboarding_origin()
-                    resume_qs = {"invite": invite_token}
-                    if invited_email:
-                        resume_qs["email"] = invited_email
-                    resume_url = (
-                        f"{onboarding_base}/auth?{urlencode(resume_qs)}"
-                    )
                     flash(accept_error, "danger")
-                    return redirect(resume_url)
+                    return redirect(
+                        hub_login_url(
+                            invite=invite_token,
+                            email=invitation.email if invitation else None,
+                        )
+                    )
                 login_user(user)
                 logger.info(
                     f"Xero login: user {user.id} accepted invite to entity "
@@ -1577,136 +1572,6 @@ def get_xero_sync_status(entity_id):
     xero_sync_status = compat.xero_sync_status
     status = xero_sync_status.get(entity_id, {"status": "idle", "message": ""})
     return jsonify(status)
-
-
-@xero_bp.route("/entity/settings/xero/disconnect", methods=["POST"])
-@login_required
-@require_entity_access(entity_keys=("entity_id",))
-@require_permission(
-    Permission.XERO_SETTINGS_UPDATE,
-    entity_keys=("entity_id",),
-    message="You do not have permission to disconnect Xero for this entity.",
-)
-def disconnect_from_xero():
-    # POST with the CSRF token: a GET let any link on another site disconnect a
-    # company and wipe its cached Xero data.
-    entity_id = request.form.get("entity_id")
-
-    if not entity_id:
-        # Nothing has touched Xero at this point — the request just arrived
-        # without an entity. Say that, so the user doesn't read this as a
-        # half-finished disconnect and go hunting for a broken connection.
-        flash(
-            "I need to know which entity to disconnect. Nothing has changed — "
-            "could you pick the entity and try again?",
-            "danger",
-        )
-        return redirect(url_for("entity.entity_list"))
-
-    try:
-        org = Entity.query.get_or_404(entity_id)
-        logger.info(f"Disconnecting entity: {org.name} (ID: {entity_id})")
-
-        connector = None
-        if org.connected_by_user_id:
-            connector = User.query.get(org.connected_by_user_id)
-            if connector is None:
-                logger.warning(
-                    f"connected_by_user_id {org.connected_by_user_id} on entity "
-                    f"{entity_id} points to a missing user; skipping remote disconnect"
-                )
-
-        if connector is not None and org.xero_org_id:
-            xero_connections_url = "https://api.xero.com/connections"
-            try:
-                if ensure_valid_token(connector):
-                    get_conn_response = requests.get(
-                        xero_connections_url,
-                        headers={
-                            "Authorization": f"Bearer {connector.access_token}"},
-                        timeout=10,
-                    )
-                    if get_conn_response.status_code == 200:
-                        for conn in get_conn_response.json():
-                            if conn.get("tenantId") == str(org.xero_org_id):
-                                auth_id_to_delete = conn.get("id")
-                                delete_response = requests.delete(
-                                    f"{xero_connections_url}/{auth_id_to_delete}",
-                                    headers={
-                                        "Authorization": f"Bearer {connector.access_token}"
-                                    },
-                                    timeout=10,
-                                )
-                                if delete_response.status_code in [200, 204]:
-                                    logger.info(
-                                        f"Disconnected user {connector.username} from entity {entity_id}"
-                                    )
-                                else:
-                                    logger.warning(
-                                        f"Xero DELETE /connections/{auth_id_to_delete} "
-                                        f"returned {delete_response.status_code}"
-                                    )
-                                break
-                    else:
-                        logger.warning(
-                            f"Xero GET /connections returned {get_conn_response.status_code} "
-                            f"for user {connector.username}"
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to disconnect user {connector.username}: {str(e)}"
-                )
-
-        # Clear the connector's stored tokens (user columns + user_token row) —
-        # but ONLY if this user has no OTHER entity still connected with the same
-        # shared token bundle. Tokens are per-user (user_token.user_id is UNIQUE)
-        # and one user can be connected_by_user_id for several entities, so a
-        # blanket clear here would break those other entities' Xero access. Scope
-        # the clear to "this was their last connection".
-        if connector is not None:
-            other_connected = (
-                Entity.query.filter(
-                    Entity.connected_by_user_id == connector.id,
-                    Entity.xero_org_id.isnot(None),
-                    Entity.id != entity_id,
-                ).first()
-                is not None
-            )
-            if other_connected:
-                logger.info(
-                    f"Keeping Xero tokens for user {connector.username} — "
-                    f"still connected to other entities"
-                )
-            else:
-                connector.clear_tokens()
-                logger.info(
-                    f"Cleared Xero tokens for user {connector.username}"
-                )
-
-        # Disconnecting has always left the cached Xero data in place. Clear
-        # it here too: whatever reconnects next is not guaranteed to be the
-        # same organisation, and a stale id is worse than an absent one.
-        invalidate_entity_xero_cache(org.id, org.xero_org_id)
-        org.status = "disconnected"
-        org.xero_org_id = None
-        org.connected_by_user_id = None
-        db.session.commit()
-        logger.info(f"Successfully disconnected entity: {entity_id}")
-        flash("You're disconnected from Xero.", "success")
-        return redirect(url_for("entity_settings", entity_id=entity_id))
-    except Exception as e:
-        logger.error(f"Error disconnecting from Xero: {str(e)}")
-        db.session.rollback()
-        # The rollback reverts our own records, but the revoke call to Xero may
-        # already have gone through — so the two sides can disagree. Say so
-        # rather than implying a clean no-op.
-        flash(
-            "I couldn't finish disconnecting this entity from Xero, so it may "
-            "still show as connected. Mind checking the connection in settings "
-            "before trying again?",
-            "danger",
-        )
-        return redirect(url_for("entity_settings", entity_id=entity_id))
 
 
 def _without_full_bank_numbers(accounts):

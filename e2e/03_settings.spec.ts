@@ -110,8 +110,8 @@ test.describe('entity settings', () => {
     expect(resp.status()).toBe(302);
     const location = new URL(resp.headers()['location']);
     expect(location.pathname).toBe('/landing');
-    // the company by short id and name since 2026-10-05
-    expect(location.searchParams.get('next')).toMatch(new RegExp(`^/subscription/entities/${entityId.slice(0, 8)}/[^/]+/modules$`));
+    // the company by short id and name since 2026-10-05; the Module tab among its settings since phase 2
+    expect(location.searchParams.get('next')).toMatch(new RegExp(`^/entities/${entityId.slice(0, 8)}/[^/]+/settings/modules$`));
     expect(location.searchParams.get('entity_id')).toBe(entityId);
     expect(location.searchParams.get('token')).toBeTruthy();
   });

@@ -1,9 +1,9 @@
 # The sidebar — the menu and My Profile
 
-Every Petty Cash page with a header — the dashboard, the report wizard, report history, the
-settings tabs (Users, Entity & Integration and Petty Cash Settings, one template each), the
-entity list while
-`MINTY_WEB_HUB` is off, create and no-permission — carries the same sidebar minty-web draws:
+Every Petty Cash page with a header — the dashboard, the report wizard, report history,
+Petty Cash Settings, create and no-permission — carries the same sidebar minty-web draws (the
+Jinja entity list, Users and Entity & Integration pages went in phase 2, 2026-10-05: they are
+minty-web's, which draws its own):
 **one drawer, two views** (the user's call, 2026-09-29; brought here 2026-09-30).
 
 - the header's **≡** opens the **menu** (Figma 02);
@@ -55,9 +55,10 @@ Top to bottom: the Minty mark; the person (avatar + name — opens My Profile); 
 - **Settings opens the settings of the app it is pressed in** (the user's call, 2026-09-30):
   on the Petty Cash pages, the **Petty Cash Settings** tab (`entity_settings_entity` — the
   accounts and contacts a report needs, the sales methods), on every Flask page - the
-  `?from=bills` exception (the payments app's Payment Settings) went with the flag on
-  2026-10-05; minty-payment-request-web's own sidebar opens its Payment Settings. A company without
-  Petty Cash has no Petty Cash Settings tab (`require_module`), so it gets Entity & Integration.
+  `?from=bills` exception (the payments app's Payment Request Settings) went with the flag on
+  2026-10-05; minty-payment-request-web's own sidebar opens its Payment Request Settings. A company without
+  Petty Cash has no Petty Cash Settings tab (`require_module`), so it gets Entity & Integration
+  (Flask's address, which hands over to minty-web's tab).
   minty-web's own menu keeps its module page.
 - **On Petty Cash Settings with unsaved changes**, a link in the drawer — Logout included —
   asks first ("Leave without saving?", [modals.md](modals.md)): the dialog sits above the drawer

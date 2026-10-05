@@ -10,14 +10,12 @@ from loguru import logger
 from sqlalchemy import func, or_
 
 from blueprints.entity import entity_bp
-from blueprints.shared.feature_flags import minty_web_hub
 from blueprints.entity.routes.modules import minty_web_module_page_handoff
-from blueprints.entity.services.entity_list import build_entity_list, sign_notices
+from blueprints.entity.services.entity_list import sign_notices
 from blueprints.entity.services.modules import (build_subscription_notices,
                                                 claim_subscription_notice)
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
-from blueprints.legal.services.gate import outstanding_terms_context
 from blueprints.shared.entity_display import build_entity_acronym
 from blueprints.xero.services.integration import get_accounts_from_xero
 from blueprints.xero.services.settings import (
@@ -31,60 +29,14 @@ from services.authz import (permission_denied, require_entity_access,
 from services.permission_policy import Permission, has_permission, is_superuser
 
 
-def _format_last_accessed(dt):
-    """Render a last-login timestamp like "9 Jun 5:42 PM", in Hong Kong time.
-
-    AN INSTANT, CONVERTED HERE. ``last_accessed_at`` is a ``TIMESTAMPTZ``
-    (``record_entity_access`` writes an aware UTC instant) and arrives here as the aware,
-    UTC value ``services.entity_list`` normalises it to; this converts it to Hong Kong once.
-    A naive value is still read as UTC, so a caller holding one gets the same answer.
-
-    Built without strftime's %-d / %-I, which are glibc extensions and raise on
-    Windows, so this renders identically on a dev box and on the server.
-    """
-    if not dt:
-        return None
-    # Naive values are UTC by the convention above. An aware one is honoured as it stands,
-    # so this stays correct if the column is ever migrated to ``timestamptz``.
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    local = dt.astimezone(tz)
-    return (
-        f"{local.day} {local.strftime('%b')} "
-        f"{local.strftime('%I:%M %p').lstrip('0')}"
-    )
-
-
 @entity_bp.route("/entity")
 @login_required
 def entity_list():
-    # With the hub on, the list is minty-web's (its /entities) - Terms owed or not: minty-web
-    # draws the acceptance panel itself, over every page (its TermsGate, over
-    # legal/routes/hub.py), so the gate's redirect to here carries on to it.
-    if minty_web_hub():
-        return _to_minty_web_list()
-
-    # The Terms panel renders as a modal over this page — it is where the gate
-    # sends anyone who has not agreed. None means nothing is outstanding.
-    # Resolved before the empty-list branch on purpose: a brand-new user with
-    # no companies is exactly the person most likely to owe an acceptance, and
-    # they never reach index.html.
-    terms = outstanding_terms_context()
-
-    # The list itself (services/entity_list.py) - the same builder minty-web's list reads,
-    # so the two can never disagree about which companies there are or what badges they carry.
-    entries = build_entity_list(current_user)
-    if not entries:
-        logger.info("Entity list is empty")
-        return render_template("entity/entity_list_empty.html", terms=terms)
-
-    organizations = [
-        {**entry, "last_accessed_display": _format_last_accessed(entry["last_accessed_at"])}
-        for entry in entries
-    ]
-    return render_template(
-        "entity/index.html", organizations=organizations, terms=terms
-    )
+    """The entity list is minty-web's ``/entities`` (the ``MINTY_WEB_HUB`` switch went in phase
+    2, 2026-10-05, with Flask's Jinja list) - Terms owed or not: minty-web draws the acceptance
+    panel itself, over every page (its TermsGate, over legal/routes/hub.py), so the gate's
+    redirect to here carries on to it."""
+    return _to_minty_web_list()
 
 
 def _to_minty_web_list():

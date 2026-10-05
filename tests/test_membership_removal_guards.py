@@ -33,7 +33,6 @@ sys.modules.setdefault(
     types.SimpleNamespace(hashpw=lambda *_args, **_kwargs: b"", gensalt=lambda: b""),
 )
 
-from blueprints.user_management.routes import roles as roles_routes
 from blueprints.user_management.services.roles import (
     check_not_last_admin_or_error,
     check_not_pending_subscriber_or_error,
@@ -337,100 +336,9 @@ def test_a_sideways_move_between_admin_ranks_is_allowed():
 
 
 # --- wired into the route, in order ---------------------------------------------
-
-
-def _delete(app, monkeypatch, *, membership, may_manage=True, payer=None, roster=None):
-    """Call the unwrapped DELETE handler with its collaborators stubbed."""
-    session = SimpleNamespace(
-        deleted=[], commit_calls=0,
-        delete=lambda item: session.deleted.append(item),
-        commit=lambda: setattr(session, "commit_calls", session.commit_calls + 1),
-    )
-
-    class FakeUserEntity:
-        query = SimpleNamespace(
-            filter_by=lambda **_k: SimpleNamespace(
-                first=lambda: membership,
-                all=lambda: list(roster or []),
-            )
-        )
-
-    monkeypatch.setattr(roles_routes, "UserEntity", FakeUserEntity)
-    monkeypatch.setattr(roles_routes, "db", SimpleNamespace(session=session))
-    monkeypatch.setattr(
-        roles_routes, "can_manage_role_assignment_for_entity",
-        lambda *_a, **_k: may_manage,
-    )
-    # The route calls this without a lookup, so it would reach the real store.
-    monkeypatch.setattr(
-        roles_routes, "check_not_subscription_payer_or_error",
-        lambda user_id, entity_id: check_not_subscription_payer_or_error(
-            user_id, entity_id, payer_lookup=lambda _e: payer
-        ),
-    )
-
-    with app.test_request_context(
-        "/minty/api/users/target-user/role",
-        method="DELETE",
-        json={"entity_id": "entity-1"},
-    ):
-        response, status = roles_routes.delete_user_role.__wrapped__.__wrapped__(
-            "target-user"
-        )
-    return response, status, session
-
-
-def test_an_accountant_can_no_longer_delete_an_admin(monkeypatch):
-    """Gap 1. The route permission's floor is ACCOUNTANT; the rank guard is what stops
-    the delete being a cheaper path than the demote they are refused."""
-    app = _build_app()
-    response, status, session = _delete(
-        app, monkeypatch,
-        membership=SimpleNamespace(role="admin"),
-        may_manage=False,
-    )
-
-    assert status == 403
-    assert session.deleted == []
-
-
-def test_the_route_refuses_to_strand_the_payer(monkeypatch):
-    app = _build_app()
-    response, status, session = _delete(
-        app, monkeypatch,
-        membership=SimpleNamespace(role="cashier"),
-        payer="target-user",
-    )
-
-    assert status == 409
-    assert "pays for this company" in response.get_json()["message"]
-    assert session.deleted == []
-
-
-def test_the_route_refuses_to_remove_the_last_admin(monkeypatch):
-    app = _build_app()
-    response, status, session = _delete(
-        app, monkeypatch,
-        membership=SimpleNamespace(role="admin"),
-        roster=[_member("target-user", "admin"), _member("u2", "cashier")],
-    )
-
-    assert status == 409
-    assert "only admin" in response.get_json()["message"]
-    assert session.deleted == []
-
-
-def test_an_ordinary_removal_still_works(monkeypatch):
-    """The guards are exceptions, not a new default: a cashier who is nobody's payer
-    still comes off the entity in one call."""
-    app = _build_app()
-    membership = SimpleNamespace(role="cashier")
-    response, status, session = _delete(app, monkeypatch, membership=membership)
-
-    assert status == 200
-    assert response.get_json()["status"] == "success"
-    assert session.deleted == [membership]
-    assert session.commit_calls == 1
+# The route is minty-web's Users tab since phase 2 (2026-10-05), Flask's bearer
+# DELETE /api/me/company/users/<id>: tests/test_hub_company_settings.py runs these guards
+# through it, in order, against the real database.
 
 
 # --- someone a handover is offered to ----------------------------------------------

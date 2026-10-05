@@ -2,9 +2,9 @@
 
 The API is the Jinja list's own builder (``services/entity_list.build_entity_list``) behind
 minty-web's bearer surface (``blueprints/shared/hub_api.py``). ``/entity`` sends the browser
-on to minty-web while ``MINTY_WEB_HUB`` is on - except while Terms are owed, since the
-acceptance modal is the Jinja page's - and carries what the redirect that brought the person
-there flashed, signed, so nothing flashed on the way is lost.
+on to minty-web - always, since the ``MINTY_WEB_HUB`` switch and the Jinja list went in phase 2
+(2026-10-05), Terms owed or not - and carries what the redirect that brought the person there
+flashed, signed, so nothing flashed on the way is lost.
 
 Imports of project modules happen inside tests: the conftest ``app`` fixture re-imports the
 blueprints, so a module captured at import time is not the one under test.
@@ -247,16 +247,7 @@ def _landing(resp):
     return parts, parse_qs(parts.query)
 
 
-def test_switch_off_the_jinja_list_stays(app, client, people, hub, monkeypatch):
-    monkeypatch.delenv("MINTY_WEB_HUB", raising=False)
-    F.login(client, people["olive"])
-    resp = client.get("/entity")
-    assert resp.status_code == 200
-    assert b"Select Company" in resp.data and b"Petty Only Ltd" in resp.data
-
-
-def test_switch_on_the_list_is_minty_webs_with_an_unscoped_token(app, client, people, hub, monkeypatch):
-    monkeypatch.setenv("MINTY_WEB_HUB", "1")
+def test_the_list_is_minty_webs_with_an_unscoped_token(app, client, people, hub, monkeypatch):
     F.login(client, people["olive"])
 
     parts, query = _landing(client.get("/entity"))
@@ -267,8 +258,7 @@ def test_switch_on_the_list_is_minty_webs_with_an_unscoped_token(app, client, pe
     assert claims["user_id"] == people["olive"].id and claims["entity_id"] == ""
 
 
-def test_switch_on_what_was_flashed_travels_with_it(app, client, people, hub, monkeypatch):
-    monkeypatch.setenv("MINTY_WEB_HUB", "1")
+def test_what_was_flashed_travels_with_it(app, client, people, hub, monkeypatch):
     F.login(client, people["olive"])
     # a company she is not a member of: the handoff flashes and redirects to /entity
     first = client.get(f"/handoff/minty-web?next=/subscription&entity_id={people['other'].id}")
@@ -301,7 +291,6 @@ def test_a_redirect_into_another_app_drops_the_flash_queue(app, client, people, 
     """Onboarding's Xero connect flashed on every attempt, but the wizard reads the outcome
     from the URL - so the queue sat in the session until finishing onboarding opened /entity,
     and minty-web's list toasted all of it. A redirect into another app never carries it."""
-    monkeypatch.setenv("MINTY_WEB_HUB", "1")
     monkeypatch.setenv("ONBOARDING_WEB_URL", ONBOARDING)
     F.login(client, people["olive"])
     _queue_flash(client, ("success", "Connected to Xero!"), ("danger", "Connection failed"))
@@ -320,7 +309,6 @@ def test_a_redirect_into_another_app_drops_the_flash_queue(app, client, people, 
 
 
 def test_a_redirect_within_flask_keeps_the_flash_queue(app, client, people, hub, monkeypatch):
-    monkeypatch.delenv("MINTY_WEB_HUB", raising=False)
     F.login(client, people["olive"])
     _queue_flash(client, ("info", "Still here"))
     resp = client.get(f"/handoff/minty-web?next=/subscription&entity_id={people['other'].id}")
@@ -329,20 +317,13 @@ def test_a_redirect_within_flask_keeps_the_flash_queue(app, client, people, hub,
         assert ["info", "Still here"] in [list(f) for f in session["_flashes"]]
 
 
-def test_switch_on_terms_owed_minty_web_takes_the_acceptance(app, client, people, hub, monkeypatch):
+def test_terms_owed_minty_web_takes_the_acceptance(app, client, people, hub, monkeypatch):
     """minty-web draws the Terms panel itself (its TermsGate over legal/routes/hub.py), so
     the list hands over even while an acceptance is owed - the gate's redirect to /entity
     carries on to minty-web, where the modal is waiting."""
-    monkeypatch.setenv("MINTY_WEB_HUB", "1")
     F.login(client, people["olive"], accepted_terms=False)
     parts, query = _landing(client.get("/entity"))
     assert (parts.netloc, parts.path) == ("hub.minty.test", "/landing")
     assert query["next"] == ["/entities"]
 
 
-def test_switch_off_terms_owed_the_jinja_page_still_takes_it(app, client, people, hub, monkeypatch):
-    monkeypatch.delenv("MINTY_WEB_HUB", raising=False)
-    F.login(client, people["olive"], accepted_terms=False)
-    resp = client.get("/entity")
-    assert resp.status_code == 200
-    assert b"Terms" in resp.data

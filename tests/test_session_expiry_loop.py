@@ -52,12 +52,19 @@ def ghost(client, db_session):
 
 def test_the_login_page_does_not_redirect_to_itself(ghost):
     """The whole bug in one line. ``auth.home`` is the hook's redirect target
-    AND is guarded by the hook, so a redirect here has no exit."""
+    AND is guarded by the hook, so a redirect here has no exit.
+
+    Since phase 2 (2026-10-05) ``/`` hands a signed-out person to minty-web's sign-in page,
+    so it always answers with a redirect - the rule is that it is never to ``/`` itself."""
+    from urllib.parse import urlsplit
+
     response = ghost.get("/", follow_redirects=False)
 
-    assert response.status_code == 200, (
-        "/ redirected instead of rendering — the login page is redirecting to "
-        "itself, which is ERR_TOO_MANY_REDIRECTS in a browser"
+    assert response.status_code == 302
+    location = urlsplit(response.headers["Location"])
+    assert location.netloc and location.path == "/login", (
+        "/ redirected to this site instead of the sign-in page — the login page is "
+        "redirecting to itself, which is ERR_TOO_MANY_REDIRECTS in a browser"
     )
 
 

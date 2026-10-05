@@ -68,9 +68,9 @@
           <a href="{{ url_for('entity_settings', entity_id=org.id) }}" class="pcs-pill">Entity &amp; Integration</a>
           <span class="pcs-pill" aria-current="page">Petty Cash Settings</span>
           {% if is_billing_enabled(org.id) %}
-          <a href="{{ url_for('entity.entity_settings_payments', org_id=org.id) }}" class="pcs-pill">Payment Settings</a>
+          <a href="{{ url_for('entity.entity_settings_payments', org_id=org.id) }}" class="pcs-pill">Payment Request Settings</a>
           {% endif %}
-          <a href="{{ url_for('entity_settings_module', org_id=org.id) }}" class="pcs-pill">Module</a>
+          <a href="{{ url_for('entity_settings_module', org_id=org.id) }}" class="pcs-pill">Modules</a>
         </nav>
       </div>
 

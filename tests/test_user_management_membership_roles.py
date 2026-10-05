@@ -12,7 +12,6 @@ sys.modules.setdefault(
 )
 
 from blueprints.user_management.routes import create_user as create_user_routes
-from blueprints.user_management.routes import roles as roles_routes
 
 
 def _build_app() -> Flask:
@@ -122,77 +121,3 @@ def test_create_user_assigns_membership_role_but_keeps_system_role_normal(
     assert session.commit_calls == 2
 
 
-def test_updating_membership_role_does_not_change_user_system_role(monkeypatch):
-    app = _build_app()
-    session = _SessionStub()
-    membership = SimpleNamespace(role="cashier")
-
-    class FakeUserEntity:
-        query = _QueryStub(result=membership)
-
-    monkeypatch.setattr(
-        roles_routes,
-        "current_user",
-        SimpleNamespace(id="actor-1", is_authenticated=True),
-    )
-    monkeypatch.setattr(
-        roles_routes,
-        "can_manage_role_assignment_for_entity",
-        lambda *_args, **_kwargs: True,
-    )
-    monkeypatch.setattr(roles_routes, "UserEntity", FakeUserEntity)
-    monkeypatch.setattr(roles_routes, "db", SimpleNamespace(session=session))
-
-    with app.test_request_context(
-        "/minty/api/users/target-user/role",
-        method="PATCH",
-        json={"entity_id": "entity-1", "role": "shop_manager"},
-    ):
-        response, status = roles_routes.update_user_role.__wrapped__.__wrapped__(
-            "target-user"
-        )
-
-    assert status == 200
-    assert response.get_json()["role"] == "shop_manager"
-    assert membership.role == "shop_manager"
-    assert session.commit_calls == 1
-
-
-def test_deleting_membership_role_removes_membership_without_changing_system_role(
-    monkeypatch,
-):
-    app = _build_app()
-    session = _SessionStub()
-    membership = SimpleNamespace(role="cashier")
-
-    class FakeUserEntity:
-        query = _QueryStub(result=membership)
-
-    monkeypatch.setattr(roles_routes, "UserEntity", FakeUserEntity)
-    monkeypatch.setattr(roles_routes, "db", SimpleNamespace(session=session))
-    # Deleting a membership now runs three guards it never used to (rank, the
-    # subscription payer, the last admin) — see tests/test_membership_removal_guards.py,
-    # which is where they are exercised. This test is about what a PERMITTED removal
-    # does to the system role, so they are waved through: a cashier trips neither the
-    # rank nor the last-admin check on its own, and the payer lookup would otherwise
-    # reach the real subscription store.
-    monkeypatch.setattr(
-        roles_routes, "can_manage_role_assignment_for_entity", lambda *_a, **_k: True
-    )
-    monkeypatch.setattr(
-        roles_routes, "check_not_subscription_payer_or_error", lambda *_a, **_k: None
-    )
-
-    with app.test_request_context(
-        "/minty/api/users/target-user/role",
-        method="DELETE",
-        json={"entity_id": "entity-1"},
-    ):
-        response, status = roles_routes.delete_user_role.__wrapped__.__wrapped__(
-            "target-user"
-        )
-
-    assert status == 200
-    assert response.get_json()["status"] == "success"
-    assert session.deleted == [membership]
-    assert session.commit_calls == 1

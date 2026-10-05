@@ -243,27 +243,6 @@ def test_no_account_is_created_if_the_consent_write_fails(app, db_session,
 
 
 # --------------------------------------------------------------------------
-# The sign-up page
-# --------------------------------------------------------------------------
-
-def test_the_register_page_shows_an_unticked_tick_box(client):
-    body = client.get("/register").get_data(as_text=True)
-
-    assert 'id="termsAccept"' in body
-    # Unticked, always — a pre-ticked box is not agreement.
-    assert "checked" not in body.split('id="termsAccept"')[1].split(">")[0]
-    assert "/legal/terms" in body
-    assert "/legal/privacy" in body
-
-
-def test_the_register_page_stamps_the_version_it_showed(client):
-    """The record must name the wording rendered on the page, not whatever is
-    live by the time the code is entered."""
-    body = client.get("/register").get_data(as_text=True)
-    assert f'TERMS_VERSION = "{registry.CURRENT_TERMS_VERSION}"' in body
-
-
-# --------------------------------------------------------------------------
 # The login branch: an invitee who ALREADY has an account
 # --------------------------------------------------------------------------
 
@@ -364,52 +343,3 @@ def test_a_plain_login_records_nothing(app, client, db_session, monkeypatch):
         assert has_consent(user_id) is False
 
 
-# --------------------------------------------------------------------------
-# The read-to-agree modal on the sign-up page
-# --------------------------------------------------------------------------
-
-def test_the_register_page_carries_the_read_to_agree_modal(client):
-    """The tick box is not tickable directly — clicking it opens the document,
-    and only agreeing at the end of that sets it.
-
-    A Xero user meets the full Terms on the acceptance gate after login. Before
-    this, an OTP user only ever saw a link they would never click. Same product,
-    two very different standards of exposure.
-    """
-    body = client.get("/register").get_data(as_text=True)
-
-    assert 'id="tc-read-backdrop"' in body
-    assert 'id="tc-read-agree"' in body
-    # The document body itself is on the page — not a link to it.
-    assert 'id="tc-read-doc"' in body
-    assert "Minty Beta Terms of Use" in body
-
-
-def test_the_register_tick_box_reads_the_pre_click_state(client):
-    """Regression: the tick box did the opposite of what it should.
-
-    By the time a click handler runs, the browser has ALREADY flipped
-    `.checked`. Reading it directly meant ticking sailed straight through
-    unread while UN-ticking opened the modal — both backwards, and the first
-    one defeats the entire point of the read-to-agree gate.
-
-    The handler must derive the pre-click state (`!box.checked`).
-    """
-    body = client.get("/register").get_data(as_text=True)
-
-    assert "var wasChecked = !box.checked;" in body
-    # The naive form must not come back.
-    assert "if (box.checked) { return; }" not in body
-
-
-def test_the_register_modal_ships_both_lock_out_guards(client):
-    """The two ways this pattern strands people, both guarded.
-
-    A document shorter than its box can never be scrolled to the end, and an
-    exact bottom comparison never matches under browser zoom. Either one leaves
-    the agree button disabled forever with no way to sign up.
-    """
-    body = client.get("/register").get_data(as_text=True)
-
-    assert "scroller.scrollHeight <= scroller.clientHeight" in body
-    assert "<= 4" in body

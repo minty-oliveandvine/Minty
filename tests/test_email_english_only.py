@@ -81,29 +81,30 @@ def test_the_rule_is_printable_ascii_only(app):
 
 
 # ---- inviting someone (Settings -> Users, and the onboarding wizard's step) --------------------
+# The Users tab is minty-web's since phase 2 (2026-10-05): Flask's bearer POST /api/me/company/invitations.
+
+
+def _invite(app, client, world, address):
+    return client.post("/api/me/company/invitations", query_string={"entity": world["entity"].id},
+                       headers=F.hub_headers(app, world["owner"].id),
+                       json={"email": address, "role": "cashier", "first_name": "New", "last_name": "Person"})
 
 
 @pytest.mark.parametrize("address", NOT_ENGLISH)
 def test_an_invite_to_a_non_english_address_is_a_400(app, client, world, mail, address):
-    F.login(client, world["owner"])
-    resp = client.post("/minty/api/invitation/send", json={
-        "entity_id": world["entity"].id, "email": address, "role": "cashier",
-    })
+    resp = _invite(app, client, world, address)
 
     assert resp.status_code == 400
-    assert resp.get_json() == {"status": "error", "message": HINT}
+    assert resp.get_json() == {"error": HINT}
     assert invitations_for(app, address.lower()) == 0
     assert mail.messages == []
 
 
 def test_an_invite_to_an_ordinary_address_goes_out(app, client, world, mail):
-    F.login(client, world["owner"])
-    resp = client.post("/minty/api/invitation/send", json={
-        "entity_id": world["entity"].id, "email": ENGLISH, "role": "cashier",
-    })
+    resp = _invite(app, client, world, ENGLISH)
 
     assert resp.status_code == 201, resp.data[:300]
-    assert resp.get_json()["invitation"]["email"] == ENGLISH
+    assert resp.get_json()["email_sent"] is True
     assert invitations_for(app, ENGLISH) == 1
 
 
@@ -159,16 +160,6 @@ def test_a_code_goes_to_an_ordinary_address(app, client, db, mail):
 
     assert resp.status_code == 200, resp.data[:300]
     assert len(mail.messages) == 1
-
-
-@pytest.mark.parametrize("address", NOT_ENGLISH)
-def test_the_register_form_reports_it_against_the_email_field(app, client, db, address):
-    """``Email()`` (email_validator) takes SMTPUTF8 and IDN addresses; the form's own
-    validator is what refuses them."""
-    resp = client.post("/validate_register",
-                       json={"first_name": "New", "last_name": "User", "email": address})
-
-    assert resp.get_json()["errors"].get("email") == [HINT]
 
 
 # ---- a company's business email ----------------------------------------------------------------
@@ -278,8 +269,10 @@ def test_a_non_english_billing_email_is_refused_before_stripe_is_asked(
 # ---- the pages carry the English-only field ----------------------------------------------------
 
 
-def test_the_sign_up_and_sign_in_pages_use_the_english_only_field(client):
-    for path in ("/register", "/", "/login"):
+def test_the_sign_in_pages_use_the_english_only_field(client):
+    # Sign-in and sign-up are minty-web's /login since phase 2 (its lib/emailInput.ts); the
+    # password page is the one Flask still draws.
+    for path in ("/login",):
         page = client.get(path).get_data(as_text=True)
         assert "js/email_input.js" in page, path
         assert "data-email-ascii=" in page, path

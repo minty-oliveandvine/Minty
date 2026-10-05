@@ -137,7 +137,7 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
   `STRIPE_PUBLISHABLE_KEY`, `SMTP_URL`, `MAIL_FROM` (start-up enforces `SECRET_KEY`,
   `DATABASE_URL` and `S3_URL`; without `SMTP_URL` no mail is sent).
 - Optional: `SUBSCRIPTION_EMAIL`, `SUBSCRIPTION_SCHEDULER_ENABLED` (+ `_FULL_HOUR`, `_TZ`,
-  `_LIGHT`), `MINTY_WEB_HUB`, `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
+  `_LIGHT`), `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
   legal flags (`REQUIRE_TERMS_AT_SIGNUP`, `CURRENT_TERMS_VERSION`, `CURRENT_PRIVACY_VERSION`),
   `INVITATION_*`, `AUTO_SUPERUSER_EMAILS`, `DD_CLIENT_TOKEN`, `LOG_LEVEL`, `SESSION_TYPE`,
   `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker).
@@ -168,6 +168,8 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 `PAYMENT_REQUEST_API_URL`, `SUBSCRIPTION_API_URL`; optional `MAINTENANCE_SHOW_NEW_LINK`.
 
 **Onboarding web (`minty-onboarding-web`, Next.js)**: `PETTY_CASH_URL`, `ONBOARDING_API_URL`.
+(Its old `/auth*` addresses forward through Flask - `PETTY_CASH_URL` - to minty-web's `/login`
+since phase 2, 2026-10-05, so it needs no minty-web variable.)
 
 Test-only variables (`MINTY_TEST_PG_URI`, which may carry `?schema=`, `MINTY_TEST_PG_DBNAME`,
 `MINTY_REPO`, `PG_BIN`, `MINTY_ROUTE_BASELINE`, `E2E_*`) are documented in each repo's test
@@ -339,6 +341,6 @@ Stack service names: `billing-backend` → `payment-request-api`, `billing-front
 `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, Petty Cash's `XERO_CLIENT_ID` /
 `XERO_CLIENT_SECRET`, `SPIRE_KEY`, `LOG_LEVEL`, `SUBSCRIPTION_SCHEDULER_*`,
 `SUBSCRIPTION_EMAIL`, `ONBOARDING_EMAIL`, `EXPENSE_AI_*`, `GEMINI_API_KEY`,
-`GOOGLE_CLOUD_PROJECT`, the legal flags, `MINTY_WEB_URL`, `MINTY_WEB_HUB`, `INVITATION_*`,
+`GOOGLE_CLOUD_PROJECT`, the legal flags, `MINTY_WEB_URL`, `INVITATION_*`,
 `AUTO_SUPERUSER_EMAILS`, `DD_CLIENT_TOKEN`, `DISPLAY_TIMEZONE`, `RUN_MIGRATIONS`,
 `DB_WAIT_SECONDS`, `SESSION_TYPE`, `GUNICORN_WORKERS`, and the test-only variables.

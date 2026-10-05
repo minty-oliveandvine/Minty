@@ -338,16 +338,10 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "create_user",
             "USER_INVITE",
         ),
-        (
-            "blueprints/user_management/routes/roles.py",
-            "update_user_role",
-            "USER_ROLE_ASSIGN",
-        ),
-        (
-            "blueprints/user_management/routes/roles.py",
-            "delete_user_role",
-            "USER_ROLE_DELETE",
-        ),
+        # Changing a member's role, removing a member, inviting and the company's Xero settings
+        # are minty-web's tabs since phase 2 (2026-10-05): blueprints/entity/routes/hub_settings.py
+        # checks each permission through its ``_open`` helper, and tests/test_hub_company_settings.py
+        # proves every one of them by its refusal.
         # ``entity_create`` (ENTITY_CREATE) is not in this list: the rule is "any signed-in
         # user" (services/permission_policy.has_permission), which ``@login_required`` on the
         # route already is - the GET redirects to the onboarding wizard, the POST is the
@@ -358,13 +352,6 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
         (
             "blueprints/entity/routes/settings.py",
             "entity_settings_users",
-            "USER_VIEW_ALL",
-        ),
-        # The poll behind the Users tab serves the same rows as the page above, so
-        # it has to be gated the same way — otherwise it is a way around that page.
-        (
-            "blueprints/entity/routes/settings.py",
-            "entity_settings_users_presence",
             "USER_VIEW_ALL",
         ),
         # the Module tab is a hand-over to minty-web's page (its writes live in
@@ -393,11 +380,6 @@ def test_entity_membership_context_is_required_for_report_helpers(monkeypatch):
             "blueprints/xero/routes/routes.py",
             "get_xero_sync_status",
             "XERO_SETTINGS_VIEW",
-        ),
-        (
-            "blueprints/xero/routes/routes.py",
-            "disconnect_from_xero",
-            "XERO_SETTINGS_UPDATE",
         ),
         (
             "blueprints/xero/routes/routes.py",

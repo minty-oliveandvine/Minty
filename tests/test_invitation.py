@@ -384,97 +384,6 @@ class TestGetPendingInvitations:
 # Route-layer tests
 # ---------------------------------------------------------------------------
 
-class TestInvitationAPI:
-    def test_send_invitation_unauthenticated_redirects(self, app, db_session, models):
-        with app.test_client() as c:
-            resp = c.post("/minty/api/invitation/send", json={
-                "entity_id": "x", "email": "x@test.com", "role": "cashier",
-            })
-            assert resp.status_code in (302, 401)
-
-    def test_send_invitation_returns_201(self, app, db_session, models):
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"])
-            eid = _id(entity)
-            admin = _make_user(db_session, models["User"], email="api_admin@test.com", role="admin")
-            _make_user_entity(db_session, models["UserEntity"], _id(admin), eid, role="admin")
-            _login(c, admin)
-
-            # The name the ROUTE calls: it imports the function, so patching the
-            # service module's attribute never reached it (a real send was attempted).
-            with patch("blueprints.invitation.routes.api.send_invitation_email", return_value=True):
-                resp = c.post("/minty/api/invitation/send", json={
-                    "entity_id": eid,
-                    "email": "newperson@test.com",
-                    "role": "cashier",
-                })
-            data = resp.get_json()
-            assert resp.status_code == 201
-            assert data["status"] == "success"
-            assert data["invitation"]["email"] == "newperson@test.com"
-            assert data["invitation"]["email_sent"] is True
-            assert data["invitation"]["status"] == "pending"
-
-    def test_send_duplicate_returns_409(self, app, db_session, models):
-        """Pre-create invitation via service, then test duplicate via API."""
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"])
-            eid = _id(entity)
-            admin = _make_user(db_session, models["User"], email="api_admin2@test.com", role="admin")
-            admin_id = _id(admin)
-            _make_user_entity(db_session, models["UserEntity"], admin_id, eid, role="admin")
-
-            from blueprints.invitation.services.invite import create_invitation
-            create_invitation(eid, "dup_api@test.com", "cashier", admin_id)
-
-            _login(c, admin)
-            # The name the ROUTE calls: it imports the function, so patching the
-            # service module's attribute never reached it (a real send was attempted).
-            with patch("blueprints.invitation.routes.api.send_invitation_email", return_value=True):
-                resp = c.post("/minty/api/invitation/send", json={
-                    "entity_id": eid, "email": "dup_api@test.com", "role": "cashier",
-                })
-            assert resp.status_code == 409
-
-    def test_list_pending_returns_invitations(self, app, db_session, models):
-        """Pre-create invitation via service, then list via API."""
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"])
-            eid = _id(entity)
-            admin = _make_user(db_session, models["User"], email="api_admin3@test.com", role="admin")
-            admin_id = _id(admin)
-            _make_user_entity(db_session, models["UserEntity"], admin_id, eid, role="admin")
-
-            from blueprints.invitation.services.invite import create_invitation
-            create_invitation(eid, "list1@test.com", "cashier", admin_id)
-
-            _login(c, admin)
-            resp = c.get(f"/minty/api/invitation/{eid}/pending")
-            data = resp.get_json()
-            assert resp.status_code == 200
-            assert data["status"] == "success"
-            assert len(data["invitations"]) >= 1
-
-    def test_cancel_invitation_via_api(self, app, db_session, models):
-        """Pre-create invitation via service, then cancel via API."""
-        with app.test_client() as c:
-            entity = _make_entity(db_session, models["Entity"])
-            eid = _id(entity)
-            admin = _make_user(db_session, models["User"], email="api_admin4@test.com", role="admin")
-            admin_id = _id(admin)
-            _make_user_entity(db_session, models["UserEntity"], admin_id, eid, role="admin")
-
-            from blueprints.invitation.services.invite import create_invitation
-            inv, _ = create_invitation(eid, "cancel_api@test.com", "cashier", admin_id)
-            inv_id = inv.id
-
-            _login(c, admin)
-            resp = c.post(f"/minty/api/invitation/{inv_id}/cancel")
-            data = resp.get_json()
-            assert resp.status_code == 200
-            assert data["status"] == "success"
-
-
 class TestAcceptInvitationRoute:
     """The accept LINK itself is covered by TestAcceptInvitationPageEmailBinding (it hands
     off to the onboarding /auth page); what is left here is the not-connected page and a
@@ -658,7 +567,7 @@ class TestAcceptInvitationPageEmailBinding:
         assert err is None
         return entity, self._Inv(inv)
 
-    def test_no_session_bounces_to_onboarding_auth_with_token(
+    def test_no_session_bounces_to_the_hub_sign_in_with_token(
         self, app, db_session, models
     ):
         with app.test_client() as c:
@@ -666,7 +575,7 @@ class TestAcceptInvitationPageEmailBinding:
             resp = c.get(f"/invitation/accept/{inv.token}")
             assert resp.status_code in (301, 302)
             loc = resp.headers["Location"]
-            assert "/auth" in loc
+            assert "/login?" in loc
             assert f"invite={inv.token}" in loc
             assert "email=invitee" in loc  # invited email surfaced for prefill
 
@@ -683,9 +592,9 @@ class TestAcceptInvitationPageEmailBinding:
             resp = c.get(f"/invitation/accept/{inv.token}")
             assert resp.status_code in (301, 302)
             loc = resp.headers["Location"]
-            # Matching session is NOT logged out: it goes to /auth resume,
+            # Matching session is NOT logged out: it goes to the sign-in page,
             # never to a Xero end-session URL.
-            assert "/auth" in loc
+            assert "/login?" in loc
             assert "xero.com" not in loc
             assert f"invite={inv.token}" in loc
 
@@ -704,7 +613,7 @@ class TestAcceptInvitationPageEmailBinding:
             assert resp.status_code in (301, 302)
             # No logout for a normalized match.
             assert "xero.com" not in resp.headers["Location"]
-            assert "/auth" in resp.headers["Location"]
+            assert "/login?" in resp.headers["Location"]
 
     def test_mismatched_session_logs_out_and_redirects(
         self, app, db_session, models
@@ -712,7 +621,7 @@ class TestAcceptInvitationPageEmailBinding:
         with app.test_client() as c:
             _, inv = self._invite(db_session, models)
             # A different, password-only user is logged in (no Xero id_token,
-            # so logout goes straight to /auth, not via Xero end-session).
+            # so logout goes straight to sign-in, not via Xero end-session).
             wrong = _make_user(
                 db_session, models["User"],
                 email="wrong@test.com", role="cashier",
@@ -726,7 +635,7 @@ class TestAcceptInvitationPageEmailBinding:
                 assert sess.get("_user_id") is None
 
             loc = resp.headers["Location"]
-            assert "/auth" in loc
+            assert "/login?" in loc
             assert f"invite={inv.token}" in loc
             assert "email=invitee" in loc  # invited email surfaced
 

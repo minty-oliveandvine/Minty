@@ -4,8 +4,8 @@ import html
 from typing import Protocol
 
 import requests
-from flask import (current_app, flash, jsonify, redirect, render_template,
-                   request, url_for)
+from flask import (current_app, flash, get_flashed_messages, jsonify, redirect,
+                   render_template, request, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -18,14 +18,12 @@ from blueprints.entity.services.settings import (
     sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
     sync_entity_account_xero_active, sync_xero_accounts_to_db_background,
     sync_xero_coa_pettycash)
-from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.entity.services.xero_account_mapping_post import (
     apply_country_currency_selection, process_xero_account_mapping_post)
-from blueprints.shared.entity_display import build_entity_acronym
+from blueprints.entity.services.country_currency import country_currency_choices
 from blueprints.xero.services.settings import sync_entity_xero_status
-from models.db import (AccountInfo, CountryInfo, CurrencyInfo, Entity,
-                       EntityAccountXero, EntityPettycashSettings, User,
-                       UserEntity, db)
+from models.db import (AccountInfo, Entity,
+                       EntityAccountXero, EntityPettycashSettings, db)
 from services.app_runtime.legacy.xero_service import (
     account_info_to_xero_format)
 from services.auth.token_service import (auto_refresh_token,
@@ -34,77 +32,12 @@ from services.auth.token_service import (auto_refresh_token,
                                          resolve_xero_token)
 from services.authz import (permission_denied, require_entity_access,
                             require_module, require_permission)
-from services.helpers.xero_bridge import get_xero_data_dynamic
 from services.permission_policy import Permission, has_permission
 
 
 class _PyCountryCountry(Protocol):
     alpha_2: str
     name: str
-
-
-def _country_currency_choices(org):
-    """Build the country / currency dropdown lists and the entity's current
-    selection in each.
-
-    Returns ``(country_code, currencies, selected_country, selected_currency)``.
-    Keys mirror the old pycountry shape so the existing suggestion JS keeps
-    working.
-
-    Only ``is_active`` registry rows are listed: country_info and
-    currency_info are seeded with the full ISO lists (~250 countries, ~170
-    currencies) and the flag narrows them to what this deployment operates in.
-
-    The entity's CURRENT row is always included even when it has since been
-    deactivated. Without that, ``selected_*`` would fall to None and the
-    template renders the hidden country_code / currency_id inputs as
-    ``value=""`` (``settings_entity.html``), so the form shows a blank
-    country for an entity that has one. The save path skips empty values
-    (xero_account_mapping_post.py:44) so nothing is overwritten, but a blank
-    field reads as "unset" and invites someone to change it. Deactivating a
-    currency must not silently rewrite the entities already using it.
-
-    Countries order by display_order then name, so common ones can be floated
-    above the alphabetical tail; currency_info has no display_order column.
-    """
-    countries_q = (
-        CountryInfo.query.filter(
-            db.or_(
-                CountryInfo.is_active.is_(True),
-                CountryInfo.country_code == org.country_code,
-            )
-        )
-        .order_by(CountryInfo.display_order, CountryInfo.country_name_en)
-    )
-    country_code = [
-        {
-            "country_code": c.country_code,
-            "country_name": c.country_name_en,
-        }
-        for c in countries_q.all()
-    ]
-
-    currencies_q = (
-        CurrencyInfo.query.filter(
-            db.or_(
-                CurrencyInfo.is_active.is_(True),
-                CurrencyInfo.id == org.currency_id,
-            )
-        )
-        .order_by(CurrencyInfo.currency_name)
-    )
-    currencies = [
-        {"currency_id": c.id, "currency_name": c.currency_name}
-        for c in currencies_q.all()
-    ]
-
-    selected_country = next(
-        (c for c in country_code if c["country_code"] == org.country_code), None
-    )
-    selected_currency = next(
-        (c for c in currencies if c["currency_id"] == org.currency_id), None
-    )
-    return country_code, currencies, selected_country, selected_currency
 
 
 def _redirect_xero_mapping(entity_id: str, *, return_view: str):
@@ -163,67 +96,23 @@ def _flash_if_xero_disconnected(org) -> bool:
     return True
 
 
-def _integration_minimal_entity_settings_post(entity_id: str):
-    """Save country/currency and (admin only) the entity name from the classic
-    Xero integration page. No Xero mapping fields are handled here."""
-    try:
-        entity = Entity.query.get_or_404(entity_id)
+def _to_hub_tab(entity_id, tab: str):
+    """Users and Entity & Integration are minty-web's tabs since phase 2 (2026-10-05):
+    ``/entities/<shortid>/<name>/settings/{users,integration}``, reached with a token scoped to
+    the company. These Flask addresses stay as the way there - the sidebar, old links, the
+    payments app's pills and every ``url_for`` here (the Xero callback lands on the
+    integration tab) - and whatever was flashed on the way travels signed in ``?flash=``, which
+    the tab's read hands back as ``notices``."""
+    from blueprints.entity.routes.modules import minty_web_company_path, minty_web_landing_url
+    from blueprints.entity.services.entity_list import sign_notices
 
-        # Entity rename is admin-only and shares the "Save Changes" button with
-        # the country/currency save. The field is disabled in the UI for
-        # non-admins (so the browser omits it); re-check the permission here so
-        # a crafted POST can't bypass the gate.
-        if (
-            "entity_name" in request.form
-            and has_permission(current_user, Permission.ENTITY_RENAME, entity_id)
-        ):
-            name_form = (request.form.get("entity_name") or "").strip()
-            if name_form != (entity.name or ""):
-                if not name_form:
-                    flash("I need a name for this entity before I can save it.", "danger")
-                    return _redirect_xero_mapping(entity_id, return_view="entity_settings"
-                    )
-                if len(name_form) > 100:
-                    flash("That name goes on a bit! Please keep it to 100 characters or fewer.", "danger")
-                    return _redirect_xero_mapping(entity_id, return_view="entity_settings"
-                    )
-                if Entity.query.filter(
-                    Entity.name == name_form, Entity.id != entity_id
-                ).first():
-                    flash("Oh, someone got there first! Do you have another name in mind?", "danger")
-                    return _redirect_xero_mapping(entity_id, return_view="entity_settings"
-                    )
-                entity.name = name_form
+    org = Entity.query.get_or_404(entity_id)
+    notices = sign_notices(get_flashed_messages(with_categories=True))
+    path = minty_web_company_path(entity_id, f"/settings/{tab}") + (f"?flash={notices}" if notices else "")
+    return redirect(minty_web_landing_url(path, org, current_user.id))
 
-        apply_country_currency_selection(entity, request.form)
-        db.session.commit()
-        flash("Settings saved!", "success")
-    except IntegrityError as exc:
-        db.session.rollback()
-        logger.error(
-            "integration_minimal_entity_settings_post integrity error entity=%s: %s",
-            entity_id,
-            exc,
-        )
-        flash(
-            "I couldn't save these settings — one of the values needs to be "
-            "unique and it's already in use. Could you check your entries and try again?",
-            "danger",
-        )
-    except Exception as exc:
-        db.session.rollback()
-        logger.error(
-            "integration_minimal_entity_settings_post failed entity=%s: %s",
-            entity_id,
-            exc,
-        )
-        flash(
-            "I couldn't save your settings. Could you check your entries and try again?",
-            "danger",
-        )
-    return _redirect_xero_mapping(entity_id, return_view="entity_settings")
-@entity_bp.route("/entity/<entity:entity_id>/settings/integration",
-                 methods=["GET", "POST"])
+
+@entity_bp.route("/entity/<entity:entity_id>/settings/integration", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="entity_id")
 @require_permission(
@@ -232,327 +121,8 @@ def _integration_minimal_entity_settings_post(entity_id: str):
     message="You do not have permission to view Xero settings for this entity.",
 )
 def entity_settings(entity_id=None):
-
-    # Check if user has any entities before allowing access to report history
-    if not check_user_has_entities(current_user.id):
-        flash(
-            "You'll need to create an entity before I can show you any entity settings.",
-            "info",
-        )
-        return redirect(url_for("entity.entity_list"))
-
-    # Best-effort: sync connection status before proceeding so UI reflects
-    # reality
-    try:
-        if entity_id:
-            sync_entity_xero_status(entity_id)
-    except Exception:
-        logger.warning(f"Entity settings: status sync skipped for {entity_id}")
-
-    if request.method == "POST":
-        if request.form.get("_integration_minimal_save") == "1":
-            if not has_permission(
-                current_user, Permission.XERO_SETTINGS_UPDATE, entity_id
-            ):
-                return permission_denied(
-                    "You do not have permission to update Xero settings.",
-                    entity_id=entity_id,
-                )
-            return _integration_minimal_entity_settings_post(entity_id)
-
-        if not has_permission(current_user, Permission.XERO_SETTINGS_UPDATE, entity_id):
-            return permission_denied(
-                "You do not have permission to update Xero settings.",
-                entity_id=entity_id,
-            )
-        return_view = request.form.get("_xero_mapping_return_view") or "entity_settings"
-        if return_view not in ("entity_settings", "entity_settings_entity"):
-            return_view = "entity_settings"
-        _xero_resp = process_xero_account_mapping_post(
-            entity_id,
-            return_view=return_view,
-            defer_success_redirect=False,
-        )
-        if _xero_resp is not None:
-            return _xero_resp
-        if not request.form.get("main_bank"):
-            flash(
-                "Please enter all default settings for this entity", "danger",
-            )
-            return _redirect_xero_mapping(entity_id, return_view=return_view)
-    try:
-        org = Entity.query.get_or_404(entity_id)
-
-        logger.info(f"Starting entity settings load for {entity_id}")
-
-        # Try to validate token (but don't fail if it doesn't work)
-        token_valid = False
-        try:
-            token_valid = ensure_valid_token(current_user)
-        except Exception as token_error:
-            logger.warning(
-                f"Token validation failed, will use database data: {str(token_error)}"
-            )
-
-        xero_token_resolved = (
-            resolve_xero_token(entity_id, current_user) is not None
-        )
-
-        # Authoritative LIVE check FIRST: hit Xero's /connections and reconcile
-        # org.status (connected/disconnected) to match reality. This must run
-        # BEFORE the reconnect flash below, otherwise a connection revoked on the
-        # Xero website — where the token can still be valid — would leave
-        # org.status stale and the flash would wrongly say "connected". Gate on a
-        # resolvable connector token; sync validates that token itself.
-        if xero_token_resolved:
-            try:
-                sync_entity_xero_status(entity_id)
-                org = Entity.query.get(entity_id) or org  # re-read fresh status
-            except Exception as sync_error:
-                logger.warning(
-                    f"Status sync failed, continuing with database data: {str(sync_error)}"
-                )
-
-        # Live check: flash "reconnect" when the entity was meant to be connected
-        # to Xero but is no longer live — either no token resolves, OR the live
-        # sync above flipped status to "disconnected" (revoked on Xero's side).
-        if org.xero_org_id and (
-            not xero_token_resolved or org.status == "disconnected"
-        ):
-            flash(
-                "This entity has been disconnected from Xero. Please reconnect "
-                "it to keep your data in sync.",
-                "danger",
-            )
-
-        if (
-            xero_token_resolved
-            and org.xero_org_id
-            and not getattr(org, "xero_tenant_name", None)
-        ):
-            try:
-                org_data = get_xero_data_dynamic(
-                    "Organisation", entity_id=entity_id
-                )
-                if org_data and not org_data.get("error"):
-                    organisations = org_data.get("Organisations") or []
-                    if organisations:
-                        name = organisations[0].get("Name")
-                        if name:
-                            org.xero_tenant_name = name
-                            db.session.commit()
-            except Exception as exc:
-                logger.warning(
-                    f"Failed to backfill xero_tenant_name for {entity_id}: {exc}"
-                )
-
-        # (Live status sync already ran above, before the reconnect flash, so
-        # org.status reflects Xero's real connection state here.)
-
-        # Sync chart of accounts from Xero in the background (non-blocking).
-        # Fetches Xero's ACTIVE accounts, upserts them as status=ACTIVE and deletes
-        # rows no longer active in Xero (account_info.status = "still in Xero" only).
-        # Skipped gracefully if Xero tokens are missing or the entity is not connected.
-        if org.status == "connected" and org.xero_org_id:
-            try:
-                token_user_for_sync = get_xero_token_user_for_entity(entity_id)
-                if token_user_for_sync and ensure_valid_token(token_user_for_sync):
-                    _app = current_app._get_current_object()
-                    sync_xero_accounts_to_db_background(
-                        entity_id,
-                        token_user_for_sync.access_token,
-                        org.xero_org_id,
-                        flask_app=_app,
-                    )
-            except Exception as _coa_sync_err:
-                logger.warning(
-                    "entity_settings GET: chart-of-accounts sync skipped entity=%s: %s",
-                    entity_id,
-                    _coa_sync_err,
-                )
-
-        # Fetch Xero tenant name (optional, don't fail if it doesn't work)
-        xero_tenant_name = None
-
-        # Only fetch tenant name if entity is connected
-        if org.status == "connected":
-            # First, try to use current user's token if they have access
-            if token_valid:
-                try:
-                    headers = {
-                        "Authorization": f"Bearer {current_user.access_token}",
-                        "Content-Type": "application/json",
-                    }
-                    connections_response = requests.get(
-                        "https://api.xero.com/connections",
-                        headers=headers,
-                    )
-                    if connections_response.status_code == 200:
-                        connections = connections_response.json()
-                        for conn in connections:
-                            if conn.get("tenantId") == str(org.xero_org_id):
-                                xero_tenant_name = conn.get("tenantName")
-                                break
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch Xero tenant name with current user token: {str(e)}"
-                    )
-
-            # If current user doesn't have access, try to find a user who does
-            if not xero_tenant_name and org.xero_org_id:
-                try:
-                    # The person who connected this company holds the token
-                    # (entities.connected_by_user_id; the user-side tenant copy is gone)
-                    owner_user = (
-                        User.query.get(org.connected_by_user_id)
-                        if org.connected_by_user_id else None
-                    )
-                    if owner_user is not None and not owner_user.access_token:
-                        owner_user = None
-
-                    if owner_user:
-                        # Try to validate and use the owner's token
-                        if ensure_valid_token(owner_user):
-                            try:
-                                headers = {
-                                    "Authorization": f"Bearer {owner_user.access_token}",
-                                    "Content-Type": "application/json",
-                                }
-                                connections_response = requests.get(
-                                    "https://api.xero.com/connections",
-                                    headers=headers,
-                                )
-                                if connections_response.status_code == 200:
-                                    connections = connections_response.json()
-                                    for conn in connections:
-                                        if conn.get("tenantId") == str(
-                                                org.xero_org_id):
-                                            xero_tenant_name = conn.get(
-                                                "tenantName")
-                                            break
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to fetch Xero tenant name with owner user token: {str(e)}"
-                                )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to find owner user for entity {entity_id}: {str(e)}"
-                    )
-
-        if entity_id:
-            logger.info(
-                f"Fetched current entity settings for entity ID: {entity_id}")
-    except Exception as e:
-        logger.error(f"Error getting entity settings: {str(e)}")
-        return redirect(url_for("entity.entity_list"))
-
-    entity_acronym = build_entity_acronym(org.name) if org else ""
-
-    from blueprints.user_management.services.roles import get_all_roles
-
-    roles = get_all_roles()
-    roles = [role.name for role in roles]
-
-    # Country / currency registries: the dropdowns list the active rows and
-    # preselect via the entity's country_code / currency_id FKs.
-    (
-        country_code,
-        currencies,
-        selected_country,
-        selected_currency,
-    ) = _country_currency_choices(org)
-
-    can_edit_xero_settings = has_permission(
-        current_user, Permission.XERO_SETTINGS_UPDATE, entity_id
-    )
-    can_rename_entity = has_permission(
-        current_user, Permission.ENTITY_RENAME, entity_id
-    )
-
-    # One page for every visit, whichever app the person came from (the classic
-    # settings.html and its Xero mapping lists went 2026-10-05; the mapping lives on
-    # Petty Cash Settings).
-    return render_template(
-        "entity/settings_xero_bills_ui.html",
-        bill_settings_url=billing_settings_app_url(entity_id, org, current_user.id),
-        roles=roles,
-        can_edit_xero_settings=can_edit_xero_settings,
-        can_rename_entity=can_rename_entity,
-        country_code=country_code,
-        currencies=currencies,
-        selected_country=selected_country,
-        selected_currency=selected_currency,
-        org=org,
-        last_connected_at=(
-            org.last_connected_at if org.last_connected_at else org.created_at
-        ),
-        xero_tenant_name=xero_tenant_name,
-        xero_token_resolved=xero_token_resolved,
-        entity_acronym=entity_acronym,
-    )
-
-
-def _entity_members(org_id):
-    """(members, signed_in) for an entity's Users tab — two answers, one query base.
-
-    The tab asks two different questions and shows them one above the other.
-    ``members`` is everyone approved, which is the roster you manage: it carries the
-    roles, the subscriber tag and the edit/remove buttons. ``signed_in`` is who is
-    here right now, which changes by the minute and is a read-only view.
-
-    Built from the same base query so the second can never contain someone the first
-    does not — "signed in but not a member" would be a contradiction the page had no
-    way to explain.
-    """
-    from services.user_presence import is_signed_in_clause
-
-    member_query = (
-        db.session.query(User, UserEntity.role)
-        .join(UserEntity, User.id == UserEntity.user_id)
-        .filter(UserEntity.entity_id == org_id, UserEntity.approved)
-    )
-    return member_query.all(), member_query.filter(
-        is_signed_in_clause(org_id)
-    ).all()
-
-
-@entity_bp.route("/entity/settings/users/<string:org_id>/presence", methods=["GET"])
-@login_required
-@require_entity_access(entity_arg="org_id")
-@require_permission(
-    Permission.USER_VIEW_ALL,
-    entity_arg="org_id",
-    message="You do not have permission to view all users for this entity.",
-)
-def entity_settings_users_presence(org_id):
-    """Just the SIGNED-IN rows, for the Users tab to poll.
-
-    Only the lower section. The member roster above it changes when an admin invites,
-    edits or removes someone — all of which reload the page — so re-sending it every
-    twenty seconds would be traffic that never carries news, and it would fight the
-    filter and any half-open row menu.
-
-    Same permission gate as the page itself: the fragment shows what the page shows,
-    so anything less would be a way around it.
-
-    Returns rendered HTML rather than JSON rows on purpose — the markup stays defined
-    once, in the partial, instead of being duplicated in JavaScript where the two
-    copies would drift apart.
-
-    Listed in pettycash/core/hooks.py as an endpoint that does NOT count as user
-    activity. A tab left open here polls all night, and treating that as presence
-    would keep whoever left it open on the list forever — the exact thing
-    last_seen_at exists to prevent.
-    """
-    _members, signed_in = _entity_members(org_id)
-    return jsonify(
-        {
-            "count": len(signed_in),
-            "html": render_template(
-                "entity/settings_users_signed_in.html", signed_in=signed_in
-            ),
-        }
-    )
+    """The Entity & Integration tab - minty-web's (``_to_hub_tab``)."""
+    return _to_hub_tab(entity_id, "integration")
 
 
 @entity_bp.route("/entity/<entity:org_id>/settings/users", methods=["GET"])
@@ -564,112 +134,8 @@ def entity_settings_users_presence(org_id):
     message="You do not have permission to view all users for this entity.",
 )
 def entity_settings_users(org_id):
-    try:
-        # Get the entity by ID
-        org = Entity.query.get_or_404(org_id)
-
-        # Mirror the Entity & Integration / Petty Cash Settings pages: any
-        # landing under Settings (including the Users tab opened directly
-        # from the sidebar) refreshes account_info from Xero in the
-        # background so the CoA stays in sync regardless of which sub-tab
-        # the user opens first.
-        if org.status == "connected" and org.xero_org_id:
-            try:
-                token_user_for_sync = get_xero_token_user_for_entity(org_id)
-                if token_user_for_sync and ensure_valid_token(token_user_for_sync):
-                    sync_xero_accounts_to_db_background(
-                        org_id,
-                        token_user_for_sync.access_token,
-                        org.xero_org_id,
-                        flask_app=current_app._get_current_object(),
-                    )
-            except Exception as _sync_err:
-                logger.warning(
-                    "entity_settings_users: chart-of-accounts sync skipped entity=%s: %s",
-                    org_id,
-                    _sync_err,
-                )
-
-        users, signed_in = _entity_members(org_id)
-
-        # Who pays for this entity. NOT a role and not derivable from one — it is one
-        # person's financial relationship, recorded per entity — so it cannot be read off
-        # the ``role`` column beside it and has to be looked up separately.
-        #
-        # It is on this page because "who can change our modules" is answered by BOTH
-        # columns at once: MODULE_MANAGE needs admin rank, and may_manage_subscription
-        # needs the payer, so the one person who can is the admin carrying this tag. With
-        # only the role shown, every admin here looked equally able to, and the ones who
-        # are not the payer found the buttons missing with nothing on the page to explain
-        # why. Compared as a string because the id may arrive as a UUID.
-        from blueprints.subscription.services import store as sub_store
-
-        payer_id = sub_store.payer_for_entity(org_id)
-        subscriber_id = str(payer_id) if payer_id else None
-
-        entity_acronym = ""
-        if org and org.name:
-            words = org.name.split()
-            entity_acronym = "".join([word[0].upper()
-                                     for word in words if word])
-
-        # Assignable roles, mirroring the onboarding invite step
-        # (onboarding/components/OnboardingSteps.jsx ROLES). The canonical four
-        # (enums.ASSIGNABLE_ENTITY_ROLES) so the dropdown never shows
-        # redundant/near-duplicate rows from the roles table; their names are the
-        # ones the profile's role pill uses too.
-        from blueprints.shared.enums import ASSIGNABLE_ENTITY_ROLES, ENTITY_ROLE_LABELS
-
-        entity_user_role_options = [
-            {"value": role.value, "name": ENTITY_ROLE_LABELS[role]}
-            for role in ASSIGNABLE_ENTITY_ROLES
-        ]
-        roles = entity_user_role_options
-
-        # One page for every visit (the classic settings_users.html went 2026-10-05).
-        return render_template(
-            "entity/settings_users_bills_ui.html",
-            org=org,
-            bill_settings_url=billing_settings_app_url(org_id, org, current_user.id),
-            users=users,
-            signed_in=signed_in,
-            entity_acronym=entity_acronym,
-            subscriber_id=subscriber_id,
-            roles=roles,
-            entity_user_role_options=entity_user_role_options,
-            # THREE flags, because this page offers three actions behind three different
-            # permissions — and it used to gate all of them on one.
-            #
-            # ``is_view_only`` is about INVITING, which is what it has always meant: it
-            # drives the floating add-user button and the page's read-only styling.
-            #
-            # The per-row buttons are the ones that were wrong. Remove posts to
-            # ``delete_user_role``, which requires USER_ROLE_DELETE (min ACCOUNTANT),
-            # while this flag asks about USER_INVITE (min SHOP_MANAGER) — so a shop
-            # manager was shown a remove button that the API answers with a 403. Each
-            # button now asks about the permission its own endpoint enforces, and edit
-            # gets the same treatment even though its floor happens to match today,
-            # because "happens to match" is not a reason to ask the wrong question.
-            is_view_only=not has_permission(
-                current_user, Permission.USER_INVITE, org_id
-            ),
-            can_edit_users=has_permission(
-                current_user, Permission.USER_ROLE_ASSIGN, org_id
-            ),
-            can_remove_users=has_permission(
-                current_user, Permission.USER_ROLE_DELETE, org_id
-            ),
-        )
-    except Exception as e:
-        logger.error(f"Error accessing entity settings users: {str(e)}")
-        flash(
-            "I couldn't load the user settings for this entity. "
-            "Could you go back to your entities and try again?",
-            "danger",
-        )
-        # Redirect to the entity list rather than back to this same page: if the
-        # failure persists, self-redirecting here would loop indefinitely.
-        return redirect(url_for("entity.entity_list"))
+    """The Users tab - minty-web's (``_to_hub_tab``)."""
+    return _to_hub_tab(org_id, "users")
 
 
 @entity_bp.route("/entity/<entity:org_id>/settings/petty-cash",
@@ -846,7 +312,7 @@ def entity_settings_entity(org_id):
             currencies,
             selected_country,
             selected_currency,
-        ) = _country_currency_choices(org)
+        ) = country_currency_choices(org)
 
         # Petty cash CoA list is sourced from entity_account_xero (joined to
         # account_info) — the single source of truth — instead of a live Xero

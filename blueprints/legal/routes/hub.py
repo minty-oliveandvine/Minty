@@ -1,13 +1,13 @@
 """The Terms gate as minty-web draws it: ``GET /api/me/terms`` and ``POST /api/me/terms/accept``.
 
 Since 2026-09-29 Flask's ``/entity`` hands the browser to minty-web's entity list whether or
-not a Terms acceptance is owed (``MINTY_WEB_HUB``), so minty-web draws the acceptance panel
+not a Terms acceptance is owed (always, since phase 2), so minty-web draws the acceptance panel
 itself - a port of ``templates/legal/_terms_panel.html``, over every page of that app, the way
 Flask's request gate covers every page of this one. These two routes are what it reads and
 posts. Everything they decide is the Jinja panel's own:
 
-* WHAT IS OWED is ``services/gate.terms_owed`` - the function the panel over the Select
-  Company list reads (through ``outstanding_terms_context``);
+* WHAT IS OWED is ``services/gate.terms_owed`` - the function the standalone ``/legal/accept``
+  page reads (through ``outstanding_terms_context``);
 * ACCEPTING is ``services/consent.accept_current_terms`` - the checks ``POST /legal/accept``
   makes, word for word: not ticked, the version changed under the reader, no document. The
   document's fingerprint comes from the registry, never from the client, and the row says

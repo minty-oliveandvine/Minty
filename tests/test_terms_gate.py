@@ -9,6 +9,7 @@ above all the others in this file.
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -118,7 +119,8 @@ def test_static_files_are_never_gated(blocked, db_session):
 def test_login_endpoints_stay_reachable(blocked, db_session):
     """Or nobody can authenticate far enough to reach the acceptance screen."""
     assert blocked.get("/login").status_code in (200, 302)
-    assert blocked.get("/register").status_code == 200
+    # forwards to the hub's sign-up, ungated
+    assert blocked.get("/register").status_code == 302
 
 
 # --------------------------------------------------------------------------
@@ -179,10 +181,13 @@ def test_a_blocked_user_can_reach_the_page_the_gate_sends_them_to(
     /entity forever and nobody without a consent row can reach any page at all
     — administrators included.
 
-    It is a 200 by design. The Terms panel renders as a MODAL over that page;
-    the enforcement is the tests below, not the modal.
+    Since phase 2 (2026-10-05) /entity hands the browser to minty-web's list, whose Terms gate
+    shows the panel; what matters here is that the gate lets /entity answer - with that
+    hand-over, not with another trip to itself. The enforcement is the tests below.
     """
-    assert blocked.get("/entity").status_code == 200
+    resp = blocked.get("/entity")
+    assert resp.status_code == 302
+    assert urlsplit(resp.headers["Location"]).path == "/landing"
 
 
 @pytest.mark.parametrize(

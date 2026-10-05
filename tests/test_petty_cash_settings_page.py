@@ -225,7 +225,7 @@ def test_back_leads_where_the_person_came_from_falling_back_to_the_dashboard(sho
     )
     assert "js/back_link.js" in html
     assert f'href="{F.co(client, entity.id)}/settings/users" class="pcs-pill">Users</a>' in html
-    assert f'href="{F.co(client, entity.id)}/settings/modules" class="pcs-pill">Module</a>' in html
+    assert f'href="{F.co(client, entity.id)}/settings/modules" class="pcs-pill">Modules</a>' in html
     assert '<span class="pcs-pill" aria-current="page">Petty Cash Settings</span>' in html
     assert 'name="_from"' not in html
     assert "?from=bills" not in html

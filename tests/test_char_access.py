@@ -13,6 +13,8 @@ F3 (closed in C1): the code wrote ``superuser`` where the schema's ``system_role
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 import char_factories as F
@@ -59,6 +61,18 @@ def add_member(app, db, entity, email, role):
         db.session.add(UserEntity(user_id=user.id, entity_id=entity.id, role=role, approved=True))
         db.session.commit()
     return user
+
+
+def _as(client):
+    """The bearer minty-web would send for whoever this client is signed in as - the Users tab
+    is minty-web's since phase 2 (2026-10-05), over Flask's /api/me/company/* routes."""
+    with client.session_transaction() as session:
+        user_id = session["_user_id"]
+    return F.hub_headers(client.application, user_id)
+
+
+def company_call(client, method, path, entity, **kwargs):
+    return client.open(path, method=method, query_string={"entity": entity.id}, headers=_as(client), **kwargs)
 
 
 def profile(client):
@@ -173,7 +187,7 @@ def test_role_change_moves_a_member_up_and_down_the_hierarchy(company, client, a
     cashier = add_member(app, db, entity, "cashier@test.com", "cashier")
     F.login(client, owner)
 
-    resp = client.patch(f"/minty/api/users/{cashier.id}/role", json={"entity_id": entity.id, "role": "accountant"})
+    resp = company_call(client, "PATCH", f"/api/me/company/users/{cashier.id}", entity, json={"role": "accountant"})
     assert resp.status_code == 200, resp.data[:300]
 
     F.login(client, cashier)
@@ -184,10 +198,10 @@ def test_the_last_admin_cannot_be_removed(company, client):
     owner, entity, superuser = company
     F.login(client, owner)
 
-    resp = client.delete(f"/minty/api/users/{owner.id}/role", json={"entity_id": entity.id})
+    resp = company_call(client, "DELETE", f"/api/me/company/users/{owner.id}", entity)
 
     assert resp.status_code in (400, 403, 409), resp.data[:300]
-    assert "admin" in resp.get_json()["message"].lower()
+    assert "admin" in resp.get_json()["error"].lower()
     assert profile(client)["memberships"], "the owner is still a member"
 
 
@@ -196,7 +210,7 @@ def test_removing_a_role_ends_the_membership(company, client, app, db):
     cashier = add_member(app, db, entity, "cashier@test.com", "cashier")
     F.login(client, owner)
 
-    resp = client.delete(f"/minty/api/users/{cashier.id}/role", json={"entity_id": entity.id})
+    resp = company_call(client, "DELETE", f"/api/me/company/users/{cashier.id}", entity)
 
     assert resp.status_code == 200, resp.data[:300]
     F.login(client, cashier)
@@ -207,7 +221,7 @@ def test_a_cashier_cannot_change_roles(company, client, app, db):
     owner, entity, superuser = company
     cashier = add_member(app, db, entity, "cashier@test.com", "cashier")
     F.login(client, cashier)
-    resp = client.patch(f"/minty/api/users/{owner.id}/role", json={"entity_id": entity.id, "role": "cashier"})
+    resp = company_call(client, "PATCH", f"/api/me/company/users/{owner.id}", entity, json={"role": "cashier"})
     assert resp.status_code == 403
 
 
@@ -223,16 +237,14 @@ def test_leave_entity_keeps_the_session_and_returns_to_the_list(company, client)
 
 
 def send_invite(client, entity, email, role, **extra):
-    return client.post("/minty/api/invitation/send",
-                       json={"entity_id": entity.id, "email": email, "role": role,
-                             "first_name": "In", "last_name": "Vited", **extra})
+    return company_call(client, "POST", "/api/me/company/invitations", entity,
+                        json={"email": email, "role": role, "first_name": "In", "last_name": "Vited", **extra})
 
 
 def pending(client, entity):
-    resp = client.get(f"/minty/api/invitation/{entity.id}/pending")
+    resp = company_call(client, "GET", "/api/me/company/users", entity)
     assert resp.status_code == 200, resp.data[:300]
-    body = resp.get_json()
-    return body if isinstance(body, list) else body.get("invitations") or body.get("pending") or []
+    return resp.get_json()["invitations"]
 
 
 def test_invitation_is_listed_as_pending_with_its_role(company, client, mail):
@@ -242,7 +254,7 @@ def test_invitation_is_listed_as_pending_with_its_role(company, client, mail):
     resp = send_invite(client, entity, "new@test.com", "cashier")
 
     assert resp.status_code in (200, 201), resp.data[:300]
-    assert resp.get_json()["invitation"]["email_sent"] is True
+    assert resp.get_json()["email_sent"] is True
     sent = mail.to("new@test.com")
     assert len(sent) == 1 and "/invitation/accept/" in (sent[0].html or sent[0].body or "")
     rows = pending(client, entity)
@@ -275,7 +287,7 @@ def test_cancelled_invitation_disappears_and_its_link_dies(company, client, app,
         inv = Invitation.query.filter_by(email="new@test.com").first()
         invitation_id, token = inv.id, inv.token
 
-    resp = client.post(f"/minty/api/invitation/{invitation_id}/cancel")
+    resp = company_call(client, "POST", f"/api/me/company/invitations/{invitation_id}/cancel", entity)
 
     assert resp.status_code == 200, resp.data[:300]
     assert pending(client, entity) == []
@@ -314,7 +326,7 @@ def test_resend_is_rate_limited_then_goes_out_again(company, client, app, db, ma
         invitation_id = Invitation.query.filter_by(email="new@test.com").first().id
 
     # straight after sending: the 60 s cooldown answers 429 with the wait
-    resp = client.post(f"/minty/api/invitation/{invitation_id}/resend")
+    resp = company_call(client, "POST", f"/api/me/company/invitations/{invitation_id}/resend", entity)
     assert resp.status_code == 429, resp.data[:300]
     assert resp.get_json()["retry_after"] > 0
 
@@ -322,7 +334,7 @@ def test_resend_is_rate_limited_then_goes_out_again(company, client, app, db, ma
     from blueprints.invitation.services import invite as invite_service
 
     invite_service._LAST_SENT.clear()
-    resp = client.post(f"/minty/api/invitation/{invitation_id}/resend")
+    resp = company_call(client, "POST", f"/api/me/company/invitations/{invitation_id}/resend", entity)
     assert resp.status_code == 200, resp.data[:300]
     assert len(pending(client, entity)) == 1
     assert len(mail.to("new@test.com")) == 2
@@ -378,7 +390,7 @@ def test_the_invitation_subject_is_one_line(app, client, db, mail):
 
     resp = send_invite(client, entity, "new@test.com", "cashier")
 
-    assert resp.get_json()["invitation"]["email_sent"] is True
+    assert resp.get_json()["email_sent"] is True
     assert mail.to("new@test.com")[0].subject == (
         "You've been invited to Olive Bcc: someone@else.test on Minty"
     )
@@ -429,7 +441,7 @@ def test_a_resend_keeps_the_invitees_names_in_the_link(company, client, app, mai
     from blueprints.invitation.services import invite as invite_service
 
     invite_service._LAST_SENT.clear()
-    resp = client.post(f"/minty/api/invitation/{invitation_id}/resend")
+    resp = company_call(client, "POST", f"/api/me/company/invitations/{invitation_id}/resend", entity)
 
     assert resp.status_code == 200, resp.data[:300]
     resent = mail.to("new@test.com")[-1].html
@@ -445,10 +457,11 @@ def test_unconsented_user_is_sent_to_the_terms_page(company, client):
 
     resp = client.get(f"{F.co(client, entity.id)}/petty-cash")
 
-    # HTML pages bounce to the entity list, which is where the terms modal is shown
+    # HTML pages bounce to the entity list - minty-web's, whose Terms gate asks (Flask's
+    # GET /api/me/terms says what is owed)
     assert resp.status_code == 302 and resp.headers["Location"].endswith("/entity"), resp.headers.get("Location")
     listing = client.get("/entity")
-    assert listing.status_code == 200 and "terms" in listing.get_data(as_text=True).lower()
+    assert listing.status_code == 302 and urlsplit(listing.headers["Location"]).path == "/landing"
     assert client.get("/legal/accept").status_code == 200
     api = client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date=2026-09-01")
     assert api.status_code == 403 and api.get_json()["code"] == "terms_acceptance_required"

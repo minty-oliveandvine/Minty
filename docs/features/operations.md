@@ -36,7 +36,7 @@ the old → new rename table — is [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md). 
 | mail | `SMTP_URL` — `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465`, `?timeout=` seconds per SMTP step (default 10 - `services/app_runtime/mail.py`); `MAIL_FROM` (the sender), `SUBSCRIPTION_EMAIL` (billing mail, defaults to `MAIL_FROM`) |
 | URLs | `PETTY_CASH_URL` (this app's public origin), `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL` (the payment app), `ONBOARDING_WEB_URL` (the wizard) |
 | other keys | `SPIRE_KEY` (DOCX export), `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` |
-| switches | `SUBSCRIPTION_SCHEDULER_ENABLED` (+ `_FULL_HOUR`, `_TZ`, `_LIGHT`), `MINTY_WEB_HUB`, `EXPENSE_AI_*` |
+| switches | `SUBSCRIPTION_SCHEDULER_ENABLED` (+ `_FULL_HOUR`, `_TZ`, `_LIGHT`), `EXPENSE_AI_*` |
 | sessions | `SESSION_TYPE` (`sqlalchemy`), `SESSION_SQLALCHEMY_TABLE` (`sessions`) |
 
 Never paste a real value into a chat or a ticket; the deployed `SECRET_KEY` differs from
@@ -85,7 +85,7 @@ Handler"). It is noise, not a test failure, and does not happen on the Linux hos
   that a test now reaches, and on a route `route_inventory.json` doesn't know. It judges a
   complete run only - a partial or `-k`/`-x` run prints "not judged" - and rewrites the list
   only with `MINTY_ROUTE_BASELINE=update` (drop covered) or `=add` (also add misses). `tests/_baseline/README.md` holds the pre-C10 history.
-  `tests/conftest.py` pins `SUBSCRIPTION_SCHEDULER_ENABLED=0` (and `MINTY_WEB_HUB=0`), so a
+  `tests/conftest.py` pins `SUBSCRIPTION_SCHEDULER_ENABLED=0`, so a
   developer `.env` that switches the daily billing jobs on never starts them in a test app.
 - **Playwright** (`e2e/`, `npm run test:e2e`): a real browser against a Flask that is
   already running — `e2e/README.md` has the environment (`E2E_BASE_URL`, the seeded

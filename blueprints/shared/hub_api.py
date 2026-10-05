@@ -1,6 +1,7 @@
 """minty-web's door into Flask: the bearer surface its hub pages read - the entity list
-(``entity.routes.me_api``), My Profile (``user_management.routes.me_api``) and the Terms
-modal (``legal.routes.hub``).
+(``entity.routes.me_api``), My Profile (``user_management.routes.me_api``), the Terms
+modal (``legal.routes.hub``) and a company's Users and Entity & Integration tabs
+(``entity.routes.hub_settings``, phase 2).
 
 The same transport as the other bearer surfaces (``bearer_api``: an explicit origin,
 ``Vary: Origin``, a JWT in the ``Authorization`` header and no session cookie), and three
@@ -35,7 +36,7 @@ from blueprints.shared import bearer_api
 
 #: Everything the hub's routes answer between them. A preflight for a method not named here
 #: is refused by the browser before a route is reached, so this is a real constraint.
-METHODS = "GET, POST, PATCH, OPTIONS"
+METHODS = "GET, POST, PATCH, DELETE, OPTIONS"
 
 
 def allowed_origins() -> tuple[str, ...]:
