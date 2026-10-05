@@ -6,10 +6,10 @@ Code: `blueprints/report/routes/history.py`, `report_detail.py`, `download.py`,
 
 ## History
 
-`GET /entity/<id>/reports` lists the company's reports newest first, ten a page
+`GET /entity/<co>/reports` lists the company's reports newest first, ten a page
 (`start_date` / `end_date` filters), each with its status badge (Draft / Submitted /
 Published) and a **View Report** link to the ending summary
-(`/entity/<id>/ending/<report_id>`). `REPORT_VIEW_ENTITY` sees everything; a cashier sees
+(`/entity/<co>/reports/<report_id>/summary`). `REPORT_VIEW_ENTITY` sees everything; a cashier sees
 only the reports they created (`REPORT_VIEW_OWN`, `can_view_report`).
 
 ## Detail
@@ -20,7 +20,7 @@ only the reports they created (`REPORT_VIEW_OWN`, `can_view_report`).
   (`can_view_report`): the key's attachment row names its report, and a key not yet on a
   line is `expenses/<report_id>/...`. Unknown key 404, someone else's 403, both logged.
   Before 2026-10-05 it signed ANY key for any signed-in user.
-- `GET /report/<id>/ending` / `/entity/<id>/ending/<report_id>` — the same summary the
+- `GET /entity/<co>/reports/<id>/ending` / `/entity/<co>/reports/<report_id>/summary` — the same summary the
   wizard shows at the end, usable after posting.
 - `GET /report/<id>/submitted?entity_id=` — export options and the Xero publish.
 
@@ -28,7 +28,7 @@ only the reports they created (`REPORT_VIEW_OWN`, `can_view_report`).
 
 | Export | Route | How it is made |
 |---|---|---|
-| Movements CSV | `GET /entity/<id>/reports/download-csv?start_date&end_date` | one line per movement of every report in the range: the float (director account), each expense (its remark and account code), the cash sale, the deposit (booked against the petty-cash account's code); `Date,Account Code,Amount,Description,Reference,Check Number` |
+| Movements CSV | `GET /entity/<co>/reports/download-csv?start_date&end_date` | one line per movement of every report in the range: the float (director account), each expense (its remark and account code), the cash sale, the deposit (booked against the petty-cash account's code); `Date,Account Code,Amount,Description,Reference,Check Number` |
 | Daily report `.docx` / PDF | `GET /report/<id>/export` | fills `static/doc/Daily_Report_Template.docx` with `docxtpl` (the nine legacy column names and the `qty*` denomination placeholders are what the template addresses) and converts it (`services/helpers/docx.py`) |
 | Ending screenshot | `GET /report/<id>/screenshot` | Selenium + headless Chrome renders the ending page and captures `#ending-content` as PNG |
 | Receipts zip | `POST /download_attachments` | every receipt of the period from the bucket, `<date>/<filename>`; **superuser only** (it spans every company) |
@@ -62,7 +62,7 @@ as `share link opened` with the link id, so access is traceable from then on.
 
 The old `?token=` entries - `/Minty_Report_<entity_and_date>/ending?token=` and
 `entity_ending`'s `?token=` branch - were **deleted on 2026-10-05**: their 30-day HMAC token
-ignored the ShareLink row, so revoking a link did nothing. `/entity/<id>/ending` is
+ignored the ShareLink row, so revoking a link did nothing. `/entity/<co>/reports/summary` is
 signed-in only now. `/insert_xero_transaction` (a no-login GET that wrote a fixture row) went
 the same day. `POST /api/check-dept-bank-yest/<entity_id>` (the dashboard's correction of the
 previous day's bank deposit, pushed to Xero when published) took GET and NO login until

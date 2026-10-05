@@ -1555,7 +1555,7 @@ def update_bank_transaction(entity_id):
                 "status": "success",
                 "message": "Bank transaction updated successfully",
                 "data": response.json(),
-                "redirect_url": f"/report/opening?entity_id={entity_id}&transaction_date={redirect_date}",
+                "redirect_url": url_for("report.report_opening", entity_id=entity_id, transaction_date=redirect_date),
             }),
         200,
     )

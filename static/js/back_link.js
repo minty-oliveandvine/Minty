@@ -21,7 +21,12 @@
 (function () {
   "use strict";
 
-  var SETTINGS_AREA = [/^\/entity\/settings\//, /^\/entity\/[^/]+\/settings\//];
+  // /entity/<shortid>/<name>/settings/... since 2026-10-05; the two older shapes still redirect.
+  var SETTINGS_AREA = [
+    /^\/entity\/[^/]+\/[^/]+\/settings\//,
+    /^\/entity\/settings\//,
+    /^\/entity\/[^/]+\/settings\//,
+  ];
 
   function inSettingsArea(href) {
     try {

@@ -222,7 +222,7 @@ def _integration_minimal_entity_settings_post(entity_id: str):
             "danger",
         )
     return _redirect_xero_mapping(entity_id, return_view="entity_settings")
-@entity_bp.route("/entity/<string:entity_id>/settings/xero",
+@entity_bp.route("/entity/<entity:entity_id>/settings/integration",
                  methods=["GET", "POST"])
 @login_required
 @require_entity_access(entity_arg="entity_id")
@@ -555,7 +555,7 @@ def entity_settings_users_presence(org_id):
     )
 
 
-@entity_bp.route("/entity/settings/users/<string:org_id>", methods=["GET"])
+@entity_bp.route("/entity/<entity:org_id>/settings/users", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="org_id")
 @require_permission(
@@ -672,7 +672,7 @@ def entity_settings_users(org_id):
         return redirect(url_for("entity.entity_list"))
 
 
-@entity_bp.route("/entity/settings/entity/<string:org_id>",
+@entity_bp.route("/entity/<entity:org_id>/settings/petty-cash",
                  methods=["GET", "POST"])
 @login_required
 @require_entity_access(entity_arg="org_id")
@@ -951,7 +951,7 @@ def entity_settings_entity(org_id):
         return redirect(url_for("entity_settings", entity_id=org_id))
 
 
-@entity_bp.route("/entity/settings/module/<string:org_id>", methods=["GET"])
+@entity_bp.route("/entity/<entity:org_id>/settings/modules", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="org_id")
 @require_permission(
@@ -971,7 +971,7 @@ def entity_settings_module(org_id):
     return redirect(minty_web_module_page_url(org, current_user.id))
 
 
-@entity_bp.route("/entity/settings/payments/<string:org_id>", methods=["GET"])
+@entity_bp.route("/entity/<entity:org_id>/settings/payment-request", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="org_id")
 def entity_settings_payments(org_id):

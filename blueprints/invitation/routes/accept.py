@@ -110,9 +110,7 @@ def accept_invitation_page(token):
     return redirect(resume_url)
 
 
-@invitation_bp.route(
-    "/invitation/xero-not-connected/<string:entity_id>", methods=["GET"]
-)
+@invitation_bp.route("/entity/<entity:entity_id>/xero-not-connected", methods=["GET"])
 @login_required
 def xero_not_connected(entity_id):
     """Page shown when user is added to Minty but not invited to Xero org."""

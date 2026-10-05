@@ -31,6 +31,7 @@ from models.db import db
 from pettycash.core.blueprint_loader import (register_blueprints,
                                              register_compat_alias)
 from pettycash.core.hooks import init_app as init_hooks
+from blueprints.shared import entity_ref
 from blueprints.shared.schema import SCHEMA
 from services.app_runtime.env import (database_url, is_development,
                                       parse_s3_url, parse_smtp_url)
@@ -132,7 +133,13 @@ def create_app():
         template_folder=os.path.join(root_dir, "templates"),
         static_folder=os.path.join(root_dir, "static"),
     )
+    # Before any blueprint adds a rule: the <entity:...> converter and its resolver
+    # (company addresses /entity/<shortid>/<name>, blueprints/shared/entity_ref.py).
+    entity_ref.init_app(app)
     register_blueprints(app)
+    # Old page addresses, each a 308 to its new one (blueprints/shared/legacy_addresses.py).
+    from blueprints.shared.legacy_addresses import legacy_bp
+    app.register_blueprint(legacy_bp)
     register_compat_alias(
         app,
         {

@@ -101,7 +101,7 @@
         <!-- Header -->
         <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
           <div class="flex-1 flex justify-start min-w-0">
-            <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="/entity/{{org.id}}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+            <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="{{ url_for('entity.report_dashboard', id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7"/>
               </svg>
@@ -153,7 +153,7 @@
           <h2 class="text-lg sm:text-xl font-bold text-gray-700">Opening</h2>
         </div>
         <!-- Form Content -->
-        <form id="opening-form" action="{{ url_for('report.report_opening') }}?entity_id={{ org.id }}&transaction_date={{ request.args.get('transaction_date') }}" method="post">
+        <form id="opening-form" action="{{ url_for('report.report_opening', entity_id=org.id) }}?transaction_date={{ request.args.get('transaction_date') }}" method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="entity_id" value="{{ org.id }}">
           <input type="hidden" name="action_type" value="save_next">
@@ -383,15 +383,15 @@
          return hasChanges;
        }
 
-      const BASE_OPENING = '{{ url_for("report.report_opening") if current_draft.status == "draft" else url_for("report.report_opening", id=current_draft.id) }}';
-      const BASE_SALES = '{{ url_for("report.report_sale") if current_draft.status == "draft" else url_for("report.report_sale", id=current_draft.id) }}';
-      const BASE_EXPENSES = '{{ url_for("report.report_expense") if current_draft.status == "draft" else url_for("report.report_expense", id=current_draft.id) }}';
-      const BASE_DEPOSIT = '{{ url_for("report.report_deposit") if current_draft.status == "draft" else url_for("report.report_deposit", id=current_draft.id) }}';
-      const BASE_CASH_COUNT = '{{ url_for("report.report_cash_count") if current_draft.status == "draft" else url_for("report.report_cash_count", id=current_draft.id) }}';
-      const BASE_ENDING = '{{ url_for("report.report_ending") if current_draft.status == "draft" else url_for("report.report_ending", id=current_draft.id) }}';
+      const BASE_OPENING = '{{ url_for("report.report_opening", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_opening", id=current_draft.id, entity_id=org.id) }}';
+      const BASE_SALES = '{{ url_for("report.report_sale", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_sale", id=current_draft.id, entity_id=org.id) }}';
+      const BASE_EXPENSES = '{{ url_for("report.report_expense", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_expense", id=current_draft.id, entity_id=org.id) }}';
+      const BASE_DEPOSIT = '{{ url_for("report.report_deposit", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_deposit", id=current_draft.id, entity_id=org.id) }}';
+      const BASE_CASH_COUNT = '{{ url_for("report.report_cash_count", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_cash_count", id=current_draft.id, entity_id=org.id) }}';
+      const BASE_ENDING = '{{ url_for("report.report_ending", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_ending", id=current_draft.id, entity_id=org.id) }}';
 
       function buildStepUrl(baseUrl, entityId, transactionDate) {
-        let url = baseUrl + '?entity_id=' + entityId;
+        let url = baseUrl + '?';
         if (transactionDate) {
           url += '&transaction_date=' + transactionDate;
         }
@@ -579,7 +579,7 @@
           loadingOverlay.classList.remove('hidden');
         }
         const entityId = '{{ org.id }}';
-        window.location.href = '/entity/' + entityId;
+        window.location.href = '{{ url_for('entity.report_dashboard', id=org.id) }}';
       }
 
       function validateOpeningCashBalance() {
@@ -815,7 +815,7 @@
       function goBack() {
         // For opening page, there's no previous section, so go to entity dashboard
         const entityId = '{{ org.id }}';
-        window.location.href = `/entity/${entityId}`;
+        window.location.href = `{{ url_for('entity.report_dashboard', id=org.id) }}`;
       }
 
       // Function to go to next (for old reports)
@@ -823,7 +823,7 @@
         // Navigate to sales page
         const entityId = '{{ org.id }}';
         const reportId = '{{ draft_id }}';
-        const url = `/report/${reportId}/sale?entity_id=${entityId}`;
+        const url = `{{ url_for('entity.report_dashboard', id=org.id) }}/reports/${reportId}/sale`;
         window.location.href = url;
       }
 
@@ -831,7 +831,7 @@
       function closeReport() {
         // Navigate back to entity dashboard
         const entityId = '{{ org.id }}';
-        window.location.href = `/entity/${entityId}`;
+        window.location.href = `{{ url_for('entity.report_dashboard', id=org.id) }}`;
       }
     </script>
   </div>

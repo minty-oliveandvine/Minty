@@ -99,15 +99,15 @@ def _is_current(html: str, label: str) -> bool:
 
 def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people):
     shop = people["both"].id
-    html = _menu(app, f"/entity/{shop}", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}", user_id=people["olive"].id, org_id=shop)
 
     assert _link(html, "Select Entity") == "/entity"
     assert _link(html, "Manage subscriptions") == "/handoff/minty-web?next=/subscription"
-    assert _link(html, "Dashboard") == f"/entity/{shop}"
-    assert _link(html, "Reports") == f"/entity/{shop}/reports"
-    assert _link(html, "Bills") == f"/entity/{shop}/bills"
+    assert _link(html, "Dashboard") == f"{F.co(app, shop)}"
+    assert _link(html, "Reports") == f"{F.co(app, shop)}/reports"
+    assert _link(html, "Bills") == f"{F.co(app, shop)}/payment-request"
     # this app's own settings - Petty Cash's (Settings opens the settings of the app it is in)
-    assert _link(html, "Settings") == f"/entity/settings/entity/{shop}"
+    assert _link(html, "Settings") == f"{F.co(app, shop)}/settings/petty-cash"
     assert _link(html, "Logout") == "/logout"
     assert _link(html, "Manage Subscription") == "/handoff/minty-web?next=/subscription"
     assert 'data-module-nav="PETTY_CASH">' in html
@@ -126,7 +126,7 @@ def test_the_person_is_at_the_top_and_opens_my_profile(app, people):
 
 def test_a_module_that_is_off_is_drawn_hidden_for_the_module_page_to_show(app, people):
     shop = people["petty"].id
-    html = _menu(app, f"/entity/{shop}", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}", user_id=people["olive"].id, org_id=shop)
 
     assert 'data-module-nav="PETTY_CASH">' in html
     assert 'data-module-nav="PAYMENT_REQUEST" style="display:none">' in html
@@ -149,26 +149,26 @@ def test_on_the_users_tab_settings_is_this_apps_own(app, people):
     # One look since 2026-10-05: Flask's Settings is Petty Cash Settings on every Flask page,
     # whichever app the person came from (the payments app's sidebar has its own Settings)
     shop = people["both"].id
-    html = _menu(app, f"/entity/settings/users/{shop}", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}/settings/users", user_id=people["olive"].id, org_id=shop)
 
-    assert _link(html, "Settings") == f"/entity/settings/entity/{shop}"
+    assert _link(html, "Settings") == f"{F.co(app, shop)}/settings/petty-cash"
     assert "from=bills" not in html
 
 
 def test_on_the_petty_cash_settings_page_settings_is_the_page_shown(app, people):
     shop = people["both"].id
-    html = _menu(app, f"/entity/settings/entity/{shop}", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}/settings/petty-cash", user_id=people["olive"].id, org_id=shop)
 
-    assert _link(html, "Settings") == f"/entity/settings/entity/{shop}"
+    assert _link(html, "Settings") == f"{F.co(app, shop)}/settings/petty-cash"
     assert _is_current(html, "Settings")
 
 
 def test_a_company_without_petty_cash_gets_the_general_settings(app, people):
     # Petty Cash Settings refuses a company without the module (require_module): no dead end
     shop = people["payments"].id
-    html = _menu(app, f"/entity/{shop}/settings/xero", user_id=people["olive"].id, org_id=shop)
+    html = _menu(app, f"{F.co(app, shop)}/settings/integration", user_id=people["olive"].id, org_id=shop)
 
-    assert _link(html, "Settings") == f"/entity/{shop}/settings/xero"
+    assert _link(html, "Settings") == f"{F.co(app, shop)}/settings/integration"
     assert _is_current(html, "Settings")
 
 

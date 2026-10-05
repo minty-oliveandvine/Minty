@@ -334,7 +334,7 @@ def download_attachments():
         )
 
 
-@report_bp.route("/entity/<string:entity_id>/reports/download-csv", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/reports/download-csv", methods=["GET"])
 @login_required
 def download_reports_csv(entity_id):
     from blueprints.report.services.shared import check_user_has_entities

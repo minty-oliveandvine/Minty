@@ -63,11 +63,13 @@ def get_unique_sale_info_for_entity(entity_id):
     )
 
 
+@report_bp.route("/entity/<entity:entity_id>/reports/new/sale", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/sale", methods=["GET"])
 @report_bp.route("/report/sale", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/sale", methods=["GET"])
 @login_required
-def report_sale(id=None):
-    entity_id = request.args.get("entity_id") or request.form.get("entity_id")
+def report_sale(id=None, entity_id=None):
+    entity_id = entity_id or request.args.get("entity_id") or request.form.get("entity_id")
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:

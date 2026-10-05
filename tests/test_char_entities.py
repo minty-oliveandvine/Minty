@@ -259,13 +259,13 @@ def company(app, db, world):
 
 def test_the_settings_pages_render_for_an_admin(world, company, client):
     F.login(client, world["admin"])
-    for url in (f"/entity/settings/entity/{company.id}",
-                f"/entity/settings/users/{company.id}", f"/entity/{company.id}/settings/xero",
-                f"/entity/{company.id}/modules"):
+    for url in (f"{F.co(client, company.id)}/settings/petty-cash",
+                f"{F.co(client, company.id)}/settings/users", f"{F.co(client, company.id)}/settings/integration",
+                f"{F.co(client, company.id)}/modules"):
         resp = client.get(url, follow_redirects=True)
         assert resp.status_code == 200, (url, resp.status_code, resp.data[:200])
     # the Module tab is minty-web's page: a hand-over, not a render (test_minty_web_handoff)
-    resp = client.get(f"/entity/settings/module/{company.id}")
+    resp = client.get(f"{F.co(client, company.id)}/settings/modules")
     assert resp.status_code == 302 and "/landing?next=" in resp.headers["Location"]
 
 
@@ -277,7 +277,7 @@ def test_a_cashier_cannot_change_the_company_settings(world, company, client, ap
         db.session.add(UserEntity(user_id=cashier.id, entity_id=company.id, role="cashier", approved=True))
         db.session.commit()
     F.login(client, cashier)
-    resp = client.post(f"/entity/settings/entity/{company.id}", data={"country_code": "HK", "currency_code": "HKD"})
+    resp = client.post(f"{F.co(client, company.id)}/settings/petty-cash", data={"country_code": "HK", "currency_code": "HKD"})
     assert resp.status_code in (302, 403)
     assert entity_row(app, company.id).name == "Corner Shop"
 
@@ -314,7 +314,7 @@ def test_xero_disconnect_flips_the_company_to_disconnected(world, company, clien
 
 def test_there_is_no_soft_delete_route(world, company, client):
     F.login(client, world["admin"])
-    assert client.post(f"/entity/{company.id}/delete").status_code == 404
+    assert client.post(f"{F.co(client, company.id)}/delete").status_code == 404
 
 
 # ---- the CLI ------------------------------------------------------------------------------------

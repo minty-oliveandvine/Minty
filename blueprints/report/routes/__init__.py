@@ -6,6 +6,9 @@ _ROUTE_MODULES = (
     # Registers the PETTY_CASH before_request gate for the whole blueprint;
     # keep first so the guard is attached before any route module loads.
     "module_guard",
+    # Old /report/... wizard addresses -> /entity/<shortid>/<name>/reports/...; and the company
+    # in the address must own the report.
+    "company_addresses",
     "api",
     "cash_count",
     "create",

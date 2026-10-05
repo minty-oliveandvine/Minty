@@ -75,6 +75,17 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def co(app_or_client, entity_id) -> str:
+    """A company's address prefix, ``/entity/<shortid>/<name>`` - what every company page
+    hangs off since 2026-10-05 (blueprints/shared/entity_ref.py). Takes the app or a test
+    client."""
+    from blueprints.shared.entity_ref import canonical_ref
+
+    app = getattr(app_or_client, "application", app_or_client)
+    with app.app_context():
+        return "/entity/" + canonical_ref(entity_id)
+
+
 def login(client, user, *, accepted_terms=True) -> None:
     """Sign in as ``user``. The terms gate (blueprints/legal) blocks every route until the
     live Terms version is accepted, so a signed-in user has agreed unless a test says

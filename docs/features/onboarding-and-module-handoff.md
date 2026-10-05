@@ -43,7 +43,7 @@ note, `minty-onboarding-web/e2e/README.md`).
 ## Launching the payment module
 
 From the dashboard's module cards: `GET /entity/<id>/modules` (the picker),
-`GET /entity/<id>/bills` (straight to the bills list). Both mint the 30-minute module JWT
+`GET /entity/<co>/payment-request` (straight to the bills list). Both mint the 30-minute module JWT
 and redirect to `<minty-payment-request-web>/landing?token=&entity_id=&entity_name=&next=&from=`.
 The payment app calls minty-payment-request-api with the token as a bearer; minty-payment-request-api verifies
 it with the shared secret, re-reads the person's role on the company and the module map,

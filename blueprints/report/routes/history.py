@@ -10,7 +10,7 @@ from services.authz import require_entity_access
 from services.permission_policy import Permission, has_permission
 
 
-@report_bp.route("/entity/<string:entity_id>/reports", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/reports", methods=["GET"])
 @login_required
 @require_entity_access(entity_arg="entity_id")
 def entity_report_history(entity_id):

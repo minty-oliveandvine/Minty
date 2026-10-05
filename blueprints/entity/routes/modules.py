@@ -20,6 +20,7 @@ login form otherwise. Picking a company there mints a fresh token through the
 handoff above. Module 2 does not ask to be returned to the page it was on: that
 path belongs to Module 2's origin, and replaying it here is what used to 404.
 """
+import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -43,10 +44,11 @@ MODULE_TOKEN_MINUTES = 30
 #: The ``module`` claim every module token carries; ``/entity/<id>/enter`` accepts no other token.
 MODULE_TOKEN_CLAIM = "billing"
 
-#: Where the Module 2 handoffs land inside minty-payment-request-web: its home, and its
-#: settings page (``billing_app_home_url`` / ``billing_settings_app_url``).
-PAYMENT_REQUEST_APP_HOME_PATH = "/"
-PAYMENT_REQUEST_SETTINGS_PATH = "settings"
+#: Where the Module 2 handoffs land inside minty-payment-request-web, under the company's
+#: address (``/entity/<shortid>/<name>``, 2026-10-05): its list, and its settings page
+#: (``billing_app_home_url`` / ``billing_settings_app_url``).
+PAYMENT_REQUEST_APP_HOME_PATH = "payment-request"
+PAYMENT_REQUEST_SETTINGS_PATH = "settings/payment-request"
 
 
 def record_entity_access(entity_id: str, user_id: str) -> None:
@@ -82,7 +84,7 @@ def record_entity_access(entity_id: str, user_id: str) -> None:
         )
 
 
-@entity_bp.route("/entity/<string:entity_id>/modules")
+@entity_bp.route("/entity/<entity:entity_id>/modules")
 @login_required
 def module_selector(entity_id):
     org = Entity.query.filter(Entity.id == entity_id).first()
@@ -213,8 +215,12 @@ def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
 
 
 def minty_web_module_page_path(entity_id) -> str:
-    """minty-web's module settings page of one company, as a path on minty-web's origin."""
-    return f"/subscription/entities/{entity_id}/modules"
+    """minty-web's module settings page of one company, as a path on minty-web's origin:
+    ``/subscription/entities/<shortid>/<name>/modules`` since 2026-10-05 (the same address
+    minty-web's ``lib/companyRef.ts`` builds)."""
+    from blueprints.shared.entity_ref import canonical_ref
+
+    return f"/subscription/entities/{canonical_ref(entity_id)}/modules"
 
 
 def minty_web_module_page_url(org: Entity, user_id) -> str:
@@ -335,7 +341,7 @@ def open_profile():
     return redirect(minty_web_profile_url(org, current_user.id))
 
 
-@entity_bp.route("/entity/<string:entity_id>/enter")
+@entity_bp.route("/entity/<entity:entity_id>/enter")
 def module_reenter(entity_id):
     """Re-entry from Module 2. Validates the JWT, re-establishes the Flask
     session, then redirects to ``next`` (if safe) or the petty cash dashboard.
@@ -392,7 +398,7 @@ def module_reenter(entity_id):
         return redirect(url_for("auth.home"))
 
 
-@entity_bp.route("/entity/<string:entity_id>/billing-relogin")
+@entity_bp.route("/entity/<entity:entity_id>/billing-relogin")
 def billing_relogin(entity_id: str):
     """Legacy: Module 2 telling us its billing JWT ran out.
 
@@ -417,10 +423,16 @@ def billing_relogin(entity_id: str):
     return redirect(url_for("auth.home"))
 
 
-@entity_bp.route("/entity/<string:entity_id>/bills")
+@entity_bp.route("/entity/<entity:entity_id>/payment-request")
 @login_required
 def go_to_bills(entity_id):
-    """Direct handoff to Module 2 Bills (skips the module picker)."""
+    """Direct handoff to Module 2 Bills (skips the module picker).
+
+    ``?request=<uuid>`` lands on that payment request instead of the list: the payments app
+    sends a page of another company here (its cookie holds one company at a time). Anything
+    that is not a uuid is ignored; the payments API decides whether the request is this
+    company's.
+    """
     org = Entity.query.filter(Entity.id == entity_id).first()
     if not org:
         flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
@@ -439,7 +451,11 @@ def go_to_bills(entity_id):
         flash("The Payment module isn't switched on for this entity yet - an admin can turn it on in the entity's module settings.", "warning")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
-    return redirect(billing_app_home_url(entity_id, org, current_user.id))
+    try:
+        request_id = str(uuid.UUID(request.args.get("request", "")))
+    except ValueError:
+        request_id = None
+    return redirect(billing_app_home_url(entity_id, org, current_user.id, request_id))
 
 
 def _generate_module_token(
@@ -544,50 +560,41 @@ def _frontend_origin() -> str:
     return bearer_api.frontend_origin()
 
 
-def billing_app_home_url(entity_id: str, org: Entity, user_id) -> str:
-    """Handoff URL for Module 2 main app with entity pre-selected."""
-    next_arg = PAYMENT_REQUEST_APP_HOME_PATH
+def _billing_app_landing_url(entity_id: str, org: Entity, user_id, page: str) -> str:
+    """The payments app's ``/landing`` with a module token for ``org``, going on to ``page``
+    under the company's address (``/entity/<shortid>/<name>/<page>``, the address the app's
+    middleware also builds - it re-checks the company against the token's)."""
+    from blueprints.shared.entity_ref import canonical_ref
+
     role = _resolve_user_entity_role(user_id, entity_id)
-    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
-    petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
     token = _generate_module_token(
         user_id,
         entity_id,
         org.xero_org_id,
         role,
-        billing_enabled=billing_enabled,
-        petty_cash_enabled=petty_cash_enabled,
+        billing_enabled=_is_module_enabled(entity_id, MODULE_BILL),
+        petty_cash_enabled=_is_module_enabled(entity_id, "PETTY_CASH"),
     )
-    entity_name = quote(org.name or "", safe="")
-    url = (
+    next_path = f"/entity/{canonical_ref(entity_id)}/{page}"
+    return (
         f"{_frontend_origin()}/landing"
-        f"?next={next_arg}"
-        f"&entity_id={entity_id}&entity_name={entity_name}&token={token}"
+        f"?next={quote(next_path, safe='')}"
+        f"&entity_id={entity_id}&entity_name={quote(org.name or '', safe='')}&token={token}"
     )
-    return url
+
+
+def billing_app_home_url(entity_id: str, org: Entity, user_id, request_id: str | None = None) -> str:
+    """Handoff URL for Module 2 main app with entity pre-selected - its list, or one payment
+    request when ``request_id`` (a uuid, checked by the caller) is given."""
+    page = PAYMENT_REQUEST_APP_HOME_PATH
+    if request_id:
+        page = f"{page}/{request_id}"
+    return _billing_app_landing_url(entity_id, org, user_id, page)
 
 
 def billing_settings_app_url(entity_id: str, org: Entity, user_id) -> str:
     """Handoff URL for Module 2 settings page."""
-    settings_path = PAYMENT_REQUEST_SETTINGS_PATH
-    role = _resolve_user_entity_role(user_id, entity_id)
-    billing_enabled = _is_module_enabled(entity_id, MODULE_BILL)
-    petty_cash_enabled = _is_module_enabled(entity_id, "PETTY_CASH")
-    token = _generate_module_token(
-        user_id,
-        entity_id,
-        org.xero_org_id,
-        role,
-        billing_enabled=billing_enabled,
-        petty_cash_enabled=petty_cash_enabled,
-    )
-    entity_name = quote(org.name or "", safe="")
-    url = (
-        f"{_frontend_origin()}/landing"
-        f"?next=/{settings_path}"
-        f"&entity_id={entity_id}&entity_name={entity_name}&token={token}"
-    )
-    return url
+    return _billing_app_landing_url(entity_id, org, user_id, PAYMENT_REQUEST_SETTINGS_PATH)
 
 
 def _notice_cors(resp):

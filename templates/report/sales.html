@@ -124,7 +124,7 @@
       <!-- Header -->
       <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
         <div class="flex-1 flex justify-start min-w-0">
-          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="/entity/{{org.id}}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="{{ url_for('entity.report_dashboard', id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
             </svg>
@@ -174,7 +174,7 @@
         </div>
         
         <!-- Form Content -->
-        <form id="sales-form" action="{{ url_for('report.report_sale') }}?entity_id={{ org.id }}&transaction_date={{ request.args.get('transaction_date') }}" method="post">
+        <form id="sales-form" action="{{ url_for('report.report_sale', entity_id=org.id) }}?transaction_date={{ request.args.get('transaction_date') }}" method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="entity_id" value="{{ org.id }}">
           <input type="hidden" name="action_type" value="save_next">
@@ -483,23 +483,23 @@
       {% if current_draft.status == "draft" %}
        const editParam = {{ 'true' if is_edit_mode else 'false' }} ? '&edit=true' : '';
        const stepUrls = {
-         'opening': '{{ url_for("report.report_opening") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
-         'sales': '{{ url_for("report.report_sale") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
-         'expenses': '{{ url_for("report.report_expense") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
-         'deposit': '{{ url_for("report.report_deposit") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
-         'cash_count': '{{ url_for("report.report_cash_count") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam,
-      'ending': '{{ url_for("report.report_ending") }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam
+         'opening': '{{ url_for("report.report_opening", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
+         'sales': '{{ url_for("report.report_sale", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
+         'expenses': '{{ url_for("report.report_expense", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
+         'deposit': '{{ url_for("report.report_deposit", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
+         'cash_count': '{{ url_for("report.report_cash_count", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
+      'ending': '{{ url_for("report.report_ending", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam
        };
        {% else %}
        const editParam = {{ 'true' if is_edit_mode else 'false' }} ? '&edit=true' : '';
        const reportEditParam = {{ 'true' if is_report_edit_mode else 'false' }} ? '&report_edit=true' : '';
        const stepUrls = {
-      'opening': '{{ url_for("report.report_opening", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-      'sales': '{{ url_for("report.report_sale", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-      'expenses': '{{ url_for("report.report_expense", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-      'deposit': '{{ url_for("report.report_deposit", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-      'cash_count': '{{ url_for("report.report_cash_count", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-      'ending': '{{ url_for("report.report_ending", id=current_draft.id) }}?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam
+      'opening': '{{ url_for("report.report_opening", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+      'sales': '{{ url_for("report.report_sale", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+      'expenses': '{{ url_for("report.report_expense", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+      'deposit': '{{ url_for("report.report_deposit", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+      'cash_count': '{{ url_for("report.report_cash_count", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+      'ending': '{{ url_for("report.report_ending", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam
        };
        {% endif %}
       
@@ -810,7 +810,7 @@
       // Navigate to opening page
       const entityId = '{{ org.id }}';
       const reportId = '{{ draft_id }}';
-      const url = `/report/${reportId}/opening?entity_id=${entityId}`;
+      const url = `{{ url_for('entity.report_dashboard', id=org.id) }}/reports/${reportId}/opening`;
       window.location.href = url;
     }
 
@@ -819,7 +819,7 @@
       // Navigate to expenses page
       const entityId = '{{ org.id }}';
       const reportId = '{{ draft_id }}';
-      const url = `/report/${reportId}/expense?entity_id=${entityId}`;
+      const url = `{{ url_for('entity.report_dashboard', id=org.id) }}/reports/${reportId}/expense`;
       window.location.href = url;
     }
 
@@ -827,7 +827,7 @@
     function closeReport() {
       // Navigate back to entity dashboard
       const entityId = '{{ org.id }}';
-      window.location.href = `/entity/${entityId}`;
+      window.location.href = `{{ url_for('entity.report_dashboard', id=org.id) }}`;
     }
 
     // Show flash notification on page load if it exists

@@ -154,7 +154,7 @@ def test_opening_creates_a_draft_visible_in_draft_totals(shop, client):
     resp = open_report(client, entity, opening="1000.00", addition="50.00")
 
     assert resp.status_code == 302, resp.data[:300]
-    assert "/report/sale" in resp.headers["Location"] or "/report/" in resp.headers["Location"]
+    assert "/reports/new/sale" in resp.headers["Location"], resp.headers["Location"]
     totals = draft_totals(client, entity, REPORT_DATE)
     assert totals["status"] == "success", totals
 
@@ -181,7 +181,7 @@ def test_sales_by_method_roll_up_into_totals(shop, client):
     post_sales(client, entity, REPORT_DATE, cash="150.10",
                by_method={visa: "200.20", alipay: "0.30", foodpanda: "99.99"})
 
-    page = client.get(f"/report/sale?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
+    page = client.get(f"{F.co(client, entity.id)}/reports/new/sale?transaction_date={F.iso(REPORT_DATE)}")
     assert page.status_code == 200
     html = page.get_data(as_text=True)
     for amount in ("150.1", "200.2", "0.3", "99.99"):
@@ -227,7 +227,7 @@ def test_deposit_closes_the_balance(shop, client):
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["bank_deposit"]) == money("500.00"), totals
     assert money(totals["closing_balance"]) == money("825.00"), totals
-    page = client.get(f"/report/deposit?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
+    page = client.get(f"{F.co(client, entity.id)}/reports/new/deposit?transaction_date={F.iso(REPORT_DATE)}")
     assert page.status_code == 200
 
 
@@ -257,7 +257,7 @@ def count_exactly(amount: Decimal, faces) -> dict:
 
 
 def history_rows(client, entity):
-    page = client.get(f"/entity/{entity.id}/reports")
+    page = client.get(f"{F.co(client, entity.id)}/reports")
     assert page.status_code == 200, page.data[:300]
     return page.get_data(as_text=True)
 
@@ -279,7 +279,7 @@ def test_exact_cash_count_has_no_discrepancy(shop, client):
     assert resp.status_code == 302, resp.data[:300]
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["closing_balance"]) == expected_closing, totals
-    page = client.get(f"/report/cash_count?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
+    page = client.get(f"{F.co(client, entity.id)}/reports/new/cash-count?transaction_date={F.iso(REPORT_DATE)}")
     assert page.status_code == 200
 
 
@@ -293,7 +293,7 @@ def test_short_cash_count_records_a_shortage(shop, client):
     post_cash_count(client, entity, REPORT_DATE, count_exactly(counted, faces),
                     discrepancy="20.00", dtype="shortage", reason="till float short")
 
-    page = client.get(f"/report/ending?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
+    page = client.get(f"{F.co(client, entity.id)}/reports/new/ending?transaction_date={F.iso(REPORT_DATE)}")
     assert page.status_code == 200
     assert "short" in page.get_data(as_text=True).lower()
 
@@ -306,7 +306,7 @@ def post_report(client, entity, day=REPORT_DATE, **walk):
     resp = post_ending(client, entity, day)
     assert resp.status_code == 302, resp.data[:300]
     location = resp.headers["Location"]
-    m = re.search(r"/report/([0-9a-f-]{36})/submitted", location)
+    m = re.search(r"/reports/([0-9a-f-]{36})/submitted", location)
     assert m, f"ending did not land on the submitted page: {location}"
     return m.group(1), expected_closing
 
@@ -317,7 +317,7 @@ def test_ending_posts_the_report_and_lands_on_submitted(shop, client):
 
     report_id, closing = post_report(client, entity)
 
-    page = client.get(f"/report/{report_id}/submitted?entity_id={entity.id}")
+    page = client.get(f"{F.co(client, entity.id)}/reports/{report_id}/submitted")
     assert page.status_code == 200
     assert report_id in history_rows(client, entity)
     # once posted there is no draft for that date any more
@@ -335,7 +335,7 @@ def test_submitted_page_offers_a_first_publish_until_the_report_has_been_to_xero
     F.login(client, owner)
     report_id, _ = post_report(client, entity)
 
-    html = client.get(f"/report/{report_id}/submitted?entity_id={entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/reports/{report_id}/submitted").get_data(as_text=True)
     assert 'id="publishButton"' in html and 'id="republishButton"' not in html
 
     with app.app_context():
@@ -343,7 +343,7 @@ def test_submitted_page_offers_a_first_publish_until_the_report_has_been_to_xero
         assert report.publishing_status == "unpublished"
         report.publishing_status = "failed"
         db.session.commit()
-    html = client.get(f"/report/{report_id}/submitted?entity_id={entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/reports/{report_id}/submitted").get_data(as_text=True)
     assert 'id="republishButton"' in html and 'id="publishButton"' not in html
 
 
@@ -441,7 +441,7 @@ def test_history_csv_lists_the_days_movements(shop, client):
     F.login(client, owner)
     post_report(client, entity)
 
-    resp = client.get(f"/entity/{entity.id}/reports/download-csv?start_date={F.iso(REPORT_DATE)}&end_date={F.iso(REPORT_DATE)}")
+    resp = client.get(f"{F.co(client, entity.id)}/reports/download-csv?start_date={F.iso(REPORT_DATE)}&end_date={F.iso(REPORT_DATE)}")
 
     assert resp.status_code == 200, resp.data[:300]
     rows = [r.split(",") for r in resp.get_data(as_text=True).splitlines() if r.strip()]
@@ -455,7 +455,7 @@ def test_history_csv_lists_the_days_movements(shop, client):
 def test_history_csv_without_a_date_range_is_refused(shop, client):
     owner, entity = shop
     F.login(client, owner)
-    resp = client.get(f"/entity/{entity.id}/reports/download-csv")
+    resp = client.get(f"{F.co(client, entity.id)}/reports/download-csv")
     assert resp.status_code == 400
     assert resp.get_json()["status"] == "error"
 
@@ -474,8 +474,8 @@ def test_convert_to_draft_reopens_the_report_at_opening(shop, client):
     assert money(totals["opening_balance"]) == money("1000.00")
     assert money(totals["cash_sales"]) == money("300.00")
     assert money(totals["bank_deposit"]) == money("500.00")
-    resume = client.get(f"/report/resume?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
-    assert resume.status_code == 302 and "/report/opening" in resume.headers["Location"]
+    resume = client.get(f"{F.co(client, entity.id)}/reports/resume?transaction_date={F.iso(REPORT_DATE)}")
+    assert resume.status_code == 302 and "/opening" in resume.headers["Location"]
 
 
 def test_convert_to_draft_keeps_the_expenses(shop, client):
@@ -602,10 +602,10 @@ def test_resume_lands_on_the_next_incomplete_section(shop, client):
     open_report(client, entity)
     post_sales(client, entity, REPORT_DATE, cash="10")
 
-    resp = client.get(f"/report/resume?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}")
+    resp = client.get(f"{F.co(client, entity.id)}/reports/resume?transaction_date={F.iso(REPORT_DATE)}")
 
     assert resp.status_code == 302, resp.data[:300]
-    assert "/report/expense" in resp.headers["Location"], resp.headers["Location"]
+    assert "/expense" in resp.headers["Location"], resp.headers["Location"]
 
 
 def test_next_day_opening_is_yesterdays_closing(shop, client):
@@ -615,7 +615,7 @@ def test_next_day_opening_is_yesterdays_closing(shop, client):
     _, closing = post_report(client, entity, REPORT_DATE)
     day2 = REPORT_DATE + timedelta(days=1)
 
-    page = client.get(f"/report/opening?entity_id={entity.id}&transaction_date={F.iso(day2)}")
+    page = client.get(f"{F.co(client, entity.id)}/reports/new/opening?transaction_date={F.iso(day2)}")
 
     assert page.status_code == 200, page.data[:300]
     html = page.get_data(as_text=True)
@@ -631,7 +631,7 @@ def test_a_second_report_for_the_same_day_is_refused(shop, client):
 
     # the wizard bounces with a flash rather than creating a duplicate
     assert resp.status_code == 302
-    assert "/report/sale" not in resp.headers.get("Location", "")
+    assert "/sale" not in resp.headers.get("Location", "")
     assert client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE)}").status_code == 404
 
 
@@ -647,4 +647,4 @@ def test_member_without_report_rights_cannot_open_the_wizard(shop, client, app, 
     resp = open_report(client, entity)
 
     assert resp.status_code == 302
-    assert "/report/sale" not in resp.headers.get("Location", "")
+    assert "/sale" not in resp.headers.get("Location", "")

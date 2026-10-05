@@ -532,7 +532,7 @@
 
                           <!-- Edit (older reports) - non-latest non-draft report the user can edit. Opens the constrained "Edit Report" inline mode on the ending page. -->
                           {% if report.id != latest_report_id and report.status != 'draft' and (can_edit_entity_reports or report.uploaded_by == current_user.username) %}
-                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); PageTransition.navigateWithFade('/entity/{{ entity_id }}/ending/{{ report.id }}?report_edit=true'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
+                          <div class="w-full px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center text-gray-600" title="Edit Report" data-report-id="{{ report.id }}" onclick="event.stopPropagation(); PageTransition.navigateWithFade('{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=report.id) }}?report_edit=true'); toggleMobileMenu(this.closest('.mobile-menu-button'))">
                             <span class="text-sm font-medium">Edit</span>
                           </div>
                           {% endif %}
@@ -554,10 +554,10 @@
                                title="View Report"
                                onclick="event.stopPropagation(); 
                                {% if report.status == 'draft' %}
-                                 const resumeUrl = '/report/resume?entity_id={{ entity_id }}&transaction_date={{ report.transaction_date.strftime('%Y-%m-%d') }}';
+                                 const resumeUrl = '{{ url_for("report.resume_report", entity_id=entity_id) }}?transaction_date={{ report.transaction_date.strftime('%Y-%m-%d') }}';
                                  PageTransition.navigateWithFade(resumeUrl);
                                {% else %}
-                                 const url = '/entity/{{ entity_id }}/ending/{{ report.id }}';
+                                 const url = '{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=report.id) }}';
                                  PageTransition.navigateWithFade(url);
                                {% endif %}
                                toggleMobileMenu(this.closest('.mobile-menu-button'))">
@@ -589,10 +589,10 @@
                     <!-- Chevron right arrow - navigate to ending report -->
                     <a href="#" class="w-8 h-8 flex items-center justify-center text-gray-400 transition-colors cursor-pointer hover-slide-parent" title="View Report" onclick="event.stopPropagation(); 
                      {% if report.status == 'draft' %}
-                       const resumeUrl = '/report/resume?entity_id={{ entity_id }}&transaction_date={{ report.transaction_date.strftime('%Y-%m-%d') }}';
+                       const resumeUrl = '{{ url_for("report.resume_report", entity_id=entity_id) }}?transaction_date={{ report.transaction_date.strftime('%Y-%m-%d') }}';
                        PageTransition.navigateWithFade(resumeUrl);
                      {% else %}
-                       const url = '/entity/{{ entity_id }}/ending/{{ report.id }}';
+                       const url = '{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=report.id) }}';
                        PageTransition.navigateWithFade(url);
                      {% endif %}
                      return false;">
@@ -860,7 +860,7 @@
       }
 
       const entityId = '{{ entity_id }}';
-      const url = `/entity/${entityId}/reports?start_date=${startDate}&end_date=${endDate}&page=1`;
+      const url = `{{ url_for('report.entity_report_history', entity_id=entity_id) }}?start_date=${startDate}&end_date=${endDate}&page=1`;
       window.location.href = url;
     }
 
@@ -877,7 +877,7 @@
       // If a filter is currently applied (URL has date params), reload the full list
       const params = new URLSearchParams(window.location.search);
       if (params.has('start_date') || params.has('end_date')) {
-        window.location.href = `/entity/{{ entity_id }}/reports`;
+        window.location.href = `{{ url_for('report.entity_report_history', entity_id=entity_id) }}`;
       }
     }
 
@@ -918,7 +918,7 @@
       
       // Construct download URL
       const entityId = '{{ entity_id }}';
-      const downloadUrl = `/entity/${entityId}/reports/download-csv?start_date=${startDate}&end_date=${endDate}`;
+      const downloadUrl = `{{ url_for('report.entity_report_history', entity_id=entity_id) }}/download-csv?start_date=${startDate}&end_date=${endDate}`;
       
       // Create a temporary link to trigger download
       const link = document.createElement('a');
@@ -957,7 +957,7 @@
 
       // Make actual API call to filter reports
       const entityId = '{{ entity_id }}';
-      const url = `/entity/${entityId}/reports?start_date=${startDate}&end_date=${endDate}`;
+      const url = `{{ url_for('report.entity_report_history', entity_id=entity_id) }}?start_date=${startDate}&end_date=${endDate}`;
       
       // Navigate to the filtered results
       window.location.href = url;
@@ -989,7 +989,7 @@
       
       if (reportStatus === 'draft') {
         if (entityId && reportDate) {
-          const resumeUrl = `/report/resume?entity_id=${entityId}&transaction_date=${reportDate}`;
+          const resumeUrl = `{{ url_for('report.resume_report', entity_id=entity_id) }}?transaction_date=${reportDate}`;
           console.log('Resuming draft report at:', resumeUrl);
           PageTransition.navigateWithFade(resumeUrl);
         } else {
@@ -1004,7 +1004,7 @@
       
       // Navigate to entity-specific ending page
       if (reportId && entityId) {
-        const url = `/entity/${entityId}/ending/${reportId}`;
+        const url = `{{ url_for('entity.report_dashboard', id=entity_id) }}/reports/${reportId}/summary`;
         console.log('Navigating to:', url);
         PageTransition.navigateWithFade(url);
       } else {
@@ -1033,7 +1033,7 @@
           
           if (reportStatus === 'draft') {
             if (entityId && reportDate) {
-              const resumeUrl = `/report/resume?entity_id=${entityId}&transaction_date=${reportDate}`;
+              const resumeUrl = `{{ url_for('report.resume_report', entity_id=entity_id) }}?transaction_date=${reportDate}`;
               console.log('Resuming draft report at:', resumeUrl);
               showFlashMessages(`Picking your ${reportDate} draft back up...`, 'success');
               PageTransition.navigateWithFade(resumeUrl);
@@ -1049,7 +1049,7 @@
           
           // Navigate to entity-specific ending page
           if (reportId && entityId) {
-            const url = `/entity/${entityId}/ending/${reportId}`;
+            const url = `{{ url_for('entity.report_dashboard', id=entity_id) }}/reports/${reportId}/summary`;
             console.log('Navigating to:', url);
             showFlashMessages('Opening that report for you...', 'success');
             PageTransition.navigateWithFade(url);
@@ -1083,7 +1083,7 @@
             showRepublishModal(reportId, entityId);
           } else {
             // If not published, navigate to submitted page to publish
-            window.location.href = `/report/${reportId}/submitted?entity_id=${entityId}`;
+            window.location.href = `{{ url_for('entity.report_dashboard', id=entity_id) }}/reports/${reportId}/submitted`;
           }
         });
       }
@@ -1671,7 +1671,7 @@
           showFlashMessages('Your report is downloaded!', 'success');
         }, 500);
         // Use CSV download endpoint with report_id parameter
-        window.location.href = `/entity/${entityId}/reports/download-csv?report_id=${reportId}`;
+        window.location.href = `{{ url_for('report.entity_report_history', entity_id=entity_id) }}/download-csv?report_id=${reportId}`;
       } else {
         showFlashMessages('Unable to download report. Missing report information.', 'error');
       }
@@ -1724,7 +1724,7 @@
           showFlashMessages('Back to draft — opening it for you now.', 'success');
           
           // Navigate to opening page with the draft (now treated as draft)
-          const editUrl = `{{ url_for('report.report_opening') }}?entity_id=${entityId}&transaction_date=${data.transaction_date || transactionDate}`;
+          const editUrl = `{{ url_for('report.report_opening', entity_id=entity_id) }}?transaction_date=${data.transaction_date || transactionDate}`;
           
           setTimeout(() => {
             PageTransition.navigateWithFade(editUrl);
@@ -1780,7 +1780,7 @@
           handlePublish(reportId, entityId, publishButton);
         } else {
           // Fallback to navigation
-          window.location.href = `/report/${reportId}/submitted?entity_id=${entityId}`;
+          window.location.href = `{{ url_for('entity.report_dashboard', id=entity_id) }}/reports/${reportId}/submitted`;
         }
       }
     }

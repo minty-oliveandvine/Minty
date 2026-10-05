@@ -324,7 +324,7 @@
     }
 
     // ── Publishing overlay helpers ──
-    const SUBMITTED_PAGE_URL = `/report/{{ id }}/submitted?entity_id={{ entity_id }}`;
+    const SUBMITTED_PAGE_URL = `{{ url_for('report.report_submitted', id=id, entity_id=entity_id) }}`;
 
     function showPublishingOverlay(label) {
       const overlay = document.getElementById('publishingOverlay');

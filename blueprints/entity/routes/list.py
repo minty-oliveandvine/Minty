@@ -98,7 +98,7 @@ def _to_minty_web_list():
     return redirect(minty_web_entity_list_url(current_user.id, notices=notices))
 
 
-@entity_bp.route("/entity/<string:id>")
+@entity_bp.route("/entity/<entity:id>")
 @login_required
 @require_module(
     "PETTY_CASH",
