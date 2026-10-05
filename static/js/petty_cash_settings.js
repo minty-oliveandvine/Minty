@@ -362,11 +362,14 @@
 
   // --- Save: one gate ---------------------------------------------------------------------------
 
-  /** Whether Save may be pressed - the only place that turns it on or off. */
+  /**
+   * Whether Save may be pressed - the only place that turns it on or off. Off with nothing to
+   * save: the page's changes are measured the way "Leave without saving?" measures them (isDirty).
+   */
   function updatePettyCashSave() {
     if (!saveButton || viewOnly) return; // the view-only button never comes on
     var loading = window.xeroDataReady !== true;
-    saveButton.disabled = saving || loading || noCodesTicked();
+    saveButton.disabled = saving || loading || noCodesTicked() || !isDirty();
   }
   // The mapping script calls this when its Xero lists start and finish loading.
   window.updatePettyCashSave = updatePettyCashSave;
@@ -501,6 +504,7 @@
     if (methodsState === "ready") {
       setMethodsNote(type, rows.length ? "" : "No " + kind.label.toLowerCase() + " methods yet.");
     }
+    updatePettyCashSave(); // every add, rename, move and delete draws the list again
   }
 
   function rowMenu(type, method, index, count) {
@@ -1000,6 +1004,7 @@
   var baseline = { form: null, codes: codesPart(), methods: null };
 
   function isDirty() {
+    if (!baseline) return false; // asked before this script reached its own measure
     if (baseline.form !== null && formPart() !== baseline.form) return true;
     if (codesPart() !== baseline.codes) return true;
     return baseline.methods !== null && methodsPart() !== baseline.methods;
@@ -1009,9 +1014,16 @@
     // The mapping script has started its Xero load by now (its DOMContentLoaded ran first).
     Promise.allSettled([window.xeroDataLoad || Promise.resolve()]).then(function () {
       baseline.form = formPart();
+      updatePettyCashSave();
     });
     Promise.allSettled([methodsLoaded]).then(function () {
       baseline.methods = methodsPart();
+      updatePettyCashSave();
+    });
+    // Save follows every edit. The mapping pickers write their hidden <select>s from script,
+    // which fires no event, so any click, key or blur re-checks too - after its handlers ran.
+    ["input", "change", "click", "mousedown", "keyup", "focusout"].forEach(function (type) {
+      document.addEventListener(type, function () { setTimeout(updatePettyCashSave, 0); }, true);
     });
     if (window.MintyLeaveGuard) window.MintyLeaveGuard.watch(isDirty);
     else console.error("[petty cash settings] the leave guard is missing; unsaved changes are not guarded");
