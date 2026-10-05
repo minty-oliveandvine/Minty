@@ -1,6 +1,7 @@
 # Report download routes: file (S3), statements, attachments ZIP, CSV export.
 # Report download: file (S3 presigned), report Excel, statements,
 # attachments ZIP, CSV export. Logic moved from app.
+import mimetypes
 import os
 import uuid
 import zipfile
@@ -61,18 +62,27 @@ def _report_owning_key(s3_key: str) -> Report | None:
     return db.session.get(Report, report_id)
 
 
+def _receipt_refusal(filename: str, what: str) -> Any:
+    """None when ``filename`` is a receipt of a report this user may see, else the logged
+    404 / 403. Every receipt route asks this first: ``/download`` used to sign ANY key for any
+    signed-in user (other companies' receipts)."""
+    report = _report_owning_key(filename)
+    if report is None:
+        logger.warning(f"{what} refused: no report owns key {filename!r} (user {current_user.id})")
+        return jsonify({"status": "error", "message": "I couldn't find that file."}), 404
+    if not can_view_report(current_user, report):
+        logger.warning(f"{what} refused: user {current_user.id} may not view report {report.id}")
+        return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to look there."}), 403
+    return None
+
+
 @report_bp.route("/download/<path:filename>", methods=["GET"])
 @login_required
 def download_file(filename):
-    # Hands out a presigned S3 link, so it must be a receipt of a report this user may
-    # see. It used to sign ANY key for any signed-in user (other companies' receipts).
-    report = _report_owning_key(filename)
-    if report is None:
-        logger.warning(f"download refused: no report owns key {filename!r} (user {current_user.id})")
-        return jsonify({"status": "error", "message": "I couldn't find that file."}), 404
-    if not can_view_report(current_user, report):
-        logger.warning(f"download refused: user {current_user.id} may not view report {report.id}")
-        return jsonify({"status": "error", "message": "Hmm, it looks like you don't have permission to look there."}), 403
+    # Hands out a presigned S3 link, so it must be a receipt of a report this user may see.
+    refusal = _receipt_refusal(filename, "download")
+    if refusal is not None:
+        return refusal
     try:
         bucket = get_s3_bucket()
         s3_client = get_s3_client()
@@ -96,6 +106,43 @@ def download_file(filename):
             ),
             500,
         )
+
+
+#: The upload limit (expense.html, ``api.expense_upload_files``): nothing larger is a receipt.
+RECEIPT_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
+
+
+@report_bp.route("/preview/<path:filename>", methods=["GET"])
+@login_required
+def preview_file(filename):
+    """A receipt's bytes from this origin, for the Expenses step's preview (2026-10-05).
+
+    ``/download`` redirects to a presigned Backblaze link: fine for ``<img>``, but pdf.js
+    ``fetch``es a PDF, and the bucket's CORS rules are not ours to rely on. Same checks as
+    ``/download``; shown inline, never larger than an upload may be.
+    """
+    refusal = _receipt_refusal(filename, "preview")
+    if refusal is not None:
+        return refusal
+    try:
+        obj = get_s3_client().get_object(Bucket=get_s3_bucket(), Key=filename)
+        size = obj.get("ContentLength")
+        if size is not None and size > RECEIPT_PREVIEW_MAX_BYTES:
+            logger.warning(f"preview refused: {filename!r} is {size} bytes")
+            return jsonify({"status": "error", "message": "That file is too big to preview here."}), 413
+        body = obj["Body"].read(RECEIPT_PREVIEW_MAX_BYTES + 1)
+    except Exception:
+        logger.exception(f"Error reading {filename} for preview")
+        return jsonify({"status": "error", "message": "I couldn't open that file. Mind trying again?"}), 500
+    if len(body) > RECEIPT_PREVIEW_MAX_BYTES:
+        logger.warning(f"preview refused: {filename!r} is over {RECEIPT_PREVIEW_MAX_BYTES} bytes")
+        return jsonify({"status": "error", "message": "That file is too big to preview here."}), 413
+    content_type = obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    resp = make_response(body)
+    resp.headers["Content-Type"] = content_type
+    resp.headers["Content-Disposition"] = "inline"
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
 
 
 @report_bp.route("/admin/download_statements", methods=["GET", "POST"])

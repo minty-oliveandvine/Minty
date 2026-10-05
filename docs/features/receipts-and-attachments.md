@@ -46,6 +46,17 @@ back as a JPEG, and the stored `mime_type` reflects the bytes actually stored).
   for a receipt of a report the person may see (`can_view_report`, via the attachment row or
   the `expenses/<report_id>/` key prefix). The
   API paths that create a line return a 15-minute presigned `preview_url`.
+- **The preview (2026-10-05).** The Expenses step draws the receipt on the page, in the
+  Payment Request app's look (`static/js/receipt_preview.js`): an image as itself, a PDF page by
+  page with **pdf.js** (4.10.38, pinned, from jsDelivr on first use - Flask has no build step;
+  an `<iframe>` shows nothing on Android and only page 1 on iOS). It shows in the Add Expense
+  upload box (a PDF used to leave it empty), as page 1 on the Expense Details tile (a PDF was
+  an icon), and larger in the receipt modal (the whole window, drawn at 2-3x for sharp print)
+  from the upload box's eye, a tile or a click - never a new tab or a black overlay any more.
+  A file that can't be drawn says why (damaged, locked, didn't come through).
+- pdf.js fetches the file, so a saved receipt is read from this origin:
+  `GET /preview/<key>` streams the bytes inline (same checks as `/download`: 404 / 403,
+  logged; at most 10 MB, the upload limit, else 413). `/download` stays the redirect.
 - `POST /download_attachments` (`start_date`, `end_date`, `company`) zips every receipt of
   the period as `<date>/<filename>`. Superuser only: a blank `company` means every company.
 - The Xero publish uploads each receipt to the **Files API** and associates it with the

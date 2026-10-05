@@ -216,6 +216,18 @@ def test_receipt_download_only_for_someone_who_may_see_the_report(shop, client, 
     assert client.get(f"/download/{key}").status_code == 403
 
 
+def test_receipt_preview_only_for_someone_who_may_see_the_report(shop, client, app):
+    owner, entity, stranger = shop
+    F.login(client, owner)
+    key = f"expenses/{_draft_report_id(client, app, entity)}/upload_abc.jpg"
+
+    assert client.get("/preview/expenses/not-a-uuid/x.jpg").status_code == 404
+    F.login(client, stranger)
+    assert client.get(f"/preview/{key}").status_code == 403
+    client.get("/logout")
+    assert client.get(f"/preview/{key}").status_code in (302, 401)
+
+
 def test_all_company_exports_are_superuser_only(shop, client):
     owner, _, _ = shop
     F.login(client, owner)
