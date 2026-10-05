@@ -26,6 +26,17 @@ ports follow the architecture diagram in `architecture/`. Added 2026-09-21: cros
 module per repo, the entry-point table) — applied to the Part 2 repos at Part 2 step 5 and to
 the rest at Part 3 step 4.
 
+**Status 2026-10-02.** Part 2 steps 1–4 are done. Part of step 5 landed early: the dark switch,
+Flask's Jinja module page and billing-frontend's profile pages were removed on 2026-10-01, and
+on 2026-10-02 the env-var consolidation renamed the repos, moved every local port and cut every
+URL variable over to one name per service. **`docs/ENVIRONMENT.md` is now the master copy of
+the repo names, ports and variable names.** Where this document spells an older name
+(`minty-billing-api`, `billing-frontend`, `MINTY_URL`, `HUB_WEB_URL`, `NEXT_PUBLIC_*`, :8004,
+:3002, …), read it through that file's §2 (ports), §8 "Renamed repos" and §9 (old → new).
+Dated entries keep the names that were true on their day. Still open: the rest of step 5
+(listed in its note), step 6, step 7 (the production cutover), launch day (8b), and all of
+Part 3 except the hub pages built early (entity list, My Profile).
+
 ---
 
 
@@ -1715,6 +1726,18 @@ updated to the new name. The DATED ENTRIES above, and the prose of steps 5-7 and
 read `minty-billing-api` and mean this repository — bringing those across is a mechanical pass to
 run WITH the rename, not a rewrite of what was true on the day.
 
+*DONE 2026-10-02, with two differences from the above.* The GitHub repository is
+`minty-subscription-api`, the docker/stack service is `subscription-api`, and the variable is
+`SUBSCRIPTION_API_URL` everywhere: there is no `NEXT_PUBLIC_` twin, because the Next apps
+inline plain names. The e2e variable is `E2E_SUBSCRIPTION_API_URL`. The differences: **the port
+DID move**, to 8000, under the `30N0`/`80N0` scheme of `docs/ENVIRONMENT.md` §2; and the other
+repos were renamed the same day (`minty-payment-request-web/-api`, `minty-onboarding-web/-api`).
+The mechanical pass over this document was not run. Its top-of-file status note maps the old
+names instead. Still to do: rename the local checkout folder `C:\Github\minty-billing-api` (its
+remote already points at `minty-subscription-api`); rename the Render service if it still
+has the old name (not visible from this machine); check the Git connection of every
+Render/Vercel service.
+
 ### 5. The Flask cut, link-outs and repoints
 
 > **Landed early, 2026-10-01 (the user: "remove dark now since it is deployed on a test site so
@@ -1742,8 +1765,48 @@ run WITH the rename, not a rewrite of what was true on the day.
 > - `SUBSCRIPTION_ENABLED` has to be REMOVED from the test site's env, and
 >   `SUBSCRIPTION_SCHEDULER_ENABLED` checked on both Flask and the API (never both on).
 >
-> Still to do here: `links.py` / the env-name hard cut, `store_ro.py`, deleting the engine,
-> `billing_client.fetch_notice`, `test_zz_no_stripe.py`, `test_zz_links.py`.
+> **Also landed early, 2026-10-02 — the env-name hard cut, under different names** (Minty
+> `d495e2d` "Consolidate env vars", plus the matching commit in each repo, merged as PRs). The
+> reference is `docs/ENVIRONMENT.md`:
+> - Repos renamed on GitHub: `minty-subscription-api`, `minty-payment-request-web/-api`,
+>   `minty-onboarding-web/-api`. **The local checkout is still `C:\Github\minty-billing-api`**
+>   (its remote is already `minty-subscription-api`). An empty, non-git `C:\Github\billing-frontend`
+>   folder is left over.
+> - Ports: web `30N0`, API `80N0`. Hub 3000, subscription API 8000, Petty Cash 8010, payment
+>   request 3020/8020, onboarding 3030/8030. Locally Flask stays on **5001**, because the Xero
+>   app only allows `http://localhost:5001/callback`; every local `.env` sets
+>   `PETTY_CASH_URL=http://localhost:5001`.
+> - One URL variable per service, the same name on servers and in browsers, with **no
+>   `NEXT_PUBLIC_` prefix** (`next.config.ts` `env` inlines them): `PETTY_CASH_URL`,
+>   `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL`, `PAYMENT_REQUEST_API_URL`,
+>   `ONBOARDING_WEB_URL`, `ONBOARDING_API_URL`. Rule 10's names (`MINTY_URL`, `HUB_WEB_URL`,
+>   `PAYMENTS_*`, `BILLING_API_URL`, `XERO_API_URL`, `<ID>_INTERNAL_URL`) were NOT used, and
+>   the old names are ignored rather than aliased.
+> - `DATABASE_URL` (schema in `?schema=`) replaced `MINTY_DB_SCHEMA` and the
+>   `POSTGRES_*`/`DB_*`/`LOCAL|RDS_DATABASE_URI` family; `SMTP_URL` + `MAIL_FROM`, `S3_URL` and
+>   `APP_ENV` replaced their families; `XERO_REDIRECT_URI` and `XERO_TOKEN_SERVICE_URL` are
+>   now derived from `PETTY_CASH_URL`.
+> - Not deployed yet: the Render/Vercel variables follow `docs/ENVIRONMENT.md` §8's cutover
+>   checklist (development first, then production, then delete the old names).
+>
+> **Still to do here (rechecked 2026-10-02 against the repos):**
+> - Rule 10's **links modules and guard tests**: there is no `links.py` / `links.ts` and no
+>   `test_zz_links.py` / `links.guard.test.ts` in any repo. They are written in the 2026-10-02
+>   names, not the ones in the prose below.
+> - Minty: `store_ro.py`; delete the engine (`blueprints/subscription/services/*` is all still
+>   there); `stripe` out of `requirements.txt` and `apscheduler` out of `pyproject.toml`;
+>   `STRIPE_*` and `SUBSCRIPTION_SCHEDULER_*` out of Flask's env (`docs/ENVIRONMENT.md` §5
+>   still lists Stripe as required for Petty Cash); `billing_client.fetch_notice`;
+>   `test_zz_no_stripe.py`.
+> - minty-onboarding-api: the Stripe/consent routes and `finalize` still proxy to **Flask**
+>   (`onboarding/api_billing.py` → `core/minty_client`). Repoint them at the subscription API
+>   (it has no `SUBSCRIPTION_API_URL` yet), so that a failed trial start fails finalize.
+> - minty-onboarding-web: the All Set screen has no **Try again**. `commit.current` still allows
+>   one attempt and only toasts a failure.
+> - Name `/api/onboarding/invite` and `/invite/cancel` in the Keep list (see the 2026-09-24 note
+>   in step 4), before `create.py`'s billing block is swept.
+> - Read the variable names in the prose below, and in its **Done when** greps, through
+>   `docs/ENVIRONMENT.md` §9.
 
 **Minty.** Delete `blueprints/subscription/services/*` except the new `store_ro.py`,
 `routes/portal.py`, `cli/subscription_access.py`, `cli/subscription_plans.py`,
@@ -1863,19 +1926,29 @@ read): the Render and Vercel variables of the five repos are edited in step 7's 
 this list, and each app's e2e against the real hosts (the dress-rehearsal pattern) is the check.
 
 **Done when** the Minty suite is green (the new count recorded against `BASELINE.txt`), Minty e2e
-is green live and dark, onboarding e2e 23 in both modes, billing-frontend e2e in both modes, both
+is green, onboarding e2e 23, billing-frontend e2e (one mode each since the dark switch went, 2026-10-01), both
 Django suites green on the harness, `grep -rn STRIPE_SECRET_KEY` across the five repos hits
 only `minty-billing-api`, the rule-10 guard test is green in Minty, `minty-billing-api`,
 `minty-web`, onboarding-backend and billing-frontend, and `grep -rn "FLASK_APP_URL\|
-FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MINTY_WEB_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|
-XERO_TOKEN_SERVICE_URL"` across the eight repos hits only billing-backend and onboarding (Next),
-which cut over at Part 3 step 4.
+FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|
+XERO_TOKEN_SERVICE_URL"` over application code reads no environment variable. *(Rechecked
+2026-10-02: already true. The only hits are the Django setting `XERO_TOKEN_SERVICE_URL`, which
+is now derived from `PETTY_CASH_URL` in minty-onboarding-api and minty-payment-request-api.
+`MINTY_WEB_URL` is dropped from this grep because it is the hub's canonical name again. The
+landing page, outside `docs/ENVIRONMENT.md`'s seven repos, still reads
+`NEXT_PUBLIC_WAITLIST_URL`; it cuts over at Part 3 step 4.)*
 
-### 6. Full-stack proof, live and dark
+### 6. Full-stack proof
 
-1. **Local stack, live** (`SUBSCRIPTION_ENABLED=1` on Minty, onboarding-backend and
-   `minty-billing-api`; `NEXT_PUBLIC_SUBSCRIPTION_ENABLED=1` on both Next apps; Stripe test keys
-   on `minty-billing-api` only): `minty-web` e2e — the five portal specs and the module-page
+*(Rewritten 2026-10-02: there is no dark mode since 2026-10-01, so the former "local stack,
+dark" leg and the dark half of the dress rehearsal are gone. What was worth keeping from them,
+`/healthz` and the CORS headers on an unauthenticated call, is in leg 1. Ports and variable
+names per `docs/ENVIRONMENT.md`.)*
+
+1. **Local stack** (Stripe test keys on the subscription API only; `SUBSCRIPTION_SCHEDULER_ENABLED=0`
+   everywhere, the e2e drives the pass by hand). `/healthz` 200, and an unauthenticated
+   `/api/me/subscriptions` answers 401 carrying `Access-Control-Allow-Origin`.
+   `minty-web` e2e — the five portal specs and the module-page
    journeys (start trial → Flask's gate opens → `manage.py subscriptions run-daily --mode full`
    past `trial_end` with a stubbed clock → module off in Flask → restart quote → cancel);
    onboarding e2e 23 (finalize shows a real `trial_end`); billing-frontend e2e (links present,
@@ -1884,15 +1957,14 @@ which cut over at Part 3 step 4.
 2. **Unit suites:** Minty green (count vs `BASELINE.txt`); `minty-billing-api` green on SQLite
    and on the harness; billing-backend 443 and onboarding-backend green; `audit_models.py` = 0
    for all three Django repos; the replay scenarios identical to the Flask run.
-3. **Local stack, dark:** the four e2e suites dark; every `minty-billing-api` path 404 with CORS
-   headers, `/healthz` 200; Flask's plain module page and its toggle working; `flask modules
+3. **Single-writer greps:** `stripe` only in the subscription API; `apscheduler` nowhere else;
+   `blueprints.subscription.services` imported in Minty only as `store_ro`; `flask modules
    show` unchanged.
-4. **Single-writer greps:** `stripe` only in `minty-billing-api`; `apscheduler` nowhere else;
-   `blueprints.subscription.services` imported in Minty only as `store_ro`.
-5. **Dress rehearsal** as on 2026-09-18 on the Supabase project: restore the latest
-   `backups/minty_pettycashv3_*.dump`, `cutover_checks.py --old-uri`, deploy the five Render
-   services and three Vercel apps dark, seed, the three existing suites plus `minty-web`'s dark
-   spec in real browsers, `audit_models.py` = 0.
+4. **Dress rehearsal** as on 2026-09-18 on the Supabase project: restore the latest
+   `backups/minty_pettycashv3_*.dump`, `cutover_checks.py --old-uri`, deploy the four Render
+   services and three Vercel apps with `docs/ENVIRONMENT.md` §5's variables, seed, the four
+   e2e suites (Minty, onboarding, payment-request web, `minty-web`) in real browsers,
+   `audit_models.py` = 0.
 
 ### 7. The production cutover, dark — the Phase E runbook
 
@@ -1925,9 +1997,10 @@ Cutover day repeats steps 3–8 with the window's backup.
 5. `pg_dump -n pettycashv3 -Fc --no-owner --no-acl` of that result; `pg_restore -d <Supabase>
    --no-owner --no-acl` (no `-n`) — it creates `pettycashv3` beside the existing `pettycashv2`.
    **No rename-swap** (decided 2026-09-16: `pettycashv3` is the permanent name). Every service
-   reads the schema name from `MINTY_DB_SCHEMA` (default `pettycashv3` — `blueprints/shared/schema.py`,
-   `config.settings.DB_SCHEMA` in the three Django services), so no config changes anywhere:
-   leave the variable unset. Drop `pettycashv2.alembic_version`; delete `bills` rows from
+   reads the schema name from `DATABASE_URL`'s `?schema=` (default `pettycashv3`; since
+   2026-10-02 it replaces `MINTY_DB_SCHEMA` — `services/app_runtime/env.py` in Flask,
+   `config/dburl.py` in the Django services), so write `?schema=pettycashv3` into each
+   service's URL (Render does not expand `${DB_SCHEMA}`). Drop `pettycashv2.alembic_version`; delete `bills` rows from
    `django_migrations` (`minty-billing-api` writes none). **Then the module copy** (added
    2026-09-22): the pipeline copies `entity_function` from the old host, whose descriptions are
    the 2026-06 seed's ("Petty cash module - track and reimburse..."); the module settings page
@@ -1942,12 +2015,16 @@ Cutover day repeats steps 3–8 with the window's backup.
    (`billing-frontend`, `onboarding`, **`minty-web`**) — seven apps, the scheduler flag off
    everywhere (step 2's value stays). **Remove `SUBSCRIPTION_ENABLED` and
    `NEXT_PUBLIC_SUBSCRIPTION_ENABLED` from every service's env** - nothing reads them since
-   2026-10-01, and a stale `=0` would only mislead.
+   2026-10-01, and a stale `=0` would only mislead. **Set every service's variables from
+   `docs/ENVIRONMENT.md` §5 before the deploy** (unless §8's checklist already did it). The old
+   names are ignored, not aliased, and the three Next apps inline theirs at build time, so they
+   are rebuilt, not restarted. Check each Render/Vercel service's Git connection after the
+   2026-10-02 repo renames.
 7. Smoke: seed (`FLASK_ENV=production scripts/e2e_seed.py --print` + the disposable onboarding
    entity), then the four e2e suites (Minty, onboarding, billing-frontend, `minty-web`) against
    the production URLs (the 2026-09-18 runs are the template: env names in each suite's helpers;
    add `E2E_XERO=1` only if the e2e shop has been linked to a Demo Company again — the restore
-   drops the link); `curl <BILLING_API>/healthz` = 200 and `curl <BILLING_API>/api/me/subscriptions`
+   drops the link); `curl <SUBSCRIPTION_API_URL>/healthz` = 200 and `curl <SUBSCRIPTION_API_URL>/api/me/subscriptions`
    = 401 (live, unauthenticated) with `Access-Control-Allow-Origin`; the manual
    checklist = `cutover_checks.py --uri <project> --old-uri <rehearsal db>` (the e2e shop's own
    rows are the only expected difference); `audit_models.py` against production = 0 for all three
@@ -2017,11 +2094,11 @@ Cutover day repeats steps 3–8 with the window's backup.
    "no notice", never as a CORS error).
 6. **`SECRET_KEY` shared by four services** until `minty-infra`; a rotation is four Render edits
    at once, verified by behaviour (a Flask token accepted by every Django service).
-7. **The dark 404 contract** is pinned by three e2e suites, `test_char_subscription_dark.py` and
-   onboarding-backend's `test_subscriptions_dark.py`: the pins move, they do not disappear —
-   Minty's shrinks to what Flask still owns; `minty-billing-api` and `minty-web` get their own.
-8. **Five flags must agree at launch** (Minty, onboarding-backend, `minty-billing-api`,
-   billing-frontend, `minty-web`); the safe order is the API first.
+7. ~~**The dark 404 contract**~~ — *gone 2026-10-01 with the dark switch; its tests were
+   deleted.*
+8. ~~**Five flags must agree at launch**~~ — *since 2026-10-01 the only flag is
+   `SUBSCRIPTION_SCHEDULER_ENABLED`, and the rule is that it is never on in Flask and the API at
+   once (step 7, 8b: the API only).*
 9. **E2E identities**: `scripts/e2e_seed.py` stays Flask-side; the live module-page spec needs
    the seeded shop with no subscription rows at the start and must clean up its trial rows (or
    use a disposable entity); Stripe test keys only in the local stack.
@@ -2043,11 +2120,14 @@ Cutover day repeats steps 3–8 with the window's backup.
     5's list *before* the restart, and each app's e2e against the real hosts is the check
     (`NEXT_PUBLIC_*` is inlined at build time, so the two Vercel projects are rebuilt, not
     just restarted). The upside is the reason for the cut: no repo carries a hosted default any
-    more, so a missing variable can never fall back to the apex again.
+    more, so a missing variable can never fall back to the apex again. *(2026-10-02: the cut
+    happened in code under `docs/ENVIRONMENT.md`'s names (`PETTY_CASH_URL`,
+    `PAYMENT_REQUEST_WEB_URL`, …, no `NEXT_PUBLIC_` prefix). The trap is unchanged: the hosted
+    variables must be set from that file's §5 before each service's next deploy.)*
 
 ## Verification (Part 2 as a whole)
 
-Steps 1–5's "done when" gates, then step 6 in full (live and dark on the local stack, the unit
+Steps 1–5's "done when" gates, then step 6 in full (the local stack, the unit
 suites, the single-writer greps, the dress rehearsal on the Supabase project), then step 7 on
 cutover day. The scaffolds of 2026-09-21 are verified the moment the workstation has Python 3.13,
 Node 22 and PostgreSQL 18: `pytest` green on SQLite and on the harness for `minty-billing-api`
@@ -2092,7 +2172,11 @@ and `-service` says nothing. The domain word matches the subdomain where one exi
 `billing` was ambiguous beside `payments` — two different domains, one of them the other's
 homonym, which is the confusion this convention exists to prevent (today's misnamed
 `billing-backend` becomes `minty-payments-api`). The rename lands BEFORE Part 2 step 5; see that
-step's entry for why. **`accounts`** for auth +
+step's entry for why. *(Done 2026-10-02, and the payments pair took the module's own name,
+**`payment-request`**, not `payments`: `minty-payment-request-web` / `minty-payment-request-api`,
+alongside `minty-onboarding-web` / `minty-onboarding-api`. Wherever this Part says
+`minty-payments-*`, `payments-web` or `PAYMENTS_*_URL`, read `minty-payment-request-*` and
+`PAYMENT_REQUEST_*_URL`; `docs/ENVIRONMENT.md` §8 has the table.)* **`accounts`** for auth +
 users + companies is still a recommendation (alternative `identity`) — say so if you want the
 alternative.
 
@@ -2487,6 +2571,28 @@ cannot serve: it retires with those pages in Part 3, not in the lift. Until then
 minty-web's menu or profile is made in all three.
 
 ## Links between services — one shape (rule 10, added 2026-09-21)
+
+> **The names and ports in this section were superseded on 2026-10-02** by `docs/ENVIRONMENT.md`,
+> which the env-var consolidation put into every repo except the landing page:
+> - **One name per service, the same on both sides, no `NEXT_PUBLIC_` twins.** `minty` →
+>   `PETTY_CASH_URL`; `hub-web` → `MINTY_WEB_URL` (kept, not `HUB_WEB_URL`); `subscription-api`
+>   → `SUBSCRIPTION_API_URL`; `payments-web/-api` → `PAYMENT_REQUEST_WEB_URL` / `_API_URL`;
+>   `onboarding-web/-api` → `ONBOARDING_WEB_URL` / `_API_URL`.
+> - **Public vs internal is inverted.** There is no `<ID>_INTERNAL_URL`. `PETTY_CASH_URL` may be
+>   the internal docker hostname, and the subscription API alone has an optional
+>   `PETTY_CASH_PUBLIC_URL` for the browser-facing origin.
+> - **No `XERO_API_URL` yet.** The token-service URL is derived as
+>   `PETTY_CASH_URL/api/internal/xero/token`, so Part 3 step 3 introduces `XERO_API_URL` (in the
+>   new style) when `minty-xero-api` exists.
+> - **Ports** follow §2's `30N0` / `80N0` slots, not the table below.
+> - **The rename map below is done** for those seven repos, under the new names. The landing
+>   page (`NEXT_PUBLIC_WAITLIST_URL`, `NEXT_PUBLIC_SITE_URL`) is still owed at Part 3 step 4.
+>
+> **Still standing:** one links module per repo as the only reader of the URL variables and the
+> only place another service's path is spelled; the entry-point table; the handoff envelope;
+> localhost as the only default in code; and the guard test per repo. Checked 2026-10-02: no
+> repo has a links module (`links.py` / `links.ts`) or a links guard test yet. Build them in the
+> new names.
 
 **Why.** Eight repos link to each other — handoffs with a token, redirects back, API bases,
 email links, CORS origins — and on 2026-09-21 each did it its own way. Minty's origin had
@@ -2999,7 +3105,7 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 1. `SECRET_KEY` identical across every Python service; `minty-accounts-api` is the only minter (Flask until step 5). `minty-billing-api` verifies only (Part 2).
 2. `minty-db` is the only repo with a `migrations/` directory and the only process that runs `migrate`. Every service imports `minty_db.models` with `MINTY_DB_OWNER = False`; no service declares its own model for a `pettycashv3` table. Writes follow the ownership map in `minty-db`'s README.
 3. Outbound calls to another service go through one client module per service (`core/minty_client.py` pattern), never scattered `requests` calls.
-4. The schema name is a setting, never a literal: `MINTY_DB_SCHEMA` (default `pettycashv3`) is the one variable every service reads — `minty-db` inherits it from Part 1's `blueprints/shared/schema.py` / `config.settings.DB_SCHEMA` — and a guard test per repo fails on any other spelling; raw SQL is schema-qualified through it.
+4. The schema name is a setting, never a literal: `MINTY_DB_SCHEMA` (default `pettycashv3`) is the one variable every service reads — `minty-db` inherits it from Part 1's `blueprints/shared/schema.py` / `config.settings.DB_SCHEMA` — and a guard test per repo fails on any other spelling; raw SQL is schema-qualified through it. *(Since 2026-10-02 the schema is `DATABASE_URL`'s `?schema=` parameter, not `MINTY_DB_SCHEMA`; `docs/ENVIRONMENT.md` §4. The rule is the same.)*
 5. Only `minty-xero-api` holds `XERO_CLIENT_ID/SECRET` (Flask until step 3).
 6. **Ports: one digit per domain, shared by its API and its frontend** — `800d` for the `-api`, `300d` for the `-web`, the digits of the architecture diagram (`architecture/minty-architecture.drawio`):
 
@@ -3016,11 +3122,13 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
    | — | `minty-legacy` | 5001 | |
    | — | PostgreSQL (stack) | host **5433** → container 5432 | |
 
-   Local dev only — Render and Vercel inject `$PORT`. **No port moves remain**: the payments pair keeps 8000/3000, and the two Part 2 services were added to `docker/stack/docker-compose.yml` with the scaffolds (`billing-api` 8004, `minty-web` 3002). `docker/stack/docker-compose.yml` is the one place the whole system is wired; every new service adds itself there with `${<NAME>_PATH:-../../../<repo>}` and `${<NAME>_HOST_PORT:-800d}`, and every hardcoded `localhost:<port>` fallback in code must agree with it. **The stack's Postgres moves to host port 5433** (container stays 5432): this machine already has a native Postgres on 5432 (`production-backup` lives there), and the compose default colliding with it is the first item in `docker/stack/README.md §8` — flip the default so a fresh checkout works beside a local Postgres, and invert the `.env.example` comment (override to 5432 only if you have none).
+   > **Superseded 2026-10-02: every port moved.** The scheme is now one slot `N` per domain, web `30N0` / API `80N0` (`docs/ENVIRONMENT.md` §2): 0 = hub + subscription (`minty-web` 3000, `minty-subscription-api` 8000), 1 = Petty Cash (Flask 8010; **5001 locally**, the only callback the Xero app allows), 2 = payment request (3020 / 8020), 3 = onboarding (3030 / 8030); the stack's Postgres stays on host 5433. The table above is history. Slots for the Part 3 services (`accounts`, `xero`, `pettycash` web/API, `www`) are not assigned yet: assign each in `docs/ENVIRONMENT.md` when its repo is created.
+
+   Local dev only — Render and Vercel inject `$PORT`. ~~**No port moves remain**: the payments pair keeps 8000/3000, and the two Part 2 services were added to `docker/stack/docker-compose.yml` with the scaffolds (`billing-api` 8004, `minty-web` 3002).~~ `docker/stack/docker-compose.yml` is the one place the whole system is wired; every new service adds itself there with `${<NAME>_PATH:-../../../<repo>}` and `${<NAME>_HOST_PORT:-800d}`, and every hardcoded `localhost:<port>` fallback in code must agree with it. **The stack's Postgres moves to host port 5433** (container stays 5432): this machine already has a native Postgres on 5432 (`production-backup` lives there), and the compose default colliding with it is the first item in `docker/stack/README.md §8` — flip the default so a fresh checkout works beside a local Postgres, and invert the `.env.example` comment (override to 5432 only if you have none).
 7. Frontends route through one cutover map per app (`apiRoutes.ts`), never inline base URLs; the map's bases come from the links module of rule 10.
 8. `MAINTENANCE_MODE` is honoured by every `-api` and every `-web` (from the shared packages, step 2); a cutover window is held by that switch, never by improvisation.
 9. Only `minty-billing-api` holds `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` (since Part 2); Flask has none, and a guard test in Minty keeps it that way.
-10. **Links between services have one shape** (section above, added 2026-09-21): every other service is a service id with one origin variable per side — `<ID>_URL` on servers, `NEXT_PUBLIC_<ID>_URL` in browsers, `<ID>_INTERNAL_URL` only for server-to-server inside `docker/stack`; one links module per repo (`blueprints/shared/links.py`, `core/links.py`, `lib/links.ts`) is the only reader of those variables and the only place another service's path is spelled; the paths it may spell are the entry-point table in this plan; `localhost:<port>` is the only default in code and no hosted hostname ever is; the three landings take the one handoff envelope. A guard test per repo (`test_zz_links.py` / `links.guard.test.ts`) fails on any other origin read, localhost literal or hosted hostname. Renames are hard cuts at the repo's own deploy step — no alias is read.
+10. **Links between services have one shape** (section above, added 2026-09-21): every other service is a service id with one origin variable per side — `<ID>_URL` on servers, `NEXT_PUBLIC_<ID>_URL` in browsers, `<ID>_INTERNAL_URL` only for server-to-server inside `docker/stack`; one links module per repo (`blueprints/shared/links.py`, `core/links.py`, `lib/links.ts`) is the only reader of those variables and the only place another service's path is spelled; the paths it may spell are the entry-point table in this plan; `localhost:<port>` is the only default in code and no hosted hostname ever is; the three landings take the one handoff envelope. A guard test per repo (`test_zz_links.py` / `links.guard.test.ts`) fails on any other origin read, localhost literal or hosted hostname. Renames are hard cuts at the repo's own deploy step — no alias is read. *(Variable names since 2026-10-02: one plain `<SERVICE>_URL` per service on both sides, per `docs/ENVIRONMENT.md` — see the note at the top of the section.)*
 11. **Time has three layers** (section "Time" above, added 2026-09-22): the server stores and reasons in **UTC** (`timestamptz`, `USE_TZ = True`, `clock.now()` aware, a naive datetime is a bug) and uses the entity's zone only for prose written for a person and for a calendar day of that business, through `minty_shared.time` (`entity_zone`, `today_for`, `format_for_person`, the one `DEFAULT_ENTITY_TIMEZONE = "Asia/Hong_Kong"`); the wire carries **ISO instants with offset and a resolved `timezone`** on every entity-bearing payload and never a formatted date; every `-web` renders every date through `<ZonedTime>` from `minty-shared-ts`'s `lib/time.ts` — visible text in the **entity's zone**, the hover `title` the same instant in the **browser's zone**. The zone is written by the onboarding wizard and the entity settings page into `entities.timezone`; `NULL` is Hong Kong. A guard test per repo (`test_zz_time.py` / `lib/time.guard.test.ts`) fails on any other `strftime`, `ZoneInfo`, `toLocale*`, `Intl.DateTimeFormat` or `Asia/Hong_Kong` literal.
 
 ## Sequencing
@@ -3032,7 +3140,7 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 | 1 | Housekeeping + CI + infra | `.github`, `minty-infra` | every trunk protected with a green CI run; `terraform plan` no-op; the subscription pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`) by Terraform |
 | 2 | **`minty-db` adopts Part 1's schema** + shared-py + e2e scaffold (requires Part 2 shipped) | `minty-db`, `minty-shared-py`, `minty-e2e` | `--fake-initial` on every environment; all three Django services on `minty_db.models`; cold start from empty works; first two E2E journeys green |
 | 3 | `minty-xero-api` | `minty-xero-api` | `XERO_API_URL` repointed; Xero E2E journey + `onboarding/e2e/xero.spec.ts` green |
-| 4 | `minty-web` grows login / dashboard / profile / settings + `minty-shared-ts` + renames | `minty-shared-ts` | both frontends build on `@minty/shared`; the payments pair renamed; every repo on the canonical `*_URL` names with its rule-10 guard green; every date on every `-web` is a `<ZonedTime>` and the APIs emit no formatted date (rule 11 guards green); app-local E2E green |
+| 4 | `minty-web` grows login / dashboard / profile / settings + `minty-shared-ts` + renames | `minty-shared-ts` | both frontends build on `@minty/shared`; the payments pair renamed (done 2026-10-02); every repo on the canonical `*_URL` names (done 2026-10-02 except the landing page) with its rule-10 guard green; every date on every `-web` is a `<ZonedTime>` and the APIs emit no formatted date (rule 11 guards green); app-local E2E green |
 | 5 | `minty-accounts-api` (single JWT minter) | `minty-accounts-api` | every E2E journey green from a cold-started DB |
 | 6 | Petty cash API + web | `minty-pettycash-api`, `minty-pettycash-web` | Xero → report → publish journey green, including its partial-publish leg (one line rejected by Xero → badge reads **Partially published**, republish retries only that line) |
 | 7 | Retire Flask | — | nothing routes to :5001 |
@@ -3068,7 +3176,7 @@ orders anything here.
    - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a `minty-e2e` journey (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
    - `minty-e2e`: Playwright scaffold + the stack CI workflow (cold-started from empty, since that now works) + the first two journeys (sign-up→finalize, connect Xero→publish report), which are the ones steps 3 and 5 will break if they go wrong. Contract-type generation into `minty-shared-ts` starts here too.
 3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_API_URL` (rule 10's name for today's `XERO_TOKEN_SERVICE_URL`; the `/api/internal/xero/token` entry moves to the `xero-api` row), then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: `minty-e2e` Xero journey + `onboarding/e2e/xero.spec.ts`.
-4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over behind `MINTY_WEB_HUB` (off unless set); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
+4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over behind `MINTY_WEB_HUB` (off unless set); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. *(2026-10-02: the renames (as `minty-payment-request-web/-api` and `minty-onboarding-web/-api`), the port moves and the env-name cut for billing-backend and onboarding are already done, under `docs/ENVIRONMENT.md`'s names. Still owed here: the landing page's cut, the links modules and guard tests, and payment-request-api's three `requests` sites onto one client module.)* **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
    notification moves with the entity list** (decided 2026-09-24): 07-I / A-07 (declined), A-08
    (expired) and 07-L (accepted) fire today over `/subscription` (Subscription & Billing) only
    because that is the one page a payer owns that `minty-web` serves — a handover is news about
@@ -3107,7 +3215,7 @@ route groups, a cutover map on the frontend, models from `minty-db`, and "verifi
 - `onboarding/lib/apiRoutes.ts` ends with an empty "proxied to Flask" block and `flaskBase.ts` is deleted; `onboarding/e2e` passes against the full stack after each of steps 3 and 5.
 - Flipping `MAINTENANCE_MODE` in `minty-infra` puts every app on its maintenance page and makes every API refuse writes, and `minty-e2e` has a journey that proves it.
 - Each service's README states the ten cross-cutting rules; `grep -rn XERO_CLIENT_SECRET` across the org hits only `minty-xero-api` (and `minty-legacy` until step 3); `grep -rn STRIPE_SECRET_KEY` hits only `minty-billing-api`.
-- Rule 10 holds across the org: every repo's links guard test is green; `grep -rn "onrender.com\|vercel.app\|oliveandvinehk.com\|dailyminty.com"` over application code (not docs, not `minty-infra`) hits nothing; `grep -rn "localhost:[0-9]"` outside links modules, tests and `.env.example` hits nothing; `grep -rn "FLASK_APP_URL\|FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MINTY_WEB_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|XERO_TOKEN_SERVICE_URL\|MINTY_PUBLIC_URL\|WAITLIST_URL"` hits nothing outside this document; every `*_URL` in every `.env.example` is a row of the service table.
+- Rule 10 holds across the org: every repo's links guard test is green; `grep -rn "onrender.com\|vercel.app\|oliveandvinehk.com\|dailyminty.com"` over application code (not docs, not `minty-infra`) hits nothing; `grep -rn "localhost:[0-9]"` outside links modules, tests and `.env.example` hits nothing; `grep -rn "FLASK_APP_URL\|FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|MINTY_PUBLIC_URL\|WAITLIST_URL\|NEXT_PUBLIC_.*_URL"` hits nothing outside this document and `docs/ENVIRONMENT.md` (since 2026-10-02 `MINTY_WEB_URL` is canonical, and `XERO_TOKEN_SERVICE_URL` survives only as a derived Django setting until `minty-xero-api`); every `*_URL` in every `.env.example` is a row of the service table.
 - Rule 11 holds across the org (from step 4): `grep -rn "Asia/Hong_Kong"` over application code hits only `minty_shared/time.py` and `minty-shared-ts/lib/time.ts` (and `minty-legacy` until step 7); every `-web`'s `time.guard.test.ts` and every `-api`'s `test_zz_time.py` is green; `grep -rn "http_date\|strftime" minty-billing-api/billing/api minty-billing-api/billing/services` hits nothing outside the shared helper's callers; `docs/openapi.json` carries no `"05 Oct 2026"`-shaped example.
 - Rule 11 is visible: with Playwright's `timezoneId: "America/Los_Angeles"` and an entity whose `timezone` is `Asia/Hong_Kong`, a trial ending at `2026-10-04T18:00:00Z` reads **5 Oct 2026** on the module page, "N days remaining" counts from the Hong Kong day, and the `<time>`'s `title` reads **4 Oct 2026, 11:00 (America/Los_Angeles)**; an entity created through the wizard in that browser has `entities.timezone = 'America/Los_Angeles'`, and the same trial reads **4 Oct 2026** for it.
 

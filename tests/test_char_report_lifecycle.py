@@ -159,6 +159,28 @@ def test_opening_creates_a_draft_visible_in_draft_totals(shop, client):
     assert totals["status"] == "success", totals
 
 
+def test_the_withdrawal_source_is_kept_on_every_save_of_the_opening(shop, client, app):
+    # Re-saving an existing draft stored the choice only when the form also carried a hidden
+    # bank_account, which was empty for a company with no petty-cash account set (2026-10-05).
+    from models.db import Report
+
+    owner, entity = shop
+    F.login(client, owner)
+
+    def source():
+        with app.app_context():
+            row = Report.query.filter_by(entity_id=entity.id, transaction_date=REPORT_DATE).one()
+            return row.cash_addition_type
+
+    _post(client, "/report/opening", entity_id=entity.id, transaction_date=F.iso(REPORT_DATE),
+          opening_balance="1000.00", cash_addition="50.00", withdrawal="company", action_type="save_next")
+    assert source() == "company"
+
+    _post(client, "/report/opening", entity_id=entity.id, transaction_date=F.iso(REPORT_DATE),
+          opening_balance="1000.00", cash_addition="50.00", withdrawal="personal", action_type="save_next")
+    assert source() == "personal"
+
+
 def test_draft_totals_404_before_any_report_exists(shop, client):
     owner, entity = shop
     F.login(client, owner)

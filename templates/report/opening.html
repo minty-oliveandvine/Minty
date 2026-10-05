@@ -200,16 +200,14 @@
               <label class="block text-sm font-medium text-gray-700 mb-2">Withdrawal from:</label>
               <div class="space-y-2">
                 <label class="flex items-center">
-                  <input type="radio" name="withdrawal" value="company" class="w-4 h-4 text-[#54D3DA] border-gray-300 focus:ring-[#54D3DA] {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}opacity-50 cursor-not-allowed{% endif %}" onchange="toggleBankAccount(); markWithdrawalDirty()" {% if report.withdrawal == 'company' %}checked{% endif %} {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}disabled{% endif %}/>
+                  <input type="radio" name="withdrawal" value="company" class="w-4 h-4 text-[#54D3DA] border-gray-300 focus:ring-[#54D3DA] {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}opacity-50 cursor-not-allowed{% endif %}" onchange="markWithdrawalDirty()" {% if report.withdrawal == 'company' %}checked{% endif %} {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}disabled{% endif %}/>
                   <span class="ml-2 text-sm {% if current_draft and current_draft.status != 'draft' %}text-gray-500{% else %}text-gray-700{% endif %}">Company Bank</span>
                 </label>
                 <label class="flex items-center">
-                  <input type="radio" name="withdrawal" value="personal" class="w-4 h-4 text-[#54D3DA] border-gray-300 focus:ring-[#54D3DA] {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}opacity-50 cursor-not-allowed{% endif %}" onchange="toggleBankAccount(); markWithdrawalDirty()" {% if report.withdrawal == 'personal' or not report.withdrawal %}checked{% endif %} {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}disabled{% endif %}/>
+                  <input type="radio" name="withdrawal" value="personal" class="w-4 h-4 text-[#54D3DA] border-gray-300 focus:ring-[#54D3DA] {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}opacity-50 cursor-not-allowed{% endif %}" onchange="markWithdrawalDirty()" {% if report.withdrawal == 'personal' or not report.withdrawal %}checked{% endif %} {% if current_draft and current_draft.status != 'draft' and not is_report_edit_mode %}disabled{% endif %}/>
                   <span class="ml-2 text-sm {% if current_draft and current_draft.status != 'draft' %}text-gray-500{% else %}text-gray-700{% endif %}">Personal</span>
                 </label>
               </div>
-              <!-- Hidden input for bank account (automatically set based on preset) -->
-              <input type="hidden" name="bank_account" id="bank_account_hidden" value="{% if report.withdrawal == 'company' %}{{main_bank_account}}{% else %}{{main_bank_account}}{% endif %}">
               {% if is_report_edit_mode %}
               <div class="flex justify-end mt-3">
                 <button type="button" onclick="saveWithdrawalSource()"
@@ -431,25 +429,11 @@
         }
       }
 
-      // Function to toggle bank account (automatically use preset)
-      function toggleBankAccount() {
-        const companyBankRadio = document.querySelector(
-          'input[value="company"]'
-        );
-        const bankAccountHidden = document.getElementById("bank_account_hidden");
-
-        // Always use the preset main bank account
-        if (bankAccountHidden && companyBankRadio) {
-          bankAccountHidden.value = "{{company_bank}}";
-        }
-      }
-
       // Save only the "withdrawal from" source for a submitted report
       // (constrained edit mode). The cash amount is never touched here.
       function saveWithdrawalSource() {
         const selected = document.querySelector('input[name="withdrawal"]:checked');
         if (!selected) { showFlashMessages('Please choose where the cash was withdrawn from.', 'error'); return; }
-        const bankAccountHidden = document.getElementById('bank_account_hidden');
         const csrfToken = document.querySelector('input[name="csrf_token"]');
         const reportId = '{{ current_draft.id }}';
         const formData = new FormData();
@@ -480,58 +464,6 @@
       // switches the radio without clicking "Save withdrawal".
       function markWithdrawalDirty() {
         withdrawalSourceDirty = true;
-      }
-
-      // Calculate opening balance based on inputs
-      function calculateOpeningBalance() {
-        const startingBalanceEl = document.getElementById('startingCashBalance');
-        const startingBalance = startingBalanceEl
-          ? parseFloat(startingBalanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0
-          : 0;
-        const additions =
-          parseFloat(
-            document.querySelector('input[placeholder="Please enter any cash addition"]')
-              .value.replace(/,/g, '')
-          ) || 0;
-        const openingBalance = startingBalance + additions;
-
-        // Only auto-calculate if Opening Balance field is empty or hasn't been manually edited
-        const openingBalanceField = document.querySelector(
-          'input[placeholder="Opening Cash Balance"]'
-        );
-        if (!openingBalanceField.dataset.manuallyEdited) {
-          // Format with commas for display
-          const formattedValue = openingBalance.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          });
-          openingBalanceField.value = formattedValue;
-        }
-
-      }
-
-      // Function to update adjusted opening balance
-      function updateAdjustedOpeningBalance() {
-        const startingBalanceEl = document.getElementById('startingCashBalance');
-        const startingBalance = startingBalanceEl
-          ? parseFloat(startingBalanceEl.textContent.replace(/[^0-9.-]/g, '')) || 0
-          : 0;
-        const additions =
-          parseFloat(
-            document.querySelector('input[placeholder="Please enter any cash addition"]')
-              .value.replace(/,/g, '')
-          ) || 0;
-        const adjustedOpeningBalance = startingBalance + additions;
-
-        // Set the value of the adjusted_opening_balance input with comma formatting
-        const adjustedOpeningBalanceField = document.querySelector('input[name="adjusted_opening_balance"]');
-        if (adjustedOpeningBalanceField) {
-          const formattedValue = adjustedOpeningBalance.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          });
-          adjustedOpeningBalanceField.value = formattedValue;
-        }
       }
 
       function updateOpeningCashBalance() {
@@ -598,9 +530,6 @@
 
       // Add event listeners for real-time calculation
       document.addEventListener("DOMContentLoaded", function () {
-        // Calculate opening balance on page load to update sticky summary
-        calculateOpeningBalance();
-        
         updateOpeningCashBalance();
         
         // Format opening balance with commas
@@ -614,22 +543,6 @@
             });
           }
         }
-        
-        // Initialize bank account to preset value
-        toggleBankAccount();
-        
-        const inputs = document.querySelectorAll('input[type="number"], input[type="text"]');
-        inputs.forEach((input) => {
-          input.addEventListener("input", calculateOpeningBalance);
-        });
-
-        // Mark Opening Balance as manually edited when user types in it
-        const openingBalanceField = document.querySelector(
-          'input[placeholder="Opening Cash Balance"]'
-        );
-        openingBalanceField.addEventListener("input", function () {
-          this.dataset.manuallyEdited = "true";
-        });
 
         // Smart scroll to center when input is focused
         function scrollToCenter(element) {
@@ -851,7 +764,7 @@ document.addEventListener('submit', function(e){
     else if(path.includes('/expense')) key='pending_expenses';
     else if(path.includes('/deposit')) key='pending_deposit';
     else if(path.includes('/opening')) key='pending_opening';
-    else if(path.includes('/cash_count')) key='pending_cash_count';
+    else if(path.includes('/cash-count')) key='pending_cash_count';
     else if(path.includes('/ending')) key='pending_ending';
 
     const btn = e.submitter || form.querySelector('button[type="submit"]');

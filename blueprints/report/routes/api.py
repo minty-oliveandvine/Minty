@@ -1221,8 +1221,7 @@ def report_edit_withdrawal(id):
                 400,
             )
         # The bank account is not per report: a company withdrawal always comes from
-        # the main bank account on entity_pettycash_settings (schema item 13), which is
-        # what the form's hidden field carries too.
+        # the main bank account on entity_pettycash_settings (schema item 13).
         report.cash_addition_type = withdrawal_type
 
         # Editing diverges the report from Xero — back to "submitted" while

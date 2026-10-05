@@ -816,7 +816,7 @@ document.addEventListener('submit', function(e){
     else if(path.includes('/expense')) key='pending_expenses';
     else if(path.includes('/deposit')) key='pending_deposit';
     else if(path.includes('/opening')) key='pending_opening';
-    else if(path.includes('/cash_count')) key='pending_cash_count';
+    else if(path.includes('/cash-count')) key='pending_cash_count';
     else if(path.includes('/ending')) key='pending_ending';
 
     const btn = e.submitter || form.querySelector('button[type="submit"]');

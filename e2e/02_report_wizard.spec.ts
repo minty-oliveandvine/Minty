@@ -28,10 +28,16 @@ test.describe.serial('report wizard', () => {
     await login(page, creds);
   });
 
-  const stepUrl = (step: string) => `/report/${step}?entity_id=${entityId}&transaction_date=${day}`;
+  // The company's own address since 2026-10-05: the full id 308s to /entity/<shortid>/<name>/...
+  const stepUrl = (step: string) => `/entity/${entityId}/reports/new/${step}?transaction_date=${day}`;
+  /** A wizard step under the company's address, before (`new`) or after the report has an id. */
+  const atStep = (step: string) => new RegExp(`/entity/[0-9a-f]{8}/[^/]+/reports/(new|[0-9a-f-]{36})/${step}(\\?|$)`);
   const next = (page: Page) => page.getByRole('button', { name: /save.*next|next|continue/i }).first();
 
   test('opening: cash addition is accepted and the opening balance updates live', async ({ page }) => {
+    // the page's own script runs to the end (until 2026-10-05 it threw on a removed field)
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(stepUrl('opening'));
     await expect(page.locator('input[name="transaction_date"]')).toHaveValue(day);
     await expect(page.locator('#startingCashBalance')).toHaveText(moneyRegex(OPENING));
@@ -39,7 +45,8 @@ test.describe.serial('report wizard', () => {
     await page.locator('input[name="cash_addition"]').blur();
     await expect(page.locator('#openingCashBalance')).toHaveText(moneyRegex(OPENING + ADDITION));
     await next(page).click();
-    await expect(page).toHaveURL(/\/report\/sale/);
+    await expect(page).toHaveURL(atStep('sale'));
+    expect(errors).toEqual([]);
   });
 
   test('sales: per-method amounts and a live total', async ({ page }) => {
@@ -54,7 +61,7 @@ test.describe.serial('report wizard', () => {
     await expect(page.locator('#totalDeliverySales')).toHaveText(moneyRegex(FOODPANDA));
     await expect(page.locator('#totalCashSales')).toHaveText(moneyRegex(CASH));
     await next(page).click();
-    await expect(page).toHaveURL(/\/report\/expense/);
+    await expect(page).toHaveURL(atStep('expense'));
   });
 
   test('expenses: one line with a receipt is added and totalled', async ({ page }) => {
@@ -74,7 +81,7 @@ test.describe.serial('report wizard', () => {
     await expect(page.getByText('Tape').first()).toBeVisible();
     await expect(page.getByText(moneyRegex(EXPENSE)).first()).toBeVisible();
     await next(page).click();
-    await expect(page).toHaveURL(/\/report\/deposit/);
+    await expect(page).toHaveURL(atStep('deposit'));
   });
 
   test('expenses: the stored receipt renders when the line is reopened', async ({ page }) => {
@@ -98,11 +105,11 @@ test.describe.serial('report wizard', () => {
     await page.locator('#bank_deposit').fill(String(DEPOSIT));
     await page.locator('#bank_deposit').blur();
     await next(page).click();
-    await expect(page).toHaveURL(/\/report\/cash_count/);
+    await expect(page).toHaveURL(atStep('cash-count'));
   });
 
   test('cash count: denominations entered in the calculator add up to the closing balance', async ({ page }) => {
-    await page.goto(stepUrl('cash_count'));
+    await page.goto(stepUrl('cash-count'));
     // 825 = 500 + 100x3 + 20 + 5  (the counts live in a calculator modal; applying it writes
     // the hidden actual_cash[...] fields the form posts)
     const counts: Record<string, string> = { '500': '1', '100': '3', '20': '1', '5': '1' };
@@ -127,7 +134,7 @@ test.describe.serial('report wizard', () => {
     await expect(page.locator('#discrepancyDescription')).toHaveAttribute('placeholder', /no discrepancy/i);
     await page.locator('#safeBoxBalance').fill('0');
     await next(page).click();
-    await expect(page).toHaveURL(/\/report\/ending/);
+    await expect(page).toHaveURL(atStep('ending'));
   });
 
   test('cash count: the Actual Cash Balance field shows the applied total', async ({ page }) => {
@@ -136,7 +143,7 @@ test.describe.serial('report wizard', () => {
       + 'stripping only "$", but the page renders the currency CODE ("HKD"), so parseFloat gets NaN and the '
       + 'field shows HKD0.00. Display only - the posted counts and discrepancy come from the hidden fields. '
       + 'Fix in phase C4 (the page is rewritten for report_cash_count anyway); this test then starts passing.');
-    await page.goto(stepUrl('cash_count'));
+    await page.goto(stepUrl('cash-count'));
     // a reload shows the SAVED total correctly (rendered server-side); the defect is the value the
     // page writes right after Apply, so apply the calculator again and read the field before any reload
     await page.locator('#calculatorBtn').click();
@@ -155,7 +162,7 @@ test.describe.serial('report wizard', () => {
     await expect(summary).toContainText(moneyRegex(EXPENSE));
     await expect(summary).toContainText(moneyRegex(CLOSING));
     await page.locator('#finishReportBtn').click();
-    await expect(page).toHaveURL(/\/report\/[0-9a-f-]{36}\/submitted/);
+    await expect(page).toHaveURL(atStep('submitted'));
   });
 
   test('history and detail show the posted report with the same figures', async ({ page }) => {
@@ -171,7 +178,7 @@ test.describe.serial('report wizard', () => {
     await expect(results).toContainText(/by Tess/);
     // "View Report" opens the ending summary of the posted report
     await page.getByRole('link', { name: /view report/i }).first().click();
-    await expect(page).toHaveURL(/\/entity\/[0-9a-f-]{36}\/ending\/[0-9a-f-]{36}/);
+    await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/reports\/([0-9a-f-]{36})\/summary/);
     const detail = page.locator('body');
     // the summary: total sales, the three-way split, total expenses, closing cash balance
     for (const amount of [CASH + VISA + ALIPAY + FOODPANDA, VISA + ALIPAY, FOODPANDA, CASH, EXPENSE, CLOSING]) {
