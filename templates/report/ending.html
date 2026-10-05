@@ -148,7 +148,7 @@ document.addEventListener('submit', function(e){
       <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
         <div class="flex-1 flex justify-start min-w-0">
           {% if not is_shared_link %}
-          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="/entity/{{org.id}}" onclick="PageTransition.navigateWithFade(this.href); return false;">
+          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="{{ url_for('entity.report_dashboard', id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
             </svg>
@@ -222,7 +222,7 @@ document.addEventListener('submit', function(e){
           <span class="text-sm sm:text-medium font-inter text-gray-300">{{ currency_symbol }}</span>
         </div>  
         <!-- Form Content -->
-        <form id="endingForm" method="post" action="{{ url_for('report.report_ending') }}?entity_id={{ org.id }}&transaction_date={{ transaction_date.strftime('%Y-%m-%d') if transaction_date else '' }}">
+        <form id="endingForm" method="post" action="{{ url_for('report.report_ending', entity_id=org.id) }}?transaction_date={{ transaction_date.strftime('%Y-%m-%d') if transaction_date else '' }}">
           <input type="hidden" name="csrf_token" value="{{csrf_token()}}">
           <input type="hidden" name="entity_id" value="{{ org.id }}">
         
@@ -696,7 +696,7 @@ document.addEventListener('submit', function(e){
                constrained inline mode, which edits only non-balance fields. #}
             {% if not is_shared_link %}
             {% if is_report_edit_mode %}
-            <a href="{{ url_for('report.entity_report_history', entity_id=request.args.get('entity_id') or org.id) }}"
+            <a href="{{ url_for('report.entity_report_history', entity_id=org.id) }}"
               class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -704,7 +704,7 @@ document.addEventListener('submit', function(e){
               <span>Done editing</span>
             </a>
             {% else %}
-            <a href="{{ url_for('report.report_ending', id=current_draft.id, entity_id=request.args.get('entity_id') or org.id, report_edit='true') }}"
+            <a href="{{ url_for('report.report_ending', id=current_draft.id, entity_id=org.id, report_edit='true') }}"
               class="bg-[#567A5C] flex font-medium gap-2 hover:bg-[#567A5C]/80 hover-scale-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full mt-6 no-underline">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
@@ -1078,7 +1078,7 @@ document.addEventListener('submit', function(e){
             
             // Wait a moment to show the success message, then redirect
             setTimeout(() => {
-              window.location.href = '{{ url_for("entity.report_dashboard", id=request.args.get("entity_id") or org.id) }}';
+              window.location.href = '{{ url_for("entity.report_dashboard", id=org.id) }}';
             }, 500);
           } else {
             // Hide loading overlay and reset buttons on error
@@ -1111,7 +1111,7 @@ document.addEventListener('submit', function(e){
             
             // Still redirect to dashboard even on error
             setTimeout(() => {
-              window.location.href = '{{ url_for("entity.report_dashboard", id=request.args.get("entity_id") or org.id) }}';
+              window.location.href = '{{ url_for("entity.report_dashboard", id=org.id) }}';
             }, 500);
           }
         })
@@ -1150,7 +1150,7 @@ document.addEventListener('submit', function(e){
           
           // Still redirect to dashboard even on error
           setTimeout(() => {
-            window.location.href = '{{ url_for("entity.report_dashboard", id=request.args.get("entity_id") or org.id) }}';
+            window.location.href = '{{ url_for("entity.report_dashboard", id=org.id) }}';
           }, 500);
         });
       }
@@ -1160,8 +1160,8 @@ document.addEventListener('submit', function(e){
      // Function to close the report (for old reports)
      function closeReport() {
        // Navigate to report history
-       const entityId = '{{ request.args.get("entity_id") or org.id }}';
-       const reportHistoryUrl = '/entity/' + entityId + '/reports';
+       const entityId = '{{ org.id }}';
+       const reportHistoryUrl = '{{ url_for('report.entity_report_history', entity_id=org.id) }}';
        PageTransition.navigateWithFade(reportHistoryUrl);
      }
 
@@ -1172,7 +1172,7 @@ document.addEventListener('submit', function(e){
 
      async function handleEditReport() {
        const reportId = '{{ current_draft.id }}';
-       const entityId = '{{ request.args.get("entity_id") or org.id }}';
+       const entityId = '{{ org.id }}';
 
        // Publishing stores no Xero object IDs, so re-publishing after an edit
        // re-POSTs every transaction instead of updating the originals.
@@ -1203,7 +1203,7 @@ document.addEventListener('submit', function(e){
 
          if (data.status === 'success') {
            showFlashMessages('Back to draft — opening it for you now.', 'success');
-           const editUrl = '{{ url_for("report.report_opening") }}?entity_id=' + entityId +
+           const editUrl = '{{ url_for("report.report_opening", entity_id=org.id) }}?' +
              (data.transaction_date ? '&transaction_date=' + data.transaction_date : '');
            setTimeout(() => { PageTransition.navigateWithFade(editUrl); }, 500);
          } else {
@@ -1217,7 +1217,7 @@ document.addEventListener('submit', function(e){
 
      // Function to generate share link
      function generateShareLink() {
-       const entityId = '{{ request.args.get("entity_id") or org.id }}';
+       const entityId = '{{ org.id }}';
        const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
        
        if (!entityId || !transactionDate) {
@@ -1358,12 +1358,12 @@ document.addEventListener('submit', function(e){
 
     const PRE_DEPOSIT_BALANCE = {{ (current_draft.opening_balance or 0) + (current_draft.cash_addition or 0) + (current_draft.cash_sales or 0) - (current_draft.expenses or 0) - (current_draft.bank_deposit or 0) }};
 
-    const BASE_OPENING = '{{ url_for("report.report_opening") if current_draft.status == "draft" else url_for("report.report_opening", id=current_draft.id) }}';
-    const BASE_SALES = '{{ url_for("report.report_sale") if current_draft.status == "draft" else url_for("report.report_sale", id=current_draft.id) }}';
-    const BASE_EXPENSES = '{{ url_for("report.report_expense") if current_draft.status == "draft" else url_for("report.report_expense", id=current_draft.id) }}';
-    const BASE_DEPOSIT = '{{ url_for("report.report_deposit") if current_draft.status == "draft" else url_for("report.report_deposit", id=current_draft.id) }}';
-    const BASE_CASH_COUNT = '{{ url_for("report.report_cash_count") if current_draft.status == "draft" else url_for("report.report_cash_count", id=current_draft.id) }}';
-    const BASE_ENDING = '{{ url_for("report.report_ending") if current_draft.status == "draft" else url_for("report.report_ending", id=current_draft.id) }}';
+    const BASE_OPENING = '{{ url_for("report.report_opening", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_opening", id=current_draft.id, entity_id=org.id) }}';
+    const BASE_SALES = '{{ url_for("report.report_sale", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_sale", id=current_draft.id, entity_id=org.id) }}';
+    const BASE_EXPENSES = '{{ url_for("report.report_expense", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_expense", id=current_draft.id, entity_id=org.id) }}';
+    const BASE_DEPOSIT = '{{ url_for("report.report_deposit", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_deposit", id=current_draft.id, entity_id=org.id) }}';
+    const BASE_CASH_COUNT = '{{ url_for("report.report_cash_count", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_cash_count", id=current_draft.id, entity_id=org.id) }}';
+    const BASE_ENDING = '{{ url_for("report.report_ending", entity_id=org.id) if current_draft.status == "draft" else url_for("report.report_ending", id=current_draft.id, entity_id=org.id) }}';
 
     // Store initial form values on page load
     let initialFormValues = {};
@@ -1438,7 +1438,7 @@ document.addEventListener('submit', function(e){
        showUnsavedDataAlert();
      }
      
-     const entityId = '{{ request.args.get("entity_id") or org.id }}';
+     const entityId = '{{ org.id }}';
      const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
      const isEditMode = {{ 'true' if is_edit_mode else 'false' }};
      const editParam = isEditMode ? '&edit=true' : '';
@@ -1446,12 +1446,12 @@ document.addEventListener('submit', function(e){
      const isReportEditMode = {{ 'true' if is_report_edit_mode else 'false' }};
      const reportEditParam = isReportEditMode ? '&report_edit=true' : '';
      const stepUrls = {
-       'opening': BASE_OPENING + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-       'sales': BASE_SALES + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-       'expenses': BASE_EXPENSES + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-       'deposit': BASE_DEPOSIT + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-       'cash_count': BASE_CASH_COUNT + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-       'ending': BASE_ENDING + '?entity_id=' + entityId + (transactionDate ? '&transaction_date=' + transactionDate : '') + editParam + reportEditParam
+       'opening': BASE_OPENING + '?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'sales': BASE_SALES + '?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'expenses': BASE_EXPENSES + '?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'deposit': BASE_DEPOSIT + '?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'cash_count': BASE_CASH_COUNT + '?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
+       'ending': BASE_ENDING + '?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam
      };
      const url = stepUrls[step];
      if (url) {

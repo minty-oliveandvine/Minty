@@ -21,12 +21,14 @@ from services.permission_policy import (Permission, can_view_report,
                                         has_permission)
 
 
+@report_bp.route("/entity/<entity:entity_id>/reports/new/submitted", methods=["GET"])
+@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/submitted", methods=["GET"])
 @report_bp.route("/report/submitted", methods=["GET"])
 @report_bp.route("/report/<string:id>/submitted", methods=["GET"])
 @login_required
-def report_submitted(id=None):
+def report_submitted(id=None, entity_id=None):
     DD_CLIENT_TOKEN = "pub8127bb0367f2b74cbba93dad6f012b90"
-    entity_id = request.args.get("entity_id")
+    entity_id = entity_id or request.args.get("entity_id")
 
     # Get the report to check Xero integration status
     report = None

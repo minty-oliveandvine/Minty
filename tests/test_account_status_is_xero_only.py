@@ -87,7 +87,7 @@ def test_a_tick_save_leaves_account_status_alone(shop, app, db, client):
     add_account(app, db, entity.id, "acc-loan", "CURRLIAB", "800", "Director Loan")
     F.login(client, owner)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={"account_codes[]": ["404"]})
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"account_codes[]": ["404"]})
 
     assert resp.status_code == 302
     assert ticks(app, entity.id) == {"400": False, "404": True}
@@ -146,7 +146,7 @@ def test_a_saved_choice_is_always_among_its_options(shop, app, db, client):
         db.session.commit()
     F.login(client, owner)
 
-    html = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
     discrepancy = re.search(r'<select name="discrepancy_account".*?</select>', html, re.S).group(0)
     assert '<option value="400">Advertising - 400</option>' in discrepancy

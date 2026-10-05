@@ -1,7 +1,7 @@
 # Petty-cash settings — currency, denominations, sales methods, the Xero mapping
 
 What a company configures before its first report: on **Petty Cash Settings**
-(`/entity/settings/entity/<id>`, `entity_settings_entity` in
+(`/entity/<co>/settings/petty-cash`, `entity_settings_entity` in
 `blueprints/entity/routes/settings.py`, template `templates/entity/settings_entity.html`) and
 during onboarding Steps 5–7 (the wizard writes the same rows through `/api/onboarding/*`).
 Models: `blueprints/entity/models/` (`currency_info`, `cash_info`, `entity_cash_setting`,
@@ -50,7 +50,7 @@ already). Since 2026-10-01 it is ONE template for every visit, built from the ol
    renames, then the order). **Any that fails stops the save** and the toast names it ("I
    couldn't rename "Visa": This method is shared with other companies…"); nothing else is
    posted, and what did go through is remembered so the next Save redoes only the rest.
-4. The form `POST /entity/settings/entity/<id>`: country and currency, the mapping, and the
+4. The form `POST /entity/<co>/settings/petty-cash`: country and currency, the mapping, and the
    ticked codes.
 
 Save stays off until the Xero lists have loaded, and while no account code is ticked. An Enter
@@ -64,7 +64,7 @@ code, symbol, decimal places). **Every money figure a company sees is formatted 
 currency** — never the report's stored code and never a default — so the registries must
 exist before a company is created (the onboarding wizard's Step 1 reads them from
 `/api/onboarding/countries` and `/currencies`). Changing the country is
-`POST /entity/settings/entity/<id>` (`ENTITY_UPDATE`).
+`POST /entity/<co>/settings/petty-cash` (`ENTITY_UPDATE`).
 
 ## Denominations (the cash count)
 

@@ -114,14 +114,14 @@ def test_a_save_with_no_code_ticked_is_refused_and_writes_nothing(shop, app, db,
     add_account(app, db, entity.id, "404", "Bank Fees")
     F.login(client, owner)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={
         "country_code": "SG",
         "main_bank": "acc-bank",
         "deposit_bank": "acc-other",
     })
 
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/entity/settings/entity/{entity.id}")
+    assert resp.headers["Location"].endswith(f"{F.co(client, entity.id)}/settings/petty-cash")
     assert ("danger", "Pick at least one account code.") in flashes(client)
     assert ticks(app, entity.id) == {"400": True, "404": True}
     assert company_country(app, entity.id) == "HK"
@@ -133,10 +133,10 @@ def test_a_code_the_company_does_not_have_does_not_count(shop, app, db, client):
     add_account(app, db, entity.id, "400", "Advertising")
     F.login(client, owner)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={"account_codes[]": ["999", " "]})
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"account_codes[]": ["999", " "]})
 
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/entity/settings/entity/{entity.id}")
+    assert resp.headers["Location"].endswith(f"{F.co(client, entity.id)}/settings/petty-cash")
     assert ticks(app, entity.id) == {"400": True}
 
 
@@ -146,7 +146,7 @@ def test_a_save_with_one_code_ticked_keeps_exactly_that_one(shop, app, db, clien
     add_account(app, db, entity.id, "404", "Bank Fees")
     F.login(client, owner)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={"account_codes[]": ["404"]})
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"account_codes[]": ["404"]})
 
     assert resp.status_code == 302
     assert ("success", "Entity settings saved!") in flashes(client)
@@ -157,7 +157,7 @@ def test_a_company_with_no_codes_still_saves(shop, app, db, client):
     owner, entity = shop
     F.login(client, owner)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={})
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={})
 
     assert resp.status_code == 302
     assert ("success", "Entity settings saved!") in flashes(client)
@@ -170,7 +170,7 @@ def test_rows_without_a_code_do_not_count(shop, app, db, client):
     add_account(app, db, entity.id, "  ", "Blank code")
     F.login(client, owner)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={})
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={})
 
     assert resp.status_code == 302
     assert ("success", "Entity settings saved!") in flashes(client)
@@ -196,7 +196,7 @@ def test_the_first_ever_save_keeps_the_ticks_and_opens_the_dashboard(shop, app, 
     F.login(client, owner)
     assert not mapping_saved(app, entity.id)
 
-    resp = client.post(f"/entity/settings/entity/{entity.id}", data={
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={
         "main_bank": "acc-pc", "deposit_bank": "acc-dep", "discrepancy_bank": "acc-pc",
         "cashsale_account": "200", "cashsale_contact": "con-1",
         "owners_account": "800", "owners_contact": "con-1",
@@ -218,14 +218,14 @@ def test_back_leads_where_the_person_came_from_falling_back_to_the_dashboard(sho
     owner, entity = shop
     F.login(client, owner)
 
-    html = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
     assert re.search(
-        rf'<a href="/entity/{entity.id}" class="pcs-back" data-back-link>\s*<span[^>]*>chevron_left</span>Back', html
+        rf'<a href="{F.co(client, entity.id)}" class="pcs-back" data-back-link>\s*<span[^>]*>chevron_left</span>Back', html
     )
     assert "js/back_link.js" in html
-    assert f'href="/entity/settings/users/{entity.id}" class="pcs-pill">Users</a>' in html
-    assert f'href="/entity/settings/module/{entity.id}" class="pcs-pill">Module</a>' in html
+    assert f'href="{F.co(client, entity.id)}/settings/users" class="pcs-pill">Users</a>' in html
+    assert f'href="{F.co(client, entity.id)}/settings/modules" class="pcs-pill">Module</a>' in html
     assert '<span class="pcs-pill" aria-current="page">Petty Cash Settings</span>' in html
     assert 'name="_from"' not in html
     assert "?from=bills" not in html
@@ -235,8 +235,8 @@ def test_an_old_from_bills_link_opens_the_same_page(shop, app, db, client):
     owner, entity = shop
     F.login(client, owner)
 
-    plain = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
-    old = client.get(f"/entity/settings/entity/{entity.id}?from=bills").get_data(as_text=True)
+    plain = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
+    old = client.get(f"{F.co(client, entity.id)}/settings/petty-cash?from=bills").get_data(as_text=True)
 
     strip_csrf = lambda html: re.sub(r'name="csrf_token" value="[^"]*"', "", html)
     assert strip_csrf(old) == strip_csrf(plain)
@@ -249,7 +249,7 @@ def test_the_codes_reach_the_page_as_data_not_markup(shop, app, db, client):
     add_account(app, db, entity.id, "404", "Bank Fees", ticked=False)
     F.login(client, owner)
 
-    html = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
     assert "<img src=x" not in html
     config = page_config(html)
@@ -272,7 +272,7 @@ def test_a_view_only_member_gets_no_working_save(shop, app, db, client):
         db.session.commit()
     F.login(client, cashier)
 
-    html = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
     assert re.search(r'<button type="button" id="saveChangesBtn" class="pcs-save-btn" disabled data-view-only', html)
     assert "You have view-only access to these settings." in html
@@ -290,7 +290,7 @@ def test_a_disconnected_company_is_told_in_the_mapping_card(shop, app, db, clien
         db.session.commit()
     F.login(client, owner)
 
-    html = client.get(f"/entity/settings/entity/{entity.id}").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
     assert "This entity has been disconnected from Xero." in html
     assert not any("disconnected from Xero" in message for _, message in flashes(client))

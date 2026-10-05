@@ -152,7 +152,7 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
                 {
                     "status": "warning",
                     "message": "No previous report found to update.",
-                    "redirect_url": f"/report/opening?entity_id={entity_id}&transaction_date={redirect_date}",
+                    "redirect_url": url_for("report.report_opening", entity_id=entity_id, transaction_date=redirect_date),
                 }
             )
             response.status_code = 200
@@ -251,7 +251,7 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
                 "closing_balance": updated_report.closing_balance,
                 "is_published": is_published,
                 "xero_status": xero_status,
-                "redirect_url": f"/report/opening?entity_id={entity_id}&transaction_date={redirect_date}",
+                "redirect_url": url_for("report.report_opening", entity_id=entity_id, transaction_date=redirect_date),
             }
         )
         response.status_code = 200

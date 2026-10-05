@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import char_factories as F
 import pytest
 
 
@@ -486,7 +487,7 @@ class TestAcceptInvitationRoute:
             user = _make_user(db_session, models["User"], email="page_render@test.com", role="cashier")
             _login(c, user)
 
-            resp = c.get(f"/invitation/xero-not-connected/{eid}")
+            resp = c.get(f"{F.co(c, eid)}/xero-not-connected")
             assert resp.status_code == 200
             assert b"Xero Access Required" in resp.data
             assert b"PageRenderCorp" in resp.data

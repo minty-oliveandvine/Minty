@@ -22,11 +22,13 @@ from services.helpers.xero_bridge import get_xero_data_dynamic
 from services.permission_policy import Permission, has_permission
 
 
+@report_bp.route("/entity/<entity:entity_id>/reports/new/deposit", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/deposit", methods=["GET"])
 @report_bp.route("/report/deposit", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/deposit", methods=["GET"])
 @login_required
-def report_deposit(id=None):
-    entity_id = request.args.get("entity_id") or request.form.get("entity_id")
+def report_deposit(id=None, entity_id=None):
+    entity_id = entity_id or request.args.get("entity_id") or request.form.get("entity_id")
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:

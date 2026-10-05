@@ -80,14 +80,16 @@ def _trigger_xero_sync_background(entity_id, org):
         )
 
 
+@report_bp.route("/entity/<entity:entity_id>/reports/new/expense", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/expense", methods=["GET"])
 @report_bp.route("/report/expense", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/expense", methods=["GET"])
 @login_required
-def report_expense(id=None):
+def report_expense(id=None, entity_id=None):
     from blueprints.report.services.s3_storage import upload_file_to_s3
 
     DD_CLIENT_TOKEN = "pub8127bb0367f2b74cbba93dad6f012b90"
-    entity_id = request.args.get("entity_id") or request.form.get("entity_id")
+    entity_id = entity_id or request.args.get("entity_id") or request.form.get("entity_id")
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:

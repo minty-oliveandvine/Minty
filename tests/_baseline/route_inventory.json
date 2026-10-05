@@ -749,7 +749,7 @@
   },
   {
    "endpoint": "entity.report_dashboard",
-   "rule": "/entity/<string:id>",
+   "rule": "/entity/<entity:id>",
    "methods": [
     "GET"
    ],
@@ -788,7 +788,7 @@
   },
   {
    "endpoint": "entity.module_selector",
-   "rule": "/entity/<string:entity_id>/modules",
+   "rule": "/entity/<entity:entity_id>/modules",
    "methods": [
     "GET"
    ],
@@ -806,7 +806,7 @@
   },
   {
    "endpoint": "entity.module_reenter",
-   "rule": "/entity/<string:entity_id>/enter",
+   "rule": "/entity/<entity:entity_id>/enter",
    "methods": [
     "GET"
    ],
@@ -816,7 +816,7 @@
   },
   {
    "endpoint": "entity.billing_relogin",
-   "rule": "/entity/<string:entity_id>/billing-relogin",
+   "rule": "/entity/<entity:entity_id>/billing-relogin",
    "methods": [
     "GET"
    ],
@@ -828,7 +828,7 @@
   },
   {
    "endpoint": "entity.go_to_bills",
-   "rule": "/entity/<string:entity_id>/bills",
+   "rule": "/entity/<entity:entity_id>/payment-request",
    "methods": [
     "GET"
    ],
@@ -930,7 +930,7 @@
   },
   {
    "endpoint": "entity.entity_settings",
-   "rule": "/entity/<string:entity_id>/settings/xero",
+   "rule": "/entity/<entity:entity_id>/settings/integration",
    "methods": [
     "GET",
     "POST"
@@ -975,7 +975,7 @@
   },
   {
    "endpoint": "entity.entity_settings_users",
-   "rule": "/entity/settings/users/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/users",
    "methods": [
     "GET"
    ],
@@ -995,7 +995,7 @@
   },
   {
    "endpoint": "entity.entity_settings_entity",
-   "rule": "/entity/settings/entity/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/petty-cash",
    "methods": [
     "GET",
     "POST"
@@ -1033,7 +1033,7 @@
   },
   {
    "endpoint": "entity.entity_settings_module",
-   "rule": "/entity/settings/module/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/modules",
    "methods": [
     "GET"
    ],
@@ -1391,7 +1391,7 @@
   },
   {
    "endpoint": "report.report_cash_count",
-   "rule": "/report/<string:id>/cash_count",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/cash-count",
    "methods": [
     "GET"
    ],
@@ -1434,7 +1434,7 @@
   },
   {
    "endpoint": "report.report_cash_count",
-   "rule": "/report/cash_count",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/cash-count",
    "methods": [
     "GET",
     "POST"
@@ -1522,7 +1522,7 @@
   },
   {
    "endpoint": "report.report_deposit",
-   "rule": "/report/<string:id>/deposit",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/deposit",
    "methods": [
     "GET"
    ],
@@ -1570,7 +1570,7 @@
   },
   {
    "endpoint": "report.report_deposit",
-   "rule": "/report/deposit",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/deposit",
    "methods": [
     "GET",
     "POST"
@@ -1663,7 +1663,7 @@
   },
   {
    "endpoint": "report.download_reports_csv",
-   "rule": "/entity/<string:entity_id>/reports/download-csv",
+   "rule": "/entity/<entity:entity_id>/reports/download-csv",
    "methods": [
     "GET"
    ],
@@ -1689,7 +1689,7 @@
   },
   {
    "endpoint": "report.report_ending",
-   "rule": "/report/<string:id>/ending",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/ending",
    "methods": [
     "GET"
    ],
@@ -1699,7 +1699,7 @@
   },
   {
    "endpoint": "report.report_ending",
-   "rule": "/report/ending",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/ending",
    "methods": [
     "GET",
     "POST"
@@ -1710,7 +1710,7 @@
   },
   {
    "endpoint": "report.entity_ending_with_report",
-   "rule": "/entity/<string:entity_id>/ending/<string:report_id>",
+   "rule": "/entity/<entity:entity_id>/reports/<string:report_id>/summary",
    "methods": [
     "GET"
    ],
@@ -1730,7 +1730,7 @@
   },
   {
    "endpoint": "report.entity_ending",
-   "rule": "/entity/<string:entity_id>/ending",
+   "rule": "/entity/<entity:entity_id>/reports/summary",
    "methods": [
     "GET"
    ],
@@ -1740,7 +1740,7 @@
   },
   {
    "endpoint": "report.report_expense",
-   "rule": "/report/<string:id>/expense",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/expense",
    "methods": [
     "GET"
    ],
@@ -1793,7 +1793,7 @@
   },
   {
    "endpoint": "report.report_expense",
-   "rule": "/report/expense",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/expense",
    "methods": [
     "GET",
     "POST"
@@ -1925,7 +1925,7 @@
   },
   {
    "endpoint": "report.entity_report_history",
-   "rule": "/entity/<string:entity_id>/reports",
+   "rule": "/entity/<entity:entity_id>/reports",
    "methods": [
     "GET"
    ],
@@ -1990,7 +1990,7 @@
   },
   {
    "endpoint": "report.report_opening",
-   "rule": "/entity/<string:entity_id>/report/opening",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/opening",
    "methods": [
     "GET",
     "POST"
@@ -2058,7 +2058,7 @@
   },
   {
    "endpoint": "report.report_opening",
-   "rule": "/report/<string:id>/opening",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/opening",
    "methods": [
     "GET"
    ],
@@ -2125,7 +2125,7 @@
   },
   {
    "endpoint": "report.report_opening",
-   "rule": "/report/opening",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/opening",
    "methods": [
     "GET",
     "POST"
@@ -2319,7 +2319,7 @@
   },
   {
    "endpoint": "report.resume_report",
-   "rule": "/report/resume",
+   "rule": "/entity/<entity:entity_id>/reports/resume",
    "methods": [
     "GET"
    ],
@@ -2340,7 +2340,7 @@
   },
   {
    "endpoint": "report.report_sale",
-   "rule": "/report/<string:id>/sale",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/sale",
    "methods": [
     "GET"
    ],
@@ -2393,7 +2393,7 @@
   },
   {
    "endpoint": "report.report_sale",
-   "rule": "/report/sale",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/sale",
    "methods": [
     "GET",
     "POST"
@@ -2447,7 +2447,7 @@
   },
   {
    "endpoint": "report.report_submitted",
-   "rule": "/report/<string:id>/submitted",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/submitted",
    "methods": [
     "GET"
    ],
@@ -2465,7 +2465,7 @@
   },
   {
    "endpoint": "report.report_submitted",
-   "rule": "/report/submitted",
+   "rule": "/entity/<entity:entity_id>/reports/<string:id>/submitted",
    "methods": [
     "GET"
    ],
@@ -2887,7 +2887,7 @@
   },
   {
    "endpoint": "invitation.xero_not_connected",
-   "rule": "/invitation/xero-not-connected/<string:entity_id>",
+   "rule": "/entity/<entity:entity_id>/xero-not-connected",
    "methods": [
     "GET"
    ],
@@ -3248,7 +3248,7 @@
   },
   {
    "endpoint": "entity_settings",
-   "rule": "/entity/<string:entity_id>/settings/xero",
+   "rule": "/entity/<entity:entity_id>/settings/integration",
    "methods": [
     "GET",
     "POST"
@@ -3283,7 +3283,7 @@
   },
   {
    "endpoint": "entity_settings_users",
-   "rule": "/entity/settings/users/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/users",
    "methods": [
     "GET"
    ],
@@ -3303,7 +3303,7 @@
   },
   {
    "endpoint": "entity_settings_entity",
-   "rule": "/entity/settings/entity/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/petty-cash",
    "methods": [
     "GET",
     "POST"
@@ -3341,7 +3341,7 @@
   },
   {
    "endpoint": "entity_settings_module",
-   "rule": "/entity/settings/module/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/modules",
    "methods": [
     "GET"
    ],
@@ -3371,7 +3371,7 @@
   },
   {
    "endpoint": "entity_report_history",
-   "rule": "/entity/<string:entity_id>/reports",
+   "rule": "/entity/<entity:entity_id>/reports",
    "methods": [
     "GET"
    ],
@@ -3497,7 +3497,7 @@
   },
   {
    "endpoint": "entity.entity_settings_payments",
-   "rule": "/entity/settings/payments/<string:org_id>",
+   "rule": "/entity/<entity:org_id>/settings/payment-request",
    "methods": [
     "GET"
    ],
@@ -3602,10 +3602,113 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "legacy.bills",
+   "rule": "/entity/<uuid:entity_id>/bills",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.settings_entity",
+   "rule": "/entity/settings/entity/<uuid:org_id>",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.settings_module",
+   "rule": "/entity/settings/module/<uuid:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.settings_payments",
+   "rule": "/entity/settings/payments/<uuid:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.settings_users",
+   "rule": "/entity/settings/users/<uuid:org_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.settings_xero",
+   "rule": "/entity/<uuid:entity_id>/settings/xero",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.xero_not_connected",
+   "rule": "/invitation/xero-not-connected/<uuid:entity_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.ending",
+   "rule": "/entity/<uuid:entity_id>/ending",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.ending_with_report",
+   "rule": "/entity/<uuid:entity_id>/ending/<string:report_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
+   "endpoint": "legacy.report_opening",
+   "rule": "/entity/<uuid:entity_id>/report/opening",
+   "methods": [
+    "GET",
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
   }
  ],
  "summary": {
-  "routes": 194,
+  "routes": 204,
   "in_scope": 125
  }
 }

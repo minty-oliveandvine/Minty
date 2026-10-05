@@ -54,7 +54,7 @@ normal traffic. Details and the reasons in [authentication.md](authentication.md
 petty cash (the cash-on-hand bank account), the bank account for deposits, the cash-sale
 revenue account, the discrepancy account and its bank account, the director's account for
 floats; and three contacts — the cash-sale customer, the director, the discrepancy
-contact. The settings page (`/entity/<id>/settings/xero`, "Petty cash settings" tab)
+contact. The settings page (`/entity/<co>/settings/integration`, "Petty cash settings" tab)
 offers the synced rows; `check_entity_xero_settings_complete` refuses a publish while any
 is missing. The seed (`scripts/e2e_seed.py`) writes placeholders for an unconnected shop
 and leaves a connected shop's real mapping alone.

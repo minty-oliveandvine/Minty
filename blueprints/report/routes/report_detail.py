@@ -665,11 +665,12 @@ def download_report(id):
         )
 
 
+@report_bp.route("/entity/<entity:entity_id>/reports/resume", methods=["GET"])
 @report_bp.route("/report/resume", methods=["GET"])
 @login_required
-def resume_report():
+def resume_report(entity_id=None):
     try:
-        entity_id = request.args.get("entity_id")
+        entity_id = entity_id or request.args.get("entity_id")
         transaction_date_param = request.args.get("transaction_date")
         report_or_draft_id = request.args.get("report_id") or request.args.get(
             "draft_id"

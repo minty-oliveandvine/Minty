@@ -678,7 +678,7 @@
       // Direct navigation to resume route with entity ID to continue the existing draft
       const orgId = '{{ org.id }}';
       const transactionDate = '{{ org.draft_date }}';
-      window.location.href = '/report/resume?entity_id=' + orgId + '&transaction_date=' + transactionDate;
+      window.location.href = '{{ url_for("report.resume_report", entity_id=org.id) }}?transaction_date=' + transactionDate;
     }
     
     // Function to show view report button for past dates with reports
@@ -726,7 +726,7 @@
         // Set the new onclick to view the report (no deposit popup)
         targetBtn.onclick = function() {
           const orgId = '{{ org.id }}';
-          const redirectUrl = `/entity/${orgId}/ending?entity_id=${orgId}&transaction_date=${dateString}`;
+          const redirectUrl = `{{ url_for('report.entity_ending', entity_id=org.id) }}?transaction_date=${dateString}`;
           console.log('View Report redirect URL:', redirectUrl);
           PageTransition.navigateWithFade(redirectUrl);
           window.location.href = redirectUrl;
@@ -850,8 +850,8 @@
       if (hasNoReports) {
         // User has no reports - go directly to opening screen without showing modal
         console.log('User has no reports - skipping modal, going directly to opening screen');
-        PageTransition.navigateWithFade('/report/opening?entity_id=' + orgId + '&transaction_date=' + selectedDate);
-        const redirectUrl = '/report/opening?entity_id=' + orgId + '&transaction_date=' + selectedDate;
+        PageTransition.navigateWithFade('{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + selectedDate);
+        const redirectUrl = '{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + selectedDate;
         console.log('Redirect URL (No Reports):', redirectUrl);
         window.location.href = redirectUrl;
       } else {
@@ -1016,8 +1016,8 @@
          const selectedDate = window.selectedDateString;
          if (selectedDate) {
            // Redirect to opening form with the selected date
-           PageTransition.navigateWithFade('/report/opening?entity_id={{org.id}}&transaction_date=' + selectedDate);
-           const yesWithDateUrl = '/report/opening?entity_id={{ org.id }}&transaction_date=' + selectedDate;
+           PageTransition.navigateWithFade('{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + selectedDate);
+           const yesWithDateUrl = '{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + selectedDate;
            console.log('Redirect URL (Yes with Date):', yesWithDateUrl);
            window.location.href = yesWithDateUrl;
            // Clear the stored date
@@ -1025,13 +1025,13 @@
          } else {
            // If there's an existing draft, continue it; otherwise start new
            {% if org.has_existing_draft %}
-           PageTransition.navigateWithFade('/report/resume?entity_id={{ org.id }}');
-           const yesContinueUrl = '/report/resume?entity_id={{ org.id }}';
+           PageTransition.navigateWithFade('{{ url_for("report.resume_report", entity_id=org.id) }}');
+           const yesContinueUrl = '{{ url_for("report.resume_report", entity_id=org.id) }}';
            console.log('Redirect URL (Yes - Continue Draft):', yesContinueUrl);
            window.location.href = yesContinueUrl;
            {% else %}
-           PageTransition.navigateWithFade('/report/opening?entity_id={{ org.id }}');
-           const yesStartNewUrl = '/report/opening?entity_id={{ org.id }}';
+           PageTransition.navigateWithFade('{{ url_for("report.report_opening", entity_id=org.id) }}');
+           const yesStartNewUrl = '{{ url_for("report.report_opening", entity_id=org.id) }}';
            console.log('Redirect URL (Yes - Start New):', yesStartNewUrl);
            window.location.href = yesStartNewUrl;
            {% endif %}
@@ -1146,8 +1146,8 @@
       if (hasNoReports) {
         // User has no reports - go directly to opening screen without showing modal
         console.log('User has no reports - skipping modal, going directly to opening screen');
-        PageTransition.navigateWithFade('/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString);
-        const redirectUrl = '/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString;
+        PageTransition.navigateWithFade('{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + dateString);
+        const redirectUrl = '{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + dateString;
         console.log('Redirect URL (No Reports):', redirectUrl);
         window.location.href = redirectUrl;
       } else {
@@ -1182,8 +1182,8 @@
         } else {
           // Previous day has no deposit - skip modal and go directly to opening screen
           console.log('Previous day has no deposit - skipping modal, going directly to opening screen');
-          PageTransition.navigateWithFade('/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString);
-          const redirectUrl = '/report/opening?entity_id=' + orgId + '&transaction_date=' + dateString;
+          PageTransition.navigateWithFade('{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + dateString);
+          const redirectUrl = '{{ url_for("report.report_opening", entity_id=org.id) }}?transaction_date=' + dateString;
           console.log('Redirect URL (No Previous Deposit):', redirectUrl);
           window.location.href = redirectUrl;
         }
@@ -2122,12 +2122,12 @@
       const transactionDate = hasDraft && draftDate ? draftDate : todayString;
 
       const baseUrls = {{ {
-        'opening': url_for('report.report_opening'),
-        'sales': url_for('report.report_sale'),
-        'expenses': url_for('report.report_expense'),
-        'deposit': url_for('report.report_deposit'),
-        'cash_count': url_for('report.report_cash_count'),
-        'ending': url_for('report.report_ending')
+        'opening': url_for('report.report_opening', entity_id=org.id),
+        'sales': url_for('report.report_sale', entity_id=org.id),
+        'expenses': url_for('report.report_expense', entity_id=org.id),
+        'deposit': url_for('report.report_deposit', entity_id=org.id),
+        'cash_count': url_for('report.report_cash_count', entity_id=org.id),
+        'ending': url_for('report.report_ending', entity_id=org.id)
       } | tojson }};
 
       const baseUrl = baseUrls[step];
@@ -2136,7 +2136,7 @@
         return;
       }
 
-      const redirectUrl = `${baseUrl}?entity_id=${orgId}&transaction_date=${transactionDate}`;
+      const redirectUrl = `${baseUrl}?transaction_date=${transactionDate}`;
       PageTransition.navigateWithFade(redirectUrl);
       window.location.href = redirectUrl;
     }
@@ -2322,7 +2322,7 @@
       const todayString = `${year}-${month}-${day}`;
       
       const orgId = '{{ org.id }}';
-      const redirectUrl = `/entity/${orgId}/ending?entity_id=${orgId}&transaction_date=${todayString}`;
+      const redirectUrl = `{{ url_for('report.entity_ending', entity_id=org.id) }}?transaction_date=${todayString}`;
       console.log('Redirect URL:', redirectUrl);
       console.log('=== END VIEW TODAY REPORT LOG ===');
       
@@ -2346,12 +2346,12 @@
       const transactionDate = hasDraft && draftDate ? draftDate : todayString;
 
       const baseUrls = {{ {
-        'opening': url_for('report.report_opening'),
-        'sales': url_for('report.report_sale'),
-        'expenses': url_for('report.report_expense'),
-        'deposit': url_for('report.report_deposit'),
-        'cash_count': url_for('report.report_cash_count'),
-        'ending': url_for('report.report_ending')
+        'opening': url_for('report.report_opening', entity_id=org.id),
+        'sales': url_for('report.report_sale', entity_id=org.id),
+        'expenses': url_for('report.report_expense', entity_id=org.id),
+        'deposit': url_for('report.report_deposit', entity_id=org.id),
+        'cash_count': url_for('report.report_cash_count', entity_id=org.id),
+        'ending': url_for('report.report_ending', entity_id=org.id)
       } | tojson }};
 
       const baseUrl = baseUrls[step];
@@ -2360,7 +2360,7 @@
         return;
       }
 
-      const redirectUrl = `${baseUrl}?entity_id=${orgId}&transaction_date=${transactionDate}`;
+      const redirectUrl = `${baseUrl}?transaction_date=${transactionDate}`;
       PageTransition.navigateWithFade(redirectUrl);
       window.location.href = redirectUrl;
     }

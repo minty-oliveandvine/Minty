@@ -266,7 +266,7 @@ def test_disconnect_revokes_at_xero_and_the_service_then_needs_a_reconnect(conne
     assert resp.status_code == 302, resp.data[:300]
     assert any(c[0] == "DELETE" and "connections/conn-1" in c[1] for c in xero.calls), xero.calls
     assert internal_token(client, app, entity.id).status_code == 409
-    page = client.get(f"/entity/{entity.id}/settings/xero")
+    page = client.get(f"{F.co(client, entity.id)}/settings/integration")
     assert page.status_code == 200
     assert "connect to xero" in page.get_data(as_text=True).lower()
 

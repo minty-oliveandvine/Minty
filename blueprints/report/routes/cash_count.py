@@ -21,11 +21,13 @@ from services.permission_policy import Permission, has_permission
 from blueprints.shared.column_types import cents
 
 
+@report_bp.route("/entity/<entity:entity_id>/reports/new/cash-count", methods=["GET", "POST"])
+@report_bp.route("/entity/<entity:entity_id>/reports/<string:id>/cash-count", methods=["GET"])
 @report_bp.route("/report/cash_count", methods=["GET", "POST"])
 @report_bp.route("/report/<string:id>/cash_count", methods=["GET"])
 @login_required
-def report_cash_count(id=None):
-    entity_id = request.args.get("entity_id") or request.form.get("entity_id")
+def report_cash_count(id=None, entity_id=None):
+    entity_id = entity_id or request.args.get("entity_id") or request.form.get("entity_id")
     if not entity_id:
         entity_id = resolve_report_entity_id(id)
     if not entity_id:

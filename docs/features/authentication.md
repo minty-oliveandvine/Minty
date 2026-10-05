@@ -138,7 +138,7 @@ only reset at login. What "still here" means for the Users tab is section 8.
 The session cookie is `Secure` everywhere but local development (`APP_ENV=development`,
 plain http): `SESSION_COOKIE_SECURE = not is_development()`.
 
-### 3.1 Addresses, redirects and response headers (the URL security round, 2026-10-05)
+### 3.1 Redirects and response headers (the URL security round, 2026-10-05)
 
 - **Redirect targets.** Every redirect to a value the request supplied - `?next=` on
   `/entity/<id>/enter`, `/handoff/minty-web` and `/xero_auth` (checked when stored AND when
@@ -169,6 +169,47 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
   `state` carries no per-session nonce (login CSRF); `/logout` and `/leave-entity` are GETs;
   tokens still ride in query strings between the apps (a one-time-code exchange would end
   that - also a schema change).
+
+### 3.2 Addresses: `/entity/<shortid>/<name>/...` (2026-10-05)
+
+Every company page hangs off **`<co>` = `<shortid>/<name>`**: the first 8 characters of the
+company's id, then its name as a readable segment, e.g. `/entity/360812e1/harbour-and-vine-limited`.
+The short id decides; the name is only for reading (`blueprints/shared/entity_ref.py`):
+
+- **The converter** (`<entity:...>` in a rule) matches `<shortid>/<name>` or a full uuid and resolves
+  it to the uuid as the address is matched, so guards and views receive exactly what they did
+  before. **A GET whose address used a full uuid, an old name or capitals is 308'd to the canonical
+  one** (query kept) - a rename never breaks a link, and the other apps, which know only uuids, link
+  `/entity/<uuid>/...` and let Flask show the readable form.
+- **An unknown company is not a 404 there**: it resolves to the nil uuid and the usual sign-in, Terms
+  and membership checks answer, so an address tells a stranger nothing about which short ids exist.
+  Two companies sharing a short id are told apart by name, else logged and treated as unknown.
+- **Slug** (`slugify_name`, mirrored by minty-web's `lib/companyRef.ts`): lowercase, `&` -> "and",
+  letters and digits of any script kept, anything else one `-`, 60 characters, `company` when empty.
+  No schema change: nothing is stored.
+- **The scheme:**
+
+  | Page | Address |
+  |---|---|
+  | Dashboard | `/entity/<co>` |
+  | Report history, CSV | `/entity/<co>/reports`, `/reports/download-csv` |
+  | Wizard step | `/entity/<co>/reports/new/<step>`, `/entity/<co>/reports/<report_id>/<step>` (`opening`, `sale`, `expense`, `deposit`, `cash-count`, `ending`, `submitted`) |
+  | Resume; summaries | `/entity/<co>/reports/resume`; `/reports/summary` (by day), `/reports/<report_id>/summary` |
+  | Settings tabs | `/entity/<co>/settings/users`, `/integration`, `/petty-cash`, `/modules` (minty-web), `/payment-request` (the payments app) |
+  | Hand-overs | `/entity/<co>/enter`, `/payment-request`, `/modules`, `/xero-not-connected` |
+
+  Module names are `petty-cash` and `payment-request` (the user's call). minty-web's module page is
+  `/subscription/entities/<shortid>/<name>/modules` too, and the payments app's pages are
+  `/entity/<shortid>/<name>/payment-request[/<id>]` and `/settings/payment-request` on its origin -
+  the hand-overs land there (`billing_app_home_url`; `/payment-request?request=<id>` lands on one
+  request), and its middleware sends another company's page back here
+  (`minty-payment-request-web/docs/features/authentication.md`).
+- **Old addresses keep working** (`blueprints/shared/legacy_addresses.py`): each pre-2026-10-05 rule
+  308s straight to the readable address (308 keeps a form's method and body). Old `/report/...`
+  wizard GETs by a signed-in person move the same way (`report/routes/company_addresses.py`), which
+  also refuses (404, logged) a report shown under another company's address. JSON APIs, OAuth,
+  `/profile` and `/handoff/minty-web` keep the uuid.
+- Tests: `tests/test_entity_ref.py`; `F.co(app_or_client, entity_id)` gives a company's prefix.
 
 ## 4. The terms gate
 
@@ -215,7 +256,7 @@ set on Minty, minty-payment-request-api, minty-onboarding-api and minty-subscrip
 
 | Token | Minted by | Lifetime | Claims | Verified by |
 |---|---|---|---|---|
-| module / billing | `blueprints/entity/routes/modules.py::_generate_module_token` when a person clicks **Payments** (`/entity/<id>/bills`, `/entity/<id>/modules`) | 30 min | `user_id`, `entity_id`, `xero_org_id`, `role`, `system_role`, `module: "billing"`, `sid` (the login session id, `LOGIN_SID_SESSION_KEY`), `billing_enabled`, `petty_cash_enabled`, `iat`, `exp` | minty-payment-request-api `core/auth.BearerAuth` |
+| module / billing | `blueprints/entity/routes/modules.py::_generate_module_token` when a person clicks **Payments** (`/entity/<co>/payment-request`, `/entity/<id>/modules`) | 30 min | `user_id`, `entity_id`, `xero_org_id`, `role`, `system_role`, `module: "billing"`, `sid` (the login session id, `LOGIN_SID_SESSION_KEY`), `billing_enabled`, `petty_cash_enabled`, `iat`, `exp` | minty-payment-request-api `core/auth.BearerAuth` |
 | onboarding | `blueprints/entity/routes/create.py::_mint_onboarding_token` when the wizard is launched | 60 min | `user_id`, `scope: "onboarding"`, `iat`, `exp` | minty-onboarding-api `core/auth.OnboardingBearerAuth`; Flask's own `/api/onboarding/*` routes |
 
 The browser is sent to `minty-payment-request-web` `/landing?token=…&entity_id=…&entity_name=…`,

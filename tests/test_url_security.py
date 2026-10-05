@@ -109,11 +109,11 @@ def test_enter_never_redirects_off_site(shop, client):
     owner, entity, _ = shop
     F.login(client, owner)
     for evil in ("/%09/evil.com", "/%5Cevil.com", "//evil.com", "https://evil.com"):
-        resp = client.get(f"/entity/{entity.id}/enter?next={evil}")
+        resp = client.get(f"{F.co(client, entity.id)}/enter?next={evil}")
         assert resp.status_code == 302
         location = resp.headers["Location"]
         assert "evil.com" not in location, (evil, location)
-        assert location.endswith(f"/entity/{entity.id}"), location
+        assert location.endswith(f"{F.co(client, entity.id)}"), location
 
 
 def test_handoff_never_forwards_an_off_site_next(shop, client, monkeypatch):
@@ -147,9 +147,9 @@ def _module_token(app, user_id, entity_id) -> str:
 def test_enter_logs_a_member_in_with_a_module_token(shop, client, app):
     owner, entity, _ = shop
     token = _module_token(app, owner.id, entity.id)
-    resp = client.get(f"/entity/{entity.id}/enter?token={token}")
+    resp = client.get(f"{F.co(client, entity.id)}/enter?token={token}")
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith(f"/entity/{entity.id}")
+    assert resp.headers["Location"].endswith(f"{F.co(client, entity.id)}")
     assert _signed_in(client)
 
 
@@ -159,14 +159,14 @@ def test_enter_refuses_the_onboarding_token(shop, client, app):
     owner, entity, _ = shop
     with app.test_request_context():
         token = _mint_onboarding_token(owner.id)
-    client.get(f"/entity/{entity.id}/enter?token={token}")
+    client.get(f"{F.co(client, entity.id)}/enter?token={token}")
     assert not _signed_in(client)
 
 
 def test_enter_refuses_a_company_the_person_is_not_in(shop, client, app):
     _, entity, stranger = shop
     token = _module_token(app, stranger.id, "")
-    client.get(f"/entity/{entity.id}/enter?token={token}")
+    client.get(f"{F.co(client, entity.id)}/enter?token={token}")
     assert not _signed_in(client)
 
 
@@ -246,7 +246,7 @@ def test_deleted_routes_are_gone(client, path):
 
 def test_old_share_token_no_longer_opens_a_report(shop, client):
     _, entity, _ = shop
-    resp = client.get(f"/entity/{entity.id}/ending?token=anything")
+    resp = client.get(f"{F.co(client, entity.id)}/reports/summary?token=anything")
     assert resp.status_code == 302
     assert "/login" in resp.headers["Location"]
 

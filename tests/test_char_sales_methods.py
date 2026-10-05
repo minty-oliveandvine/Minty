@@ -230,7 +230,7 @@ def test_methods_switched_on_are_the_ones_the_sales_form_offers(shop, client, ap
     from test_char_report_lifecycle import open_report
 
     open_report(client, entity, date(2026, 9, 1))
-    page = client.get(f"/report/sale?entity_id={entity.id}&transaction_date=2026-09-01")
+    page = client.get(f"{F.co(client, entity.id)}/reports/new/sale?transaction_date=2026-09-01")
 
     assert page.status_code == 200
     html = page.get_data(as_text=True)
@@ -253,7 +253,7 @@ def test_the_sales_page_offers_one_input_per_enabled_method_plus_cash(shop, clie
     from test_char_report_lifecycle import open_report
 
     open_report(client, entity, date(2026, 9, 1))
-    html = client.get(f"/report/sale?entity_id={entity.id}&transaction_date=2026-09-01").get_data(as_text=True)
+    html = client.get(f"{F.co(client, entity.id)}/reports/new/sale?transaction_date=2026-09-01").get_data(as_text=True)
 
     assert 'name="sales[shop_sales][visa]"' in html
     assert 'name="sales[delivery_sales][foodpanda]"' in html
@@ -328,7 +328,7 @@ def test_switching_a_method_off_keeps_the_amount_an_old_report_recorded(shop, cl
     post_sales(client, entity, day, cash="100", by_method={"visa_sales": "250", "alipay_sales": "50"})
 
     def sales_page():
-        return client.get(f"/report/sale?entity_id={entity.id}&transaction_date=2026-09-01").get_data(as_text=True)
+        return client.get(f"{F.co(client, entity.id)}/reports/new/sale?transaction_date=2026-09-01").get_data(as_text=True)
 
     assert "50" in sales_page()
     ids = {m["name"]: m["id"] for m in methods_api(client, entity)}

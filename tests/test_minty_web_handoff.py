@@ -62,10 +62,11 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
     owner, entity, _ = shop
     F.login(client, owner)
 
-    parts, query = _landing(client.get(f"/entity/settings/module/{entity.id}"))
+    parts, query = _landing(client.get(f"{F.co(client, entity.id)}/settings/modules"))
 
     assert (parts.scheme, parts.netloc, parts.path) == ("http", "hub.minty.test", "/landing")
-    assert query["next"] == [f"/subscription/entities/{entity.id}/modules"]
+    # the company by short id and name, as minty-web's lib/companyRef.ts builds it
+    assert query["next"] == [f"/subscription/entities/{F.co(client, entity.id)[len('/entity/'):]}/modules"]
     assert query["entity_id"] == [entity.id]
     assert query["entity_name"] == [entity.name]
     claims = _claims(app, query["token"][0])
@@ -76,15 +77,20 @@ def test_live_the_module_page_is_minty_webs(shop, client, app, live_page):
 
     # an old link's ?from=bills is ignored (2026-10-05): the module page's Back goes where the
     # person came from, so nothing is carried
-    _, query = _landing(client.get(f"/entity/settings/module/{entity.id}?from=bills"))
-    assert query["next"] == [f"/subscription/entities/{entity.id}/modules"]
+    _, query = _landing(client.get(f"{F.co(client, entity.id)}/settings/modules?from=bills"))
+    assert query["next"] == [f"/subscription/entities/{F.co(client, entity.id)[len('/entity/'):]}/modules"]
 
 
 def test_there_is_no_jinja_module_page_any_more(app):
     """The Jinja module page and the session routes behind it were deleted on 2026-10-01:
     the address above is a hand-over and nothing else answers under it."""
-    rules = {r.rule for r in app.url_map.iter_rules() if r.rule.startswith("/entity/settings/module/")}
-    assert rules == {"/entity/settings/module/<string:org_id>"}
+    rules = {(r.rule, r.endpoint) for r in app.url_map.iter_rules() if "settings/module" in r.rule}
+    # the hand-over (and its alias), and the pre-2026-10-05 address as a 308 to it
+    assert rules == {
+        ("/entity/<entity:org_id>/settings/modules", "entity.entity_settings_module"),
+        ("/entity/<entity:org_id>/settings/modules", "entity_settings_module"),
+        ("/entity/settings/module/<uuid:org_id>", "legacy.settings_module"),
+    }
     assert not (app.root_path and (__import__("pathlib").Path(app.root_path) / "templates/entity/settings_module.html").exists())
 
 
@@ -97,6 +103,7 @@ def test_the_handoff_mints_a_scoped_token_for_a_company(shop, client, app, live_
     )
 
     assert parts.netloc == "hub.minty.test" and parts.path == "/landing"
+    # the hand-off passes `next` on as it was given (minty-web moves an old one itself)
     assert query["next"] == [f"/subscription/entities/{entity.id}/modules"]
     assert query["entity_id"] == [entity.id]
     assert _claims(app, query["token"][0])["entity_id"] == entity.id

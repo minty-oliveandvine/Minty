@@ -115,12 +115,23 @@ const BFCache = (function(){
     }
   }
 
+  // The draft totals need the company and the day. Since 2026-10-05 the company is in the
+  // page's path (/entity/<shortid>/<name>/reports/...), not its query, so it is taken from the
+  // form's hidden entity_id field and added to whatever query the page has.
+  function draftTotalsUrl(){
+    var params = new URLSearchParams(location.search);
+    var field = document.querySelector('input[name="entity_id"]');
+    if (!params.get('entity_id') && field && field.value) params.set('entity_id', field.value);
+    var query = params.toString();
+    return '/api/get_draft_totals' + (query ? '?' + query : '');
+  }
+
   window.addEventListener('pageshow', function(event){
     restoreUIAndData({
       keys: ['pending_expenses','pending_sales','pending_opening','pending_deposit','pending_cash_count','pending_ending'],
       sync: {
-        pending_expenses: window.location.pathname.includes('/expense') ? `/api/get_draft_totals${location.search ? location.search : ''}` : null,
-        pending_sales: window.location.pathname.includes('/sale') ? `/api/get_draft_totals${location.search ? location.search : ''}` : null
+        pending_expenses: window.location.pathname.includes('/expense') ? draftTotalsUrl() : null,
+        pending_sales: window.location.pathname.includes('/sale') ? draftTotalsUrl() : null
       },
       onSync: function(key, data){
         try {

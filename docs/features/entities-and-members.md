@@ -61,10 +61,10 @@ without Petty Cash); the payments app's own sidebar opens its Payment Settings.
 
 | Tab | Route | What it edits | Who |
 |---|---|---|---|
-| Entity & Integration | `GET/POST /entity/<id>/settings/xero` | the company name, country & currency, the Xero connection ([xero-integration.md](xero-integration.md)) | `ENTITY_UPDATE` / `XERO_SETTINGS_UPDATE` — accountant and up; others see it read-only (`settings-readonly`) |
-| Petty Cash Settings | `GET/POST /entity/settings/entity/<id>` (Petty Cash on only) | country & currency, the Xero account mapping - the accounts and contacts the dashboard's "Setup Required" asks for ([xero-integration.md](xero-integration.md) §3) - the sales settlement methods and the petty-cash account codes, at least one of which stays ticked ([petty-cash-settings.md](petty-cash-settings.md)) | `ENTITY_UPDATE` / `COA_UPDATE` / `COA_CREATE` / `COA_DELETE` - as above |
-| Users | `GET /entity/settings/users/<id>` | members with role, who pays for the company (the billing-group payer, looked up separately from the role), pending invitations, and who is signed in now (`…/presence`, polled every 20 s — [authentication.md](authentication.md) §8) | admins manage roles and invitations |
-| Module | `GET /entity/settings/module/<id>` | a hand-over to minty-web's Module page ([modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |
+| Entity & Integration | `GET/POST /entity/<co>/settings/integration` | the company name, country & currency, the Xero connection ([xero-integration.md](xero-integration.md)) | `ENTITY_UPDATE` / `XERO_SETTINGS_UPDATE` — accountant and up; others see it read-only (`settings-readonly`) |
+| Petty Cash Settings | `GET/POST /entity/<co>/settings/petty-cash` (Petty Cash on only) | country & currency, the Xero account mapping - the accounts and contacts the dashboard's "Setup Required" asks for ([xero-integration.md](xero-integration.md) §3) - the sales settlement methods and the petty-cash account codes, at least one of which stays ticked ([petty-cash-settings.md](petty-cash-settings.md)) | `ENTITY_UPDATE` / `COA_UPDATE` / `COA_CREATE` / `COA_DELETE` - as above |
+| Users | `GET /entity/<co>/settings/users` | members with role, who pays for the company (the billing-group payer, looked up separately from the role), pending invitations, and who is signed in now (`…/presence`, polled every 20 s — [authentication.md](authentication.md) §8) | admins manage roles and invitations |
+| Module | `GET /entity/<co>/settings/modules` | a hand-over to minty-web's Module page ([modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |
 
 Renaming the company is reflected in the header at once (`e2e/03_settings.spec.ts`).
 

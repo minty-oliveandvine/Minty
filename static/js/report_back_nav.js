@@ -10,21 +10,14 @@
     return s[s.length - 1] === "reports";
   }
 
+  // A report page: the old /report/... addresses, or anything BELOW a company's reports
+  // (/entity/<shortid>/<name>/reports/<id or new>/<step>, .../reports/<id>/summary). Keyed on
+  // what follows "reports" - a company named "Sale" must not make its dashboard look like one.
   function isReportPage(path) {
     var s = segs(path);
     if (s[0] === "report") return true;
-    var sections = [
-      "ending",
-      "opening",
-      "sale",
-      "sales",
-      "expense",
-      "deposit",
-      "cash_count",
-    ];
-    return s.some(function (x) {
-      return sections.indexOf(x) >= 0;
-    });
+    var at = s.indexOf("reports");
+    return at >= 0 && at < s.length - 1;
   }
 
   function init() {
