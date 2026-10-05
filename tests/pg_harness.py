@@ -41,18 +41,44 @@ bug.
 from __future__ import annotations
 
 import glob
+import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import dotenv_values
 
-from services.app_runtime.env import DEFAULT_SCHEMA, parse_database_url, with_schema
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_env_module():
+    """``services/app_runtime/env.py``, loaded BY PATH rather than as ``services.app_runtime``.
+
+    The three Django APIs load this harness from their own conftest without Minty on
+    ``sys.path`` - and putting it there would let Minty's ``config.py`` / ``services`` shadow
+    their own modules. ``env.py`` is stdlib-only by design, so the one file is all we need.
+    Registered in ``sys.modules`` so its dataclasses resolve their annotations.
+    """
+    name = "minty_pg_harness_env"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name, REPO_ROOT / "services" / "app_runtime" / "env.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_env = _load_env_module()
+DEFAULT_SCHEMA = _env.DEFAULT_SCHEMA
+parse_database_url = _env.parse_database_url
+with_schema = _env.with_schema
 DEFAULT_SCHEMA_SQL = REPO_ROOT / "docs" / "schema" / "01_schema_rebased.sql"
 BUILT_SCHEMA = "pettycash_test"  # what 01_schema_rebased.sql creates
 
