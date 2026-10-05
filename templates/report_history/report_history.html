@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Report History - Vine Consulting Limited</title>
+  <title>Report History - {{ entity_name }}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img/favicon.ico') }}" />
 
   <!-- Tailwind CSS -->
@@ -153,14 +153,15 @@
         (generated at runtime by the Play CDN for these dynamically-added
         classes) removes them from the grid entirely, so every date packed
         left under the wrong weekday and the final partial row spread out.
-        Re-assert Flatpickr's cell so the slot stays, and show those days
-        greyed like a normal calendar instead of blank. */
+        Re-assert Flatpickr's cell so the slot stays, but leave those days
+        blank: shown, they repeat the other month's dates (and pick up its
+        range highlight), so the two side-by-side months look like they clash. */
      .flatpickr-calendar .flatpickr-day.hidden,
      .flatpickr-calendar .flatpickr-day.prevMonthDay,
      .flatpickr-calendar .flatpickr-day.nextMonthDay {
        display: inline-block !important;
-       visibility: visible !important;
-       color: rgba(57, 57, 57, 0.3);   /* Flatpickr's own muted "other month" grey */
+       visibility: hidden !important;
+       pointer-events: none;
      }
      /* Footer action buttons inside the calendar popup */
      .fp-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid #f0f0f0; }
