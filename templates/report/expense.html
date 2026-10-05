@@ -18,6 +18,7 @@
 
   <!-- Shared currency formatting -->
   <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/receipt_preview.js') }}"></script>
 
   <!-- Hover Effects Component -->
   {% include 'components/hover_effects.html' %}
@@ -266,6 +267,8 @@
                  <!-- Image Preview Container -->
                 <div id="imagePreviewContainer" class="hidden" style="margin: 0; padding: 0; line-height: 0;">
                   <img id="uploadedImage" class="w-64 h-48 object-contain mx-auto hidden" alt="Uploaded receipt">
+                  <!-- A PDF receipt, drawn by static/js/receipt_preview.js -->
+                  <div id="uploadedPdfPreview" class="hidden max-h-96 overflow-y-auto rounded-md bg-white p-2" style="line-height: normal;"></div>
                 </div>
                  <svg id="uploadIcon" class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
@@ -402,6 +405,23 @@
           <div class="flex justify-center gap-3">
             <button type="button" onclick="hideViewExpenseModal()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
               <span>Close</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Receipt modal: one receipt, drawn by static/js/receipt_preview.js, in the Expense
+           Details modal's look (above it, so it can open from there too) -->
+      <div id="receiptViewerModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[200] p-2 sm:p-4 hidden" onclick="closeReceiptViewer()" role="dialog" aria-modal="true" aria-labelledby="receiptViewerTitle">
+        <div class="bg-white rounded-lg shadow-xl p-4 sm:p-6 w-full max-w-5xl mx-auto h-[94vh] flex flex-col" onclick="event.stopPropagation()">
+          <div class="flex items-center justify-between gap-3 mb-4">
+            <h2 id="receiptViewerTitle" class="text-xl font-bold text-gray-900">Receipt</h2>
+          </div>
+          <p id="receiptViewerName" class="-mt-3 mb-3 truncate text-sm text-gray-500"></p>
+          <div id="receiptViewerBody" class="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-2"></div>
+          <div class="mt-4 flex justify-center">
+            <button type="button" onclick="closeReceiptViewer()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
+              Close
             </button>
           </div>
         </div>
@@ -1590,11 +1610,16 @@
        const uploadSubtext = document.getElementById('uploadSubtext');
        
        // Check if there are any image files
-       const imageFiles = Array.from(files).filter(file => 
+       const imageFiles = Array.from(files).filter(file =>
          file.type === 'image/jpeg' || file.type === 'image/jpg' || file.type === 'image/png'
        );
-       
-       if (imageFiles.length > 0) {
+       const pdfFile = Array.from(files).find(file => window.ReceiptPreview.kind(file.type || file.name) === 'pdf');
+       hidePdfPreview();
+
+       if (imageFiles.length === 0 && pdfFile) {
+         // A PDF receipt is drawn too (2026-10-05) - it used to leave the box empty.
+         showPdfPreview(pdfFile, pdfFile.name);
+       } else if (imageFiles.length > 0) {
          // Get the first image file
          const firstImage = imageFiles[0];
          const reader = new FileReader();
@@ -1666,23 +1691,48 @@
        }
      }
 
-     // Handle preview of uploaded files
+     // A PDF receipt in the upload box: its pages, scrolling, above the "Uploaded" text
+     // (static/js/receipt_preview.js). `source` is a File or a /preview/<key> URL.
+     function showPdfPreview(source, title) {
+       const host = document.getElementById('uploadedPdfPreview');
+       const container = document.getElementById('imagePreviewContainer');
+       if (!host || !container) return;
+       document.getElementById('uploadedImage').classList.add('hidden');
+       document.getElementById('uploadIcon').style.display = 'none';
+       container.classList.remove('hidden');
+       container.style.display = 'block';
+       container.style.lineHeight = 'normal';
+       container.style.marginBottom = '8px';
+       host.classList.remove('hidden');
+       window.ReceiptPreview.render(host, source, { kind: 'pdf', title: title || 'Receipt' });
+     }
+
+     function hidePdfPreview() {
+       const host = document.getElementById('uploadedPdfPreview');
+       if (!host) return;
+       host.classList.add('hidden');
+       host.replaceChildren();
+       const container = document.getElementById('imagePreviewContainer');
+       if (container) {
+         container.style.lineHeight = '0';
+         container.style.marginBottom = '';
+       }
+     }
+
+     // Handle preview of uploaded files: the picked receipt full screen, on this page
+     // (each file used to open in a new tab).
      function previewUploadedFiles(event) {
        event.stopPropagation(); // Prevent triggering the upload area click
-       
+
        const fileInput = document.getElementById('expense_files');
-       const files = fileInput.files;
-       
+       const files = fileInput.files && fileInput.files.length ? fileInput.files : (currentUploadedFiles || []);
+
        if (files.length === 0) {
          return; // Do nothing if no files (icon should be disabled)
        }
-       
-       // Open each file in a new tab
-       for (let i = 0; i < files.length; i++) {
-         const file = files[i];
-         const fileURL = URL.createObjectURL(file);
-         window.open(fileURL, '_blank');
-       }
+
+       const file = files[0];
+       openReceiptViewer(file, window.ReceiptPreview.kind(file.type || file.name), file.name);
      }
 
      // Hover functions for preview icon
@@ -1811,6 +1861,7 @@
       imagePreviewContainer.classList.add('hidden');
       uploadedImage.classList.add('hidden');
       uploadedImage.src = '';
+      hidePdfPreview();
 
        // Reset icon to upload icon and show it
        uploadIcon.style.display = 'block';
@@ -3178,8 +3229,73 @@
        uploadText.style.color = '#00A078';
        uploadSubtext.style.display = 'block';
        uploadSubtext.textContent = 'Click to change files';
+       if (window.ReceiptPreview.kind(firstFile.mime_type || firstFile.display_name || firstFile.s3_key) === 'pdf') {
+         // pdf.js reads the bytes, so from this origin (/preview), not /download's redirect
+         showPdfPreview(receiptPreviewUrl(firstFile.s3_key), firstFile.display_name);
+       }
      }
    }
+
+   // The View modal's PDF tiles: drawn once the modal's HTML is on the page, page 1 only;
+   // a click opens the whole file.
+   let receiptThumbs = [];
+
+   function renderReceiptThumbs() {
+     receiptThumbs.forEach((thumb, i) => {
+       const host = document.getElementById('receiptThumb' + i);
+       if (host) window.ReceiptPreview.render(host, thumb.source, { kind: 'pdf', title: thumb.title, maxPages: 1 });
+     });
+   }
+
+   function openReceiptThumb(i) {
+     const thumb = receiptThumbs[i];
+     if (thumb) openReceiptViewer(thumb.source, 'pdf', thumb.title);
+   }
+
+   function cleanDownloadBase() {
+     return '{{ url_for("report.download_file", filename="") }}'.replace(/\/+$/, '');
+   }
+
+   // A saved receipt's bytes from this origin (report.preview_file), for pdf.js.
+   function receiptPreviewUrl(s3Key) {
+     const base = '{{ url_for("report.preview_file", filename="") }}'.replace(/\/+$/, '');
+     return base + '/' + String(s3Key || '').replace(/^\/+/, '');
+   }
+
+   // The receipt, larger, in a modal on this page (2026-10-05): an image or a PDF drawn page by
+   // page. A PDF used to open a new tab with an <iframe> (nothing on Android, page 1 on iOS)
+   // and an image a black full-screen overlay.
+   function openReceiptViewer(source, kind, title) {
+     const modal = document.getElementById('receiptViewerModal');
+     const body = document.getElementById('receiptViewerBody');
+     if (!modal || !body) return;
+     // The whole window, not the page's phone card: out to <body>, so no card can clip it
+     if (modal.parentElement !== document.body) document.body.appendChild(modal);
+     document.getElementById('receiptViewerName').textContent = title || '';
+     modal.classList.remove('hidden');
+     document.body.style.overflow = 'hidden';
+     window.ReceiptPreview.render(body, source, { kind: kind, title: title || 'Receipt' });
+   }
+
+   function closeReceiptViewer() {
+     const modal = document.getElementById('receiptViewerModal');
+     if (!modal || modal.classList.contains('hidden')) return;
+     modal.classList.add('hidden');
+     document.getElementById('receiptViewerBody').replaceChildren();
+     // the Expense Details modal underneath keeps the page still
+     const details = document.getElementById('viewExpenseModal');
+     if (!details || details.classList.contains('hidden')) document.body.style.overflow = '';
+   }
+
+   // Escape closes the receipt only - not the Expense Details modal under it, which the
+   // page's own Escape handler (registered later) would close next.
+   document.addEventListener('keydown', (event) => {
+     const modal = document.getElementById('receiptViewerModal');
+     if (event.key !== 'Escape' || !modal || modal.classList.contains('hidden')) return;
+     event.preventDefault();
+     event.stopImmediatePropagation();
+     closeReceiptViewer();
+   });
 
    // POST the form values to the update endpoint when in edit mode. Reloads
    // the page on success so the Jinja-rendered list reflects the new state.
@@ -3294,6 +3410,7 @@
 
          // Single attachment renders full-width; multiple use a 2-up grid.
          const fileGridCols = expense.files.length > 1 ? 'grid-cols-2' : 'grid-cols-1';
+         receiptThumbs = [];
          let filesHTML = `
            <div class="mb-4">
              <div class="grid ${fileGridCols} gap-2">`;
@@ -3350,14 +3467,13 @@
                </div>
              `;
            } else if (isPDF) {
+             // drawn after the modal is on the page (renderReceiptThumbs); a saved one from this
+             // origin, since pdf.js fetches it
+             const thumbIndex = receiptThumbs.length;
+             receiptThumbs.push({ source: isLocalExpense ? file : receiptPreviewUrl(fileUrl.slice(cleanDownloadBase().length + 1)), title: fileName });
              filesHTML += `
-               <div class="relative group cursor-pointer border border-gray-200 rounded-lg p-4 hover:border-[#54D3DA] transition-colors" onclick="event.stopPropagation(); previewExpenseFile('${fileUrl}')">
-                 <div class="flex flex-col items-center justify-center h-24">
-                   <svg class="w-12 h-12 text-red-500 mb-2" fill="currentColor" viewBox="0 0 20 20">
-                     <path d="M4 18h12V6h-4V2H4v16zm-2 1V0h12l4 4v16H2v-1z"></path>
-                   </svg>
-                   <span class="text-xs text-gray-600 text-center truncate w-full">${fileName}</span>
-                 </div>
+               <div class="relative group cursor-pointer border border-gray-200 rounded-lg overflow-hidden hover:border-[#54D3DA] transition-colors" onclick="event.stopPropagation(); openReceiptThumb(${thumbIndex})">
+                 <div id="receiptThumb${thumbIndex}" class="h-64 overflow-hidden bg-gray-50 pointer-events-none"></div>
                </div>
              `;
            } else {
@@ -3447,6 +3563,7 @@
        }
 
        content.innerHTML = detailsHTML;
+       renderReceiptThumbs();
        // Set the textarea value via the DOM to avoid HTML-escaping issues with
        // quotes/newlines inside the template string above.
        if (isReportEditMode) {
@@ -3597,7 +3714,7 @@
    let currentFileIndex = 0;
    let fileViewerUrls = [];
 
-   // Preview expense file: images in overlay modal; PDF and other types open in a new tab
+   // Preview expense file: images in the overlay modal, a PDF in the file viewer; other types open in a new tab
    function previewExpenseFile(fileUrl) {
      // Check if it's a blob URL (from File objects)
      const isBlobUrl = fileUrl.startsWith('blob:');
@@ -3620,31 +3737,12 @@
      }
      
      if (isImage) {
-       showExpenseImagePreviewModal(fileUrl);
+       openReceiptViewer(fileUrl, 'image', isBlobUrl ? '' : decodeURIComponent(fileUrl.split('/').pop()));
      } else if (isPDF) {
-       // For PDFs, open in new tab with iframe
-       const previewWindow = window.open('', '_blank');
-       previewWindow.document.write(`
-         <!DOCTYPE html>
-         <html>
-         <head>
-           <title>PDF Preview</title>
-           <style>
-             * { margin: 0; padding: 0; box-sizing: border-box; }
-             html, body { width: 100%; height: 100%; }
-             iframe {
-               width: 100%;
-               height: 100vh;
-               border: none;
-             }
-           </style>
-         </head>
-         <body>
-           <iframe src="${fileUrl}"></iframe>
-         </body>
-         </html>
-       `);
-       previewWindow.document.close();
+       // On this page, drawn by pdf.js - from this origin, which /download's redirect is not
+       const base = cleanDownloadBase();
+       const source = fileUrl.startsWith(base + '/') ? receiptPreviewUrl(fileUrl.slice(base.length + 1)) : fileUrl;
+       openReceiptViewer(source, 'pdf', decodeURIComponent(fileUrl.split('/').pop()));
      } else {
        // For other files or blob URLs that aren't images, try iframe first
        const previewWindow = window.open('', '_blank');

@@ -3,7 +3,7 @@
 // silently (field names, JSON keys), so every step asserts what the page SHOWS, not what the
 // database holds. Amounts are chosen so each total is a distinct number.
 import { expect, test, type Page } from '@playwright/test';
-import { RECEIPT_PNG, brokenImages, fixtures, login, moneyRegex, reportDate, requireCredentials, requireStack } from './helpers';
+import { RECEIPT_PDF, RECEIPT_PNG, brokenImages, fixtures, login, moneyRegex, reportDate, requireCredentials, requireStack } from './helpers';
 
 // A first report opens at 0 (the page carries yesterday's closing in a hidden field); the
 // user types the cash added to the float.
@@ -96,6 +96,26 @@ test.describe.serial('report wizard', () => {
     const receipt = modal.locator('#viewExpenseContent img');
     await expect(receipt).toHaveCount(1);
     expect(await brokenImages(page, '#viewExpenseContent')).toEqual([]);
+  });
+
+  test('expenses: a PDF receipt is drawn on the page, and larger in a modal, never a new tab', async ({ page }) => {
+    // static/js/receipt_preview.js (2026-10-05): a PDF used to leave the upload box empty and
+    // open in a new tab. Picked, not added, so the day's totals stay as the next steps expect.
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto(stepUrl('expense'));
+    await page.getByRole('button', { name: /add new expense/i }).click();
+    await page.locator('#expense_files').setInputFiles({ name: 'receipt.pdf', mimeType: 'application/pdf', buffer: RECEIPT_PDF });
+    await expect(page.locator('#uploadedPdfPreview canvas')).toHaveCount(1, { timeout: 20_000 });
+    const popups: string[] = [];
+    page.context().on('page', (p) => popups.push(p.url()));
+    await page.locator('#previewIconContainer').click();
+    // in the receipt modal (the Expense Details look), not a black overlay or a new tab
+    await expect(page.locator('#receiptViewerModal canvas')).toHaveCount(1, { timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#receiptViewerModal')).toBeHidden();
+    expect(popups).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('deposit: the page shows the cash on hand before the deposit', async ({ page }) => {

@@ -171,6 +171,31 @@ def test_a_receipt_downloads_from_the_store(day, client, s3):
     assert key in resp.headers["Location"]
 
 
+def test_a_receipt_previews_from_this_origin(day, client, s3):
+    # pdf.js fetches a PDF, so the Expenses step's preview reads the bytes here rather than
+    # through /download's redirect to the bucket (2026-10-05)
+    owner, entity = day
+    key = add_expense(client, entity, DAY, "Taxi", "80.00")["expense"]["files"][0]["s3_key"]
+
+    resp = client.get(f"/preview/{key}")
+
+    assert resp.status_code == 200, resp.data[:300]
+    assert resp.data == s3.objects[key]
+    assert resp.headers["Content-Type"] == "image/jpeg"
+    assert resp.headers["Content-Disposition"] == "inline"
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_a_receipt_larger_than_an_upload_is_not_previewed(day, client, s3):
+    from blueprints.report.routes.download import RECEIPT_PREVIEW_MAX_BYTES
+
+    owner, entity = day
+    key = add_expense(client, entity, DAY, "Big", "1.00")["expense"]["files"][0]["s3_key"]
+    s3.objects[key] = b"x" * (RECEIPT_PREVIEW_MAX_BYTES + 1)
+
+    assert client.get(f"/preview/{key}").status_code == 413
+
+
 def test_deleting_the_line_deletes_its_receipt(day, client, s3):
     owner, entity = day
     keep = add_expense(client, entity, DAY, "Keep", "1.00")["expense"]
