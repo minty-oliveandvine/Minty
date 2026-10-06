@@ -3,7 +3,11 @@
 // read the tables the redesign reshapes most (sale_info / entity_sale_setting,
 // entity_pettycash_settings, entities).
 import { expect, test } from '@playwright/test';
-import { login, reportDate, requireCredentials, requireStack, fixtures } from './helpers';
+import { login, reportDate, requireCredentials, requireStack, fixtures, xeroLive } from './helpers';
+
+// The mapping and the account-code ticks are Xero's: without a live connection (the seed shop,
+// unless E2E_XERO=1) Petty Cash Settings shows only "Xero isn't connected" in their place.
+const NEEDS_XERO = 'set E2E_XERO=1 against a shop connected to a Xero Demo Company';
 
 test.describe('entity settings', () => {
   let entityId = '';
@@ -16,6 +20,7 @@ test.describe('entity settings', () => {
   });
 
   test('petty cash settings show the account mapping and the sales methods', async ({ page }) => {
+    test.skip(!xeroLive(), NEEDS_XERO);
     await page.goto(`/entity/settings/entity/${entityId}`);
     const body = page.locator('body');
     for (const name of fixtures().mappingAccounts) {
@@ -34,7 +39,24 @@ test.describe('entity settings', () => {
     await expect(page.getByRole('checkbox', { name: '429' })).toBeChecked();
   });
 
+  test('without Xero the mapping and the codes only say how to connect it (phone)', async ({ page }) => {
+    test.skip(xeroLive(), 'the shop is connected to Xero');
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.goto(`/entity/settings/entity/${entityId}`);
+    const notices = page.getByRole('status').filter({ hasText: "Xero isn't connected." });
+    await expect(notices).toHaveCount(2);
+    await expect(page.locator('#main_bank_select')).toHaveCount(0);
+    await expect(page.locator('#accountCodeList')).toHaveCount(0);
+    // the cards that need no Xero stay
+    await expect(page.locator('#ci_country_display')).toBeVisible();
+    await expect(page.locator('#paymentMethodsList')).toContainText('Visa');
+    // Save waits for nothing from Xero: off with nothing changed
+    await expect(page.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+  });
+
   test('save stays off until something changed, and off again when it is put back (phone)', async ({ page }) => {
+    test.skip(!xeroLive(), NEEDS_XERO);
     await page.setViewportSize({ width: 360, height: 780 });
     await page.goto(`/entity/settings/entity/${entityId}`);
     await page.waitForFunction(() => (window as unknown as { xeroDataReady?: boolean }).xeroDataReady === true);

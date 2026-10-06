@@ -30,6 +30,9 @@
   var viewOnly = !saveButton || saveButton.hasAttribute("data-view-only");
   var methodsUrl = "/api/entities/" + encodeURIComponent(config.entityId) + "/payment-methods";
   var saving = false;
+  // Without a live Xero connection the mapping and account-code cards show only a notice, and the
+  // mapping script (its lists, its check) is not on the page: Save waits for nothing from Xero.
+  var xeroLive = config.xeroLive === true;
 
   function readConfig() {
     var el = document.getElementById("pcs-config");
@@ -368,7 +371,7 @@
    */
   function updatePettyCashSave() {
     if (!saveButton || viewOnly) return; // the view-only button never comes on
-    var loading = window.xeroDataReady !== true;
+    var loading = xeroLive && window.xeroDataReady !== true;
     saveButton.disabled = saving || loading || noCodesTicked() || !isDirty();
   }
   // The mapping script calls this when its Xero lists start and finish loading.
@@ -924,12 +927,12 @@
     if (saving || viewOnly) return;
 
     // The mapping check: every mapping field, once any is set (the fragment's rule).
-    if (typeof window.validateMappingBeforeSave !== "function") {
+    if (xeroLive && typeof window.validateMappingBeforeSave !== "function") {
       console.error("[petty cash settings] the mapping check is missing; nothing was saved");
       toast("Something went wrong on my end. Mind trying again?", "error");
       return;
     }
-    if (!window.validateMappingBeforeSave()) {
+    if (xeroLive && !window.validateMappingBeforeSave()) {
       var missing = document.querySelector("#pc-settings .pcs-combo-input.border-red-500");
       if (missing) {
         revealCardOf(missing);
