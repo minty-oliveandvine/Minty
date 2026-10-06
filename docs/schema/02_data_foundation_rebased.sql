@@ -124,7 +124,7 @@ SELECT (CASE WHEN s.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
        s.first_name,
        s.last_name,
        s.user_phone,
-       COALESCE((CASE s.system_role::text WHEN 'superuser' THEN 'superadmin' WHEN 'user' THEN 'normal' ELSE s.system_role::text END), 'normal')::pettycash_test.system_role,
+       (CASE WHEN lower(s.email) = 'mintyliveadmin@dailyminty.com' THEN 'superadmin' ELSE COALESCE((CASE s.system_role::text WHEN 'superuser' THEN 'superadmin' WHEN 'user' THEN 'normal' ELSE s.system_role::text END), 'normal') END)::pettycash_test.system_role,
        s.approved,
        s.xero_user_id,
        s.xero_email,
@@ -612,7 +612,7 @@ DECLARE r record; bad int := 0;
 BEGIN
   FOR r IN
     SELECT COALESCE(a.v, b.v) AS v, COALESCE(a.n,0) AS src, COALESCE(b.n,0) AS dst
-      FROM (SELECT (COALESCE((CASE s.system_role::text WHEN 'superuser' THEN 'superadmin' WHEN 'user' THEN 'normal' ELSE s.system_role::text END), 'normal')::pettycash_test.system_role)::text v, count(*) n FROM pettycashv2."user" s GROUP BY 1) a
+      FROM (SELECT ((CASE WHEN lower(s.email) = 'mintyliveadmin@dailyminty.com' THEN 'superadmin' ELSE COALESCE((CASE s.system_role::text WHEN 'superuser' THEN 'superadmin' WHEN 'user' THEN 'normal' ELSE s.system_role::text END), 'normal') END)::pettycash_test.system_role)::text v, count(*) n FROM pettycashv2."user" s GROUP BY 1) a
       FULL JOIN (SELECT system_role::text v, count(*) n FROM pettycash_test."user" GROUP BY 1) b ON b.v = a.v
      ORDER BY 1
   LOOP
@@ -716,6 +716,21 @@ BEGIN
   FOR n IN SELECT count(*) FROM pettycash_test.report_expense_attachment LOOP
     RAISE NOTICE 'B4  report_expense_attachment : % (filled by 03, EXPENSE RECEIPTS)', n;
   END LOOP;
+END $$;
+
+-- B7 -- the super admin (FORCE above, the user's rule of 2026-10-06): exactly one
+-- user carries this address, and that user is superadmin. Anything else stops 02.
+DO $$
+DECLARE n int; ok int; total int;
+BEGIN
+  SELECT count(*), count(*) FILTER (WHERE system_role = 'superadmin') INTO n, ok
+    FROM pettycash_test."user" WHERE lower(email) = 'mintyliveadmin@dailyminty.com';
+  SELECT count(*) INTO total FROM pettycash_test."user" WHERE system_role = 'superadmin';
+  RAISE NOTICE 'B7  mintyliveadmin@dailyminty.com : % row(s), % superadmin (superadmins in all: %)   %',
+    n, ok, total, CASE WHEN n = 1 AND ok = 1 THEN 'OK' ELSE '*** NOT SUPERADMIN ***' END;
+  IF n <> 1 OR ok <> 1 THEN
+    RAISE EXCEPTION 'B7: mintyliveadmin@dailyminty.com is not exactly one superadmin user (% row(s), % superadmin)', n, ok;
+  END IF;
 END $$;
 
 -- B5 -- no key was lost. Each source row that passed the guards is found in

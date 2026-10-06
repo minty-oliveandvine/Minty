@@ -21,7 +21,7 @@ DO $$
 DECLARE v record; bad text; nbad int; ntot int; total_bad int := 0;
 BEGIN
   ntot := 0; nbad := 0; bad := '';
-  FOR v IN EXECUTE 'SELECT DISTINCT (COALESCE((CASE s.system_role::text WHEN ''superuser'' THEN ''superadmin'' WHEN ''user'' THEN ''normal'' ELSE s.system_role::text END), ''normal''))::text AS val FROM pettycashv2."user" s' LOOP
+  FOR v IN EXECUTE 'SELECT DISTINCT ((CASE WHEN lower(s.email) = ''mintyliveadmin@dailyminty.com'' THEN ''superadmin'' ELSE COALESCE((CASE s.system_role::text WHEN ''superuser'' THEN ''superadmin'' WHEN ''user'' THEN ''normal'' ELSE s.system_role::text END), ''normal'') END))::text AS val FROM pettycashv2."user" s' LOOP
     ntot := ntot + 1;
     BEGIN
       EXECUTE format('SELECT %L::pettycash_test.system_role', v.val);
