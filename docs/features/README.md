@@ -25,6 +25,7 @@ the new hub (`../minty-web` + `../minty-subscription-api`). Each of those repos 
 | Connecting a company to Xero, syncing, publishing and republishing a day | [xero-integration.md](xero-integration.md) |
 | Modules, the subscription reads Flask keeps, the dashboard notice | [modules-and-subscriptions.md](modules-and-subscriptions.md) |
 | Launching the wizard and the payment module; `/api/onboarding/*` | [onboarding-and-module-handoff.md](onboarding-and-module-handoff.md) |
+| Manual QA checklist — onboarding's dependencies here (OTP sign-in, Xero connect, the onboarding JWT) and the report wizard's 6 steps | [qa-checklist.md](qa-checklist.md) |
 | The sidebar on every page with a header - the menu and My Profile (minty-web's, ported) | [sidebar.md](sidebar.md) |
 | Modals - minty-web's design on every app; the Flask port and "Leave without saving?" | [modals.md](modals.md) |
 | Toasts - minty-web's card on every app; the one shared toast here | [toasts.md](toasts.md) |
