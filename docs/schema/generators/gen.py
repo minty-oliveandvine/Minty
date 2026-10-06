@@ -9,6 +9,7 @@ What is NOT mechanical lives in the dictionaries below, and nowhere else:
     EXPR        target column <- an expression over the source row (alias `s`)
     ENUM_MAP    target column <- CASE mapping of production values onto the
                                  redesign's enum members (01 header, item 18)
+    FORCE       an enum member forced over ENUM_MAP where a source-row condition holds
     USER_REFS   columns that hold a user id and go through uid()
     EXPECT_SKIP rows a table is EXPECTED to lose to a foreign-key guard
 
@@ -347,6 +348,14 @@ ENUM_MAP = {
     ("subscription_audit_log", "function_code"):     {"BILL": "PAYMENT_REQUEST"},
 }
 
+# Enum value forced over the mapping where a condition on the source row holds:
+# (condition, member). The user's rule (2026-10-06): mintyliveadmin is ALWAYS the
+# super admin, whatever a dump says. B7 fails 02 if it did not land.
+SUPERADMIN_EMAIL = "mintyliveadmin@dailyminty.com"
+FORCE = {
+    ("user", "system_role"): ("lower(s.email) = '%s'" % SUPERADMIN_EMAIL, "superadmin"),
+}
+
 # Value mapping for plain varchar columns - the same idea as ENUM_MAP, for a
 # vocabulary the schema holds as text. Empty since module_code became an enum
 # (item 20); kept so the next text vocabulary has a home. B3/R3 assert these too.
@@ -453,6 +462,9 @@ def coerce(expr, sdt, tdt, udt, t, c):
             base = "(CASE %s%s ELSE %s END)" % (src, whens, src) if whens else src
             if None in m:
                 base = "COALESCE(%s, '%s')" % (base, m[None])
+            if (t, c) in FORCE:
+                cond, member = FORCE[(t, c)]
+                base = "(CASE WHEN %s THEN '%s' ELSE %s END)" % (cond, member, base)
             return "%s::%s.%s" % (base, DST, udt)
         return "%s::text::%s.%s" % (expr, DST, udt)
     vm = VALUE_MAP.get((t, c))
@@ -807,6 +819,25 @@ BEGIN
 END $$;
 """ % {"S": SRC, "D": DST}
 
+B7 = """-- B7 -- the super admin (FORCE above, the user's rule of 2026-10-06): exactly one
+-- user carries this address, and that user is superadmin. Anything else stops 02.
+DO $$
+DECLARE n int; ok int; total int;
+BEGIN
+  SELECT count(*), count(*) FILTER (WHERE system_role = 'superadmin') INTO n, ok
+    FROM %(D)s."user" WHERE lower(email) = '%(e)s';
+  SELECT count(*) INTO total FROM %(D)s."user" WHERE system_role = 'superadmin';
+  RAISE NOTICE 'B7  %(e)s : %% row(s), %% superadmin (superadmins in all: %%)   %%',
+    n, ok, total, CASE WHEN n = 1 AND ok = 1 THEN 'OK' ELSE '*** NOT SUPERADMIN ***' END;
+  IF n <> 1 OR ok <> 1 THEN
+    RAISE EXCEPTION 'B7: %(e)s is not exactly one superadmin user (%% row(s), %% superadmin)', n, ok;
+  END IF;
+END $$;
+""" % {"D": DST, "e": SUPERADMIN_EMAIL}
+
+# Re-measured 2026-10-06 on production-backup_20261006.dump: 239 restored contacts - three of
+# the 09-25 build's are now in the synced table (a Xero sync re-created them), and one is new (an
+# expense of 2026-10-05 naming a contact the sync table lacks); accounts still 10, nothing lost.
 # Re-measured 2026-09-25 on production-backup_20260925.dump (16:16): 241 restored contacts - one
 # more than the day before (an EMBASSY contact on a 2026-09-24 report); accounts still 10 and
 # neither "lost their ..." check moved off 0. History below.
@@ -830,15 +861,17 @@ BEGIN
    WHERE NULLIF(se.account_id,'') IS NOT NULL AND d.account_id IS NULL;
   SELECT count(*) INTO lost_c FROM %(S)s.shop_expense se JOIN %(D)s.report_expense d ON d.id = se.id::uuid
    WHERE NULLIF(se.contact_id,'') IS NOT NULL AND d.contact_id IS NULL;
-  RAISE NOTICE 'R2  restored xero_contact_sync rows : %%   (expected 241)   %%', c, CASE WHEN c = 241 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R2  restored xero_contact_sync rows : %%   (expected 239)   %%', c, CASE WHEN c = 239 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  restored account_info rows      : %%   (expected 10)    %%', a, CASE WHEN a = 10 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R2  expenses that lost their account : %%   %%', lost_a, CASE WHEN lost_a = 0 THEN 'OK' ELSE '*** LOST ***' END;
   RAISE NOTICE 'R2  expenses that lost their contact : %%   %%', lost_c, CASE WHEN lost_c = 0 THEN 'OK' ELSE '*** LOST ***' END;
   IF lost_a > 0 OR lost_c > 0 THEN RAISE EXCEPTION 'R2: an expense lost a reference the source had'; END IF;
-  IF c <> 241 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
+  IF c <> 239 OR a <> 10 THEN RAISE EXCEPTION 'R2: restored-row counts changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 
+# Re-measured 2026-10-06 on production-backup_20261006.dump: 323 zero-count rows (+24, all posted
+# reports dated 2026-09-25..10-05 - predicted from the source exactly); still NULL 7 unchanged.
 # Re-measured 2026-09-25 on production-backup_20260925.dump: 299 zero-count rows (+2 in a day);
 # the 7 that still read NULL did not move. History below.
 # Re-measured 2026-09-24 on production-backup_20260924.dump: 297 zero-count rows (282 on the 09-18
@@ -884,9 +917,9 @@ BEGIN
   -- 7 of the 284 are Test_1 (PHP): the catalogue has no PHP denominations, so
   -- there is no row to carry the zero on and the app could never have counted
   -- them either. Reported and asserted, not carried.
-  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 299)   %%', n, CASE WHEN n = 299 THEN 'OK' ELSE '*** CHANGED ***' END;
+  RAISE NOTICE 'R4  zero-count rows added : %%   (expected 323)   %%', n, CASE WHEN n = 323 THEN 'OK' ELSE '*** CHANGED ***' END;
   RAISE NOTICE 'R4  zero-counted reports with no denomination for their currency (still NULL) : %%   (expected 7)   %%', still_null, CASE WHEN still_null = 7 THEN 'OK' ELSE '*** CHANGED ***' END;
-  IF n <> 299 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
+  IF n <> 323 OR still_null <> 7 THEN RAISE EXCEPTION 'R4: zero-count numbers changed - re-measure before trusting the load'; END IF;
 END $$;
 """ % {"S": SRC, "D": DST}
 
@@ -1074,7 +1107,7 @@ def emit(path, head, tables, label):
             + stmts + "\n\n\n-- ==================================================================\n"
             "--  CHECKS\n-- ==================================================================\n\n"
             + check_counts(label, tables) + "\n" + check_enums(label, tables) + "\n"
-            + (B4 + "\n" if label == "B" else "")
+            + (B4 + "\n" + B7 + "\n" if label == "B" else "")
             + check_keys(label, tables) + "\n" + check_money(label, tables) + "\n"
             + (R2 + "\n" + ZERO_COUNTS + "\n" + R7 + "\n" + RECEIPTS + "\n" if label == "R" else "")
             + "ROLLBACK;\n")

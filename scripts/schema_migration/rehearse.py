@@ -49,6 +49,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from dotenv import dotenv_values
+
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA_DIR = REPO / "docs" / "schema"
 sys.path.insert(0, str(REPO / "tests"))
@@ -70,10 +72,9 @@ def _dotenv_database_url() -> str | None:
     env_file = REPO / ".env"
     if not env_file.exists():
         return None
-    for line in io.open(env_file, encoding="utf-8"):
-        if line.startswith("DATABASE_URL="):
-            return parse_database_url(line.split("=", 1)[1].strip()).libpq
-    return None
+    # dotenv expands ${DB_SCHEMA}, as the app's own load_dotenv() does
+    url = dotenv_values(env_file).get("DATABASE_URL")
+    return parse_database_url(url).libpq if url else None
 
 
 def _default_admin_uri() -> str:
