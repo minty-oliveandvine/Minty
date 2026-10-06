@@ -358,6 +358,17 @@ def client(app):
 
 
 @pytest.fixture
+def xero_live(monkeypatch):
+    """Petty Cash Settings treats the company as live on Xero (``_xero_live``) without a Xero
+    call, so its Xero-fed cards and the account-code rule are on. Looked up at test time: this
+    conftest re-imports ``blueprints.*`` per app, so a top-level import would patch a stale module."""
+    import importlib
+
+    routes = importlib.import_module("blueprints.entity.routes.settings")
+    monkeypatch.setattr(routes, "_xero_live", lambda org: True)
+
+
+@pytest.fixture
 def caplog(caplog):
     """pytest's ``caplog``, also fed by loguru - which the services log through, and which
     pytest does not see on its own. With it a test asserts on what the engine logged the

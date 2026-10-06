@@ -80,7 +80,7 @@ def ticks(app, entity_id) -> dict:
     return {code: active for code, active in rows}
 
 
-def test_a_tick_save_leaves_account_status_alone(shop, app, db, client):
+def test_a_tick_save_leaves_account_status_alone(shop, xero_live, app, db, client):
     owner, entity = shop
     add_account(app, db, entity.id, "acc-ads", "EXPENSE", "400", "Advertising", ticked=True)
     add_account(app, db, entity.id, "acc-fees", "EXPENSE", "404", "Bank Fees", ticked=True)
@@ -130,7 +130,7 @@ def test_onboarding_ticks_come_from_the_posted_codes(shop, app, db):
     assert statuses(app, entity.id) == {"400": "ACTIVE", "404": "ACTIVE", "800": "ACTIVE"}
 
 
-def test_a_saved_choice_is_always_among_its_options(shop, app, db, client):
+def test_a_saved_choice_is_always_among_its_options(shop, xero_live, app, db, client):
     # Rows left INACTIVE by the old tick save (healed only by a connected re-sync)
     from models.db import EntityPettycashSettings
 

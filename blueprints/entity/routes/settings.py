@@ -82,6 +82,13 @@ def _xero_disconnected(org) -> bool:
     return not (token_resolved and getattr(org, "status", None) != "disconnected")
 
 
+def _xero_live(org) -> bool:
+    """Whether the entity has a live Xero connection: an org that was never connected, or one
+    disconnected inside Minty (which nulls ``xero_org_id``), is not live either - unlike
+    ``_xero_disconnected``, which only nags entities that are supposed to be connected."""
+    return bool(org is not None and getattr(org, "xero_org_id", None)) and not _xero_disconnected(org)
+
+
 def _flash_if_xero_disconnected(org) -> bool:
     """Flash a "Xero disconnected — please reconnect" error when
     ``_xero_disconnected(org)``. Returns True if the entity is disconnected.
@@ -156,6 +163,10 @@ def entity_settings_entity(org_id):
     try:
         # Get the entity by ID
         org = Entity.query.get_or_404(org_id)
+        # Live check (hits Xero /connections). Without a live connection the page hides the
+        # Xero-fed cards (the mapping and the account codes), so a save must not touch them:
+        # it would refuse over cached codes nobody can see, or switch every code off.
+        xero_live = _xero_live(org)
 
         # Handle POST request (save country selection)
         if request.method == "POST":
@@ -184,7 +195,7 @@ def entity_settings_entity(org_id):
             # codes ticked here. Refused
             # BEFORE anything is written - the mapping save commits on its own. A company with
             # no codes at all saves as before; the page greys Save in the same case.
-            saveable = saveable_account_codes(org_id)
+            saveable = saveable_account_codes(org_id) if xero_live else set()
             if saveable:
                 posted = {
                     str(c).strip()
@@ -201,7 +212,7 @@ def entity_settings_entity(org_id):
                 EntityPettycashSettings.query.filter_by(entity_id=org_id).first() is None
             )
             try:
-                if request.form.get("main_bank") and has_permission(
+                if xero_live and request.form.get("main_bank") and has_permission(
                     current_user, Permission.COA_UPDATE, org_id
                 ):
                     _xr = process_xero_account_mapping_post(
@@ -214,29 +225,30 @@ def entity_settings_entity(org_id):
 
                 apply_country_currency_selection(org, request.form)
 
+                db.session.commit()
                 # The ticks live on entity_account_xero.is_active only; account_info.status is
                 # Xero's own "still active" and is never touched by a tick (2026-10-01).
-                selected_account_codes = request.form.getlist("account_codes[]")
-                logger.info(
-                    f"Saving selected account codes for entity {org_id}: {selected_account_codes}"
-                )
-                db.session.commit()
-                try:
-                    sync_entity_account_xero_active(
-                        org_id, org.xero_org_id, selected_account_codes
+                if xero_live:
+                    selected_account_codes = request.form.getlist("account_codes[]")
+                    logger.info(
+                        f"Saving selected account codes for entity {org_id}: {selected_account_codes}"
                     )
-                except Exception:
-                    db.session.rollback()
-                    logger.exception(
-                        "entity_settings_entity POST: the account code ticks were not saved "
-                        "entity=%s", org_id,
-                    )
-                    flash(
-                        "I couldn't save your account code ticks. Mind trying again?",
-                        "danger",
-                    )
-                    return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
-                    )
+                    try:
+                        sync_entity_account_xero_active(
+                            org_id, org.xero_org_id, selected_account_codes
+                        )
+                    except Exception:
+                        db.session.rollback()
+                        logger.exception(
+                            "entity_settings_entity POST: the account code ticks were not saved "
+                            "entity=%s", org_id,
+                        )
+                        flash(
+                            "I couldn't save your account code ticks. Mind trying again?",
+                            "danger",
+                        )
+                        return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
+                        )
 
                 flash("Entity settings saved!", "success")
                 if first_save and EntityPettycashSettings.query.filter_by(
@@ -271,7 +283,7 @@ def entity_settings_entity(org_id):
 
         # Handle GET request (display form)
         # Compare Xero live vs DB and sync both modules if changes detected
-        if org.xero_org_id:
+        if xero_live:
             try:
                 token_user = get_xero_token_user_for_entity(org_id)
                 if token_user and ensure_valid_token(token_user):
@@ -325,21 +337,22 @@ def entity_settings_entity(org_id):
         # already have an entity_account_xero row — so on first load the list
         # would be partial until the background thread caught up. This backfill
         # reads account_info only (no Xero API call), so it's fast and safe to
-        # run inline. Wrapped so a failure can't break the page.
-        try:
-            sync_xero_coa_pettycash(org_id, org.xero_org_id)
-        except Exception as _coa_backfill_err:
-            logger.warning(
-                "entity_settings_entity: petty cash CoA backfill skipped "
-                "entity={}: {}",
-                org_id,
-                _coa_backfill_err,
-            )
+        # run inline. Wrapped so a failure can't break the page. Not live: the card is hidden.
+        if xero_live:
+            try:
+                sync_xero_coa_pettycash(org_id, org.xero_org_id)
+            except Exception as _coa_backfill_err:
+                logger.warning(
+                    "entity_settings_entity: petty cash CoA backfill skipped "
+                    "entity={}: {}",
+                    org_id,
+                    _coa_backfill_err,
+                )
 
         # The Petty Cash Account Code list, in code order: {code, name, selected} per row. The
         # page script draws it as text and posts the ticks (static/js/petty_cash_settings.js).
         petty_cash_codes = []
-        if org_id:
+        if xero_live:
             coa_rows = (
                 db.session.query(AccountInfo, EntityAccountXero.is_active)
                 .join(
@@ -368,20 +381,22 @@ def entity_settings_entity(org_id):
                 len(petty_cash_codes), org_id,
             )
 
-        token_valid = False
-        try:
-            token_valid = ensure_valid_token(current_user)
-        except Exception as tok_err:
-            logger.warning(
-                "entity_settings_entity: token check skipped entity=%s: %s",
-                org_id,
-                tok_err,
-            )
         _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
-        from blueprints.entity.services.xero_mapping_form_context import \
-            build_xero_mapping_form_context
+        _mapping = {}
+        if xero_live:
+            token_valid = False
+            try:
+                token_valid = ensure_valid_token(current_user)
+            except Exception as tok_err:
+                logger.warning(
+                    "entity_settings_entity: token check skipped entity=%s: %s",
+                    org_id,
+                    tok_err,
+                )
+            from blueprints.entity.services.xero_mapping_form_context import \
+                build_xero_mapping_form_context
 
-        _mapping = build_xero_mapping_form_context(org_id, org, token_valid)
+            _mapping = build_xero_mapping_form_context(org_id, org, token_valid)
 
         # The Electronic/Delivery cards are the only controls on this page whose
         # APIs enforce SALES_METHOD_* rather than COA_*. Same minimum role today,
@@ -389,10 +404,6 @@ def entity_settings_entity(org_id):
         _can_edit_sales_methods = has_permission(
             current_user, Permission.SALES_METHOD_UPDATE, org_id
         )
-        # Live check (hits Xero /connections): the mapping card says so when the
-        # entity was connected to Xero but is no longer live, so the user knows to
-        # reconnect.
-        xero_disconnected = _xero_disconnected(org)
         return render_template(
             "entity/settings_entity.html",
             org=org,
@@ -404,7 +415,7 @@ def entity_settings_entity(org_id):
             is_view_only=not _can_edit_coa,
             can_edit_coa_mappings=_can_edit_coa,
             can_edit_sales_methods=_can_edit_sales_methods,
-            xero_disconnected=xero_disconnected,
+            xero_live=xero_live,
             **_mapping,
         )
     except Exception as e:

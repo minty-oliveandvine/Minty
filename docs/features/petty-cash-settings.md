@@ -38,9 +38,15 @@ app; Users, Entity & Integration and the Module tab are minty-web's - since phas
   the script as JSON (`#pcs-config`) and is drawn as text.
 - **Dialogs**: minty-web's design ([modals.md](modals.md)): "Leave without saving?" guards the
   page once it has loaded, and deleting a sales method asks first.
-- **Disconnected from Xero**: said inside the mapping card (with the way to Entity &
-  Integration to reconnect), not as a toast. A company that never connected sends no request
-  for the Xero lists at all.
+- **Without a live Xero connection** (2026-10-06; `_xero_live` in the route: no
+  `xero_org_id` - never connected, or disconnected inside Minty, which nulls it - or a token that
+  doesn't resolve, or Xero's `/connections` says revoked): the two Xero-fed cards, **Xero account
+  mapping** and **Petty Cash Account Code**, keep their heading and show only "Xero isn't
+  connected. Connect it in Entity & Integration to set these up." - no lists, no "+ New Contact",
+  and the mapping script (its `/xero-data` load and its check) is not on the page. Country &
+  currency and the sales methods stay. The save then writes only those: the account-code rule,
+  the mapping and the ticks are skipped, so the cached codes are neither refused over nor
+  switched off. Not a toast.
 
 ### The save, in order
 
@@ -54,7 +60,9 @@ app; Users, Entity & Integration and the Module tab are minty-web's - since phas
 4. The form `POST /entity/<co>/settings/petty-cash`: country and currency, the mapping, and the
    ticked codes.
 
-Save stays off until the Xero lists have loaded, while no account code is ticked, and while
+Without a live Xero connection steps 1 and 2 are skipped and the POST carries no mapping or ticks.
+
+Save stays off until the Xero lists have loaded (when connected), while no account code is ticked, and while
 nothing has changed (2026-10-05): the page measures its changes the way "Leave without saving?"
 does (`isDirty` - the form's fields, the ticks and the sales methods against what it loaded), so
 an edit put back by hand turns Save off again. The mapping pickers write their hidden `<select>`s

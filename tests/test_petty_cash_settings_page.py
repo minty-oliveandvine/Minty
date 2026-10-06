@@ -13,8 +13,10 @@ Pins:
   person came from, falling back to the company's home; an old link's ``?from=bills`` changes
   nothing (the flag went 2026-10-05);
 * the account codes reach the page as data (the page script draws them as text), never as
-  markup; a view-only member gets no working Save; a company disconnected from Xero is told so
-  inside the mapping card rather than by a toast.
+  markup; a view-only member gets no working Save;
+* without a live Xero connection (never connected, disconnected in Minty, or a dead token) the
+  Xero-fed cards - the mapping and the account codes - show only a "Xero isn't connected" notice,
+  and a save leaves the cached ticks and the mapping alone.
 """
 
 from __future__ import annotations
@@ -108,7 +110,7 @@ def page_config(html: str) -> dict:
 # ---- the account-code rule ------------------------------------------------------------------
 
 
-def test_a_save_with_no_code_ticked_is_refused_and_writes_nothing(shop, app, db, client):
+def test_a_save_with_no_code_ticked_is_refused_and_writes_nothing(shop, xero_live, app, db, client):
     owner, entity = shop
     add_account(app, db, entity.id, "400", "Advertising")
     add_account(app, db, entity.id, "404", "Bank Fees")
@@ -128,7 +130,7 @@ def test_a_save_with_no_code_ticked_is_refused_and_writes_nothing(shop, app, db,
     assert not mapping_saved(app, entity.id)
 
 
-def test_a_code_the_company_does_not_have_does_not_count(shop, app, db, client):
+def test_a_code_the_company_does_not_have_does_not_count(shop, xero_live, app, db, client):
     owner, entity = shop
     add_account(app, db, entity.id, "400", "Advertising")
     F.login(client, owner)
@@ -140,7 +142,7 @@ def test_a_code_the_company_does_not_have_does_not_count(shop, app, db, client):
     assert ticks(app, entity.id) == {"400": True}
 
 
-def test_a_save_with_one_code_ticked_keeps_exactly_that_one(shop, app, db, client):
+def test_a_save_with_one_code_ticked_keeps_exactly_that_one(shop, xero_live, app, db, client):
     owner, entity = shop
     add_account(app, db, entity.id, "400", "Advertising")
     add_account(app, db, entity.id, "404", "Bank Fees")
@@ -153,7 +155,7 @@ def test_a_save_with_one_code_ticked_keeps_exactly_that_one(shop, app, db, clien
     assert ticks(app, entity.id) == {"400": False, "404": True}
 
 
-def test_a_company_with_no_codes_still_saves(shop, app, db, client):
+def test_a_company_with_no_codes_still_saves(shop, xero_live, app, db, client):
     owner, entity = shop
     F.login(client, owner)
 
@@ -163,7 +165,7 @@ def test_a_company_with_no_codes_still_saves(shop, app, db, client):
     assert ("success", "Entity settings saved!") in flashes(client)
 
 
-def test_rows_without_a_code_do_not_count(shop, app, db, client):
+def test_rows_without_a_code_do_not_count(shop, xero_live, app, db, client):
     # They cannot be ticked back on (the save keys on the code), so they never block a save
     owner, entity = shop
     add_account(app, db, entity.id, None, "Uncoded")
@@ -176,7 +178,7 @@ def test_rows_without_a_code_do_not_count(shop, app, db, client):
     assert ("success", "Entity settings saved!") in flashes(client)
 
 
-def test_the_first_ever_save_keeps_the_ticks_and_opens_the_dashboard(shop, app, db, client):
+def test_the_first_ever_save_keeps_the_ticks_and_opens_the_dashboard(shop, xero_live, app, db, client):
     # The first mapping save used to switch every code on and leave for the dashboard before
     # the ticks were saved; now the ticks land first, then it goes to the dashboard as before.
     from models.db import AccountInfo, XeroContactSync
@@ -243,7 +245,7 @@ def test_an_old_from_bills_link_opens_the_same_page(shop, app, db, client):
     assert "from=bills" not in old and 'name="_from"' not in old
 
 
-def test_the_codes_reach_the_page_as_data_not_markup(shop, app, db, client):
+def test_the_codes_reach_the_page_as_data_not_markup(shop, xero_live, app, db, client):
     owner, entity = shop
     add_account(app, db, entity.id, "400", '<img src=x onerror="alert(1)">')
     add_account(app, db, entity.id, "404", "Bank Fees", ticked=False)
@@ -282,10 +284,42 @@ def test_a_view_only_member_gets_no_working_save(shop, app, db, client):
     assert page_config(html)["canEditCodes"] is False
 
 
-def test_a_disconnected_company_is_told_in_the_mapping_card(shop, app, db, client):
+# ---- without a live Xero connection ----------------------------------------------------------
+
+
+NOT_CONNECTED = "Xero isn't connected. Connect it in"
+
+
+def assert_xero_cards_hidden(html):
+    # both Xero-fed cards keep their heading and show only the notice
+    assert "Xero account mapping" in html and "Petty Cash Account Code" in html
+    assert html.count(NOT_CONNECTED) == 2
+    assert 'id="main_bank_select"' not in html
+    assert 'id="accountCodeList"' not in html
+    assert 'id="xeroRefreshNote"' not in html
+    assert "loadXeroDataAsync" not in html  # the mapping script is not on the page
+    config = page_config(html)
+    assert config["xeroLive"] is False
+    assert config["codes"] == []
+    # the cards that do not need Xero stay
+    assert 'id="ci_country_display"' in html and 'id="paymentMethodsList"' in html
+
+
+def test_a_company_that_never_connected_sees_the_notice_not_the_lists(shop, app, db, client):
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")  # cached from an earlier connection
+    F.login(client, owner)
+
+    html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
+
+    assert_xero_cards_hidden(html)
+
+
+def test_a_company_with_a_dead_connection_sees_the_notice_not_the_lists(shop, app, db, client):
     from models.db import Entity
 
     owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
     with app.app_context():
         # once connected to a Xero organisation, now without a token that resolves
         Entity.query.filter_by(id=entity.id).update({"xero_org_id": "org-gone-1111"})
@@ -294,7 +328,23 @@ def test_a_disconnected_company_is_told_in_the_mapping_card(shop, app, db, clien
 
     html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
-    assert "This entity has been disconnected from Xero." in html
+    assert_xero_cards_hidden(html)
     assert not any("disconnected from Xero" in message for _, message in flashes(client))
-    # the "could not refresh" note is for a connected company only
-    assert 'id="xeroRefreshNote"' not in html
+
+
+def test_a_save_without_xero_leaves_the_ticks_and_the_mapping_alone(shop, app, db, client):
+    # The hidden cards post nothing: the cached codes must not be refused over or switched off,
+    # and a stray mapping field must not be saved.
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    add_account(app, db, entity.id, "404", "Bank Fees", ticked=False)
+    F.login(client, owner)
+
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={
+        "country_code": "HK", "main_bank": "acc-bank",
+    })
+
+    assert resp.status_code == 302
+    assert ("success", "Entity settings saved!") in flashes(client)
+    assert ticks(app, entity.id) == {"400": True, "404": False}
+    assert not mapping_saved(app, entity.id)

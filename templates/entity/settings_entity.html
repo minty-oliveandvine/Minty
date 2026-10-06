@@ -17,6 +17,16 @@
 {% set fn = (current_user.first_name or '')[:1] %}
 {% set ln = (current_user.last_name or '')[:1] %}
 {% set viewer_name = ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or '')) | trim %}
+{# Without a live Xero connection (never connected, disconnected, or a dead token) the Xero-fed
+   cards keep their heading and show only this - their lists would be empty or stale. #}
+{% macro xero_not_connected() %}
+<div class="pcs-notice pcs-notice-alert" role="status">
+  <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
+  <span>Xero isn't connected. Connect it in
+    <a href="{{ url_for('entity_settings', entity_id=org.id) }}">Entity &amp; Integration</a>
+    to set these up.</span>
+</div>
+{% endmacro %}
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -132,25 +142,18 @@
                 </h2>
                 <p class="pcs-card-sub">The Xero accounts and contacts a petty cash report posts to.</p>
               </div>
+              {% if xero_live %}
               <div class="pcs-card-body{% if not can_map %} pcs-readonly{% endif %}" id="mappingContent">
-                {% if xero_disconnected %}
-                <div class="pcs-notice pcs-notice-alert" role="status">
-                  <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
-                  <span>This entity has been disconnected from Xero. Reconnect it in
-                    <a href="{{ url_for('entity_settings', entity_id=org.id) }}">Entity &amp; Integration</a>
-                    to keep these lists in sync.</span>
-                </div>
-                {% endif %}
-                {% if org.xero_org_id and not xero_disconnected %}
-                {# Shown by the mapping script when its refresh from Xero fails (a company that
-                   never connected has nothing to refresh; a disconnected one has the notice above). #}
+                {# Shown by the mapping script when its refresh from Xero fails. #}
                 <div class="pcs-notice" id="xeroRefreshNote" role="status" hidden>
                   <span class="material-symbols-outlined" aria-hidden="true">info</span>
                   <span>I couldn't refresh these lists from Xero just now, so they show what was last synced.</span>
                 </div>
-                {% endif %}
                 {% include 'entity/partials/xero_account_mapping_cards_classic.html' %}
               </div>
+              {% else %}
+              <div class="pcs-card-body" id="mappingContent">{{ xero_not_connected() }}</div>
+              {% endif %}
             </section>
 
             {# 3. Electronic and Delivery #}
@@ -169,6 +172,9 @@
                 </h2>
                 <p class="pcs-card-sub">Only selected account code will appear when adding an expense in Petty Cash.</p>
               </div>
+              {% if not xero_live %}
+              <div class="pcs-card-body" id="accountCodeContent">{{ xero_not_connected() }}</div>
+              {% else %}
               <div class="pcs-card-body" id="accountCodeContent">
                 <div class="pcs-search">
                   <label for="accountCodeInput" class="sr-only">Search account code</label>
@@ -181,6 +187,7 @@
                   </div>
                 </div>
               </div>
+              {% endif %}
             </section>
 
           </div>
@@ -226,8 +233,9 @@
   'currencies': currencies,
   'canEditCodes': not is_view_only,
   'canEditSalesMethods': can_edit_sales_methods | default(false),
+  'xeroLive': xero_live,
 } | tojson }}</script>
-{% include 'entity/partials/xero_entity_mapping_scripts_classic.html' %}
+{% if xero_live %}{% include 'entity/partials/xero_entity_mapping_scripts_classic.html' %}{% endif %}
 <script src="{{ url_for('static', filename='js/petty_cash_settings.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/back_link.js') }}"></script>
 </body>
