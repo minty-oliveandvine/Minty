@@ -73,8 +73,8 @@ DATABASE_URL=$OLD SUBSCRIPTION_SCHEDULER_ENABLED=0 \
 | File | Journeys |
 |---|---|
 | `01_login.spec.ts` | login form, wrong password, the terms panel shows for the shared account (locked tick box; never answered), the Terms-accepted account lands on the entity list, the company dashboard |
-| `02_report_wizard.spec.ts` | opening (live opening balance) → sales (three live sub-totals) → expenses (receipt upload, supplier and account pickers, running total) → deposit (cash on hand) → cash count (calculator modal, hidden fields, zero discrepancy) → ending (summary figures) → submitted → history row and the posted report's summary |
-| `03_settings.spec.ts` | petty-cash account mapping, the sales-methods editor (add via the catalogue picker → visible on the sales form), users, the Xero page and an entity rename round-trip, the module page, the CSV export's movement lines |
+| `02_report_wizard.spec.ts` | opening (live opening balance) → sales (three live sub-totals) → expenses (receipt upload, supplier and account pickers, running total) → deposit (cash on hand) → cash count (calculator modal, hidden fields, zero discrepancy) → ending (summary figures) → submitted → history row and the posted report's summary → the day's movements CSV |
+| `03_settings.spec.ts` | petty-cash account mapping, the sales-methods editor (add via the catalogue picker → visible on the sales form), Save off until something changed (phone), and the Users / Entity & Integration / Module tabs' hand-over to minty-web (the redirects read, not followed); none of it needs 02 |
 | `04_xero_publish.spec.ts` | `E2E_XERO=1` only: the report 02 posted → Publish on its submitted page → `/api/report/<id>/publishing_status` reaches `xero_integrated_yes` → Republish offered. Real bank transactions, a transfer and the receipt land in the linked organisation |
 
 Serial, one worker: every journey signs in as the same user and writes to the same entity.

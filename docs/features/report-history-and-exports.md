@@ -74,5 +74,5 @@ previous day's bank deposit, pushed to Xero when published) took GET and NO logi
 CSV's movement lines, the receipt links, delete), `tests/test_cashier_report_history.py`
 (what a cashier may see), `tests/test_report_export_permissions.py`,
 `tests/test_share_link_access.py`;
-`e2e/02_report_wizard.spec.ts` (history and detail after posting) and
-`e2e/03_settings.spec.ts` (the CSV).
+`e2e/02_report_wizard.spec.ts` (history and detail after posting, and the movements CSV of the
+day it posted).

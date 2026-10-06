@@ -216,7 +216,8 @@ same shapes.
 `tests/test_access_rules.py`, `tests/test_double_buy_guard.py`,
 `tests/test_subscription_*.py`, `tests/test_billing_*.py`, `tests/test_one_payer_per_entity.py`,
 `tests/test_minty_web_handoff.py` (the Module tab is a hand-over, and nothing else answers under
-it); Minty's `e2e/03_settings.spec.ts` reads that redirect. The Jinja module-page tests
+it); Minty's `e2e/03_settings.spec.ts` reads that redirect (with the Users and Entity &
+Integration tabs', the same way). The Jinja module-page tests
 (`test_subscription_templates`, `test_consent_takeover`, `test_restart_billing_guard`,
 `test_purchase_card_choice`, `test_retry_decline_wording`, the dark suite) went with the page on
 2026-10-01.
