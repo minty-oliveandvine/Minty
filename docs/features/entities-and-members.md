@@ -76,7 +76,9 @@ without Petty Cash); the payments app's own sidebar opens its Payment Request Se
 | Users | minty-web; `GET /entity/<co>/settings/users` hands over. Reads `GET /api/me/company/users` | members with role, who pays for the company (the billing-group payer, looked up separately from the role), pending invitations; per row whether this person may change the role / remove | read `USER_VIEW_ALL` and invite `USER_INVITE` (shop manager+); change a role `USER_ROLE_ASSIGN` (shop manager+); remove `USER_ROLE_DELETE` (accountant+) - each also the rank rule below |
 | Module | `GET /entity/<co>/settings/modules` | a hand-over to minty-web's Module page ([modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |
 
-Renaming the company is reflected in the header at once (`e2e/03_settings.spec.ts`).
+Renaming the company is reflected in the header at once - minty-web's Entity & Integration tab
+(its `features/company-settings/e2e/12_company_settings.spec.ts`; the API's rules are
+`tests/test_hub_company_settings.py`).
 
 ## Members, roles, invitations
 
@@ -136,7 +138,7 @@ consent history), `GET/POST /admin/download_statements` (statements across compa
 
 `tests/test_char_entities.py` (the tabs and their permissions), `tests/test_entity_*.py`
 (list, create, selection, the trial badge), `tests/test_user_presence.py`,
-`tests/test_settings_users_subscriber_tag.py`, `tests/test_one_payer_per_entity.py`,
+`tests/test_hub_company_settings.py`, `tests/test_one_payer_per_entity.py`,
 `tests/test_invitation*.py`, `tests/test_authz_decorators.py`, `tests/test_email_english_only.py`; in the browser
-`e2e/03_settings.spec.ts` (mapping, sales methods, users, the Xero page, rename, the
-module page, the CSV) and `e2e/01_login.spec.ts` (Select Company).
+`e2e/03_settings.spec.ts` (mapping, sales methods, Save, and the Users / Entity & Integration /
+Module tabs' hand-over to minty-web) and `e2e/01_login.spec.ts` (Select Company).

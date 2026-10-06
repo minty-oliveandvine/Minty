@@ -1,7 +1,8 @@
 // The petty-cash report wizard in a real browser: opening -> sales -> expenses -> deposit ->
-// cash count -> ending -> submitted. This is the JavaScript the schema redesign can break
-// silently (field names, JSON keys), so every step asserts what the page SHOWS, not what the
-// database holds. Amounts are chosen so each total is a distinct number.
+// cash count -> ending -> submitted, then the posted day in history and its movements CSV.
+// This is the JavaScript the schema redesign can break silently (field names, JSON keys), so
+// every step asserts what the page SHOWS, not what the database holds. Amounts are chosen so
+// each total is a distinct number.
 import { expect, test, type Page } from '@playwright/test';
 import { RECEIPT_PDF, RECEIPT_PNG, brokenImages, fixtures, login, moneyRegex, reportDate, requireCredentials, requireStack } from './helpers';
 
@@ -208,5 +209,22 @@ test.describe.serial('report wizard', () => {
     // "Tape" is the description and is not shown here)
     await page.locator('#expensesShowMore').click();
     await expect(detail).toContainText(fixtures().accountName);
+  });
+
+  test('the movements CSV lists the posted day, one line per movement', async ({ page }) => {
+    const res = await page.request.get(`/entity/${entityId}/petty-cash/reports/download-csv?start_date=${day}&end_date=${day}`);
+    expect(res.status()).toBe(200);
+    const text = await res.text();
+    const rows = text.split(/\r?\n/).filter((r) => r.trim());
+    expect(rows[0]).toMatch(/^Date,Account Code,Amount/);
+    // Python writes the amounts: a whole number keeps its ".0" (500.0), any other as typed
+    const amount = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n));
+    // the float added at the start (director account 835), the expense by its account code and
+    // remark, the cash sale (200) and the deposit, booked against the petty cash account (090 on
+    // the seed's mapping, 091 on the Demo Company's)
+    expect(text).toContain('Cash Addition');
+    expect(text).toContain(`,${fixtures().expenseCode},${amount(-EXPENSE)},Tape`);
+    expect(text).toContain(`,200,${amount(CASH)},Cash Sale`);
+    expect(text).toContain(`,${fixtures().pettyCashCode},${amount(-DEPOSIT)},Bank Deposit`);
   });
 });

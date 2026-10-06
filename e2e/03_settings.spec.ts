@@ -1,8 +1,9 @@
-// Entity settings in the browser: the petty-cash account mapping, the sales methods editor,
-// users, the Xero page, the module page, and the CSV export. These pages read the tables the
-// redesign reshapes most (sale_info / entity_sale_setting, entity_pettycash_settings, entities).
+// Entity settings in the browser: the petty-cash account mapping, the sales methods editor and
+// Save, then the Users / Entity & Integration / Module tabs' hand-over to minty-web. These pages
+// read the tables the redesign reshapes most (sale_info / entity_sale_setting,
+// entity_pettycash_settings, entities).
 import { expect, test } from '@playwright/test';
-import { login, moneyRegex, reportDate, requireCredentials, requireStack, fixtures, xeroLive } from './helpers';
+import { login, reportDate, requireCredentials, requireStack, fixtures } from './helpers';
 
 test.describe('entity settings', () => {
   let entityId = '';
@@ -86,74 +87,31 @@ test.describe('entity settings', () => {
     await expect(page.locator('#shop_sales_octopus')).toBeAttached();
   });
 
-  test('users page lists the member with an edit and a remove action', async ({ page }) => {
-    await page.goto(`/entity/settings/users/${entityId}`);
-    await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Eve Tester' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /edit user/i }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /remove user/i }).first()).toBeVisible();
-    await expect(page.locator('body')).toContainText(/admin/i);
-  });
-
-  test('xero settings page renders the entity name, country/currency and the connection button', async ({ page }) => {
-    await page.goto(`/entity/${entityId}/settings/xero`);
-    await expect(page.getByRole('textbox', { name: /entity name/i })).toHaveValue('E2E Petty Cash Shop');
-    // a shop linked to a Demo Company by hand is Connected and offers Disconnect; the seed's shop is not
-    if (xeroLive()) {
-      await expect(page.locator('body')).toContainText('Connected');
-      await expect(page.getByRole('button', { name: /disconnect from xero/i })).toBeVisible();
-    } else {
-      await expect(page.getByRole('button', { name: /^connect to xero/i })).toBeVisible();
-    }
-    await expect(page.getByRole('heading', { name: /country & currency/i })).toBeVisible();
-  });
-
-  test('renaming the entity is reflected in the header and reverted', async ({ page }) => {
-    await page.goto(`/entity/${entityId}/settings/xero`);
-    const name = page.getByRole('textbox', { name: /entity name/i });
-    await name.fill('E2E Petty Cash Shop (renamed)');
-    await page.getByRole('button', { name: /save changes/i }).click();
-    await page.goto(`/entity/${entityId}/settings/xero`);
-    await expect(name).toHaveValue('E2E Petty Cash Shop (renamed)');
-    await name.fill('E2E Petty Cash Shop');
-    await page.getByRole('button', { name: /save changes/i }).click();
-    await page.goto(`/entity/${entityId}/settings/xero`);
-    await expect(name).toHaveValue('E2E Petty Cash Shop');
-  });
-
-  test('the Module tab hands the browser to minty-web with a token for the company', async ({ page }) => {
-    // Flask's Jinja module page was deleted on 2026-10-01: the address is a hand-over to
-    // minty-web's Module page. Read the redirect itself rather than following it - the
-    // minty-web dev server is not part of this stack.
-    // The full id 308s to the company's own address first (2026-10-05); that one hands over.
-    const moved = await page.request.get(`/entity/${entityId}/settings/modules`, { maxRedirects: 0 });
-    expect(moved.status()).toBe(308);
-    const readable = new URL(moved.headers()['location'], page.url() || 'http://localhost').pathname;
-    expect(readable).toMatch(new RegExp(`^/entity/${entityId.slice(0, 8)}/[^/]+/settings/modules$`));
-    const resp = await page.request.get(readable, { maxRedirects: 0 });
-    expect(resp.status()).toBe(302);
-    const location = new URL(resp.headers()['location']);
-    expect(location.pathname).toBe('/landing');
-    // the company by short id and name since 2026-10-05; the Module tab among its settings since phase 2
-    expect(location.searchParams.get('next')).toMatch(new RegExp(`^/entities/${entityId.slice(0, 8)}/[^/]+/settings/modules$`));
-    expect(location.searchParams.get('entity_id')).toBe(entityId);
-    expect(location.searchParams.get('token')).toBeTruthy();
-  });
-
-  test('history CSV lists the posted day as movements', async ({ page }) => {
-    const day = reportDate(-1);
-    const res = await page.request.get(`/entity/${entityId}/petty-cash/reports/download-csv?start_date=${day}&end_date=${day}`);
-    expect(res.status()).toBe(200);
-    const text = await res.text();
-    const rows = text.split(/\r?\n/).filter((r) => r.trim());
-    expect(rows[0]).toMatch(/^Date,Account Code,Amount/);
-    // one line per movement of the report the wizard spec posted: the float added at the
-    // start (director account 835), the expense by its remark and account code (445), the
-    // cash sale (200) and the deposit, booked against the petty cash account (090 on the
-    // seed's mapping, 091 on the Demo Company's)
-    expect(text).toMatch(/Cash Addition/);
-    expect(text).toMatch(new RegExp(`,${fixtures().expenseCode},-25\\.1,Tape`));
-    expect(text).toMatch(/,200,300\.1,Cash Sale/);
-    expect(text).toMatch(new RegExp(`,${fixtures().pettyCashCode},-500\\.0,Bank Deposit`));
-  });
+  // Users, Entity & Integration and the Module tab are minty-web's since phase 2 (2026-10-05;
+  // Flask's Jinja pages are deleted). Their Flask addresses stay as the way there: an old full-id
+  // address 308s to the company's own, which hands the browser to minty-web's /landing with a
+  // token for the company. Read the redirects rather than following them - the minty-web dev
+  // server is not part of this stack. The pages themselves are minty-web's
+  // features/company-settings/e2e/12_company_settings.spec.ts (and the subscription feature's 02),
+  // their Flask API tests/test_hub_company_settings.py (the rename and every permission).
+  for (const [tab, oldPath] of [
+    ['users', (id: string) => `/entity/settings/users/${id}`],
+    ['integration', (id: string) => `/entity/${id}/settings/xero`],
+    ['modules', (id: string) => `/entity/${id}/settings/modules`],
+  ] as const) {
+    test(`the ${tab} tab hands the browser to minty-web with a token for the company`, async ({ page }) => {
+      const shortId = entityId.slice(0, 8);
+      const moved = await page.request.get(oldPath(entityId), { maxRedirects: 0 });
+      expect(moved.status()).toBe(308);
+      const readable = new URL(moved.headers()['location'], page.url() || 'http://localhost').pathname;
+      expect(readable).toMatch(new RegExp(`^/entity/${shortId}/[^/]+/settings/${tab}$`));
+      const resp = await page.request.get(readable, { maxRedirects: 0 });
+      expect(resp.status()).toBe(302);
+      const location = new URL(resp.headers()['location']);
+      expect(location.pathname).toBe('/landing');
+      expect(location.searchParams.get('next')).toMatch(new RegExp(`^/entities/${shortId}/[^/]+/settings/${tab}$`));
+      expect(location.searchParams.get('entity_id')).toBe(entityId);
+      expect(location.searchParams.get('token')).toBeTruthy();
+    });
+  }
 });
