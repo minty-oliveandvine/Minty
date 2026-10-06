@@ -14,7 +14,6 @@ BLUEPRINTS = (
     ("blueprints.xero", "xero_bp"),
     ("blueprints.invitation", "invitation_bp"),
     ("blueprints.legal", "legal_bp"),
-    ("blueprints.subscription", "subscription_bp"),
 )
 
 

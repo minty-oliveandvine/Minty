@@ -12,8 +12,7 @@ from sqlalchemy import func, or_
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import minty_web_module_page_handoff
 from blueprints.entity.services.entity_list import sign_notices
-from blueprints.entity.services.modules import (build_subscription_notices,
-                                                claim_subscription_notice)
+from blueprints.entity.services.modules import claim_subscription_notice
 from blueprints.entity.services.shared import (check_user_has_entities,
                                                get_main_bank_account)
 from blueprints.shared.entity_display import build_entity_acronym
@@ -27,6 +26,7 @@ from services.auth.token_service import (ensure_valid_token,
 from services.authz import (permission_denied, require_entity_access,
                             require_module, require_permission)
 from services.permission_policy import Permission, has_permission, is_superuser
+from services.subscription_api import fetch_notice
 
 
 @entity_bp.route("/entity")
@@ -314,9 +314,9 @@ def report_dashboard(id):
         if _currency and _currency.currency_code:
             currency_symbol = _currency.currency_code
 
-    # Subscription notice — once per entity per login. claim_* is checked FIRST so
-    # the billing queries behind build_* never run on a page view that wouldn't show
-    # the modal anyway; the dashboard is a hot path.
+    # Subscription notice — once per entity per login. claim_* is checked FIRST so the
+    # subscription API is only asked on a page view that would show the modal; the
+    # dashboard is a hot path.
     #
     # ``?notice=1`` re-shows it without a fresh login. Debug-gated, because the whole
     # point of the claim is that a customer sees this once — but testing it otherwise
@@ -326,13 +326,10 @@ def report_dashboard(id):
     claimed = force_notice or claim_subscription_notice(session, id)
     subscription_notice = None
     if claimed:
-        try:
-            notice = build_subscription_notices(id, current_user.id)
-            subscription_notice = notice if notice["items"] else None
-        except Exception as exc:  # never break the dashboard over a notice
-            logger.error(f"Subscription notice build failed for {id}: {exc}")
+        # Never breaks the dashboard: a failure is logged there and answers None.
+        subscription_notice = fetch_notice(id, current_user)
     # One line per dashboard load. "Not showing" has several indistinguishable
-    # causes — claim already spent, nothing to report, a build that threw — and
+    # causes — claim already spent, nothing to report, a failed fetch — and
     # without this the only way to tell them apart is to guess.
     logger.info(
         f"NOTICE {id}: forced={force_notice} claimed={claimed} "

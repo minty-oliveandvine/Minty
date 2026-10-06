@@ -195,7 +195,6 @@ def test_the_app_is_configured_from_the_urls(app):
     assert app.config["MAIL_USE_TLS"] is True and app.config["MAIL_USE_SSL"] is False
     assert app.config["MAIL_TIMEOUT"] == 10.0
     assert app.config["MAIL_DEFAULT_SENDER"] == app.config["MAIL_FROM"] == "noreply@minty.test"
-    assert app.config["SUBSCRIPTION_EMAIL"] == "noreply@minty.test"  # defaults to MAIL_FROM
     assert app.config["REDIRECT_URI"] == "http://localhost:8010/callback"
     assert app.config["XERO_API_BASE_URL"] == "https://api.xero.com/api.xro/2.0"
     assert app.config["APP_ENV"] == "development"

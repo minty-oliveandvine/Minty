@@ -179,7 +179,7 @@ def test_a_trial_badge_never_claims_a_module_that_is_off(app, client, people, hu
     # Petty Only runs a Payment Request trial row although the module is not switched on,
     # and a Petty Cash trial that is.
     monkeypatch.setattr(
-        "blueprints.entity.services.entity_list.get_trial_modules_for_entities",
+        "blueprints.entity.services.entity_list.trial_modules_for_entities",
         lambda ids: {petty.id: {"PETTY_CASH", "PAYMENT_REQUEST"}},
     )
     entries = {e["name"]: e for e in _get(client, app, people["olive"].id).get_json()["entities"]}

@@ -25,8 +25,8 @@ from loguru import logger
 from sqlalchemy.orm import aliased
 
 from blueprints.entity.services.modules import (get_enabled_modules_for_entities,
-                                                get_trial_modules_for_entities,
                                                 module_display_names)
+from blueprints.subscription.services.store_ro import trial_modules_for_entities
 from models.db import Entity, User, UserEntity, db
 from services.permission_policy import is_superuser
 
@@ -90,7 +90,7 @@ def build_entity_list(user) -> list[dict]:
 
     entity_ids = [r.id for r in rows]
     modules_by_entity = get_enabled_modules_for_entities(entity_ids)
-    trials_by_entity = get_trial_modules_for_entities(entity_ids)
+    trials_by_entity = trial_modules_for_entities(entity_ids)
     trial_labels = module_display_names(
         {code for codes in trials_by_entity.values() for code in codes}
     )

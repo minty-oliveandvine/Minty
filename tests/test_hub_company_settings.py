@@ -121,7 +121,7 @@ def test_the_users_tab_reads_the_members_their_rights_and_the_roles_one_may_give
 def test_the_subscriber_is_the_payer_not_a_rank(app, client, shop, monkeypatch):
     """"Who can change our modules" needs admin rank AND the payer, so the tab marks the payer -
     whoever they are, and nobody else."""
-    from blueprints.subscription.services import store
+    from blueprints.subscription.services import store_ro as store
 
     monkeypatch.setattr(store, "payer_for_entity", lambda _eid: shop["accountant"].id)
     page = call(client, app, "GET", "/api/me/company/users", shop["admin"], shop["entity"].id).get_json()
@@ -189,7 +189,7 @@ def test_removal_runs_the_guards_in_order_and_removes(app, client, shop):
 
 
 def test_the_payer_is_not_removed(app, client, shop, monkeypatch):
-    from blueprints.subscription.services import store
+    from blueprints.subscription.services import store_ro as store
 
     monkeypatch.setattr(store, "rows_for_entity", lambda eid: [type("Row", (), {"payer_user_id": shop["accountant"].id})()])
     resp = call(client, app, "DELETE", f"/api/me/company/users/{shop['accountant'].id}", shop["admin"], shop["entity"].id)

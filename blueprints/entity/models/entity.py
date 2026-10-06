@@ -69,10 +69,7 @@ class Entity(db.Model):
     financial_year_end_day = db.Column(db.SmallInteger, nullable=True)
     financial_year_end_month = db.Column(db.SmallInteger, nullable=True)
     # NOTE: no stripe_customer_id column - the customer belongs to the PAYER, not the
-    # entity, so it resolves entity -> payer -> customer. Render paths read it from the
-    # local tables via ``entity.services.modules._entity_customer_id``; the billing paths
-    # use ``subscription.services.checkout._resolve_customer_id``, which adds a Stripe
-    # search fallback that is deliberately wrong for a render.
+    # entity, so it resolves entity -> payer -> customer, in minty-subscription-api.
     # The member who connected this company to Xero; their user_token row is the one a
     # publish uses (replaces the old user.xero_entity_id, C1).
     connected_by_user_id = db.Column(

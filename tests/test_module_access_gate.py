@@ -1,25 +1,20 @@
 """Access is a PROJECTION of the subscription row, and every unknown answers no.
 
 ``entity_module_subscription`` is the record of truth; ``entity_function_map.is_enabled``
-only caches it so a request costs one indexed lookup instead of a join. That makes two
-rules load-bearing, and neither had a test:
+only caches it so a request costs one indexed lookup instead of a join. One rule is
+load-bearing here:
 
 * **The gate fails closed.** No map row, or no catalog row, means NO. It used to fall
   through to the catalog's ``is_active``, which granted a module to every entity that
   had never subscribed to it.
-* **The sweep revokes what nothing backs.** A module switched on with no subscription
-  row is the one inconsistency no event can repair — trials and cancellations fire on
-  writes, but "enabled and never subscribed" has no write to hang off. The sweep used
-  to skip exactly that case, so it survived forever: the user was inside the module
-  while its card still offered "Start free trial".
 
-Mid-onboarding entities are the deliberate exception — the wizard records its Step 2
-selection in the map and only starts the trials at finalize.
+The sweep that revokes what nothing backs is minty-subscription-api's (``manage.py
+subscriptions sweep-access``), tested there.
 """
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timezone
 
 import pytest
 
@@ -183,152 +178,3 @@ def test_entity_creation_grants_nothing(app, db_session):
 
         assert _is_module_enabled(entity.id, "PETTY_CASH") is False
         assert _is_module_enabled(entity.id, "PAYMENT_REQUEST") is False
-
-
-# --- the sweep --------------------------------------------------------------
-
-
-def test_sweep_revokes_access_with_no_subscription_row(app, db_session):
-    """The case that used to be skipped, and so never got repaired."""
-    from blueprints.entity.routes.modules import _is_module_enabled
-    from blueprints.entity.services.modules import sweep_expired_module_access
-
-    with app.app_context():
-        entity = _entity(db_session)
-        pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "PAYMENT_REQUEST", is_active=False)
-        _grant(db_session, entity, pc, enabled=True)
-
-        assert _is_module_enabled(entity.id, "PETTY_CASH") is True
-
-        result = sweep_expired_module_access()
-
-        assert {"entity_id": entity.id, "code": "PETTY_CASH"} in result["disabled"]
-        assert _is_module_enabled(entity.id, "PETTY_CASH") is False
-
-
-def test_sweep_exempts_entities_still_onboarding(app, db_session):
-    """Between Step 2's selection and finalize's trial start, enabled-with-no-row is
-    the expected state — revoking there would leave finalize nothing to start."""
-    from blueprints.entity.routes.modules import _is_module_enabled
-    from blueprints.entity.services.modules import sweep_expired_module_access
-
-    with app.app_context():
-        entity = _entity(db_session, status="onboarding")
-        pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "PAYMENT_REQUEST", is_active=False)
-        _grant(db_session, entity, pc, enabled=True, actor="onboarding")
-
-        result = sweep_expired_module_access()
-
-        assert result["disabled"] == []
-        assert _is_module_enabled(entity.id, "PETTY_CASH") is True
-
-
-# ``_naive_clock`` went with C7: the subscription tables' timestamps are ``AwareDateTime``,
-# which hands back an aware stamp on SQLite too, so the sweep's clock can stay aware.
-def test_sweep_terminates_a_cancellation_whose_access_ran_out(app, db_session, monkeypatch):
-    """The date that ends access also ends the SUBSCRIPTION.
-
-    Leaving the row on ``scheduled_cancel`` meant a module nobody could use still read
-    as mid-cancellation forever — the panel offering Renew for something already over,
-    and ``_in_cancellation_window`` refusing to let them buy it again. ``cancelled`` is
-    terminal and re-purchasable, which is the state they are actually in.
-    """
-    from blueprints.entity.routes.modules import _is_module_enabled
-    from blueprints.entity.services.modules import sweep_expired_module_access
-
-    with app.app_context():
-        entity = _entity(db_session)
-        pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "PAYMENT_REQUEST", is_active=False)
-        _grant(db_session, entity, pc, enabled=True, actor="subscription")
-
-        past = datetime.now() - timedelta(days=1)
-        row = _sub_row(
-            db_session, entity, "PETTY_CASH",
-            phase="scheduled_cancel", app_access_until=past,
-        )
-
-        result = sweep_expired_module_access()
-
-        assert {"entity_id": entity.id, "code": "PETTY_CASH"} in result["disabled"]
-        assert _is_module_enabled(entity.id, "PETTY_CASH") is False
-        db_session.session.refresh(row)
-        assert row.phase == "cancelled"
-        # Cleared: a leftover date on a terminal row is a trap for any reader that
-        # checks dates before phases.
-        assert row.app_access_until is None
-
-
-def test_sweep_does_not_terminate_a_cancellation_still_running(app, db_session, monkeypatch):
-    """Cancelled but still inside its paid days is NOT over — it is the one state where
-    Renew is the right offer, and terminating it early would take that away."""
-    from blueprints.entity.routes.modules import _is_module_enabled
-    from blueprints.entity.services.modules import sweep_expired_module_access
-
-    with app.app_context():
-        entity = _entity(db_session)
-        pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "PAYMENT_REQUEST", is_active=False)
-        _grant(db_session, entity, pc, enabled=True, actor="subscription")
-
-        future = datetime.now() + timedelta(days=10)
-        row = _sub_row(
-            db_session, entity, "PETTY_CASH",
-            phase="scheduled_cancel", app_access_until=future,
-        )
-
-        result = sweep_expired_module_access()
-
-        assert result["disabled"] == []
-        assert _is_module_enabled(entity.id, "PETTY_CASH") is True
-        db_session.session.refresh(row)
-        assert row.phase == "scheduled_cancel"
-
-
-def test_sweep_leaves_an_ended_trial_to_the_trial_job(app, db_session, monkeypatch):
-    """A trial past its end is NOT terminated here: convert-or-expire is a decision this
-    job cannot make, and stamping ``cancelled`` over it would rob the trial-end job of
-    the row it converts. Access still comes off — that part is a date, not a decision."""
-    from blueprints.entity.services.modules import sweep_expired_module_access
-
-    with app.app_context():
-        entity = _entity(db_session)
-        pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "PAYMENT_REQUEST", is_active=False)
-        _grant(db_session, entity, pc, enabled=True, actor="subscription")
-
-        past = datetime.now() - timedelta(days=1)
-        row = _sub_row(
-            db_session, entity, "PETTY_CASH",
-            phase="trial", trial_end=past, app_access_until=past,
-        )
-
-        sweep_expired_module_access()
-
-        db_session.session.refresh(row)
-        assert row.phase == "trial"
-
-
-def test_sweep_leaves_a_running_trial_alone(app, db_session):
-    """Regression guard: the revoke-on-no-row branch must not swallow live trials."""
-    from blueprints.entity.routes.modules import _is_module_enabled
-    from blueprints.entity.services.modules import sweep_expired_module_access
-
-    with app.app_context():
-        entity = _entity(db_session)
-        pc = _function(db_session, "PETTY_CASH", is_active=False)
-        _function(db_session, "PAYMENT_REQUEST", is_active=False)
-        _grant(db_session, entity, pc, enabled=True, actor="subscription")
-
-        future = datetime.now(UTC) + timedelta(days=10)
-        _sub_row(
-            db_session, entity, "PETTY_CASH",
-            phase="trial", trial_end=future, app_access_until=future,
-        )
-
-        result = sweep_expired_module_access()
-
-        assert result["disabled"] == []
-        assert _is_module_enabled(entity.id, "PETTY_CASH") is True

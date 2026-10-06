@@ -43,8 +43,9 @@ A person with no company is sent to create one.
 `GET /entity/create` no longer renders a form: it launches the **onboarding wizard**
 (`onboarding_launch_url(user, fresh=True)`) — the wizard's Step 1 creates the row through
 `POST /api/onboarding/create`, Xero, sales methods, account codes, invitations and modules
-follow on its later steps, and `POST /api/onboarding/finalize` flips the company from
-`onboarding` to live ([onboarding-and-module-handoff.md](onboarding-and-module-handoff.md)).
+follow on its later steps, and minty-onboarding-api's `POST /api/onboarding/finalize` flips the
+company from `onboarding` to live and starts its trials through minty-subscription-api (Flask's
+finalize was deleted on 2026-10-06; [onboarding-and-module-handoff.md](onboarding-and-module-handoff.md)).
 `GET /entity/success` is the return page.
 
 ## Settings (`/entity/<id>/settings/…`)

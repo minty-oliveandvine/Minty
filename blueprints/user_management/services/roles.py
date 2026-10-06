@@ -81,11 +81,10 @@ def check_not_subscription_payer_or_error(
     settings page states when it names the payer — here it is enforced on the way out.
 
     ``payer_lookup`` is injectable so this stays testable without the subscription model
-    graph; the import is lazy for the same reason ``require_subscription_payer`` defers
-    it — user_management is imported early.
+    graph; the import is lazy because user_management is imported early.
     """
     if payer_lookup is None:
-        from blueprints.subscription.services import store as sub_store
+        from blueprints.subscription.services import store_ro as sub_store
 
         # "Does ANY module row of this entity name this user as payer", not
         # ``payer_for_entity``. That one answers from an unordered ``.first()``, which is
@@ -138,10 +137,10 @@ def check_not_pending_subscriber_or_error(
     larger harm than the one it prevents.
     """
     if pending_lookup is None:
-        from blueprints.subscription.services import transfers
+        from blueprints.subscription.services import store_ro
 
         def pending_lookup(eid):
-            offer = transfers.pending_transfer_for_entity(eid)
+            offer = store_ro.pending_transfer_for_entity(eid)
             return offer.to_user_id if offer is not None else None
 
     try:
@@ -225,7 +224,7 @@ def check_not_subscription_payer_anywhere_or_error(
     model graph in with it.
     """
     if entities_lookup is None:
-        from blueprints.subscription.services import store as sub_store
+        from blueprints.subscription.services import store_ro as sub_store
 
         entities_lookup = sub_store.entities_paid_for_by
 
@@ -287,10 +286,10 @@ def check_role_change_or_error(
 
     # The payer must keep the rank that lets them spend their own money. Demoting them
     # produces the deadlock the module settings page cannot express: MODULE_MANAGE now
-    # fails for the payer, may_manage_subscription fails for every other admin, and the
+    # fails for the payer, the subscription API refuses every other admin, and the
     # subscription can no longer be changed by anyone.
     if payer_lookup is None:
-        from blueprints.subscription.services import store as sub_store
+        from blueprints.subscription.services import store_ro as sub_store
 
         payer_lookup = sub_store.payer_for_entity
 

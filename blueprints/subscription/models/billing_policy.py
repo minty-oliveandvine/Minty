@@ -3,9 +3,9 @@
 See migration ``e1a3c5b7d9f2`` for why this is one typed row rather than a key/value
 table, and why the past-due grace and the dunning give-up deadline are ONE column.
 
-Nothing reads this model directly. ``subscription.services.policy`` is the only caller:
-it validates the row against the rules the columns cannot express and falls back to the
-in-code defaults if it does not hold together.
+Nothing in Flask reads this model. minty-subscription-api's ``billing.services.policy`` is
+the only reader: it validates the row against the rules the columns cannot express and
+falls back to the in-code defaults if it does not hold together.
 """
 from models.db import db
 from blueprints.subscription.models.column_types import tz_datetime

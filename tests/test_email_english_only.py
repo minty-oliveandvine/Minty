@@ -119,15 +119,6 @@ def test_the_onboarding_invite_refuses_a_non_english_address(app, client, world,
     assert invitations_for(app, address.lower()) == 0
 
 
-@pytest.mark.parametrize("address", NOT_ENGLISH)
-def test_the_payer_portal_invite_refuses_a_non_english_address(app, address):
-    from blueprints.subscription.services import portal
-
-    with app.app_context():
-        # refused before the entity or the payer is even looked up
-        assert portal.invite_admin_to_entity(F.new_id(), F.new_id(), address) == (False, HINT)
-
-
 # ---- the sign-in / sign-up code ----------------------------------------------------------------
 
 
@@ -239,31 +230,6 @@ def test_the_entity_create_form_refuses_a_malformed_address_instead_of_saving_nu
     assert "Please enter a valid business email." in resp.get_data(as_text=True)
     with app.app_context():
         assert Entity.query.filter_by(name="Corner Shop").count() == 0
-
-
-# ---- a billing account's email (onboarding) ----------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "path, body",
-    [
-        ("/api/onboarding/billing/payment-methods/confirm", {"setup_intent": "seti_x"}),
-        ("/api/onboarding/billing/accounts", {"payment_method": "pm_x"}),
-    ],
-)
-@pytest.mark.parametrize("address", NOT_ENGLISH)
-def test_a_non_english_billing_email_is_refused_before_stripe_is_asked(
-    app, client, world, monkeypatch, path, body, address
-):
-    def _no_stripe(*_a, **_k):
-        raise AssertionError("Stripe was reached with a refused billing email")
-
-    monkeypatch.setattr("blueprints.entity.routes.create._billing_call", _no_stripe)
-    resp = client.post(path, json={**body, "billing_email": address},
-                       headers=onboarding_bearer(app, world["owner"].id))
-
-    assert resp.status_code == 400
-    assert resp.get_json() == {"error": HINT}
 
 
 # ---- the pages carry the English-only field ----------------------------------------------------

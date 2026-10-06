@@ -1,297 +1,23 @@
-"""The subscription notice shown on both landing pages.
+"""The subscription notice on the Petty Cash dashboard: when Flask asks, and how.
 
-Nothing in the product told a customer their trial was about to lapse or their card
-had been declined — the settings page held all of it, and you only saw it if you went
-looking. This is the interruption: one modal, once per entity per login, on the Petty
-Cash dashboard and the Payment landing page.
+What the notice SAYS is minty-subscription-api's (``GET /api/entities/{id}/subscription-notice``,
+tested there). What stays in Flask, and is pinned here:
 
-Two things are worth pinning down and neither is the copy:
-
-* **The list is the point.** A company can be past due on one module and winding down
-  another. Picking "the most important" one and hiding the rest would be a lie of
-  omission, so every applicable item appears, ordered by severity.
-* **Only the payer is offered an action.** ``@require_subscription_payer`` refuses
-  everyone else server-side, so showing a co-admin a "Pay now" button produces a click
-  that fails. They are told who to ask instead.
-
-``get_module_cards`` is stubbed throughout. It is exercised by its own tests and needs
-a full Stripe-shaped fixture set; what is new here is the reading of those cards, so
-the tests feed synthetic ones and assert on the reading.
+* **When to ask** - once per entity per login (``claim_subscription_notice``), with the login
+  id that lets the Payment app honour the same rule (``LOGIN_SID_SESSION_KEY``, the ``sid``
+  claim).
+* **How to ask** - ``services.subscription_api.fetch_notice``: server-side, as the person
+  viewing the dashboard, with a five-minute self-minted token; any failure is no notice, never
+  a broken dashboard.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
-UTC = timezone.utc
 
-
-def _card(code, name, **overrides):
-    """A module card with everything switched off — override only what matters."""
-    card = {
-        "code": code,
-        "name": name,
-        "subscription_status": None,
-        "needs_card": False,
-        "needs_consent_only": False,
-        "pending_cancel": False,
-        "access_end_long": None,
-        "period_end": None,
-        "period_end_long": None,
-        "period_end_short": None,
-    }
-    card.update(overrides)
-    return card
-
-
-@pytest.fixture
-def stub_user(app, monkeypatch):
-    """Stand a payer in front of ``User.query.get`` without touching the database.
-
-    What is under test is how a payer is turned into the "ask this person" line —
-    name joining and the email fallback — not persistence. Going through the real
-    table would need the second schema attached in the same connection the builder
-    runs on, which buys nothing here.
-    """
-    from types import SimpleNamespace
-
-    def _install(**fields):
-        user = SimpleNamespace(**fields)
-        # Replace the whole class, not User.query — flask-sqlalchemy's ``query`` is a
-        # descriptor that still resolves to the real session. The builder does
-        # ``from models.db import User`` at call time, so it picks this up.
-        monkeypatch.setattr(
-            "models.db.User", SimpleNamespace(query=SimpleNamespace(get=lambda _id: user))
-        )
-        return user
-
-    return _install
-
-
-@pytest.fixture
-def notices(app, monkeypatch):
-    """Call build_subscription_notices over a fixed card list, with auth stubbed out.
-
-    Depends on ``app`` because importing the service standalone trips a circular
-    import through models.db — the app fixture is what bootstraps that graph.
-    """
-    from blueprints.entity.services import modules as svc
-
-    def _run(cards, *, can_manage=True, payer=None, user_id="user-1"):
-        monkeypatch.setattr(svc, "get_module_cards", lambda _eid: cards)
-        monkeypatch.setattr(
-            "services.permission_policy.has_permission_by_user_id",
-            lambda *_a, **_k: can_manage,
-        )
-        monkeypatch.setattr(
-            "blueprints.subscription.services.store.may_manage_subscription",
-            lambda *_a, **_k: can_manage,
-        )
-        monkeypatch.setattr(
-            "blueprints.subscription.services.store.payer_for_entity",
-            lambda *_a, **_k: payer,
-        )
-        with app.app_context():
-            return svc.build_subscription_notices("entity-1", user_id)
-
-    return _run
-
-
-# --- what gets said ---------------------------------------------------------
-
-
-def test_nothing_wrong_says_nothing(notices):
-    """A healthy entity must not be interrupted at all."""
-    result = notices([_card("PETTY_CASH", "Petty Cash"), _card("PAYMENT_REQUEST", "Payment")])
-
-    assert result["items"] == []
-    assert result["severity"] is None
-
-
-def test_past_due_names_the_module_and_the_deadline(notices):
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
-               access_end_long="19 Aug 2026")]
-    )
-
-    item = result["items"][0]
-    assert item["kind"] == "past_due"
-    assert item["severity"] == "critical"
-    assert item["module"] == "Payment"
-    assert "Payment" in item["title"]
-    assert "19 Aug 2026" in item["detail"]
-
-
-def test_past_due_without_a_deadline_still_says_something_actionable(notices):
-    """access_end_long is None once the date has passed — don't render "None"."""
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")]
-    )
-
-    assert "None" not in result["items"][0]["detail"]
-    assert "payment method" in result["items"][0]["detail"]
-
-
-def test_pending_cancel_reports_when_access_ends(notices):
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", pending_cancel=True, access_end_long="1 Sep 2026")]
-    )
-
-    item = result["items"][0]
-    assert item["kind"] == "pending_cancel"
-    assert "1 Sep 2026" in item["detail"]
-    assert "won't be billed again" in item["detail"]
-
-
-# --- trials say nothing -----------------------------------------------------
-
-
-def test_a_cancelled_trial_running_out_is_not_announced(notices):
-    """``pending_cancel`` is set for a cancelled free trial too (cards.py: it is still a
-    trial, running out its free days). That is a trial notice, so it says nothing - only
-    a PAID module winding down does."""
-    result = notices(
-        [_card("PETTY_CASH", "Petty Cash", pending_cancel=True, trial_cancelled=True,
-               access_end_long="1 Sep 2026", subscription_status="trialing")]
-    )
-
-    assert result["items"] == []
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        # a healthy trial that will convert, early and late in its term
-        dict(subscription_status="trialing",
-             period_end=datetime.now(UTC) + timedelta(days=25), period_end_long="19 Aug 2026"),
-        dict(subscription_status="trialing",
-             period_end=datetime.now(UTC) + timedelta(days=2), period_end_long="19 Aug 2026"),
-        # the term has passed and the pass has not closed it out yet
-        dict(subscription_status="trialing", trial_closing=True,
-             period_end=datetime.now(UTC) - timedelta(hours=1)),
-        # a trial that will NOT convert: no card at all / a card but no consent for this company
-        dict(subscription_status="trialing", needs_card=True, period_end_long="19 Aug 2026"),
-        dict(subscription_status="trialing", needs_card=True, needs_consent_only=True,
-             period_end_long="19 Aug 2026"),
-        # a lapsed trial: the gate is off and the restart screen could fix it
-        dict(trial_expired=True, has_access=False, access_end_long="1 Aug 2026"),
-    ],
-    ids=["running-early", "running-late", "closing", "no-card", "no-consent", "lapsed"],
-)
-def test_no_trial_state_produces_a_notice(notices, overrides):
-    """Every TRIAL notice was removed on 2026-10-01 (the user's decision): trial ending,
-    a trial that will not convert, a lapsed trial. The trial-ending EMAIL still warns a
-    trial that will not convert, and minty-web's Module page shows every trial's state."""
-    result = notices([_card("PETTY_CASH", "Petty Cash", **overrides)])
-
-    assert result["items"] == []
-    assert result["severity"] is None
-
-
-# --- the list ---------------------------------------------------------------
-
-
-def test_every_applicable_item_appears_not_just_the_worst(notices):
-    """The whole reason this is a list: one company, two different problems."""
-    result = notices(
-        [
-            _card("PETTY_CASH", "Petty Cash", pending_cancel=True,
-                  access_end_long="1 Sep 2026"),
-            _card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
-                  access_end_long="19 Aug 2026"),
-        ]
-    )
-
-    assert len(result["items"]) == 2
-    assert {i["module"] for i in result["items"]} == {"Petty Cash", "Payment"}
-
-
-def test_items_are_ordered_worst_first(notices):
-    """Card order is catalog order; the modal's order must be severity."""
-    result = notices(
-        [
-            _card("PETTY_CASH", "Petty Cash", pending_cancel=True,
-                  access_end_long="1 Sep 2026"),
-            _card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
-                  access_end_long="19 Aug 2026"),
-        ]
-    )
-
-    assert [i["kind"] for i in result["items"]] == ["past_due", "pending_cancel"]
-    assert result["severity"] == "critical"
-
-
-def test_the_notice_is_entity_wide_not_per_module(notices):
-    """The Petty Cash dashboard reports a Payment problem, and vice versa.
-
-    Billing is per payer and the anchor is shared, so a declined card is a property
-    of the company. A landing page that only spoke for its own module would leave the
-    user staring at a working page while the other module dies.
-    """
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due",
-               access_end_long="19 Aug 2026")]
-    )
-
-    assert result["items"][0]["module_code"] == "PAYMENT_REQUEST"
-
-
-# --- who may act ------------------------------------------------------------
-
-
-def test_the_payer_is_offered_the_action(notices):
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
-        can_manage=True,
-    )
-
-    assert result["can_manage"] is True
-
-
-def test_a_non_payer_is_told_who_to_ask_instead(notices, stub_user):
-    """A button @require_subscription_payer would refuse must not be offered."""
-    stub_user(first_name="Pay", last_name="Er", email="payer@test.com")
-
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
-        can_manage=False,
-        payer="payer-id",
-        user_id="someone-else",
-    )
-
-    assert result["can_manage"] is False
-    assert result["payer"]["name"] == "Pay Er"
-    assert result["payer"]["email"] == "payer@test.com"
-
-
-def test_a_payer_with_no_name_falls_back_to_their_email(notices, stub_user):
-    """The modal prints name-or-email; a blank name must not render as empty."""
-    stub_user(first_name="", last_name="", email="payer@test.com")
-
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
-        can_manage=False,
-        payer="payer-id",
-        user_id="someone-else",
-    )
-
-    assert result["payer"]["name"] == ""
-    assert result["payer"]["email"] == "payer@test.com"
-
-
-def test_the_payer_is_not_named_to_themselves(notices):
-    """"Managed by you" is noise — the payer already has the buttons."""
-    result = notices(
-        [_card("PAYMENT_REQUEST", "Payment", subscription_status="past_due")],
-        payer="user-1",
-        user_id="user-1",
-    )
-
-    assert result["payer"] is None
-
-
-# --- once per entity per login ----------------------------------------------
+# --- when to ask --------------------------------------------------------------
 
 
 def test_the_notice_is_claimed_once_per_session():
@@ -451,179 +177,87 @@ def test_the_claim_is_spent_even_when_there_was_nothing_to_show():
     assert claim_subscription_notice(session, "entity-1") is False  # now there is
 
 
-# --- the JSON endpoint the Payment frontend calls ---------------------------
-#
-# The billing frontend lives on another origin and talks to its own backend for
-# everything else; subscription state exists only here. Its billing JWT is signed
-# with this app's SECRET_KEY, so the token it already holds is the credential.
+# --- how to ask ---------------------------------------------------------------
 
 
-NOTICE_URL = "/api/entity/{eid}/subscription-notice"
+class _Resp:
+    def __init__(self, status=200, body=None):
+        self.status_code = status
+        self._body = body
 
-
-def _token(app, *, user_id="user-1", entity_id="entity-1", expired=False):
-    import jwt
-
-    now = datetime.now(UTC)
-    return jwt.encode(
-        {
-            "user_id": user_id,
-            "entity_id": entity_id,
-            "module": "billing",
-            "exp": now - timedelta(minutes=1) if expired else now + timedelta(minutes=30),
-            "iat": now,
-        },
-        app.config["SECRET_KEY"],
-        algorithm="HS256",
-    )
+    def json(self):
+        if self._body is None:
+            raise ValueError("no JSON")
+        return self._body
 
 
 @pytest.fixture
-def notice_api(app, client, monkeypatch):
-    """The endpoint with membership and the builder stubbed; auth is what's under test."""
-    from types import SimpleNamespace
+def fetch(app, monkeypatch):
+    """``fetch_notice`` with ``requests.get`` recorded; returns ``(result, calls)``."""
+    import requests
 
-    def _setup(*, member=True, items=None):
-        # The route binds ``User`` at import time, so patching models.db alone
-        # leaves the already-resolved name pointing at the real table.
-        monkeypatch.setattr(
-            "blueprints.entity.routes.modules.User",
-            SimpleNamespace(query=SimpleNamespace(get=lambda _id: SimpleNamespace(id=_id))),
-        )
-        monkeypatch.setattr(
-            "blueprints.entity.routes.modules.is_superuser", lambda *_a, **_k: False
-        )
-        monkeypatch.setattr(
-            "services.permission_policy.has_entity_access", lambda *_a, **_k: member
-        )
-        monkeypatch.setattr(
-            "blueprints.entity.services.modules.build_subscription_notices",
-            lambda *_a, **_k: {
-                "items": items if items is not None else [],
-                "can_manage": True,
-                "payer": None,
-                "severity": None,
-            },
-        )
-        return client
+    from services import subscription_api
 
-    return _setup
+    def _run(*, response=None, raises=None):
+        calls = []
+
+        def _get(url, **kwargs):
+            calls.append((url, kwargs))
+            if raises:
+                raise raises
+            return response
+
+        monkeypatch.setattr(requests, "get", _get)
+        user = SimpleNamespace(id="user-1", system_role="normal")
+        with app.app_context():
+            return subscription_api.fetch_notice("entity-1", user), calls
+
+    return _run
 
 
-def test_notice_api_requires_a_token(notice_api):
-    res = notice_api().get(NOTICE_URL.format(eid="entity-1"))
-
-    assert res.status_code == 401
-
-
-def test_notice_api_rejects_a_garbage_token(notice_api):
-    res = notice_api().get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": "Bearer not-a-jwt"},
-    )
-
-    assert res.status_code == 401
+NOTICE = {
+    "items": [{"kind": "past_due", "severity": "critical", "title": "Petty Cash payment failed"}],
+    "can_manage": True,
+    "payer": None,
+    "severity": "critical",
+    "settings_path": "/handoff/minty-web?next=x",
+}
 
 
-def test_notice_api_rejects_an_expired_token(app, notice_api):
-    res = notice_api().get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": f"Bearer {_token(app, expired=True)}"},
-    )
+def test_the_notice_comes_from_the_subscription_api_as_the_viewer(app, fetch):
+    import jwt
 
-    assert res.status_code == 401
+    result, [(url, kwargs)] = fetch(response=_Resp(200, NOTICE))
 
-
-def test_a_token_for_one_entity_cannot_read_another(app, notice_api):
-    """A token that names a company is held to it."""
-    res = notice_api().get(
-        NOTICE_URL.format(eid="entity-2"),
-        headers={"Authorization": f"Bearer {_token(app, entity_id='entity-1')}"},
-    )
-
-    assert res.status_code == 403
-    assert res.get_json()["error"] == "entity_mismatch"
+    assert result == NOTICE
+    assert url.endswith("/api/entities/entity-1/subscription-notice")
+    token = kwargs["headers"]["Authorization"].removeprefix("Bearer ")
+    claims = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
+    assert claims["user_id"] == "user-1"
+    assert claims["entity_id"] == "entity-1"
+    # One request's worth of life, no more.
+    assert claims["exp"] - claims["iat"] <= 5 * 60
+    assert kwargs["timeout"]
 
 
-def test_a_token_with_no_entity_claim_falls_back_to_membership(app, notice_api):
-    """The refresh path goes through the Module 2 backend, which need not preserve
-    the claim. Requiring it would lock out every user whose 30-minute token rolled
-    over — and it is not what authorises the read; membership is."""
-    res = notice_api(member=True).get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": f"Bearer {_token(app, entity_id='')}"},
-    )
-
-    assert res.status_code == 200
+def test_nothing_to_report_is_no_notice(fetch):
+    result, _ = fetch(response=_Resp(200, {**NOTICE, "items": []}))
+    assert result is None
 
 
-def test_a_claimless_token_still_cannot_read_a_stranger_entity(app, notice_api):
-    """Dropping the claim check must not drop the authorisation with it."""
-    res = notice_api(member=False).get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": f"Bearer {_token(app, entity_id='')}"},
-    )
-
-    assert res.status_code == 403
-    assert res.get_json()["error"] == "not_a_member"
+@pytest.mark.parametrize("status", [401, 403, 500, 502])
+def test_a_refusal_or_failure_is_no_notice(fetch, status):
+    result, _ = fetch(response=_Resp(status, {"error": "x"}))
+    assert result is None
 
 
-def test_membership_is_rechecked_not_trusted_from_the_claim(app, notice_api):
-    """A token outlives a revoked membership; the claim is not proof of access."""
-    res = notice_api(member=False).get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": f"Bearer {_token(app)}"},
-    )
+def test_an_unreachable_api_is_no_notice(fetch):
+    import requests
 
-    assert res.status_code == 403
+    result, _ = fetch(raises=requests.ConnectionError("down"))
+    assert result is None
 
 
-def test_notice_api_returns_the_items_and_a_minty_settings_path(app, notice_api):
-    client = notice_api(
-        items=[{"kind": "past_due", "severity": "critical", "module": "Payment"}]
-    )
-    res = client.get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": f"Bearer {_token(app)}"},
-    )
-
-    assert res.status_code == 200
-    body = res.get_json()
-    assert body["items"][0]["kind"] == "past_due"
-    # A PATH on Minty, not a URL: the frontend wraps it in buildMintyEnterUrl so its
-    # token buys a Flask session first; Flask then hands the browser to minty-web's
-    # Module page (the hand-over is authenticated at the click, not at render).
-    from urllib.parse import parse_qs, urlsplit
-
-    parts = urlsplit(body["settings_path"])
-    assert (parts.scheme, parts.netloc, parts.path) == ("", "", "/handoff/minty-web")
-    assert parse_qs(parts.query) == {
-        "next": ["/entities/entity-1/company/settings/modules"],
-        "entity_id": ["entity-1"],
-    }
-
-
-def test_notice_api_survives_a_builder_failure(app, notice_api, monkeypatch):
-    """A notice must never take the landing page down with it."""
-    monkeypatch.setattr(
-        "blueprints.entity.services.modules.build_subscription_notices",
-        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("stripe down")),
-    )
-    res = notice_api().get(
-        NOTICE_URL.format(eid="entity-1"),
-        headers={"Authorization": f"Bearer {_token(app)}"},
-    )
-
-    assert res.status_code == 200
-    assert res.get_json()["items"] == []
-
-
-def test_notice_api_answers_the_cors_preflight(notice_api):
-    res = notice_api().open(NOTICE_URL.format(eid="entity-1"), method="OPTIONS")
-
-    assert res.status_code == 204
-    assert "Access-Control-Allow-Origin" in res.headers
-    assert "Authorization" in res.headers["Access-Control-Allow-Headers"]
-    # Without Vary a cached response for one origin could be replayed to another.
-    # Flask appends Cookie of its own, so assert membership rather than equality.
-    assert "Origin" in res.headers["Vary"]
+def test_a_non_json_answer_is_no_notice(fetch):
+    result, _ = fetch(response=_Resp(200, None))
+    assert result is None

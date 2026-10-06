@@ -76,8 +76,8 @@ def _standalone_page_templates() -> list[pathlib.Path]:
             continue
         # Email bodies are full documents but are never SERVED, so there is no
         # session and no flash queue to drain — and the partial they would have to
-        # include emits a <script> call that no mail client would run. Rendered by
-        # ``subscription.services.notify`` and handed straight to Flask-Mail.
+        # include emits a <script> call that no mail client would run. Rendered and
+        # handed straight to Flask-Mail.
         if p.relative_to(TEMPLATES).parts[0] == "email":
             continue
         text = p.read_text(encoding="utf-8")
