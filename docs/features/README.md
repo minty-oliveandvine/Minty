@@ -23,7 +23,7 @@ the new hub (`../minty-web` + `../minty-subscription-api`). Each of those repos 
 | Receipts: storage, naming, the comma trap, downloads | [receipts-and-attachments.md](receipts-and-attachments.md) |
 | History, detail pages, CSV / Excel / docx / screenshot exports, share links | [report-history-and-exports.md](report-history-and-exports.md) |
 | Connecting a company to Xero, syncing, publishing and republishing a day | [xero-integration.md](xero-integration.md) |
-| Modules, the subscription engine, the in-app notices, the scheduler | [modules-and-subscriptions.md](modules-and-subscriptions.md) |
+| Modules, the subscription reads Flask keeps, the dashboard notice | [modules-and-subscriptions.md](modules-and-subscriptions.md) |
 | Launching the wizard and the payment module; `/api/onboarding/*` | [onboarding-and-module-handoff.md](onboarding-and-module-handoff.md) |
 | The sidebar on every page with a header - the menu and My Profile (minty-web's, ported) | [sidebar.md](sidebar.md) |
 | Modals - minty-web's design on every app; the Flask port and "Leave without saving?" | [modals.md](modals.md) |

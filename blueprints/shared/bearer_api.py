@@ -1,10 +1,9 @@
 """The cross-origin, bearer-token transport the separate front ends call Minty through.
 
-Three surfaces speak it and each had written it out itself:
+The surfaces that speak it each had written it out themselves (the payer portal and the
+subscription-notice API went to minty-subscription-api on 2026-10-06):
 
-* ``subscription.routes.portal`` -- the payer portal, called by the Module 2 frontend.
-* ``entity.routes.modules`` -- the subscription-notice API, same frontend.
-* ``entity.routes.create`` -- the onboarding app, a different origin again.
+* ``entity.routes.create`` -- the onboarding app's remaining calls to Flask.
 
 They share a shape, not a configuration: every one names its origin explicitly rather
 than leaning on the global flask-cors install, pins ``Vary: Origin`` so a response cached

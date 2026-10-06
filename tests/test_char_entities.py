@@ -208,36 +208,23 @@ def test_a_stranger_cannot_read_or_shape_someone_elses_onboarding(world, client,
     theirs = onboarding_bearer(app, stranger.id)
     assert client.get(f"/api/onboarding/state?entity_id={entity_id}", headers=theirs).status_code == 403
     assert client.post("/api/onboarding/modules", json={"entity_id": entity_id, "modules": [MODULE_BILL]}, headers=theirs).status_code == 403
-    assert client.post("/api/onboarding/finalize", json={"entity_id": entity_id}, headers=theirs).status_code == 403
     assert client.get(f"/api/onboarding/state?entity_id={entity_id}").status_code == 401
 
 
-def test_finalizing_a_company_without_xero_leaves_it_disconnected(world, client, app, monkeypatch):
-    from blueprints.entity.services.modules import MODULE_PETTY_CASH
+def test_a_finalized_company_is_no_longer_offered_the_wizard(world, client, app, db):
+    """Finalize itself is minty-onboarding-api's (since 2026-10-06); what Flask still owns is
+    the entity list, which must stop offering the wizard once the company is live."""
+    from blueprints.shared.enums import EntityStatus
 
     admin = world["admin"]
     headers = onboarding_bearer(app, admin.id)
     entity_id = client.post("/api/onboarding/create", json={
         "entity_name": "Wizard Co", "country_code": "HK", "currency_code": "HKD"}, headers=headers).get_json()["entity_id"]
-    client.post("/api/onboarding/modules", json={"entity_id": entity_id, "modules": [MODULE_PETTY_CASH]}, headers=headers)
-
-    resp = client.post("/api/onboarding/finalize", json={"entity_id": entity_id}, headers=headers)
-    assert resp.status_code == 200, resp.data[:300]
-    assert entity_row(app, entity_id).status == "disconnected"
-
-
-def test_finalizing_takes_the_company_out_of_onboarding_and_the_list_stops_offering_the_wizard(world, client, app):
-    from blueprints.entity.services.modules import MODULE_PETTY_CASH
-
-    admin = world["admin"]
-    headers = onboarding_bearer(app, admin.id)
-    entity_id = client.post("/api/onboarding/create", json={
-        "entity_name": "Wizard Co", "country_code": "HK", "currency_code": "HKD"}, headers=headers).get_json()["entity_id"]
-    client.post("/api/onboarding/modules", json={"entity_id": entity_id, "modules": [MODULE_PETTY_CASH]}, headers=headers)
-
-    resp = client.post("/api/onboarding/finalize", json={"entity_id": entity_id}, headers=headers)
-    assert resp.status_code == 200, resp.data[:300]
-    assert entity_row(app, entity_id).status != "onboarding"
+    assert entity_row(app, entity_id).status == "onboarding"
+    with app.app_context():
+        from models.db import Entity
+        db.session.get(Entity, entity_id).status = EntityStatus.DISCONNECTED
+        db.session.commit()
 
     rows = {row["name"]: row for row in F.hub_list(client, app, admin.id)}
     # "Setup in progress" is a row still onboarding

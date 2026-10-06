@@ -97,7 +97,7 @@ def _roles_for(user, entity_id) -> list[dict]:
 def _users_page(user, entity_id) -> dict:
     from blueprints.invitation.services.invite import (get_pending_invitations,
                                                        resend_cooldown_remaining)
-    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services import store_ro as sub_store
     from models.db import Entity, User, UserEntity, db
 
     org = db.session.get(Entity, entity_id)

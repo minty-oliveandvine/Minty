@@ -42,7 +42,7 @@ def reject_user(user_id):
     # Refused even for a superuser: the resulting state cannot be repaired from inside
     # the app by anyone, so "staff may override" would only mean staff may create it.
     # The way through is to move the subscription first, which is now a supported act.
-    from blueprints.subscription.services import store as sub_store
+    from blueprints.subscription.services import store_ro as sub_store
 
     paying_for = sub_store.entities_paid_for_by(user.id)
     if paying_for:

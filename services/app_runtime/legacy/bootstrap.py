@@ -284,48 +284,6 @@ def create_app():
     # the login page, `requests` follows it, and billing parses an HTML 200 as JSON.
     from blueprints.xero.routes.routes import internal_xero_access_token
     csrf.exempt(internal_xero_access_token)
-    # The payer portal's writes. Module 2's profile posts these with the billing JWT and
-    # no session cookie, so CSRF would redirect them to the login page and the client
-    # would parse an HTML 200 as JSON. They authenticate on the bearer token, and the four
-    # that DO take an id from the request check it: a payment method whose customer isn't
-    # the token's payer answers "not found" (see payment_methods._owned), so a forged
-    # cross-site POST reaches nothing.
-    from blueprints.subscription.routes.portal import (
-        my_entity_payment_method_api,
-        my_invite_admin_api,
-        my_payment_method_confirm_api,
-        my_transfer_cancel_api,
-        my_transfer_initiate_api,
-        my_transfer_respond_api,
-        my_payment_method_default_api,
-        my_payment_method_remove_api,
-        my_payment_method_setup_intent_api,
-        my_payment_method_update_api,
-    )
-    csrf.exempt(my_invite_admin_api)
-    csrf.exempt(my_payment_method_setup_intent_api)
-    csrf.exempt(my_payment_method_confirm_api)
-    csrf.exempt(my_payment_method_default_api)
-    csrf.exempt(my_payment_method_update_api)
-    csrf.exempt(my_payment_method_remove_api)
-    # The per-entity nomination — the one write on this surface with billing consequences,
-    # and the one that was missed when it shipped: its POST answered 400 "CSRF token is
-    # missing" while its GET, being safe, went on returning 200, so the dialog read fine
-    # and only Save failed. Neither of its two proofs depends on this token: the method
-    # must belong to the caller's own customer (payment_methods._owned) and the caller
-    # must be the entity's PAYER (_payer_of), so a forged cross-site POST nominates
-    # nothing.
-    csrf.exempt(my_entity_payment_method_api)
-    # The handover routes. These were hand-verified once, because conftest disables CSRF
-    # so no test could EXERCISE it — but tests/test_csrf_exemptions.py now asserts the
-    # registry instead of the behaviour, and covers every write route on the blueprint,
-    # so a new one added without an exemption here fails there by name. Each still checks
-    # the caller: the service refuses unless the token's user is the entity's payer
-    # (initiate/cancel) or the offer's recipient (respond), so a forged cross-site POST
-    # reaches nothing even before this.
-    csrf.exempt(my_transfer_initiate_api)
-    csrf.exempt(my_transfer_respond_api)
-    csrf.exempt(my_transfer_cancel_api)
     # minty-web's My Profile saves the person's own name and email with the module JWT and no
     # session cookie (blueprints/shared/hub_api.py). The write can only ever touch the
     # token's own user row - there is no id in the request to forge.
@@ -354,26 +312,16 @@ def create_app():
                                                   onboarding_contacts,
                                                   onboarding_contacts_create,
                                                   onboarding_create_entity,
-                                                  onboarding_finalize,
                                                   onboarding_invite,
                                                   onboarding_invite_cancel,
-                                                  onboarding_billing_accounts,
-                                                  onboarding_billing_authorize,
-                                                  onboarding_billing_confirm,
-                                                  onboarding_billing_set_default,
-                                                  onboarding_billing_setup_intent,
                                                   onboarding_modules,
                                                   onboarding_opening_balance,
-                                                  onboarding_payment_method_complete,
-                                                  onboarding_payment_method_setup,
                                                   onboarding_sales_methods,
                                                   onboarding_saved_step,
                                                   onboarding_update_entity,
                                                   onboarding_xero_disconnect)
     csrf.exempt(onboarding_create_entity)
     csrf.exempt(onboarding_modules)
-    csrf.exempt(onboarding_payment_method_setup)
-    csrf.exempt(onboarding_payment_method_complete)
     csrf.exempt(onboarding_sales_methods)
     csrf.exempt(onboarding_opening_balance)
     csrf.exempt(onboarding_account_codes)
@@ -382,24 +330,9 @@ def create_app():
     csrf.exempt(onboarding_invite)
     csrf.exempt(onboarding_invite_cancel)
     csrf.exempt(onboarding_bill_codes)
-    csrf.exempt(onboarding_finalize)
     csrf.exempt(onboarding_saved_step)
     csrf.exempt(onboarding_update_entity)
     csrf.exempt(onboarding_xero_disconnect)
-    # Step 2's "Buy now": the payer's cards, and consent to bill this entity. Same reason
-    # as the payer portal's identical routes above — bearer JWT, no session cookie — and
-    # the same protection without CSRF: the two that take an id from the request check it
-    # against the token's own user. A payment method whose customer isn't the token's payer
-    # answers "not found" (``payment_methods._owned``), and an entity the token's user is
-    # not a member of answers 403 (``_entity_for_member``), so a forged cross-site POST
-    # reaches nothing.
-    csrf.exempt(onboarding_billing_setup_intent)
-    csrf.exempt(onboarding_billing_confirm)
-    csrf.exempt(onboarding_billing_set_default)
-    csrf.exempt(onboarding_billing_authorize)
-    # opening a billing account: the same bearer-only call, and the payment method it names
-    # must belong to the token's payer (``payment_methods._owned``)
-    csrf.exempt(onboarding_billing_accounts)
     # minty-web's /login and /login/confirm call these from a different origin (port
     # 3000) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_request_code,
@@ -438,11 +371,6 @@ def create_app():
     # CLI commands — manual ops knobs while a subscription admin UI doesn't exist.
     from cli.modules import modules_cli
     app.cli.add_command(modules_cli)
-    # Subscription CLI: live-from-Stripe catalog inspection + access sweep.
-    from cli.subscription_access import subscriptions_cli
-    from cli.subscription_plans import plans_cli
-    app.cli.add_command(subscriptions_cli)
-    app.cli.add_command(plans_cli)
     # Expense AI: the 90-day audit purge, and the Stage 0 round-trip check that
     # has to be run from the application's own network path, not a laptop.
     from cli.expense_ai import expense_ai_cli
@@ -457,19 +385,6 @@ def create_app():
     # actually depends on this.
     from legal.registry import verify_pinned_hashes
     verify_pinned_hashes()
-
-    # The daily subscription pass. Nothing else ends a trial or advances
-    # ``paid_through``, and Minty has no worker process to put a timer in, so it
-    # runs in here. Started last, after the CLI and the blueprints, so a failure
-    # to schedule cannot stop the app coming up — a web service that serves
-    # nobody is worse than one that bills nobody. No-op unless
-    # SUBSCRIPTION_SCHEDULER_ENABLED is set, which is why importing this app in a
-    # test or a shell schedules nothing.
-    from services.app_runtime.scheduler import start_scheduler
-    try:
-        start_scheduler(app)
-    except Exception:
-        logger.exception("scheduler: could not start the daily subscription pass")
 
     return (
         app,

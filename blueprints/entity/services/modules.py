@@ -23,35 +23,24 @@ an unambiguous DB record.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Mapping
 
 from loguru import logger
 
-# Nothing here formats money or dates any more, and nothing imports ``Decimal``: the code
-# that did went to ``subscription.services`` (``money``, ``display``, ``cards``, ``panel``,
-# ``notices``, ``access_sweep``). What is left is the entity-side module GATE -- who may
-# use which module, and the writes that grant it.
+# The entity-side module GATE -- who may use which module, and the writes that grant it.
+# Subscription reasoning (cards, the panel, notices, the access sweep) is
+# minty-subscription-api's; the few reads Flask still makes are ``subscription.services.store_ro``.
 from blueprints.shared.enums import ModuleCode
 from models.db import EntityFunction, EntityFunctionMap, db
 
 # Canonical module codes: the ``module_code`` enum (blueprints/shared/enums.py, schema item
 # 20). The Payment Request module's code is PAYMENT_REQUEST; ``MODULE_BILL`` keeps its
 # historical name so the ~50 call sites read as before. ``billing_plan.code`` still says
-# ``BILL`` by decision - ``subscription.services.billing.plan_code`` maps it.
+# ``BILL`` by decision - minty-subscription-api maps it.
 MODULE_PETTY_CASH = ModuleCode.PETTY_CASH.value
 MODULE_BILL = ModuleCode.PAYMENT_REQUEST.value
 MODULE_CODES: tuple[str, ...] = (MODULE_PETTY_CASH, MODULE_BILL)
-
-# How long after ``trial_end`` a trial the subscription pass has not closed out yet still
-# presents as a trial being finalised rather than as one that expired.
-#
-# Six hours against an hourly pass: wide enough to cover a missed run, a deploy, or a host
-# that was busy, and far too narrow to cover an environment where nothing runs at all.
-# That second half is the point. Without a bound, every stale trial on a system with no
-# scheduler matches forever — which is precisely what production is until the scheduler is
-# enabled there.
-TRIAL_CLOSING_WINDOW = timedelta(hours=6)
 
 # What the multi-module plan is called on screen. The catalog row carries its own
 # display_name and that wins; this is the fallback for a catalog that has no bundle
@@ -98,48 +87,6 @@ MODULE_DISPLAY: dict[str, dict] = {
         "learn_more": "https://youtu.be/v7G6gaGO0V0?si=P7-aWHPa9p4jDlHS",
     },
 }
-
-# How money and dates are PRINTED is not this module's business, and the five helpers that
-# used to sit here have gone to the two modules that own those questions:
-#
-#   _currency_symbol        -> money.symbol
-#   _normalize_price_amount -> money.to_major
-#   _fmt_money              -> money.format_trimmed
-#   _fmt_day_month_year     -> display.day          (unpadded: prose)
-#   _fmt_day_month          -> display.day_month
-#
-# The first two were already one-line delegations by the time they moved; the other three
-# carried real logic. Nothing outside this file called any of them, and nothing that
-# remains here needs them -- they served only the card/panel/catalogue code, which is
-# itself on its way out (see ``subscription.services.notices`` and ``access_sweep`` for
-# the pieces already gone).
-
-
-def _entity_customer_id(entity_id) -> str | None:
-    """The entity's Stripe customer id from local tables (None if it has no customer).
-
-    LOCAL READS ONLY, deliberately — do NOT swap this for
-    ``checkout._resolve_customer_id``. That helper falls back to a Stripe Customer
-    Search when the mapping row is missing, which is right on the billing paths (being
-    wrong there mints a duplicate customer or revokes a paid module) but wrong here:
-    this feeds the settings-page card render, so a payer who genuinely has no customer
-    would fire a search on EVERY page load and always find nothing. The old
-    ``stripe_state`` route got away with it by memoizing per request; nothing memoizes
-    now.
-
-    The cost of being wrong here is only that the card reads "no payment method", which
-    is also what it says for a payer with no customer at all. If that ever needs to be
-    exact, resolve it once at the billing seam and pass it in.
-    """
-    if not entity_id:
-        return None
-    # entity -> payer -> customer. The customer belongs to the PAYER (a user), not to
-    # the entity, because one payer's card covers every entity they own.
-    from blueprints.subscription.services import store as sub_store
-
-    payer_id = sub_store.payer_for_entity(entity_id)
-    return sub_store.customer_id_for_user(payer_id) if payer_id else None
-
 
 def _enabled_state(entity_id: str) -> dict[str, bool]:
     """Resolve each canonical module's on/off state for an entity.
@@ -222,106 +169,6 @@ def module_display_names(codes) -> dict[str, str]:
     return {code: (by_code.get(code) or code) for code in codes}
 
 
-# The module cards moved to ``subscription.services.cards``. Re-exported: ``routes/settings.py``
-# imports this name from here inside the request, and ``notices`` reaches it through this
-# module too.
-def get_module_cards(entity_id: str) -> list[dict]:
-    from blueprints.subscription.services.cards import get_module_cards as _cards
-
-    return _cards(entity_id)
-
-
-# Re-exported despite being private, because ``test_conversion_forecast.py`` calls it on
-# THIS module by name -- fourteen tests over what a converting trial is actually charged,
-# which is worth more than the tidiness of dropping an underscore-prefixed re-export.
-def _forecast_conversion_charges(entity_id, payer_id, billed_now, cards):
-    from blueprints.subscription.services.cards import _forecast_conversion_charges as _f
-
-    return _f(entity_id, payer_id, billed_now, cards)
-
-
-# Moved to ``subscription.services.panel`` / ``.cards``. Re-exported because every one of
-# these is called on THIS module by name -- ``routes/settings.py`` and ``routes/create.py``
-# import them here inside the request, and the suite reaches them the same way.
-def get_subscription_summary(entity_id: str) -> dict:
-    from blueprints.subscription.services.panel import get_subscription_summary as _f
-
-    return _f(entity_id)
-
-
-def get_billing_anchor(entity_id: str) -> str | None:
-    from blueprints.subscription.services.panel import get_billing_anchor as _f
-
-    return _f(entity_id)
-
-
-def next_payment_from_panel(panel: dict | None) -> str | None:
-    from blueprints.subscription.services.panel import next_payment_from_panel as _f
-
-    return _f(panel)
-
-
-def get_next_payment_date(entity_id: str) -> str | None:
-    from blueprints.subscription.services.panel import get_next_payment_date as _f
-
-    return _f(entity_id)
-
-
-def build_consent_takeover(entity_id, user_id, *, can_manage: bool, access_state=None):
-    from blueprints.subscription.services.panel import build_consent_takeover as _f
-
-    return _f(entity_id, user_id, can_manage=can_manage, access_state=access_state)
-
-
-def get_module_plan_catalog() -> dict:
-    from blueprints.subscription.services.cards import get_module_plan_catalog as _f
-
-    return _f()
-
-
-def get_trial_modules_for_entities(entity_ids: list[str]) -> dict[str, set[str]]:
-    from blueprints.subscription.services.cards import get_trial_modules_for_entities as _f
-
-    return _f(entity_ids)
-
-
-# The subscription panel moved to ``subscription.services.panel``. Re-exported because
-# ``routes/settings.py`` imports it from here inside the request, and three tests call
-# ``modules.build_subscription_panel`` directly.
-def build_subscription_panel(cards, summary, anchor_display):
-    from blueprints.subscription.services.panel import build_subscription_panel as _panel
-
-    return _panel(cards, summary, anchor_display)
-
-
-# Ordering for the notice list, most severe first. The modal shows every item that
-# applies rather than picking one — a company can be past due on one module and
-# winding down another, and hiding the second would be a lie of omission.
-#
-# No trial kind: every trial notice (trial ending, a trial that will not convert, a lapsed
-# trial, a cancelled trial running out) was removed on 2026-10-01 by the user's decision.
-# Every kind ``notices.build_subscription_notices`` emits must be listed here - the sort
-# calls ``.index()`` on it.
-_NOTICE_ORDER = ("past_due", "pending_cancel")
-
-
-# The dashboard notice moved to ``subscription.services.notices`` -- deciding a company
-# is past due or winding down is subscription reasoning. Re-exported rather than
-# repointed: importers name THIS module (some binding at import, some per request), and
-# the moved code reads its inputs back off here at call time so the suite's patches on
-# ``modules.get_module_cards`` still bite.
-def claim_subscription_notice(session, entity_id: str) -> bool:
-    from blueprints.subscription.services.notices import claim_subscription_notice as _claim
-
-    return _claim(session, entity_id)
-
-
-def build_subscription_notices(entity_id: str, user_id) -> dict:
-    from blueprints.subscription.services.notices import build_subscription_notices as _build
-
-    return _build(entity_id, user_id)
-
-
 #: Session key holding the entity ids whose notice has already been shown this login.
 NOTICE_SEEN_SESSION_KEY = "subscription_notice_seen"
 
@@ -337,6 +184,27 @@ NOTICE_SEEN_SESSION_KEY = "subscription_notice_seen"
 #: It is an opaque random value, not a session identifier anyone can authenticate
 #: with — it only ever answers "is this the same sign-in as before".
 LOGIN_SID_SESSION_KEY = "login_sid"
+
+
+def claim_subscription_notice(session, entity_id: str) -> bool:
+    """Whether the dashboard shows the subscription notice now - and if so, mark it shown.
+
+    Once per entity per login: not once per page view, and not once forever - a user who
+    comes back tomorrow should be told if it is still broken. Consuming rather than
+    reading is what keeps the cost bearable: the notice is fetched from the subscription
+    API only when this returns True.
+
+    Takes the session as a parameter so it is testable with a plain dict.
+    """
+    if not entity_id:
+        return False
+    seen = session.get(NOTICE_SEEN_SESSION_KEY) or []
+    if str(entity_id) in seen:
+        return False
+    # Reassign rather than mutate in place: Flask's session only marks itself dirty on
+    # __setitem__, so appending to the existing list would not persist.
+    session[NOTICE_SEEN_SESSION_KEY] = [*seen, str(entity_id)]
+    return True
 
 
 
@@ -422,17 +290,11 @@ def _module_has_paid_subscription(entity_id: str, code: str) -> bool:
       exactly the accounts where money is already in question;
     * a cancelled module still inside its paid extension also counts, matching Stripe's
       ``active`` + ``cancel_at_period_end``. A cancelled TRIAL shares that phase but has
-      never been charged, so it stays freely toggleable (see ``access.is_paid_module``).
+      never been charged, so it stays freely toggleable (see ``store_ro.module_is_paid``).
     """
-    from blueprints.subscription.services import access, store
+    from blueprints.subscription.services import store_ro
 
-    row = store.module_row(entity_id, (code or "").strip().upper())
-    if row is None:
-        return False
-    return access.is_paid_module(
-        phase=row.phase,
-        has_been_billed=row.first_billed_at is not None,
-    )
+    return store_ro.module_is_paid(entity_id, code)
 
 
 def set_entity_module(
@@ -469,19 +331,6 @@ def set_entity_module(
         )
 
     return _write_pairs(entity_id, {code: bool(enabled)}, actor=actor, user_id=user_id)
-
-
-# The daily access reconciler moved to ``subscription.services.access_sweep`` -- it is
-# subscription work and every one of its callers lives there. Re-exported rather than
-# repointed: importers and the suite's monkeypatches both name THIS module, and the moved
-# code reads it back off here at call time, so the patches still bite.
-#
-# ``_notify_access_revoked`` was exported alongside it until 2026-09. The revocation email
-# was retired, so both it and ``_entity_names_for_sweep`` -- which existed only to put a
-# company name in that email -- are gone rather than left as dead names for the next
-# reader to trace.
-from blueprints.subscription.services.access_sweep import (  # noqa: E402, F401
-    sweep_expired_module_access)
 
 
 def _write_pairs(

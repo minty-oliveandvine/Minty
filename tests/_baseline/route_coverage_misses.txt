@@ -1,7 +1,7 @@
 # Known gaps: in-scope routes no test reaches with a real request yet (tests/test_zz_route_coverage.py).
 # The gate fails on a route missing from this list AND on a listed route that a test now reaches.
 # Rewrite only on a complete run: MINTY_ROUTE_BASELINE=update (drop covered) or =add (also add misses).
-# 28 of 120 in-scope routes
+# 28 of 102 in-scope routes
 
 entity.billing_relogin                                  GET       /entity/<entity:entity_id>/billing-relogin         company
 entity.billing_sync_chart_accounts                      POST      /api/entities/<string:entity_id>/billing/sync-chart-accounts via ensure_valid_token

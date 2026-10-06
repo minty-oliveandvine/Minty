@@ -244,10 +244,9 @@ def init_app(app, db):
             ``currency_symbol`` to render_template override this default.
             """
             # Context processors run for EVERY render_template, including the ones
-            # with no request behind them — the billing emails are rendered from
-            # `flask subscriptions ...` cron jobs. Touching `request` there raises,
-            # and the handler below logs it at ERROR, so a perfectly healthy nightly
-            # run filled the log with errors about a value the email never asks for.
+            # with no request behind them (an email rendered from a CLI job). Touching
+            # `request` there raises, and the handler below logs it at ERROR, so a
+            # healthy run would fill the log with errors about a value it never asks for.
             # There is no request entity to resolve outside a request; "$" is the
             # answer, not a failure.
             if not has_request_context():

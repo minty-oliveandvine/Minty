@@ -37,6 +37,17 @@ Dated entries keep the names that were true on their day. Still open: the rest o
 (listed in its note), step 6, step 7 (the production cutover), launch day (8b), and all of
 Part 3 except the hub pages built early (entity list, My Profile).
 
+**Status 2026-10-06.** Step 5 is done except rule 10's links modules, which moved to Part 3
+step 4 (the user's call: they change no behaviour). On 2026-10-05 phase 2 of the hub move landed
+(sign-in, module choice, Users and Entity & Integration in minty-web; see Part 3 step 4) and the
+local checkout became `C:\Github\minty-subscription-api`. On 2026-10-06: minty-onboarding-api's
+card, consent and finalize calls go to minty-subscription-api (finalize is native there and a
+failed trial start fails it; the All Set screen has Try again); minty-payment-request-web reads
+the notice from minty-subscription-api; and **Flask's subscription engine is deleted** (services,
+payer portal, onboarding billing routes and finalize, the notice route, the CLI, the scheduler,
+`stripe`, `apscheduler`), leaving `store_ro.py` and the models. Next: step 6, then step 7 (its
+variables come from `.env.prod`; production changes are asked for first) and 8b.
+
 ---
 
 
@@ -1733,8 +1744,8 @@ inline plain names. The e2e variable is `E2E_SUBSCRIPTION_API_URL`. The differen
 DID move**, to 8000, under the `30N0`/`80N0` scheme of `docs/ENVIRONMENT.md` §2; and the other
 repos were renamed the same day (`minty-payment-request-web/-api`, `minty-onboarding-web/-api`).
 The mechanical pass over this document was not run. Its top-of-file status note maps the old
-names instead. Still to do: rename the local checkout folder `C:\Github\minty-billing-api` (its
-remote already points at `minty-subscription-api`); rename the Render service if it still
+names instead. Still to do: ~~rename the local checkout folder `C:\Github\minty-billing-api`~~
+(done 2026-10-05: `C:\Github\minty-subscription-api`); rename the Render service if it still
 has the old name (not visible from this machine); check the Git connection of every
 Render/Vercel service.
 
@@ -1769,8 +1780,8 @@ Render/Vercel service.
 > `d495e2d` "Consolidate env vars", plus the matching commit in each repo, merged as PRs). The
 > reference is `docs/ENVIRONMENT.md`:
 > - Repos renamed on GitHub: `minty-subscription-api`, `minty-payment-request-web/-api`,
->   `minty-onboarding-web/-api`. **The local checkout is still `C:\Github\minty-billing-api`**
->   (its remote is already `minty-subscription-api`). An empty, non-git `C:\Github\billing-frontend`
+>   `minty-onboarding-web/-api`. The local checkout was renamed to
+>   `C:\Github\minty-subscription-api` on 2026-10-05. An empty, non-git `C:\Github\billing-frontend`
 >   folder is left over.
 > - Ports: web `30N0`, API `80N0`. Hub 3000, subscription API 8000, Petty Cash 8010, payment
 >   request 3020/8020, onboarding 3030/8030. Locally Flask stays on **5001**, because the Xero
@@ -1788,6 +1799,29 @@ Render/Vercel service.
 >   now derived from `PETTY_CASH_URL`.
 > - Not deployed yet: the Render/Vercel variables follow `docs/ENVIRONMENT.md` §8's cutover
 >   checklist (development first, then production, then delete the old names).
+>
+> **Done 2026-10-06** (the list below was the 2026-10-02 recheck; each item is now true except
+> the first):
+> - Minty: `store_ro.py` holds the reads (there were nine, not five - see the risk list);
+>   `blueprints/subscription/services/*` else, `routes/portal.py`, the onboarding billing routes,
+>   `/plans` and finalize in `create.py`, `subscription_notice_api`, `cli/subscription_*.py`,
+>   `services/app_runtime/scheduler.py`, `scripts/subscription/*` (except `build_email_assets.py`,
+>   whose images minty-subscription-api ships), `templates/email/subscription_notice.html`,
+>   `require_subscription_payer`, the `subscription` blueprint, `stripe` / `apscheduler` /
+>   `tzlocal`, `STRIPE_*` / `SUBSCRIPTION_SCHEDULER_*` / `SUBSCRIPTION_EMAIL` - all deleted.
+>   The dashboard notice is `services/subscription_api.py::fetch_notice` (the plan's
+>   `billing_client.fetch_notice`, named for the service). `test_zz_no_stripe.py` and
+>   `test_subscription_store_ro.py` added; ~45 engine test files deleted (their Django twins
+>   stay); route inventory 203 -> 176 routes.
+> - minty-onboarding-api: `SUBSCRIPTION_API_URL` (required outside development),
+>   `core/subscription_client.py`, finalize native; minty-subscription-api's `BearerAuth` takes
+>   the same 60 s clock-skew leeway as onboarding.
+> - minty-onboarding-web: All Set's Try again (`e2e/walk.spec.ts` forces one failure).
+> - minty-payment-request-web: the notice from `SUBSCRIPTION_API_URL`.
+> - `/api/onboarding/invite` and `/invite/cancel` were kept by name.
+> - **Not done, moved to Part 3 step 4:** rule 10's links modules and guard tests (no
+>   `links.py` / `links.ts` / `test_zz_links.py` / `links.guard.test.ts` in any repo; written in
+>   `docs/ENVIRONMENT.md`'s names when they come).
 >
 > **Still to do here (rechecked 2026-10-02 against the repos):**
 > - Rule 10's **links modules and guard tests**: there is no `links.py` / `links.ts` and no
@@ -1928,8 +1962,8 @@ this list, and each app's e2e against the real hosts (the dress-rehearsal patter
 **Done when** the Minty suite is green (the new count recorded against `BASELINE.txt`), Minty e2e
 is green, onboarding e2e 23, billing-frontend e2e (one mode each since the dark switch went, 2026-10-01), both
 Django suites green on the harness, `grep -rn STRIPE_SECRET_KEY` across the five repos hits
-only `minty-billing-api`, the rule-10 guard test is green in Minty, `minty-billing-api`,
-`minty-web`, onboarding-backend and billing-frontend, and `grep -rn "FLASK_APP_URL\|
+only `minty-billing-api`, ~~the rule-10 guard test is green in Minty, `minty-billing-api`,
+`minty-web`, onboarding-backend and billing-frontend~~ (moved to Part 3 step 4, 2026-10-06), and `grep -rn "FLASK_APP_URL\|
 FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|
 XERO_TOKEN_SERVICE_URL"` over application code reads no environment variable. *(Rechecked
 2026-10-02: already true. The only hits are the Django setting `XERO_TOKEN_SERVICE_URL`, which
@@ -2073,7 +2107,12 @@ Cutover day repeats steps 3–8 with the window's backup.
    (`services/authz.py::require_subscription_payer`, `user_management/services/roles.py`'s
    payer guards ×4, `user_management/routes/approve_reject_access.py`,
    `entity/services/modules.py::_entity_customer_id`); a guard test asserts `store_ro` never
-   adds or commits.
+   adds or commits. *(2026-10-06: there were more - the Users tab's subscriber mark
+   (`hub_settings.py`), the paid-module lock behind `flask modules set`, the entity list's trial
+   badge, and the dashboard notice (now fetched from the API). `require_subscription_payer` and
+   `_entity_customer_id` had no live caller and were deleted instead. `store_ro` holds
+   `payer_for_entity`, `rows_for_entity`, `entities_paid_for_by`, `pending_transfer_for_entity`,
+   `module_is_paid`, `trial_modules_for_entities`; `test_store_ro_never_writes` is the guard.)*
 2. **`entity_function_map` double writers**: Flask writes during the wizard
    (`/api/onboarding/modules`, the entity-create defaults) and from `flask modules set`;
    Django writes the projection and never for `status = onboarding` entities (the

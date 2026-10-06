@@ -120,7 +120,7 @@ Two competing shapes, split by blueprint, not by route:
 | Shape | Count | Where |
 |---|---|---|
 | `{"status": "error", "message": …}` | ~235 | `report/`, `auth/`, `xero/`, `legal/`, the global handlers |
-| `{"error": …}` | ~131 | `entity/routes/create.py` (71), `entity/routes/settings.py` (33), `subscription/routes/portal.py` (13) |
+| `{"error": …}` | ~131 | `entity/routes/create.py` (71), `entity/routes/settings.py` (33), `subscription/routes/portal.py` (13; deleted 2026-10-06 with Flask's engine) |
 
 `entity/routes/settings.py` uses **both** — `{"error": …}` for billing routes,
 `{"status": "error", "message": …}` for the Xero-contact routes below them. The
@@ -138,10 +138,6 @@ against; copy is authored at each raise site.
 - `services/auth/token_service.py` — `token_expired()` returns a **tuple** on
   failure as a sentinel. Both callers (`hooks.py`, the refresh flow) branch on
   `isinstance(..., tuple)`. It never reaches a response body. Keep the shape.
-- `blueprints/subscription/routes/portal.py` — `_MissingField` text is authored
-  by `_required()` and names the field **on purpose**;
-  `test_payer_portal_api.py::test_initiating_a_handover_needs_an_entity`
-  asserts it. Do not genericise it.
 - `blueprints/xero/services/publish_errors.py` — the `<= 120` char passthrough
   is deliberate: a real Xero validation sentence ("Account code 'X' is not a
   valid code for this document") is exactly what the user needs to fix their

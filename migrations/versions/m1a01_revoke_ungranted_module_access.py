@@ -98,9 +98,11 @@ depends_on = None
 
 def upgrade():
     # A no-op on purpose (see the docstring): the revocation is the deliberate
-    # ``flask subscriptions revoke-ungranted``, never a side effect of a deploy.
-    print("m1a01: no-op - nothing revoked; the revocation is "
-          "`flask subscriptions revoke-ungranted` (dry unless --apply).")
+    # ``manage.py subscriptions revoke-ungranted`` on minty-subscription-api (Flask's
+    # ``flask subscriptions`` went with its engine on 2026-10-06), never a side effect
+    # of a deploy.
+    print("m1a01: no-op - nothing revoked; the revocation is minty-subscription-api's "
+          "`manage.py subscriptions revoke-ungranted` (dry unless --apply).")
 
 
 def downgrade():

@@ -101,8 +101,9 @@ smtps://USER:PASSWORD@HOST:465    implicit SSL (default port 465)
 Query parameters: `timeout` (seconds per SMTP step, default 10); `tls=0` turns STARTTLS off
 for `smtp://` (local mail catchers). User and password are percent-decoded. Unset: Petty Cash
 logs and skips every send; the Django APIs print mail to the console. `MAIL_FROM` is the
-default sender; `SUBSCRIPTION_EMAIL` and `ONBOARDING_EMAIL` are optional per-purpose senders
-that default to `MAIL_FROM` (each must be a verified sender in Brevo).
+default sender; `SUBSCRIPTION_EMAIL` and `ONBOARDING_EMAIL` are the subscription API's
+optional per-purpose senders that default to `MAIL_FROM` (each must be a verified sender in
+Brevo).
 
 ### `S3_URL`
 
@@ -133,11 +134,12 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 **Petty Cash (`Minty`, Flask)**
 - Required: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `S3_URL`, `PETTY_CASH_URL`,
   `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL`, `ONBOARDING_WEB_URL`,
-  `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `SPIRE_KEY`, `STRIPE_SECRET_KEY`,
-  `STRIPE_PUBLISHABLE_KEY`, `SMTP_URL`, `MAIL_FROM` (start-up enforces `SECRET_KEY`,
-  `DATABASE_URL` and `S3_URL`; without `SMTP_URL` no mail is sent).
-- Optional: `SUBSCRIPTION_EMAIL`, `SUBSCRIPTION_SCHEDULER_ENABLED` (+ `_FULL_HOUR`, `_TZ`,
-  `_LIGHT`), `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
+  `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `SPIRE_KEY`, `SMTP_URL`, `MAIL_FROM` (start-up
+  enforces `SECRET_KEY`, `DATABASE_URL` and `S3_URL`; without `SMTP_URL` no mail is sent).
+  `SUBSCRIPTION_API_URL` is also read server-side: the dashboard's subscription notice.
+  No `STRIPE_*`, `SUBSCRIPTION_SCHEDULER_*` or `SUBSCRIPTION_EMAIL` since 2026-10-06 (Flask's
+  subscription engine was deleted; nothing reads them).
+- Optional: `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
   legal flags (`REQUIRE_TERMS_AT_SIGNUP`, `CURRENT_TERMS_VERSION`, `CURRENT_PRIVACY_VERSION`),
   `INVITATION_*`, `AUTO_SUPERUSER_EMAILS`, `DD_CLIENT_TOKEN`, `LOG_LEVEL`, `SESSION_TYPE`,
   `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker).
@@ -158,7 +160,9 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 
 **Onboarding API (`minty-onboarding-api`, Django)**
 - Required: `APP_ENV`, `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, `PETTY_CASH_URL`,
-  `ONBOARDING_WEB_URL`, `DISPLAY_TIMEZONE`.
+  `SUBSCRIPTION_API_URL` (since 2026-10-06: cards, billing consent and finalize's trial start;
+  outside development the service refuses to start without it), `ONBOARDING_WEB_URL`,
+  `DISPLAY_TIMEZONE`.
 - Optional: `CORS_ALLOWED_ORIGINS` (default `ONBOARDING_WEB_URL`), `LOG_LEVEL`.
 
 **Minty web hub (`minty-web`, Next.js)**: `PETTY_CASH_URL`, `SUBSCRIPTION_API_URL`,
@@ -206,8 +210,9 @@ Do it in this order — the old variables can stay in place until the end, becau
 running yet reads the new ones and nothing new reads the old ones:
 
 1. **Set the new variables on every development service** (§5): `APP_ENV`, `DATABASE_URL`
-   (with `?schema=pettycashv3`), `S3_URL`, `SMTP_URL`, `MAIL_FROM`, the `*_URL` set; on Render
-   leave `PORT` to the platform. Rotate `SECRET_KEY` (§4) while you are there.
+   (with `?schema=pettycashv3`), `S3_URL`, `SMTP_URL`, `MAIL_FROM`, the `*_URL` set - including
+   the onboarding API's `SUBSCRIPTION_API_URL`, without which it no longer starts (2026-10-06);
+   on Render leave `PORT` to the platform. Rotate `SECRET_KEY` (§4) while you are there.
 2. **Register** the development `PETTY_CASH_URL/callback` in the Xero app if it is not there.
 3. **Deploy `development`** in every repo (the Next apps must rebuild — §6).
 4. **Verify**: sign in, hand off to each module (hub, payment request, onboarding), upload a
@@ -298,6 +303,7 @@ STACK = `docker/stack` / `docker/` compose files.
 | `MINTY_PROXY_TIMEOUT`, `FLASK_PROXY_TIMEOUT` | ONA, SUB | constant (20 s) |
 | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | PRA | removed (only Petty Cash holds them) |
 | `STRIPE_WEBHOOK_SECRET` | PC, STACK | removed |
+| `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `SUBSCRIPTION_SCHEDULER_*`, `SUBSCRIPTION_EMAIL` | PC | removed from Petty Cash (2026-10-06; still the subscription API's) |
 
 ### Docker stack (`docker/stack/.env`)
 

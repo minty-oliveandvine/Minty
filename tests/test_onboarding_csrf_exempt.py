@@ -15,8 +15,6 @@ production, so that's what we assert on.
 """
 from __future__ import annotations
 
-import pytest
-
 
 def _csrf(app):
     csrf = app.extensions.get("csrf")
@@ -56,16 +54,3 @@ def test_every_onboarding_post_is_csrf_exempt(app):
         f"in services/app_runtime/legacy/bootstrap.py: {missing}"
     )
 
-
-@pytest.mark.parametrize(
-    "view_name",
-    [
-        "onboarding_payment_method_setup",
-        "onboarding_payment_method_complete",
-    ],
-)
-def test_payment_method_posts_are_exempt(app, view_name):
-    """The two routes that actually regressed, pinned by name."""
-    exempt = _csrf(app)._exempt_views
-    dotted = f"blueprints.entity.routes.create.{view_name}"
-    assert dotted in exempt

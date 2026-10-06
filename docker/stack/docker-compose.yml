@@ -244,6 +244,9 @@ services:
       minty:
         # Waits for the pettycashv3 schema and the Flask tables to exist.
         condition: service_healthy
+      subscription-api:
+        # Cards, billing consent and finalize's trial start are proxied there.
+        condition: service_healthy
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
       PYTHONUNBUFFERED: "1"
@@ -257,6 +260,8 @@ services:
       # Server-to-server: the proxied endpoints and the Xero token fetch. Internal
       # service name, so it never leaves the compose network.
       PETTY_CASH_URL: http://minty:8010
+      # Server-to-server: cards, billing consent and finalize's trial start.
+      SUBSCRIPTION_API_URL: http://subscription-api:8000
       # Only the wizard calls this API from a browser, so CORS defaults to its origin.
       ONBOARDING_WEB_URL: http://localhost:${ONBOARDING_WEB_HOST_PORT:-3030}
       # Must agree with Minty's hardcoded Asia/Hong_Kong, or the two disagree about

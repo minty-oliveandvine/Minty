@@ -128,9 +128,8 @@ Every typed email address is printable ASCII (0x21-0x7E) and nothing else (2026-
   (`/api/me/company/invitations`, `/api/onboarding/invite`) 400 - an invite's address must also
   be an address with no markup (`invite_address_error`) - the business email
   (`/api/onboarding/create`, `PUT /api/onboarding/entity/<id>`, the `/entity/create` form) 400,
-  the onboarding billing email (`…/billing/payment-methods/confirm`, `…/billing/accounts`) 400,
-  and My Profile (`PATCH /api/me/profile`) and the payer
-  portal's invite-admin 422 - those two answer every refused address with 422.
+  and My Profile (`PATCH /api/me/profile`) 422. The onboarding billing email and the payer
+  portal's invite-admin are minty-subscription-api's since 2026-10-06 (it refuses them there).
 - Stored addresses are not rewritten.
 
 ## 3. The session
