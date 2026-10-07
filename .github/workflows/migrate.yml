@@ -1,0 +1,79 @@
+# Manual, deliberate Alembic runs against a hosted database - never on push.
+#
+# Hosted services run with RUN_MIGRATIONS=false (set by minty-infra), so a deploy never
+# migrates on its own; this workflow is the one way a hosted schema moves. Order on a
+# release that needs a migration: run `current`, run `upgrade`, THEN merge the code that
+# needs the new columns (a missing column breaks SELECTs silently - see docs/ENVIRONMENT.md).
+#
+# Secrets: DATABASE_URL as an environment secret on `development` and `production-db`
+# (the Supabase SESSION POOLER URI with ?schema=pettycashv3 - the direct db.<ref> host is
+# IPv6-only and GitHub runners are not). `production-db` has a required reviewer where the
+# GitHub plan allows it (minty-infra github.tf).
+name: migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which database
+        type: choice
+        options: [development, production]
+        required: true
+      action:
+        description: "current = show the revision and heads (read-only); upgrade = flask db upgrade"
+        type: choice
+        options: [current, upgrade]
+        default: current
+        required: true
+
+concurrency:
+  group: migrate-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  alembic:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'production' && 'production-db' || 'development' }}
+    steps:
+      - name: production migrates only from main
+        if: inputs.environment == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production migrations run from main only (this run is on ${GITHUB_REF})."
+          exit 1
+
+      - name: the DATABASE_URL secret is set
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is empty: add it as a secret on the '${{ inputs.environment == 'production' && 'production-db' || 'development' }}' environment."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # The same install as docker/Dockerfile: the locked runtime set, no dev group.
+      - run: pip install uv && uv sync --frozen --no-dev --no-default-groups --no-install-project
+
+      # Importing the app enforces SECRET_KEY, DATABASE_URL and S3_URL. A migration signs
+      # nothing and touches no bucket, so a throwaway key and a dummy bucket URL are enough;
+      # neither ever reaches a hosted service.
+      - name: flask db ${{ inputs.action }}
+        env:
+          APP_ENV: production
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          S3_URL: https://dummy-key:dummy-secret@s3.us-west-004.backblazeb2.com/dummy-bucket
+          ACTION: ${{ inputs.action }}
+        run: |
+          export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          if [ "$ACTION" = "upgrade" ]; then
+            # SESSION_TYPE=cachelib for this one command, exactly as docker/docker-entrypoint.sh
+            # does: the database session backend would create `sessions` before Alembic runs.
+            SESSION_TYPE=cachelib .venv/bin/python -m flask --app main.py db upgrade
+          fi
+          echo "current:"; .venv/bin/python -m flask --app main.py db current
+          echo "heads:";   .venv/bin/python -m flask --app main.py db heads

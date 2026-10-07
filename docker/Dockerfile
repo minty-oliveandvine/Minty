@@ -33,5 +33,6 @@ EXPOSE 8010
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # Shell form so ${PORT} is expanded at start-up; `exec` makes gunicorn PID 1, so it
-# receives the container's stop signal.
-CMD exec gunicorn -w "${GUNICORN_WORKERS:-4}" --max-requests 200 --max-requests-jitter 50 -b "0.0.0.0:${PORT:-8010}" main:app
+# receives the container's stop signal. Workers, threads, timeout and keep-alive match the
+# Procfile: gunicorn's 30 s default timeout kills slow Xero and expense-AI requests.
+CMD exec gunicorn -w "${GUNICORN_WORKERS:-2}" --threads 4 --timeout 120 --keep-alive 120 --max-requests 200 --max-requests-jitter 50 -b "0.0.0.0:${PORT:-8010}" main:app

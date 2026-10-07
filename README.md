@@ -37,14 +37,18 @@ Two things hold them together and are easy to get wrong:
 
 | Environment | URL |
 |---|---|
-| Production | https://minty.oliveandvinehk.com |
+| Production (until the cutover) | https://www.minty.oliveandvinehk.com (the apex redirects, and fails CORS preflights - never use it) |
 | Staging | https://staging-olive-and-vine-minty-26bm.onrender.com |
 | Pre-staging | https://pre-staging-olive-and-vine-minty.onrender.com |
 | Development | https://development-olive-and-vine-minty.onrender.com |
 
+After the cutover, `minty-infra` (Option B) serves Petty Cash at https://pettycash.dailyminty.com
+(production) and https://dev-pettycash.dailyminty.com (development), on Render.
+
 Each sibling reaches this app through its `PETTY_CASH_URL`. `main` deploys production and
-`development` deploys the development environment; the deploy settings themselves live in the
-Render / Vercel dashboards — see [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md#branches-and-deployments).
+`development` deploys the development environment; until `minty-infra` is applied, the deploy
+settings live in the Render / Vercel dashboards — see
+[`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md#branches-and-deployments).
 
 ## Running with Docker (recommended)
 

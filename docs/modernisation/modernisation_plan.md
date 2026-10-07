@@ -3085,6 +3085,19 @@ is the escape hatch, not a different CI.
 
 ## Infrastructure as code — `minty-infra` (Terraform)
 
+> **2026-10-07: `minty-infra` exists** (`C:\Github\minty-infra`, private), built in two hosting
+> options; **Option B was chosen the same day and is `minty-infra`'s `main`** = this section's
+> design over today's services (Render, Vercel, Supabase, B2,
+> GitHub; state local for now, a private B2 bucket later; `dailyminty.com` stays on Vercel DNS); the parked alternative is
+> **`infra-cloudflare` (Option A)** = B with the three Next.js apps on Cloudflare Workers and the
+> DNS on Cloudflare (backends stay on Render; Cloudflare Containers later, Workers only for
+> services Part 3 rewrites). Its README and `CUTOVER.md` are the current description; where this
+> section differs (one Render `env_group` per environment instead of a GitHub org secret, which a
+> user account cannot have; state local for now (a private B2 bucket later), not HCP Terraform; the subscription pass
+> as a Render cron job; the wrapper `tf.ps1`
+> with plan/apply local rather than from Actions), they win. `docs/ENVIRONMENT.md` §8 summarises
+> Option B.
+
 Everything the plan deploys to has an official provider: Render (`render-oss/render`), Vercel
 (`vercel/vercel`), Supabase (`supabase/supabase`), Backblaze B2 (`Backblaze/b2`), GitHub
 (`integrations/github`). The target tree is ~11 deployables × 2 environments plus 15 repos of
