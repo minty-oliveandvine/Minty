@@ -82,13 +82,13 @@
         <mxCell id="OPS" value="DevOps" style="swimlane;html=1;startSize=30;fillColor=#f8fafc;strokeColor=#475569;fontColor=#0f172a;fontStyle=1;rounded=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="750" width="1360" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="O0" value="&lt;b&gt;minty-e2e&lt;/b&gt;&lt;br&gt;Playwright · cross-service journeys · gates every cutover" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
+        <mxCell id="O0" value="&lt;b&gt;Minty e2e.yml&lt;/b&gt;&lt;br&gt;stack-e2e · the whole stack · gates every cutover" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
           <mxGeometry x="20" y="40" width="400" height="60" as="geometry"/>
         </mxCell>
         <mxCell id="O1" value="&lt;b&gt;minty-infra&lt;/b&gt;&lt;br&gt;Terraform: Render · Vercel · Supabase · B2 · GitHub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
           <mxGeometry x="480" y="40" width="400" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="O2" value="&lt;b&gt;.github&lt;/b&gt;&lt;br&gt;reusable Actions workflows: python-api · next-web · e2e-stack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
+        <mxCell id="O2" value="&lt;b&gt;.github&lt;/b&gt;&lt;br&gt;reusable Actions workflows: python-api · flask-app · next-web · stack-e2e" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;fontColor=#0f172a;" vertex="1" parent="OPS">
           <mxGeometry x="940" y="40" width="400" height="60" as="geometry"/>
         </mxCell>
 
