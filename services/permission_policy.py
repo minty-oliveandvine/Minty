@@ -24,7 +24,7 @@ class Role(str, Enum):
 # The database's vocabulary (blueprints/shared/enums.SystemRole); re-exported here because
 # this module has always been where the code looked it up. SUPERUSER is the historical name
 # of the member whose stored word is now "superadmin".
-from blueprints.shared.enums import SystemRole as _DbSystemRole
+from blueprints.shared.enums import SystemRole as _DbSystemRole  # noqa: E402 - see above
 
 
 class SystemRole(str, Enum):

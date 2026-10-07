@@ -7,7 +7,6 @@ from flask import (current_app, flash, get_flashed_messages, redirect,
                    render_template, request, session, url_for)
 from flask_login import current_user, login_required
 from loguru import logger
-from sqlalchemy import func, or_
 
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import minty_web_module_page_handoff
@@ -23,8 +22,7 @@ from blueprints.xero.services.settings import (
 from models.db import Entity, Report, User, UserEntity, db, tz
 from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity)
-from services.authz import (permission_denied, require_entity_access,
-                            require_module, require_permission)
+from services.authz import (permission_denied, require_module)
 from services.permission_policy import Permission, has_permission, is_superuser
 from services.subscription_api import fetch_notice
 

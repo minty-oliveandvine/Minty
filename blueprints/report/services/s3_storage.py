@@ -134,7 +134,7 @@ def delete_expense_with_receipts(expense, *, keep_keys=()):
     over), then the line (its link rows go with it), then the ``attachment`` rows no
     line points at any more. Flushes; the caller commits.
     """
-    from blueprints.report.models.shop_expense import Attachment, ReportExpenseAttachment
+    from blueprints.report.models.shop_expense import ReportExpenseAttachment
     from models.db import db
 
     keep = set(keep_keys or ())

@@ -1,7 +1,6 @@
 # Entity shared helpers: check_user_has_entities,
 # get_settings_redirect_url, create_default_entity_settings,
 # display_deposit_balance, get_main_bank_account.
-from datetime import datetime
 
 from flask import url_for
 from loguru import logger
@@ -10,7 +9,7 @@ from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
 from blueprints.shared.enums import SaleType
 from models.db import (AccountInfo, EntityPettycashSettings,
-                       EntitySaleSetting, SaleInfo, UserEntity, db, tz)
+                       EntitySaleSetting, SaleInfo, UserEntity, db)
 
 
 def check_user_has_entities(user_id):

@@ -670,11 +670,13 @@ END $$;
 
 
 def check_keys(label, tables):
-    """Every primary key survives, except the ones this file deliberately mints."""
-    minted = {"user": "id", "cash_info": "id"}
+    """Every primary key survives, except the ones this file deliberately mints.
+
+    The minted ids need no list of their own: `KEY_EXPR` already carries the conversion for the
+    two md5 user ids and the cash ids, which is what the comparison below uses.
+    """
     entries = []
     for t in tables:
-        st = TABLE_SRC.get(t, t)
         pk = pks.get(t)
         if not pk or any(c not in dict(plan_table(t)[1]) for c in pk):
             continue
@@ -733,7 +735,7 @@ BEGIN
   END LOOP;
   IF bad > 0 THEN RAISE EXCEPTION '%(l)s6: %% money column(s) changed', bad; END IF;
 END $$;
-""" % {"l": label, "v": ", ".join(entries), "S": SRC, "D": DST}
+""" % {"l": label, "v": ", ".join(entries), "D": DST}
 
 
 HEAD02 = """-- ===========================================================================

@@ -5,7 +5,6 @@
 # new functions).
 from datetime import datetime, timedelta, timezone
 
-from flask import current_app as app
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 from loguru import logger
@@ -20,7 +19,7 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
 from blueprints.shared.enums import SaleType
-from blueprints.shared.enums import DiscrepancyType, ReportStatus
+from blueprints.shared.enums import ReportStatus
 from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, UserEntity, db, tz)
 from services.helpers.xero_bridge import resolve_contact_name
 from services.permission_policy import (Permission, can_view_report,

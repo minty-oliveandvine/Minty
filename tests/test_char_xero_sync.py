@@ -22,7 +22,7 @@ import uuid
 import pytest
 
 import char_factories as F
-from test_char_report_lifecycle import REPORT_DATE, add_expense, open_report, post_report
+from test_char_report_lifecycle import REPORT_DATE, open_report, post_report
 
 pytestmark = pytest.mark.char
 

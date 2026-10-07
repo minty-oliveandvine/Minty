@@ -3,13 +3,11 @@
 import threading
 from uuid import uuid4
 
-from flask import current_app, jsonify
+from flask import current_app
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from blueprints.xero.services.settings import \
-    check_entity_xero_settings_complete
 from models.db import (AccountInfo, Entity, EntityAccountXero,
                        EntityPettycashSettings, XeroContactSync, db)
 from blueprints.shared.schema import SCHEMA
