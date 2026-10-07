@@ -48,7 +48,10 @@ web 3000, payment-request API 8000, onboarding web 3001, onboarding API 8001.
 | `ONBOARDING_API_URL` | `http://localhost:8030` | onboarding API |
 
 Trailing slashes are stripped when read. In a deployment each value is the other service's
-public origin (e.g. `PETTY_CASH_URL=https://minty.oliveandvinehk.com`).
+public origin, exactly as the browser reaches it with no redirect in between (e.g.
+`PETTY_CASH_URL=https://pettycash.dailyminty.com`). Never a host that redirects: the old apex
+`https://minty.oliveandvinehk.com` answers a CORS preflight with a 307, which every browser
+treats as a failure.
 
 One exception: **`PETTY_CASH_PUBLIC_URL`** (subscription API only, optional, defaults to
 `PETTY_CASH_URL`) — the browser-facing Flask origin for when `PETTY_CASH_URL` is an internal
@@ -203,6 +206,50 @@ holds `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET`.
 `main` deploys **production**; `development` deploys the **development** environment. Each
 service's variables are set per environment in its host's dashboard (Render or Vercel —
 whichever hosts that service); none are committed.
+
+### Hosting as code (`minty-infra`, Option B)
+
+The repo [`minty-infra`](https://github.com/minty-oliveandvine/minty-infra) brings the
+dashboards into Terraform. **Option B - today's services (Render, Vercel, Supabase, B2,
+GitHub) - was chosen on 2026-10-07** and lives on `minty-infra`'s `main`. Until it is applied
+(`minty-infra/CUTOVER.md`: development first, production in the cutover window), the dashboards
+above stay the source of truth.
+
+Option A (the three Next.js apps on Cloudflare Workers, `dailyminty.com` on Cloudflare DNS,
+backends still on Render) stays parked on the `infra-cloudflare` branches of `minty-infra`,
+Minty and the three Next.js repos.
+
+| Service | Production | Development | Host |
+|---|---|---|---|
+| Petty Cash | `pettycash.dailyminty.com` | `dev-pettycash.dailyminty.com` | Render |
+| Subscription API | `subscription-api.dailyminty.com` | `dev-subscription-api.dailyminty.com` | Render |
+| Payment Request API | `payment-backend.dailyminty.com` | `dev-payment-backend.dailyminty.com` | Render |
+| Onboarding API | `onboarding-api.dailyminty.com` | `dev-onboarding-api.dailyminty.com` | Render |
+| Minty web hub | `login.dailyminty.com` | `dev-login.dailyminty.com` | Vercel |
+| Payment Request web | `payment.dailyminty.com` | `dev-payment.dailyminty.com` | Vercel |
+| Onboarding web | `onboarding.dailyminty.com` | `dev-onboarding.dailyminty.com` | Vercel |
+
+- Every `*_URL` above is set by Terraform from that one table; no dashboard edit.
+- `APP_ENV`, `SECRET_KEY` and `DATABASE_URL` come from one Render env group per environment
+  (`minty-shared-<env>`), so a `SECRET_KEY` rotation is one value and one apply.
+- The subscription pass runs as an hourly Render cron job (`manage.py subscriptions tick`) in
+  production; `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Render service.
+- Render deploys a branch only after its CI checks pass. Vercel's development environment is
+  the preview deployment of the `development` branch.
+- `S3_URL` uses a key scoped to one bucket per environment (development gets its own bucket).
+
+And:
+
+- **Migrations are deliberate.** Hosted services run with `RUN_MIGRATIONS=false` (set by
+  `minty-infra`; the image's own default is still `true`, so nothing changes until that apply).
+  The schema moves only through Minty's manual **migrate** workflow
+  (`.github/workflows/migrate.yml`: `current` to look, `upgrade` to apply; production from
+  `main` behind the `production-db` environment). Run it **before** merging code that needs
+  the new columns.
+- **Health checks:** Petty Cash `/health`, subscription API `/healthz`, payment-request API
+  `/healthz`, onboarding API `/health` — liveness only, no database.
+- **Docker** (`docker/Dockerfile`) starts gunicorn like the `Procfile`: 2 workers
+  (`GUNICORN_WORKERS`), 4 threads, `--timeout 120`.
 
 ### Cutover checklist
 
