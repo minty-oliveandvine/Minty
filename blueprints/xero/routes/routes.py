@@ -27,7 +27,7 @@ from blueprints.xero.services.integration import (
 from blueprints.xero.services.settings import (get_entity_account_settings,
                                                sync_entity_xero_status)
 from services.helpers.xero_bridge import get_entity_contact_settings
-from models.db import Entity, Report, User, UserToken, db, tz
+from models.db import Entity, Report, User, db
 from services.authz import (permission_denied, require_entity_access,
                             require_permission)
 from services.auth.token_service import (ensure_valid_token,
@@ -683,10 +683,6 @@ def xero_callback():
         response = get_auth_token(code, state)
         decoded = decode_jwt(response.get("id_token"))
         decode_jwt(response.get("access_token"))
-        access_token = response.get("access_token")
-        id_token = response.get("id_token")
-        expires_in = response.get("expires_in")
-        refresh_token = response.get("refresh_token")
 
         # The Xero id_token carries an `email` claim (the `email` scope is
         # requested); `preferred_username` is the Xero login email as a fallback.

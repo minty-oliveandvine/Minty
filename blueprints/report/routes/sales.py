@@ -12,10 +12,10 @@ from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (
     check_user_has_entities, get_cash_sales_from_detail,
     header_publishing_status_for, parse_nested_keys, resolve_report_entity_id,
-    safe_float, sum_sales_by_type, update_draft_progress,
+    safe_float, update_draft_progress,
     update_report_draft_sales_from_detail)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, db, tz
+from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 

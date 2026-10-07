@@ -17,7 +17,6 @@ from blueprints.report.services.shared import (check_user_has_entities,
                                                normalize_expense_files,
                                                resolve_report_entity_id,
                                                safe_float,
-                                               sum_sales_by_type,
                                                update_draft_progress)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (AccountInfo, Entity, EntityAccountXero, Report, ShopExpense, XeroContactSync, db)

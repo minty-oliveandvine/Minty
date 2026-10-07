@@ -34,5 +34,5 @@ def test_rehearsal_is_all_green(tmp_path: Path) -> None:
     log = (tmp_path / f"{dbname}_rehearsal.log").read_text(encoding="utf-8") if (tmp_path / f"{dbname}_rehearsal.log").exists() else proc.stdout
     assert proc.returncode == 0, log[-6000:]
     assert "ALL GREEN" in log
-    assert "***" not in log, "a check line was not OK:\n" + "\n".join(l for l in log.splitlines() if "***" in l)
+    assert "***" not in log, "a check line was not OK:\n" + "\n".join(line for line in log.splitlines() if "***" in line)
     assert (tmp_path / f"{dbname}_not_carried.md").exists()

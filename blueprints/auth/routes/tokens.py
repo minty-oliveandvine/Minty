@@ -1,5 +1,5 @@
 # Token endpoints: mytoken, event_id, check_token, refresh_token.
-from flask import current_app, flash, jsonify
+from flask import flash, jsonify
 from flask_login import current_user, login_required
 from loguru import logger
 

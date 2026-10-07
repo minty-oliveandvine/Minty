@@ -379,9 +379,6 @@ def edit_report(id):
 @report_bp.route("/report/delete/<string:id>", methods=["POST"])
 @login_required
 def delete_report(id):
-    s3_client = get_s3_client()
-    bucket = get_s3_bucket()
-
     def _delete_report_children(report_id):
         """Delete the child rows that must go before a report row can.
 

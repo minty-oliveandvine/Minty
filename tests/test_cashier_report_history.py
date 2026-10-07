@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 from services.permission_policy import (
     Permission,
-    Role,
     can_delete_report,
     can_edit_report,
     can_view_report,

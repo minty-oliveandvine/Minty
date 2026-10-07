@@ -240,7 +240,9 @@ def test_an_old_from_bills_link_opens_the_same_page(shop, app, db, client):
     plain = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
     old = client.get(f"{F.co(client, entity.id)}/settings/petty-cash?from=bills").get_data(as_text=True)
 
-    strip_csrf = lambda html: re.sub(r'name="csrf_token" value="[^"]*"', "", html)
+    def strip_csrf(html):
+        return re.sub(r'name="csrf_token" value="[^"]*"', "", html)
+
     assert strip_csrf(old) == strip_csrf(plain)
     assert "from=bills" not in old and 'name="_from"' not in old
 

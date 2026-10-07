@@ -20,7 +20,7 @@ from __future__ import annotations
 import requests
 from loguru import logger
 
-from models.db import Entity, User, UserToken, db
+from models.db import Entity, User, db
 from services.auth.token_service import ensure_valid_token
 from services.permission_policy import Permission, has_permission_by_user_id
 

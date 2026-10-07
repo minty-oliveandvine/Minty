@@ -58,6 +58,33 @@ dependencies = [
   "xero_python==1.5.3",
 ]
 
+[tool.ruff]
+# ruff shipped in the dev group but had never been run over the whole repo; `ruff check .` is a
+# CI step as of 2026-10-07 (the shared flask-app workflow). Rule selection is ruff's default
+# (E4, E7, E9, F) - this section only says where those rules are wrong about this repo, so that a
+# finding means something and the step stays worth having.
+target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+# The model hub: every import here exists to REGISTER the mapper with SQLAlchemy, so "unused" is
+# the point. Removing one breaks the declarative registry rather than tidying it (tests/conftest.py
+# imports this module at collection start for exactly that reason).
+"models/db.py" = ["F401"]
+
+# Alembic's generated header imports `op` and `sa` whether or not a revision uses them. They are
+# the migration format, not this repo's style.
+"migrations/versions/*" = ["F401"]
+
+# Several test modules must set environment variables before the app is imported, so their imports
+# genuinely cannot all sit at the top of the file (the same bootstrap tests/conftest.py documents).
+"tests/*" = ["E402"]
+
+# Standalone tooling scripts, run by hand and read as scripts: `a; b` on one line, `l` as a
+# loop variable, imports after an environment is arranged. Held to the same rules as the
+# application they generate, they would only produce noise.
+"docs/schema/generators/*" = ["E401", "E402", "E702", "E741"]
+"scripts/*" = ["E401", "E402", "E702", "E741"]
+
 [tool.uv]
 default-groups = ["dev"]
 

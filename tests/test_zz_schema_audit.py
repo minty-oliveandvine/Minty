@@ -30,6 +30,6 @@ def test_every_model_in_the_four_repos_matches_the_schema(built_database):
                AUDIT_SCHEMA=pg_harness.APP_SCHEMA, AUDIT_STRICT="1")
     result = subprocess.run([sys.executable, str(AUDIT)], capture_output=True, text=True,
                             encoding="utf-8", env=env)
-    summary = [l for l in result.stdout.splitlines() if l.startswith("TOTAL")]
+    summary = [line for line in result.stdout.splitlines() if line.startswith("TOTAL")]
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
     assert summary and summary[0].startswith("TOTAL 0 "), summary

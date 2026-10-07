@@ -11,8 +11,7 @@ from typing import Any, MutableMapping, cast
 import pytz
 import requests
 from flask import current_app, g
-from flask_login import current_user
-from sqlalchemy import nulls_last, text
+from sqlalchemy import text
 
 from models.db import Entity, User, UserToken
 

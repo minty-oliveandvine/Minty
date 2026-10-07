@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 from flask import Flask
 
 from blueprints.xero.routes import routes as xero_routes
