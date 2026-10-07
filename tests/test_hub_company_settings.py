@@ -342,7 +342,7 @@ def test_the_flask_tab_hands_over_with_what_was_flashed(app, client, shop, tab):
     assert f"{where.scheme}://{where.netloc}{where.path}" == f"{HUB}/landing"
     query = parse_qs(where.query)
     next_path = urlsplit(query["next"][0])
-    assert next_path.path == f"/entities/{shop['entity'].id[:8]}/olive-and-vine/settings/{tab}"
+    assert next_path.path == f"/entity/{shop['entity'].id[:8]}/olive-and-vine/settings/{tab}"
     flash = parse_qs(next_path.query)["flash"][0]
     read = call(client, app, "GET", f"/api/me/company/{tab}", shop["admin"], shop["entity"].id, query={"flash": flash})
     assert read.get_json()["notices"] == [{"category": "success", "message": "You're connected to Xero!"}]

@@ -219,7 +219,7 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
   | Hand-overs | `/entity/<co>/enter`, `/payment-request`, `/modules`, `/xero-not-connected` |
 
   Module names are `petty-cash` and `payment-request` (the user's call). minty-web's company pages are
-  `/entities/<shortid>/<name>/…` too (the module page `…/settings/modules` since phase 2), and the payments app's pages are
+  `/entity/<shortid>/<name>/…` too (the module page `…/settings/modules` since phase 2), and the payments app's pages are
   `/entity/<shortid>/<name>/payment-request[/<id>]` and `/settings/payment-request` on its origin -
   the hand-overs land there (`billing_app_home_url`; `/payment-request?request=<id>` lands on one
   request), and its middleware sends another company's page back here

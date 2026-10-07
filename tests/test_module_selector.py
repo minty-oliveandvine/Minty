@@ -4,7 +4,7 @@ rows, minty-web's ``/enter``). It decides, from the database, where the person l
 * a company still onboarding resumes its wizard;
 * someone who is not a member (and not a superuser) is refused, back to the list;
 * one module switched on goes straight into it - Petty Cash's dashboard, or the payments app;
-* both: minty-web's module choice (``/entities/<shortid>/<name>``, phase 2 - 2026-10-05; it was
+* both: minty-web's module choice (``/entity/<shortid>/<name>``, phase 2 - 2026-10-05; it was
   the payments app's ``/module-selection``), with a token scoped to the company.
 """
 from __future__ import annotations
@@ -64,7 +64,7 @@ def test_both_modules_open_minty_webs_module_choice_with_a_company_token(app, cl
 
     assert (f"{where.scheme}://{where.netloc}", where.path) == (HUB, "/landing")
     query = parse_qs(where.query)
-    assert query["next"] == [f"/entities/{company.id[:8]}/olive-and-vine"]
+    assert query["next"] == [f"/entity/{company.id[:8]}/olive-and-vine"]
     claims = jwt.decode(query["token"][0], app.config["SECRET_KEY"], algorithms=["HS256"])
     assert claims["entity_id"] == company.id and claims["user_id"] == owner.id
     assert claims["petty_cash_enabled"] is True and claims["billing_enabled"] is True

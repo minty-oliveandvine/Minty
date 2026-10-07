@@ -105,7 +105,7 @@ def _flash_if_xero_disconnected(org) -> bool:
 
 def _to_hub_tab(entity_id, tab: str):
     """Users and Entity & Integration are minty-web's tabs since phase 2 (2026-10-05):
-    ``/entities/<shortid>/<name>/settings/{users,integration}``, reached with a token scoped to
+    ``/entity/<shortid>/<name>/settings/{users,integration}``, reached with a token scoped to
     the company. These Flask addresses stay as the way there - the sidebar, old links, the
     payments app's pills and every ``url_for`` here (the Xero callback lands on the
     integration tab) - and whatever was flashed on the way travels signed in ``?flash=``, which
