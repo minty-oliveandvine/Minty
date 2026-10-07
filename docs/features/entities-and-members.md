@@ -30,7 +30,7 @@ in `blueprints/entity/services/entity_list.py::build_entity_list`, for its one r
 Clicking one goes
 through `GET /entity/<co>/modules` (`routes/modules.py::module_selector`, a router): a company
 still onboarding resumes its wizard, someone outside it goes back to the list, one module goes
-straight into it, and both go to **minty-web's module choice** (`/entities/<shortid>/<name>`,
+straight into it, and both go to **minty-web's module choice** (`/entity/<shortid>/<name>`,
 with a token scoped to the company - phase 2, 2026-10-05; it was the payments app's
 `/module-selection`), whose two doors enter each module through `/entity/<co>/enter`
 (`tests/test_module_selector.py`). Opening Petty Cash
@@ -52,7 +52,7 @@ finalize was deleted on 2026-10-06; [onboarding-and-module-handoff.md](onboardin
 
 Flask draws ONE tab: Petty Cash Settings = `settings_entity.html`
 ([petty-cash-settings.md](petty-cash-settings.md)) - each app keeps its own settings. **Users,
-Entity & Integration and Module are minty-web's** (`/entities/<shortid>/<name>/settings/<tab>`,
+Entity & Integration and Module are minty-web's** (`/entity/<shortid>/<name>/settings/<tab>`,
 phase 2 - 2026-10-05, `minty-web/docs/features/company-settings.md`): their Flask addresses stay
 as HAND-OVERS (`routes/settings.py::_to_hub_tab` - a company-scoped token, and whatever was
 flashed on the way signed into `?flash=`; the Xero reconnect's outcome reaches the tab that way),

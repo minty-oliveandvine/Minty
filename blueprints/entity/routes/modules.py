@@ -7,7 +7,7 @@ Flow when a user clicks an entity in the entity list:
   3. If only billing is enabled, issue a short-lived HS256 JWT signed with
      Flask ``SECRET_KEY`` and hand off to the Module 2 Next.js frontend with
      the JWT in the query string, straight into the app itself.
-  4. Both enabled: minty-web's module choice (``/entities/<shortid>/<name>``, phase 2 -
+  4. Both enabled: minty-web's module choice (``/entity/<shortid>/<name>``, phase 2 -
      2026-10-05; it was Module 2's ``/module-selection`` page), with a token scoped to the
      company. The picker only appears when there is actually something to pick.
 
@@ -200,7 +200,7 @@ def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
 
 
 def minty_web_company_path(entity_id, sub: str = "") -> str:
-    """One company's pages on minty-web's origin: ``/entities/<shortid>/<name><sub>`` (phase 2,
+    """One company's pages on minty-web's origin: ``/entity/<shortid>/<name><sub>`` (phase 2,
     2026-10-05 - minty-web's ``lib/hubPaths.ts::companyPath``). An id that names no company
     keeps its full form with the placeholder name ``company``; minty-web puts the company's
     own name in the address bar once it knows it."""
@@ -209,12 +209,12 @@ def minty_web_company_path(entity_id, sub: str = "") -> str:
     ref = canonical_ref(entity_id)
     if "/" not in ref:
         ref = f"{ref}/company"
-    return f"/entities/{ref}{sub}"
+    return f"/entity/{ref}{sub}"
 
 
 def minty_web_module_page_path(entity_id) -> str:
     """minty-web's module settings page of one company - the Module tab among its settings,
-    ``/entities/<shortid>/<name>/settings/modules`` since phase 2 (it was
+    ``/entity/<shortid>/<name>/settings/modules`` since phase 2 (it was
     ``/subscription/entities/<shortid>/<name>/modules``; minty-web 307s the old address)."""
     return minty_web_company_path(entity_id, "/settings/modules")
 

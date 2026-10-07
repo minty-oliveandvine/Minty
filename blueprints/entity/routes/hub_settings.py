@@ -1,5 +1,5 @@
 """A company's Users and Entity & Integration tabs as minty-web draws them (phase 2, 2026-10-05):
-the bearer routes behind ``/entities/<shortid>/<name>/settings/{users,integration}``. They replace
+the bearer routes behind ``/entity/<shortid>/<name>/settings/{users,integration}``. They replace
 the session pages ``settings_users_bills_ui.html`` / ``settings_xero_bills_ui.html`` and the session
 JSON routes those pages called (``/minty/api/invitation/*``, ``/minty/api/users/<id>[/role]``,
 ``POST /entity/settings/xero/disconnect``), which are deleted with them.

@@ -71,7 +71,7 @@ page reads the same endpoint itself.
 **The doors to minty-web.**
 - The **Module tab** (`GET /entity/<co>/settings/modules`) is a **hand-over**: the route mints
   the company's module token and redirects to
-  `MINTY_WEB_URL/landing?next=/entities/<shortid>/<name>/settings/modules` (`modules.py::minty_web_company_path`; `/subscription/entities/…/modules` until phase 2) (`tests/test_minty_web_handoff.py`;
+  `MINTY_WEB_URL/landing?next=/entity/<shortid>/<name>/settings/modules` (`modules.py::minty_web_company_path`; `/subscription/entities/…/modules` until phase 2) (`tests/test_minty_web_handoff.py`;
   the page's Back returns to wherever the person came from, so nothing is carried). The page is minty-web's (Part 2 step 4a,
   `../minty-web/docs/features/subscriptions.md` §9) and posts its actions to
   minty-subscription-api. Flask's Jinja module page and its 20 session routes were deleted on
