@@ -207,6 +207,42 @@ holds `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET`.
 service's variables are set per environment in its host's dashboard (Render or Vercel —
 whichever hosts that service); none are committed.
 
+### CI (the shared workflows)
+
+Every repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusable workflow in
+[`minty-oliveandvine/.github`](https://github.com/minty-oliveandvine/.github), pinned at `@v1`
+(never `@main`). All of them trigger on `push` to `[main, development]` plus `pull_request`.
+
+| Repo | Calls | Secret that repo must hold |
+|---|---|---|
+| Minty | `flask-app.yml` | - |
+| Minty (`e2e.yml`, weekly + manual) | `stack-e2e.yml` | `STACK_READ_TOKEN` |
+| minty-subscription-api | `python-api.yml` | `MINTY_READ_TOKEN` |
+| minty-payment-request-api | `python-api.yml` | `MINTY_READ_TOKEN` |
+| minty-onboarding-api | `python-api.yml` | `MINTY_READ_TOKEN` |
+| minty-web | `next-web.yml` | - |
+| minty-payment-request-web | `next-web.yml` | - |
+| minty-onboarding-web | `next-web.yml` | - |
+| daily-minty-landing-page | `next-web.yml` | - (triggers on `master` / `Newlandingpages`) |
+| minty-infra | its own `check.yml` (`terraform fmt` / `validate`, no credentials) | - |
+
+- **`MINTY_READ_TOKEN`** - a fine-grained PAT with read access to the *contents* of
+  `minty-oliveandvine/Minty` only. The three Django APIs' Postgres test pass builds its database
+  from Minty's `docs/schema/01_schema_rebased.sql` through `Minty/tests/pg_harness.py`, so Minty
+  is checked out (sparse, two files) beside the caller.
+- **`STACK_READ_TOKEN`** - a fine-grained PAT with read access to the contents of the four
+  private repos, for the stack job's seven checkouts. It needs **no** application secret:
+  `SECRET_KEY` is generated per run, `S3_URL` falls back to compose's dummy, Stripe/SMTP stay
+  unset and `E2E_XERO` stays off.
+- The `.github` repo is **public**, because a public repo (minty-web, minty-payment-request-web,
+  minty-onboarding-web) cannot call a reusable workflow that lives in a private one. Only workflow
+  YAML lives there; secrets are passed by name from each caller.
+- Browser tests run from Minty's `e2e.yml`, not in each repo's CI - they need the whole stack.
+  The exception is the landing page, whose Playwright config starts its own server.
+- `minty-infra`'s `github.tf` does **not** set required status checks yet, so a red run blocks no
+  merge; and on GitHub Free, rulesets and environments exist only on the three public repos
+  (`github_pro = false`).
+
 ### Hosting as code (`minty-infra`, Option B)
 
 The repo [`minty-infra`](https://github.com/minty-oliveandvine/minty-infra) brings the

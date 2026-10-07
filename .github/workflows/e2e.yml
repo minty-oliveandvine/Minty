@@ -1,0 +1,44 @@
+# The whole stack, then one repo's browser specs against it. The workflow body is shared:
+# minty-oliveandvine/.github -> .github/workflows/stack-e2e.yml
+#
+# It lives here because Minty owns all three moving parts (docker/stack, tests/pg_harness.py and
+# scripts/e2e_seed.py) and is private, so the read token for the private checkouts never sits in
+# a public repo.
+#
+# Weekly, not nightly, on purpose: it builds seven images and runs browser specs serially, and
+# private repos share 2,000 Actions minutes a month. Measure a run before making it more
+# frequent. Use "Run workflow" any time.
+name: e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Whose specs to run"
+        type: choice
+        default: minty-web
+        options:
+          - minty-web
+          - Minty
+          - minty-payment-request-web
+      ref:
+        description: "The branch of the other six repos"
+        type: string
+        default: development
+      spec:
+        description: "Optional Playwright filter, e.g. e2e/01_login.spec.ts"
+        type: string
+        default: ""
+  schedule:
+    # Sunday 19:00 UTC = Monday 03:00 Hong Kong.
+    - cron: "0 19 * * 0"
+
+jobs:
+  stack:
+    uses: minty-oliveandvine/.github/.github/workflows/stack-e2e.yml@v1
+    with:
+      suite: ${{ inputs.suite || 'minty-web' }}
+      ref: ${{ inputs.ref || 'development' }}
+      spec: ${{ inputs.spec || '' }}
+    secrets:
+      STACK_READ_TOKEN: ${{ secrets.STACK_READ_TOKEN }}

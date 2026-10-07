@@ -123,8 +123,13 @@ def main() -> int:
         # --- reference data the wizard needs (HKD + denominations, HK) -------------
         hkd = CurrencyInfo.query.filter_by(currency_code="HKD").first()
         if hkd is None:
+            # symbol="" as production records it, NOT "$". The browser falls back to the currency
+            # code when no symbol is recorded, so production renders "HKD 400" and the subscription
+            # specs match on `HK$0` or `HKD 0`; a "$" here renders "$0" and matches neither. This
+            # only ever fires on a cold start - in a migrated database HKD already exists - which
+            # is why it stayed invisible until the stack job ran from an empty schema (2026-10-07).
             hkd = CurrencyInfo(id=str(uuid.uuid4()), currency_code="HKD", currency_name="Hong Kong Dollar",
-                               symbol="$", decimal_places=2, is_active=True)
+                               symbol="", decimal_places=2, is_active=True)
             db.session.add(hkd)
             db.session.flush()
         if not CashInfo.query.filter_by(currency_id=hkd.id).count():

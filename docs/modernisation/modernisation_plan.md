@@ -2300,12 +2300,14 @@ minty-oliveandvine/
 │                         docs/schema/01_schema_rebased.sql: every table as a model, 0001 = that
 │                         file, the only `migrate` runner (deploy job / stack init container).
 │                         Also: write-ownership map, audit_models.py, enum check, seed loaders
-├── minty-e2e             Playwright (TS). Cross-service journeys against the full docker stack;
-│                         the gate every cutover step must pass.
 ├── minty-infra           Terraform. Every Render service, Vercel project, Supabase project, B2
 │                         bucket, and every repo's branch protection / environments / secrets.
-└── .github               The org's reusable CI workflows (python-api, next-web, py-package,
-                          e2e-stack, deploy-gate). Every repo's CI is a 10-line call into here.
+└── .github               The shared CI workflows (python-api, flask-app, next-web, stack-e2e).
+                          Every repo's CI is a ~12-line call into here. PUBLIC, because a public
+                          repo cannot call a reusable workflow from a private one.
+
+(There is no `minty-e2e`: the cross-service journeys live in the app repo that owns each one, and
+`stack-e2e.yml` is what runs them against the whole stack. See the E2E section.)
 ```
 
 ### The same tree as a diagram
@@ -2360,7 +2362,7 @@ flowchart TB
 
   subgraph OPS["DevOps"]
     direction LR
-    O0["minty-e2e<br/>Playwright · stack gate"]
+    O0["Minty e2e.yml<br/>stack-e2e gate"]
     O1["minty-infra<br/>Terraform: Render · Vercel · Supabase · B2 · GitHub"]
     O2[".github<br/>reusable Actions workflows"]
   end
@@ -2593,6 +2595,48 @@ the shared components (`MintySelect`, `Toast`, `Icon`) and the design tokens fro
 step 5 replaced them with `links.ts`. Install as
 `"@minty/shared": "github:minty-oliveandvine/minty-shared-ts#v0.x"`.
 
+**What the responsive layer must reconcile (surveyed 2026-10-07).** The design tokens come out of
+`app/globals.css`, so the lift is also the moment the four frontends stop disagreeing about
+widths. No app overrides Tailwind's breakpoints - no `--breakpoint-*` in any `@theme`, no
+`screens` in either v3 config - so every app nominally has sm 640 / md 768 / lg 1024 / xl 1280 /
+2xl 1536 and uses a different subset of it:
+
+| app | prefixes in use | its own widths, off the ladder |
+|---|---|---|
+| `minty-web` | `sm` 115, `md` 17, `lg` 29; no `xl`/`2xl` | `max-[560px]` x36, `max-[900px]`, `min-[1200px]` |
+| `minty-payment-request-web` | all five, but `2xl` once and `xl` in 3 files | **1279** (below), `min-[925px]`, `min-[1650px]` |
+| `minty-onboarding-web` | `sm` only, 6 uses | ~10 widths in 4,026 lines of hand-written CSS (1180, 1240, 900, 760, 700, 560, 480) |
+| `daily-minty-landing-page` | `md` 313, `lg` 41, `sm` 19; no `xl`/`2xl` | none (one 768 breakpoint, Tailwind v3) |
+
+Three divergences the package has to decide, not inherit:
+
+1. **The content cap differs per app**: `max-w-[1920px]` in minty-web and the payments app (inner
+   caps 1346 / 1024 / 942), `1140px` in the landing page's `Container.tsx` overridden to `1440px`
+   in seven places, `1920px` on onboarding's topbar only. One token, `--content-max`, replaces
+   the literal in each.
+2. **minty-payment-request-web's real desktop threshold is 1279px and matches nothing else it
+   uses** (`globals.css:66-100`: below it, `html`/`body` go `position: fixed; overflow: hidden`
+   and scrolling moves into `#app-scroll-root`). Either that becomes a shared decision at `xl`
+   1280 or it is app-local on purpose - it may not stay an accident one pixel off a breakpoint.
+3. **Flask is fixed-width and cannot join**: `static/css/layout.css:58-77` sets `.main-container`
+   to literal 640 / 768 / 1024px widths by band, so content is 640px wide on a 1023px screen and
+   never exceeds 1024px on any desktop - and the same trio is copy-pasted into ~14 Jinja
+   `<style>` blocks. A TypeScript package cannot serve those pages (the same reason the sidebar's
+   Jinja port stays behind); they retire with Part 3. `Minty/tailwind.config.js` scans only
+   `./static/**`, not `templates/`, so a Tailwind class in a template emits no CSS at all.
+
+The rule-11 precedent applies: the package ships the tokens **and the guard test** that fails on
+a literal breakpoint width or content cap written outside it. Rule 11 also already pins each
+`-web`'s Playwright config, which is where the viewport gap belongs - no `playwright.config.ts`
+in any of the five repos sets a `viewport`, so all of them run only Desktop Chrome 1280x720, and
+the 360 / 768 / 1440 rule is asserted in exactly two specs
+(`minty-payment-request-web/e2e/{02_bill_lifecycle,08_list_filters}.spec.ts`). minty-web tests one
+phone width (390, `e2e/09_terms.spec.ts`), Flask one (360, `e2e/03_settings.spec.ts`), and
+`minty-onboarding-web` and the landing page none. Pinch-zoom is at least never disabled: no
+`maximum-scale` or `user-scalable=no` anywhere, though the `viewport` export itself is
+inconsistent (payments and landing set one, minty-web and onboarding rely on Next's default, and
+Flask repeats the meta per template).
+
 **The sidebar is already in three apps as copies (2026-09-30, the user's "build it now and
 transfer later to shared").** minty-web's one drawer with two views - the menu and My Profile -
 was copied into billing-frontend at minty-web's own paths, each file headed `COPY of
@@ -2724,7 +2768,7 @@ tests (the route exists, takes these params). The rows move when a route moves (
 | `minty` | `/auth/email/request-code`, `/auth/email/verify-code`, `/legal/current`, `/legal/terms`, `/legal/privacy`, `/legal/invite-terms-status`, `/xero_auth`, `/xero_connect` | per route | onboarding-web (→ `accounts-api` / `xero-api` at Part 3) |
 | `minty` | `/api/onboarding/*` | — | onboarding-web's cutover map, onboarding-api's proxies |
 | `hub-web` | `/landing` | the handoff envelope | minty |
-| `hub-web` | `/subscription`, `/subscription/subscriptions`, `/subscription/subscriptions/incoming`, `/entities/<shortid>/<name>/settings/modules` (was `/subscription/entities/<id>/modules` until 2026-10-05) | `from` | minty (as `next`), billing-api emails, payments-web portal links |
+| `hub-web` | `/subscription`, `/subscription/subscriptions`, `/subscription/subscriptions/incoming`, `/entity/<shortid>/<name>/settings/modules` (was `/subscription/entities/<id>/modules` until 2026-10-05, and the plural `/entities/…` until 2026-10-07) | `from` | minty (as `next`), billing-api emails, payments-web portal links |
 | `payments-web` | `/landing` | the handoff envelope | minty |
 | `payments-web` | `/module-selection` | `token`, `entity_id`, `entity_name` | minty, payments-api `core/views.py` |
 | `payments-web` | `/`, `/settings`, `/profile` (as `next` values) | — | minty — replaces the `PAYMENT_REQUEST_{APP_HOME,SETTINGS,PROFILE}_PATH` overrides |
@@ -2996,8 +3040,16 @@ runs is not a gate.
    `e2e/` too, run against a live service (`minty-billing-api/e2e` since Part 2: health, the
    dark 404-with-CORS contract, a Flask-shaped token accepted and a forged one refused).
    Runs before a merge, not per commit — it needs the stack.
-3. **Cross-service journeys — `minty-e2e`, against the full `docker/stack`.** The flows that
-   cross three or more repos and that no app owns:
+3. **Cross-service journeys — in the repo that owns the journey, against the full
+   `docker/stack`.** *(Revised 2026-10-07: there is **no `minty-e2e`**. The premise that these
+   flows "no app owns" turned out to be false — `minty-web/e2e/04_live_api.spec.ts` already
+   starts a real trial through the subscription API and asserts Flask's `entity_function_map`
+   gate opened, `minty-onboarding-web/e2e/walk.spec.ts` already finalizes a real entity across
+   Next + Flask + onboarding-api + subscription-api, and `Minty/e2e/04_xero_publish.spec.ts`
+   already publishes into a real Xero org. A fourth repo would have been a second home for
+   coverage that has one. What was missing was never a repo but something that stands the stack
+   up and runs them, which is now a job: `stack-e2e.yml` in the org `.github` repo, called from
+   `Minty/.github/workflows/e2e.yml`.)* The flows that cross three or more repos:
    - sign up → wizard → finalize → land on the dashboard with the trial open (accounts + onboarding + billing)
    - connect Xero → create a report → publish → bank transaction appears (accounts + pettycash + xero)
    - raise a payment request → attach → publish bill to Xero (payments + xero + accounts)
@@ -3008,21 +3060,95 @@ runs is not a gate.
      `minty-db` tag, and a `SELECT *` through every `minty_db` model succeeds against the
      freshly migrated DB.
 
-**The stack is the fixture.** `minty-e2e`'s CI workflow (GitHub Actions) checks out every repo
-at a pinned ref, runs `docker/stack` with `RUN_MIGRATIONS=true` from an **empty** database, seeds
-via `minty-db`, then runs Playwright. That only works once Django owns cold start (step 3+) —
-until then it restores the dump that `docker/stack/README.md §3b` describes. Nightly, on demand,
-and via `repository_dispatch` from each service's own CI on merge to its main branch. Test
-identities (`E2E_JWT_SECRET`, `E2E_USER_ID`, `E2E_ENTITY_ID`, the disposable `ee72f706…` entity)
-move from onboarding's local convention into `minty-db`'s seed so every suite shares them.
+**The stack is the fixture.** *(Built 2026-10-07.)* `stack-e2e.yml` checks out all seven repos
+side by side (which is all `docker/stack`'s `*_PATH` defaults need), brings up `db`, **builds the
+schema by running `docs/schema/01_schema_rebased.sql` into it** and renaming `pettycash_test` to
+`pettycashv3` exactly as `tests/pg_harness.py` does, brings up the other six with
+`--wait`, runs `scripts/e2e_seed.py --print` inside the `minty` container and pipes the env block
+it emits into the job, then runs one repo's Playwright specs. `RUN_MIGRATIONS` stays `false`:
+loading the schema file **is** the cold start, not a workaround for one — the Alembic chain cannot
+build from empty (`docker/stack/README.md §3b`), and it is the schema file, not the chain, that is
+the source of truth. So this needs neither `minty-db` nor step 3, and it works today.
+
+**No production secret is involved.** `SECRET_KEY` is generated per run (it only has to be the
+same for every service — compose already shares one value through its `x-secret-key` anchor),
+`S3_URL` falls back to compose's dummy, Stripe and SMTP stay unset, and `E2E_XERO` stays off, so
+no run reaches a real Xero org or a real mailbox. The only secret is a read-only PAT for the four
+private checkouts. Test identities come from `scripts/e2e_seed.py`, which creates its own
+reference rows (HKD, the denominations, `entity_function`) and therefore works against a schema
+with no data in it at all.
+
+**What running it proved (2026-10-07), and the one thing it cannot do.** Rehearsed natively (no
+Docker on the workstation yet): the schema built from `01` in 4 minutes, `e2e_seed.py` populated a
+schema with no data in it at all - it creates its own HKD, denominations and `entity_function` rows
+- and **79 of minty-web's 81 specs passed** against Flask + subscription-api + minty-web on the
+seeded database. The one failure is a real cold-start gap, not a flake: **`billing_plan` and
+`billing_policy` are empty**, so a trial start has no plan and no window. Both are reference data
+that only arrives by migrating a legacy database (`02_data_foundation_rebased.sql` reads them from
+`pettycashv2`); nothing in any repo seeds them, and `manage.py plans list` is read-only by design
+("the catalog is edited by hand in SQL"). **This is step 2's wall too** - "cold start from empty
+works" cannot be true for `minty-db` either until the catalogue has a seed that is in version
+control. **Closed the same day, the user's call: the catalogue is now in git** as
+`docs/schema/seed_catalogue.sql` - three plans, the one policy row, and the single `currency_info`
+row their foreign key needs - loaded by the job straight after the schema and then checked. It is
+idempotent and never UPDATEs, so a price edited in a database is not silently reverted; changing a
+price or a window means changing the row AND that file together.
+
+Seeding it also surfaced a second, quieter disagreement: `scripts/e2e_seed.py` wrote the HKD
+`symbol` as `"$"` where production records none, and the browser falls back to the currency code
+when none is recorded - so production renders `HKD 400` and the specs match `HK$0` or `HKD 0`,
+while a cold start rendered `$0` and matched neither. In any migrated database HKD already exists,
+so that branch never ran and the defect was invisible. `e2e_seed.py` now writes `symbol=""`, and
+the catalogue seed runs before the services so the row is right whichever order they run in.
+With both fixed the suite is **80 passed, 1 skipped, 0 failed**.
+
+Step 2 still owns the REST of a fresh install - 168 currencies, 249 countries, the nine
+denominations, the six roles - which `seed_catalogue.sql` deliberately does not carry and says so
+in its header.
+
+Weekly plus `workflow_dispatch`, not nightly: the job builds seven images and runs browser specs
+serially, and the private repos share 2,000 Actions minutes a month. Measure a run before making
+it more frequent. Still owed: `minty-onboarding-web`'s `walk`/`resume` specs, which need a
+disposable entity in `onboarding` status (`E2E_ENTITY_ID`) that the seed does not create yet —
+the job refuses that suite by name rather than running it half-configured.
 
 **Rules:** a cutover step is not done until (a) the app-local suite of every affected `-web`
-repo is green and (b) `minty-e2e` is green from a cold-started database. A Django-writes /
-Flask-reads bug found in production gets a regression spec in `minty-e2e` in the same fix PR,
-as `onboarding/e2e` already does. Never fix a flaky E2E by retrying it — the flakes so far have
+repo is green and (b) `Minty`'s `e2e.yml` is green from a schema-built database. A Django-writes /
+Flask-reads bug found in production gets a regression spec in the repo whose journey crosses that
+seam, in the same fix PR, as `onboarding/e2e` already does. Never fix a flaky E2E by retrying it — the flakes so far have
 been real (server-time fallback, `saved_step` restore).
 
 ## CI/CD — there is none today, and multi-repo needs it more than monorepo did
+
+> **Status 2026-10-07: built.** The `.github` repo holds `python-api.yml`, `flask-app.yml`,
+> `next-web.yml`, `stack-e2e.yml` and its own `actionlint.yml`; eight repos call them in about a
+> dozen lines each; the dead ClickUp workflow is deleted. Four corrections to what this section
+> designed, each from something the survey found:
+>
+> 1. **`minty-oliveandvine` is a user account, not an organisation.** So there are no org-level
+>    secrets to inherit — the single `SECRET_KEY` comes from `minty-infra`'s `environment_secrets`,
+>    which already sets it per repo and per environment — and no workflow templates. Reusable
+>    workflows work the same on a user account.
+> 2. **`.github` is public.** A public repo cannot call a reusable workflow from a private one, and
+>    `minty-web`, `minty-payment-request-web` and `minty-onboarding-web` are public, so a private
+>    `.github` would have served only half the estate. Nothing but workflow YAML lives there, and
+>    every secret is passed by name from the caller (never `secrets: inherit`).
+> 3. **The branch pair is `main` + `development`**, not `main` + `staging` — `staging` exists in no
+>    repo, and `development` is what `minty-infra/services.tf` maps to its dev environment. The
+>    landing page is still on `master` + `Newlandingpages` and joins the convention at step 4.
+> 4. **`e2e-stack.yml` is `stack-e2e.yml` and `deploy-gate.yml` was not built.** Render's
+>    `auto_deploy_trigger = "checksPass"` is the gate; a second workflow firing deploy hooks would
+>    be a second mechanism for the same thing. `py-package.yml` waits for `minty-db` /
+>    `minty-shared-py` to exist.
+>
+> **Minty is linted now too.** `ruff check .` had never been run over the whole repo and reported
+> 96 findings. Minty carries a `[tool.ruff]` section as of 2026-10-07 whose `per-file-ignores` say
+> where ruff's default rules are wrong about this repo - `models/db.py`'s imports exist to REGISTER
+> mappers, Alembic's generated headers import `op`/`sa` regardless, several test modules must set
+> the environment before importing the app, and the `docs/schema` generators are scripts - and the
+> remaining 43 were fixed (31 dead imports, 6 dead locals, 3 `F811` that were fallout from one
+> unused import in `services/auth/token_service.py`, and `check_keys`' obsolete `minted` dict,
+> whose job `KEY_EXPR` took over). All three Django APIs were already clean.
 
 **Today:** zero test/lint/type-check workflows in any repo. Three workflow files exist
 (`Minty/.github/workflows/teams-notification.yml`, `billing-frontend/.github/workflows/
@@ -3037,21 +3163,33 @@ trunk has a different name (`Minty-PettyCash`, `Minty-BillingBackend`, `Minty-Bi
 `.github` repo hold *reusable workflows*; each service's own workflow is then ~10 lines:
 
 ```
-minty-oliveandvine/.github/.github/workflows/
-├── python-api.yml      ruff · pyright · pytest against a Postgres service container
-│                       (MINTY_DB_OWNER=True builds the test DB from minty-db's migrations —
-│                       Postgres, not SQLite: the uuid/enum traps don't reproduce on SQLite)
-├── next-web.yml        tsc --noEmit · eslint · vitest · next build · openapi type drift check
-├── py-package.yml      minty-db / minty-shared-py: tests + tag on release
-├── e2e-stack.yml       checkout every repo at pinned refs → docker/stack from empty → seed →
-│                       Playwright (called by minty-e2e; nightly + repository_dispatch on merge)
-└── deploy-gate.yml     fires the Render deploy hook / Vercel deploy only after the above pass
+minty-oliveandvine/.github/.github/workflows/      ← as built, 2026-10-07
+├── python-api.yml      the three Django APIs: ruff · pytest on SQLite · pytest again on a
+│                       Postgres service container built from Minty's 01_schema_rebased.sql
+│                       (the pass that catches a shared_models mirror drifting from the schema;
+│                       the uuid/enum traps don't reproduce on SQLite). Inputs: python-version,
+│                       schema-name-test. Secret: MINTY_READ_TOKEN
+├── flask-app.yml       Minty: pytest -n auto on Postgres, no SQLite mode (pg_harness.py is the
+│                       only mode since C10), uv not pip, no token. Retires at step 7
+├── next-web.yml        npm ci · typecheck · eslint · vitest · next build, and Playwright only
+│                       where the config starts its own server. Inputs: node-version,
+│                       typecheck-script, unit-tests, extra-scripts, build-env, e2e
+├── stack-e2e.yml       seven checkouts → docker/stack → the schema from 01_schema_rebased.sql →
+│                       e2e_seed.py → one repo's Playwright specs. Called by Minty's e2e.yml
+└── actionlint.yml      this repo's own check: eight repos call the four above
 ```
+
+Still to come: `py-package.yml` when `minty-db` / `minty-shared-py` exist, and the openapi
+type-drift check when `minty-shared-ts` generates from `/api/openapi.json` (step 4).
 
 A service repo's `.github/workflows/ci.yml` is `uses: minty-oliveandvine/.github/.github/workflows/python-api.yml@v1`
 plus its inputs. Fixing CI for every repo is then one PR in one place.
 
-**Branches and environments.** One convention across all repos: `main` = production,
+**Branches and environments.** *(Corrected 2026-10-07: the convention is `main` = production,
+**`development`** = dev, everything else a PR branch. `staging` exists in no repo and
+`minty-infra/services.tf` maps exactly those two names to its two environments; every workflow
+triggers on `push` to `[main, development]` plus `pull_request`. The landing page is still on
+`master` + `Newlandingpages` and joins at step 4.)* One convention across all repos: `main` = production,
 `staging` = staging, everything else a PR branch. Render's four Minty environments (dev,
 pre-staging, staging, prod) collapse to two plus **preview deploys** per PR (Vercel does this
 natively; Render has preview environments) — a PR preview is what dev/pre-staging were for.
@@ -3069,13 +3207,23 @@ merge red", not "CI deploys". Two exceptions that need an explicit step:
   No floating `@main` pins anywhere — that is how a shared change silently deploys to five
   services at once.
 
-**Secrets.** One GitHub *Environment* per stage (`production`, `staging`) in each repo holding
+**Secrets.** *(Corrected 2026-10-07: there is no org-level secret to inherit — `minty-oliveandvine`
+is a user account. `minty-infra`'s `environment_secrets` variable is the single source instead: it
+already writes `SECRET_KEY` per repo and per environment from one place, so the value is still
+never pasted twice, which is the property that matters. On GitHub Free a private repo has no
+Environments at all, so Minty's own `migrate.yml` environments and any per-stage split need
+`github_pro = true`. What CI needs today is two read-only PATs: `MINTY_READ_TOKEN` on the three
+`-api` repos, for the sparse checkout of Minty's harness and schema file, and `STACK_READ_TOKEN`
+on Minty, for the stack job's six other checkouts.)* One GitHub *Environment* per stage (`production`, `staging`) in each repo holding
 that repo's secrets; `SECRET_KEY` is the one value that must be identical across every `-api`
 repo's environment, so it is set via the org-level secret and inherited, not pasted per repo —
 the onboarding 401 incident was a paste. Rotate the production `SECRET_KEY` and the Stripe/Xero/
 mail/S3 values as the first CI task, since the current ones have been pasted into chat.
 
 **Cleanup.** Delete the three dead workflows in step 1 alongside the duplicate repos.
+*(2026-10-07: `Minty/.github/workflows/teams-notification.yml` deleted. The two
+billing-frontend ones are already gone from `development`; they survive only on the old
+`Minty-BillingFrontend` branch, to be dropped when that branch is next touched.)*
 
 **CI engine: GitHub Actions, decided.** Jenkins was considered and rejected: it is a controller
 to host, patch and back up, it reproduces the reusable-workflow layer as a shared library with
@@ -3189,8 +3337,8 @@ gains a `k8s-api` module beside `render-api` and the services do not change.
 
 | Step | Phase | New repos | Done when |
 |---|---|---|---|
-| 1 | Housekeeping + CI + infra | `.github`, `minty-infra` | every trunk protected with a green CI run; `terraform plan` no-op; the subscription pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`) by Terraform |
-| 2 | **`minty-db` adopts Part 1's schema** + shared-py + e2e scaffold (requires Part 2 shipped) | `minty-db`, `minty-shared-py`, `minty-e2e` | `--fake-initial` on every environment; all three Django services on `minty_db.models`; cold start from empty works; first two E2E journeys green |
+| 1 | Housekeeping + CI + infra **(CI built 2026-10-07)** | `.github`, `minty-infra` | every trunk protected with a green CI run; `terraform plan` no-op; the subscription pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`) by Terraform |
+| 2 | **`minty-db` adopts Part 1's schema** + shared-py (requires Part 2 shipped) | `minty-db`, `minty-shared-py` | `--fake-initial` on every environment; all three Django services on `minty_db.models`; cold start from empty works; the stack job green on a cold start that runs the Alembic chain rather than loading the schema file |
 | 3 | `minty-xero-api` | `minty-xero-api` | `XERO_API_URL` repointed; Xero E2E journey + `onboarding/e2e/xero.spec.ts` green |
 | 4 | `minty-web` grows login / dashboard / profile / settings + `minty-shared-ts` + renames | `minty-shared-ts` | both frontends build on `@minty/shared`; the payments pair renamed (done 2026-10-02); every repo on the canonical `*_URL` names (done 2026-10-02 except the landing page) with its rule-10 guard green; every date on every `-web` is a `<ZonedTime>` and the APIs emit no formatted date (rule 11 guards green); app-local E2E green |
 | 5 | `minty-accounts-api` (single JWT minter) | `minty-accounts-api` | every E2E journey green from a cold-started DB |
@@ -3221,14 +3369,14 @@ orders anything here.
 
 ### The steps in detail
 
-1. **Archive the duplicates** (`OliveAndVineHK` ×4, `Minty-old`) and **stand up CI + infra**: the org `.github` repo with `python-api.yml` and `next-web.yml`, called from the five live repos; `minty-infra` with the GitHub resources (branch protection on each trunk, environments, org-level `SECRET_KEY`); the three dead workflows deleted; production secrets rotated through Terraform; the subscription daily pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`, Part 2's decision deferred to here; the cron expression is UTC — `SUBSCRIPTION_SCHEDULER_TZ` retires with the timer). Zero product-code risk, and every later step is gated by it.
+1. **Archive the duplicates** (`OliveAndVineHK` ×4, `Minty-old`) and **stand up CI + infra**: the `.github` repo with `python-api.yml`, `flask-app.yml`, `next-web.yml` and `stack-e2e.yml`, called from eight repos *(done 2026-10-07; public, and `minty-oliveandvine` is a user account, so no org-level secret — see the CI/CD section)*; `minty-infra` with the GitHub resources (branch protection on each trunk, **required status checks, which `github.tf` still does not set**, environments, the `SECRET_KEY` written per repo from `environment_secrets`); the three dead workflows deleted *(Minty's done 2026-10-07)*; production secrets rotated through Terraform; the subscription daily pass moved from the in-process timer to a Render Cron Job (`manage.py subscriptions tick`, Part 2's decision deferred to here; the cron expression is UTC — `SUBSCRIPTION_SCHEDULER_TZ` retires with the timer). Zero product-code risk, and every later step is gated by it.
 2. **Foundations, before any new service** — the biggest step, and the one that removes the most risk from every later one:
    - `minty-db` adopts the schema **Part 1 already put in production**: `0001_initial` = `01_schema_rebased.sql` via `SeparateDatabaseAndState`, `migrate --fake-initial` on every environment, all three Django services (billing-backend, onboarding-backend, `minty-billing-api`) import `minty_db.models`, `docker/stack` cold start switches to the `minty-db` init container. (The redesign, the application changes and the rehearsals are Part 1; the cutover is Part 2's last step — if Part 2 has not shipped, this step cannot start.)
    - `minty-shared-py` from `minty-billing-api/core/` (the newest copy, including `core/links.py` — rule 10) reconciled with onboarding-backend's; all three Django services repoint at it and at `minty-db`; their `shared_models/` directories go. It is born with `minty_shared/time.py` (rule 11: the one `Asia/Hong_Kong` constant, `entity_zone`, `today_for`, `format_for_person`, `validate_timezone`) and the `test_zz_time.py` guard every `-api` copies.
-   - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a `minty-e2e` journey (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
-   - `minty-e2e`: Playwright scaffold + the stack CI workflow (cold-started from empty, since that now works) + the first two journeys (sign-up→finalize, connect Xero→publish report), which are the ones steps 3 and 5 will break if they go wrong. Contract-type generation into `minty-shared-ts` starts here too.
-3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_API_URL` (rule 10's name for today's `XERO_TOKEN_SERVICE_URL`; the `/api/internal/xero/token` entry moves to the `xero-api` row), then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: `minty-e2e` Xero journey + `onboarding/e2e/xero.spec.ts`.
-4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over (behind `MINTY_WEB_HUB` until phase 2 removed it, 2026-10-05, with the Jinja list; sign-in (`features/auth`, `/login`), module choice (`/entities/<shortid>/<name>`) and the company's Users and Entity & Integration tabs (`features/company-settings`, `…/settings/{users,integration}` over Flask's `/api/me/company/*`) moved to minty-web the same day, the Flask pages deleted - **phase 2 done, 2026-10-05**); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. *(2026-10-02: the renames (as `minty-payment-request-web/-api` and `minty-onboarding-web/-api`), the port moves and the env-name cut for billing-backend and onboarding are already done, under `docs/ENVIRONMENT.md`'s names. Still owed here: the landing page's cut, the links modules and guard tests, and payment-request-api's three `requests` sites onto one client module.)* **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
+   - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a stack-job journey in the repo that owns it (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
+   - **E2E** (there is no `minty-e2e`; built 2026-10-07 instead as `stack-e2e.yml`, see the CI/CD section): the stack job switches from loading `01_schema_rebased.sql` to a real cold start, `RUN_MIGRATIONS=true` from an empty volume, once `minty-db` owns it — which is the first time the two cold-start paths can be compared. The journeys steps 3 and 5 would break (sign-up→finalize, connect Xero→publish report) already exist in `minty-onboarding-web/e2e` and `Minty/e2e`; what is owed here is the seed's disposable onboarding entity, so `minty-onboarding-web`'s suite can join the job. Contract-type generation into `minty-shared-ts` starts here too.
+3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_API_URL` (rule 10's name for today's `XERO_TOKEN_SERVICE_URL`; the `/api/internal/xero/token` entry moves to the `xero-api` row), then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: the stack job's Xero journey (`Minty/e2e/04_xero_publish.spec.ts`) + `onboarding/e2e/xero.spec.ts`.
+4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over (behind `MINTY_WEB_HUB` until phase 2 removed it, 2026-10-05, with the Jinja list; sign-in (`features/auth`, `/login`), module choice (`/entity/<shortid>/<name>`, singular since 2026-10-07) and the company's Users and Entity & Integration tabs (`features/company-settings`, `…/settings/{users,integration}` over Flask's `/api/me/company/*`) moved to minty-web the same day, the Flask pages deleted - **phase 2 done, 2026-10-05**); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. *(2026-10-02: the renames (as `minty-payment-request-web/-api` and `minty-onboarding-web/-api`), the port moves and the env-name cut for billing-backend and onboarding are already done, under `docs/ENVIRONMENT.md`'s names. Still owed here: the landing page's cut, the links modules and guard tests, and payment-request-api's three `requests` sites onto one client module.)* **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
    notification moves with the entity list** (decided 2026-09-24): 07-I / A-07 (declined), A-08
    (expired) and 07-L (accepted) fire today over `/subscription` (Subscription & Billing) only
    because that is the one page a payer owns that `minty-web` serves — a handover is news about
@@ -3242,7 +3390,7 @@ orders anything here.
    a `suspended` kind kept apart from Payment failed. Settle first where Day 10's usage count
    comes from (the pettycash side of the boundary) and that `NoticeKind` is a closed union in
    the payments app as well.
-5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. The entity read and `PATCH` expose `timezone` (validated by `minty_shared.time`), and `minty-web`'s entity settings page gets the select — rule 11's second writer. Gate: every `minty-e2e` journey, from a cold-started DB.
+5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. The entity read and `PATCH` expose `timezone` (validated by `minty_shared.time`), and `minty-web`'s entity settings page gets the select — rule 11's second writer. Gate: every suite the stack job runs, from a cold-started DB.
 6. **`minty-pettycash-api` + `minty-pettycash-web`** — largest (15.5k) but self-contained once entities live in accounts. Carries the **"Partially published" badge** (decision above) — the one piece of report UI that is a change, not a port:
    - *Today (Flask):* `publish.py:2525-2532` writes `publishing_status = 'failed'` whether 1 or all transactions failed, and only the log level differs; the `publish_failed` history row (`publish.py:2547-2553`) stores the reason items but not the counts. `report_history.html:513` and `report_draft_header_badge.html:25` render every `failed` as "Publish failed"; the overlay poller (`report_history.html:1567-1575`) shows "Partially published" when `failed` has any reasons — a total failure with reasons is announced as partial. The three `# show "Partially Published"` comments (`ending.py:763`, `ending.py:1755`, `shared.py:39`) describe a badge that no longer exists.
    - *Port:* the publish orchestrator already returns `succeeded` / `failed` (`publish.py:1919`); write both into the `publish_failed` history row's JSON alongside the reason items. `minty-pettycash-api`'s report list and publish-status endpoints derive `partial = status is failed and latest publish_failed.succeeded > 0` (legacy rows without counts: `partial = False`, they read "Publish failed" as today). `minty-pettycash-web` renders the three states — **Published** / **Partially published** (reasons on hover, republish = selective retry, no duplicate warning) / **Publish failed** — on the report list, the report header badge and the overlay, from the same flag. No schema change; the enum stays at three members.
@@ -3260,12 +3408,12 @@ route groups, a cutover map on the frontend, models from `minty-db`, and "verifi
 - `audit_models.py` reports **zero** findings for `minty_db.models`, Minty's SQLAlchemy models and the three Django services' models against the live schema of local **and** Supabase (0 for the three repos since 2026-09-18).
 - Every `02`/`03` B-check reads OK on the production run; row counts match the `pettycash_legacy` source for every table; `04` reports no attachment left behind.
 - `find C:\Github -name migrations -path "*api*"` finds nothing outside `minty-db`; `grep -rn "managed = " <every -api repo>` finds nothing (the switch lives in `minty_db`, not in services).
-- `minty-e2e` is green from a cold-started database after each of steps 3, 5, 6, and its CI workflow has a run history — not just a file.
+- `Minty`'s `e2e.yml` is green from a cold-started database after each of steps 3, 5, 6, and has a run history — not just a file.
 - Every repo's Actions tab shows green runs of the reusable workflows on its trunk; `main` and `staging` are protected with those checks required; no `.github/workflows/*.yml` in any repo is longer than ~15 lines or triggers on a branch that does not exist.
 - `terraform plan` in `minty-infra` is a no-op against production after the imports; every Render service and Vercel project in the dashboards appears in state (`terraform state list`), and a `SECRET_KEY` rotation is one variable change + one apply, verified by a token minted by accounts being accepted by every other service.
 - `pip show minty-db minty-shared` in every Django container reports the same tags; `billing-backend/shared_models`, `billing-backend/bills/migrations`, `onboarding-backend/shared_models` and `minty-billing-api/shared_models` no longer exist.
 - `onboarding/lib/apiRoutes.ts` ends with an empty "proxied to Flask" block and `flaskBase.ts` is deleted; `onboarding/e2e` passes against the full stack after each of steps 3 and 5.
-- Flipping `MAINTENANCE_MODE` in `minty-infra` puts every app on its maintenance page and makes every API refuse writes, and `minty-e2e` has a journey that proves it.
+- Flipping `MAINTENANCE_MODE` in `minty-infra` puts every app on its maintenance page and makes every API refuse writes, and the stack job has a journey that proves it.
 - Each service's README states the ten cross-cutting rules; `grep -rn XERO_CLIENT_SECRET` across the org hits only `minty-xero-api` (and `minty-legacy` until step 3); `grep -rn STRIPE_SECRET_KEY` hits only `minty-billing-api`.
 - Rule 10 holds across the org: every repo's links guard test is green; `grep -rn "onrender.com\|vercel.app\|oliveandvinehk.com\|dailyminty.com"` over application code (not docs, not `minty-infra`) hits nothing; `grep -rn "localhost:[0-9]"` outside links modules, tests and `.env.example` hits nothing; `grep -rn "FLASK_APP_URL\|FRONTEND_APP_URL\|ONBOARDING_APP_URL\|MODULE1_URL\|MODULE2_BACKEND_URL\|MINTY_PUBLIC_URL\|WAITLIST_URL\|NEXT_PUBLIC_.*_URL"` hits nothing outside this document and `docs/ENVIRONMENT.md` (since 2026-10-02 `MINTY_WEB_URL` is canonical, and `XERO_TOKEN_SERVICE_URL` survives only as a derived Django setting until `minty-xero-api`); every `*_URL` in every `.env.example` is a row of the service table.
 - Rule 11 holds across the org (from step 4): `grep -rn "Asia/Hong_Kong"` over application code hits only `minty_shared/time.py` and `minty-shared-ts/lib/time.ts` (and `minty-legacy` until step 7); every `-web`'s `time.guard.test.ts` and every `-api`'s `test_zz_time.py` is green; `grep -rn "http_date\|strftime" minty-billing-api/billing/api minty-billing-api/billing/services` hits nothing outside the shared helper's callers; `docs/openapi.json` carries no `"05 Oct 2026"`-shaped example.
