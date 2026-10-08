@@ -90,7 +90,11 @@ Renaming the company is reflected in the header at once - minty-web's Entity & I
   the session PATCH read it from the query for its check and from the body for its write.
   `PATCH /api/me/company/users/<id>` `{role}` changes a role; `DELETE` removes, through the
   guards in order: rank 403 → the payer 409 → the last admin 409 → a pending handover's nominee
-  409 (`services/roles.py`). Roles are the four assignable ones only (`enums.ASSIGNABLE_ENTITY_ROLES`,
+  409 (`services/roles.py`). The payer guard reads `store_ro.entities_paid_for_by`, which asks
+  for rows naming this person — so since 2026-10-08 a company whose trial has no SUBSCRIBER
+  (`payer_user_id` NULL; starting a trial no longer establishes one) does NOT block removing
+  the admin who started it. Correct: they carry no bill. The guard still fires the moment
+  somebody confirms billing. Roles are the four assignable ones only (`enums.ASSIGNABLE_ENTITY_ROLES`,
   400 otherwise); the rank rule (`can_manage_role_assignment_for_entity`) allows a role AT or
   below your own. **Names are not changed here** - a person edits their own in My Profile (the
   session PATCH renamed anyone).
