@@ -2935,7 +2935,7 @@ day to pay before `dunning.suspension_at`, `pay_by`). All of it folds into
   `formatIn(iso, tz, style)` for the `short` (`5 Oct`), `day` (`5 Oct 2026`) and `long`
   (`5 Oct 2026, 09:00`) styles the screens use today, and `daysBetween(fromIso, toIso, tz)` (the
   difference of the two `dayIn` days, floored at 0). No date library: `Intl` in the browser and
-  Node 22's full ICU cover it.
+  Node's full ICU cover it.
 - `<ZonedTime iso tz style />` is the only way a date reaches the DOM:
 
   ```html
