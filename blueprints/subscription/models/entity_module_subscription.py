@@ -7,6 +7,13 @@ with the Stripe biller retired there is nothing upstream of them. The paying use
 against) is referenced by ``payer_user_id`` — a FK to ``user``, NOT to
 ``user_stripe_customer``, so a trial row can exist before any card/customer.
 
+``payer_user_id`` is NULLABLE, and NULL is an answer: the row has no SUBSCRIBER yet.
+A free trial is started by any admin holding MODULE_MANAGE and commits nobody; the
+subscriber is established by one act only — putting the company on a billing account
+and confirming billing — which stamps every module row of the entity. A NULL-payer
+trial expires at term end rather than converting, and until it is stamped any admin
+may act on the subscription (the engine's ``store.may_manage_subscription``).
+
 A bundled entity has two rows (PETTY_CASH + BILL) billed as ONE bundle price, so
 never total an entity by summing its rows — price the module SET via
 ``store.billing_plan_for_codes``. Phase / extension_state vocab lives in
@@ -49,7 +56,7 @@ class EntityModuleSubscription(TimestampMixin, db.Model):
     payer_user_id = db.Column(
         uuid_column(),
         db.ForeignKey(f"{SCHEMA}.user.id"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
 

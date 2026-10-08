@@ -37,6 +37,14 @@ header). The endpoints, in wizard order:
 | 8 Bills | `bill-codes` |
 | 9 All Set | `finalize` (minty-onboarding-api) — flips the company live (`status`), then starts the card-free trials of the chosen modules on minty-subscription-api (`trial_end` in the answer; null when no module has one). A failed trial start fails finalize, and the All Set screen offers Try again |
 
+**The trials are subscriber-less as well as card-free** (the user, 2026-10-08): finalize
+establishes no payer. The wizard's door onto the billing relationship is step 2's billing sheet
+(`billing/authorize`, which is what `establish_payer=True` is for), and it may be skipped — then
+the company goes live with trials nobody is liable for, every admin may act on its subscription,
+and the trials EXPIRE at term end rather than converting until someone presses *Activate
+Subscription* in minty-web and picks a billing account. See minty-subscription-api's
+`docs/features/subscriptions-api.md` §1.
+
 **Arriving on step 9 finalizes** (the wizard calls it on arrival, the screen commits
 nothing) — a test must never navigate there directly (`onboarding-step9-finalizes-on-arrival`
 note, `minty-onboarding-web/e2e/README.md`).

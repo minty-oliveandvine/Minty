@@ -2175,7 +2175,7 @@ CREATE TABLE pettycash_test.entity_module_subscription (
   id               UUID                              NOT NULL DEFAULT gen_random_uuid(),
   entity_id        UUID                              NOT NULL,
   function_code    pettycash_test.module_code        NOT NULL,
-  payer_user_id    UUID                              NOT NULL,
+  payer_user_id    UUID                              NULL,   -- NULL until billing is confirmed
   phase            pettycash_test.subscription_phase NOT NULL,
   app_access_until TIMESTAMPTZ                       NULL,
   trial_end        TIMESTAMPTZ                       NULL,

@@ -32,14 +32,20 @@ TRIAL_CLOSING_WINDOW = timedelta(hours=6)
 
 
 def payer_for_entity(entity_id) -> str | None:
-    """The payer user id for an entity (None before it has a subscription or trial).
+    """The payer user id for an entity, from any of its rows that HAS one.
 
-    One payer per entity is enforced on the engine's write, so any row answers.
+    None before the entity has a subscription or trial at all, and equally while its
+    trials have no SUBSCRIBER: ``payer_user_id`` is NULL until billing is confirmed on a
+    billing account, because starting a free trial commits nobody.
+
+    One payer per entity is enforced on the engine's write, so any row that has one
+    answers — but a NULL row answers nothing, and an unordered ``.first()`` would let a
+    subscriber-less row speak for an entity that IS being billed.
     """
     if not entity_id:
         return None
-    row = EntityModuleSubscription.query.filter_by(entity_id=str(entity_id)).first()
-    return row.payer_user_id if row else None
+    rows = EntityModuleSubscription.query.filter_by(entity_id=str(entity_id)).all()
+    return next((r.payer_user_id for r in rows if r.payer_user_id), None)
 
 
 def rows_for_entity(entity_id) -> list[EntityModuleSubscription]:
