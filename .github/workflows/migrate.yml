@@ -50,9 +50,9 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -69,7 +69,11 @@ jobs:
           S3_URL: https://dummy-key:dummy-secret@s3.us-west-004.backblazeb2.com/dummy-bucket
           ACTION: ${{ inputs.action }}
         run: |
-          export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          # Assigned and exported separately (shellcheck SC2155): combined, a failure of the
+          # python call can be masked by export's own exit status, leaving SECRET_KEY empty and
+          # surfacing later as a confusing "SECRET_KEY is required" instead of the real cause.
+          SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          export SECRET_KEY
           if [ "$ACTION" = "upgrade" ]; then
             # SESSION_TYPE=cachelib for this one command, exactly as docker/docker-entrypoint.sh
             # does: the database session backend would create `sessions` before Alembic runs.
