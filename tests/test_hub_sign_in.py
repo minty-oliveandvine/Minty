@@ -1,4 +1,5 @@
-"""Sign-in is minty-web's ``/login`` since phase 2 (2026-10-05); Flask stays the identity behind it.
+"""Sign-in is minty-web's ``/login`` since phase 2 (2026-10-05), sign-up its ``/signup`` since
+2026-10-09; Flask stays the identity behind both.
 
 Flask's side: every way in to signing in (the front door ``/``, Flask-Login's redirect, ``/register``,
 an invitation link) is a redirect to the hub's page built by ``hub_login_url`` - carrying ``next``
@@ -39,10 +40,10 @@ def mail(monkeypatch):
     return F.install_fake_mail(monkeypatch)
 
 
-def _sign_in_page(resp):
+def _sign_in_page(resp, path="/login"):
     assert resp.status_code == 302, resp.data[:300]
     parts = urlsplit(resp.headers["Location"])
-    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == f"{HUB}/login"
+    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == f"{HUB}{path}"
     return parse_qs(parts.query)
 
 
@@ -85,8 +86,9 @@ def test_notices_read_nothing_from_a_forged_or_missing_value(client, db):
 
 
 def test_register_forwards_to_the_hubs_sign_up(client, db):
-    assert _sign_in_page(client.get("/register")) == {"mode": ["signup"]}
-    assert _sign_in_page(client.post("/register", data={"email": "x@test.com"})) == {"mode": ["signup"]}
+    """Sign-up is its own page on the hub, so the mode is the PATH - no ``?mode=`` any more."""
+    assert _sign_in_page(client.get("/register"), "/signup") == {}
+    assert _sign_in_page(client.post("/register", data={"email": "x@test.com"}), "/signup") == {}
 
 
 def test_the_login_pages_own_endpoints_are_gone(client, db):
