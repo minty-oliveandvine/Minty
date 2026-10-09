@@ -220,7 +220,7 @@
                             {% if expense.receipt_keys %}
                                 {# one link per receipt row: a filename may itself contain a comma #}
                                 {% for file in expense.receipt_keys %}
-                                    <a href="{{ url_for('report.download_file', filename=file) }}" target="_blank">{{ file.split('/')[-1] }}</a><br>
+                                    <button type="button" class="btn btn-link p-0 align-baseline" data-receipt-key="{{ file }}" data-receipt-name="{{ file.split('/')[-1] }}">{{ file.split('/')[-1] }}</button><br>
                                 {% endfor %}
                             {% else %}
                                 No files uploaded.
@@ -273,5 +273,6 @@
             }
         }
         </script>
+{% include 'components/receipt_viewer_modal.html' %}
 </body>
 </html>

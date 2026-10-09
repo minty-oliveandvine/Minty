@@ -110,12 +110,18 @@ test.describe.serial('report wizard', () => {
     await expect(page.locator('#uploadedPdfPreview canvas')).toHaveCount(1, { timeout: 20_000 });
     const popups: string[] = [];
     page.context().on('page', (p) => popups.push(p.url()));
+    // and nothing may save itself to disk either (2026-10-09: no new tab, no download)
+    const downloads: string[] = [];
+    page.on('download', (d) => downloads.push(d.suggestedFilename()));
     await page.locator('#previewIconContainer').click();
     // in the receipt modal (the Expense Details look), not a black overlay or a new tab
     await expect(page.locator('#receiptViewerModal canvas')).toHaveCount(1, { timeout: 20_000 });
+    // the viewer now comes from the shared partial, on every page that shows a receipt
+    await expect(page.locator('#receiptViewerModal')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#receiptViewerModal')).toBeHidden();
     expect(popups).toEqual([]);
+    expect(downloads).toEqual([]);
     expect(errors).toEqual([]);
   });
 

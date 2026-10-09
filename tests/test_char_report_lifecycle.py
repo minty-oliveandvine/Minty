@@ -584,12 +584,22 @@ def test_every_receipt_the_detail_page_shows_is_an_object_the_bucket_holds(shop,
         db.session.commit()
         assert expense.receipt_keys == [legacy_key]
 
-    # the detail page links one download per receipt, and each download is a key the
-    # bucket holds (the link redirects to the object's presigned URL)
+    # the detail page offers one receipt per key, and each key is one the bucket holds.
+    # Since 2026-10-09 the control is a viewer button carrying the key, not a download
+    # link: the receipt opens full screen on the page (no new tab, no download).
     html = client.get(f"/report/{report_id}").get_data(as_text=True)
-    links = [unquote(unescape(h)) for h in re.findall(r'href="(/download/[^"]+)"', html)]
-    assert links == [f"/download/{legacy_key}"], f"receipt links {links}"
-    resp = client.get(links[0])
+    keys = [unquote(unescape(k)) for k in re.findall(r'data-receipt-key="([^"]+)"', html)]
+    assert keys == [legacy_key], f"receipt keys {keys}"
+    # no receipt link at the download route (the Excel export's own /report/download/ stays)
+    assert "/download/expenses/" not in html, "a receipt still links at the download route"
+
+    # the viewer reads the bytes from this origin, inline, so pdf.js can fetch them
+    resp = client.get(f"/preview/{legacy_key}")
+    assert resp.status_code == 200, resp.status_code
+    assert "inline" in resp.headers.get("Content-Disposition", "")
+
+    # the download route still works for anyone who reaches it directly
+    resp = client.get(f"/download/{legacy_key}")
     assert resp.status_code == 302 and resp.headers["Location"] == f"https://fake-s3.test/{legacy_key}", resp.headers.get("Location")
 
     # the attachments download: the same receipt, whole, inside the zip. It spans every
