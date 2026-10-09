@@ -473,11 +473,14 @@
 
                     <!-- Display existing files: one per receipt row (a filename may contain a comma) -->
                     {% for file in expense.receipt_keys %}
-                      <a
-                        href="{{ url_for('report.download_file', filename=file) }}"
-                        target="_blank"
-                        >{{ file }}</a
-                      ><br />
+                      <button
+                        type="button"
+                        class="btn btn-link p-0 align-baseline"
+                        data-receipt-key="{{ file }}"
+                        data-receipt-name="{{ file.split('/')[-1] }}"
+                      >
+                        {{ file }}
+                      </button><br />
                     {% endfor %}
                   </td>
                   <td>
@@ -813,26 +816,6 @@
           }
         }
 
-        document
-          .querySelector("#shopExpensesContainer")
-          .addEventListener("click", function (event) {
-            if (event.target.classList.contains("preview-button")) {
-              const row = event.target.closest("tr");
-              const fileInput = row.querySelector(".file-input");
-              const previewContainer = row.querySelector(
-                ".file-preview-container",
-              );
-
-              if (fileInput && previewContainer) {
-                handleFilePreview(fileInput, previewContainer);
-              } else {
-                console.error(
-                  "File input or preview container not found for the clicked preview button.",
-                );
-              }
-            }
-          });
-
         function createExpenseRow() {
           const rowIndex = shopExpensesTable.querySelectorAll("tr").length;
           const row = document.createElement("tr");
@@ -867,24 +850,9 @@
           attachListenersToExistingRows();
         }
 
-        function attachListenersToExistingRows() {
-          const rows = document.querySelectorAll(
-            "#shopExpensesContainer tbody tr",
-          );
-          rows.forEach((row) => {
-            const previewButton = row.querySelector(".preview-button");
-            const fileInput = row.querySelector(".file-input");
-            const previewContainer = row.querySelector(
-              ".file-preview-container",
-            );
-
-            if (previewButton && fileInput && previewContainer) {
-              previewButton.addEventListener("click", () =>
-                handleFilePreview(fileInput, previewContainer),
-              );
-            }
-          });
-        }
+        // Preview wiring is scripts.js's: it owns handleFilePreview (closure-scoped, so it
+        // was never callable from here) and binds the rows itself.
+        function attachListenersToExistingRows() {}
 
         function reindexExpenseRows() {
           shopExpensesTable.querySelectorAll("tr").forEach((row, index) => {
@@ -935,5 +903,6 @@
         calculateTotalActualCash();
       });
     </script>
+{% include 'components/receipt_viewer_modal.html' %}
   </body>
 </html>

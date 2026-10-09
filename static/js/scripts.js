@@ -274,67 +274,45 @@ document.addEventListener('DOMContentLoaded', function () {
     // Attach toggle function to checkbox
     noExpenseCheckbox.addEventListener('change', toggleExpenses);
 
-        // Function to handle file previews
+        /**
+         * Preview the files on an expense row: the ones already saved, and the ones just
+         * picked. Each thumbnail opens the full-screen receipt viewer
+         * (templates/components/receipt_viewer_modal.html) - nothing opens a new tab and
+         * nothing downloads, so a file no browser can draw says so instead.
+         */
         function handleFilePreview(fileInput, previewContainer) {
             previewContainer.innerHTML = ''; // Clear existing previews
+            if (!window.ReceiptPreview) return; // page without the viewer partial
 
             const existingFiles = previewContainer.dataset.existingFiles
             ? JSON.parse(previewContainer.dataset.existingFiles)
             : [];
 
-            console.log('Existing files for preview:', existingFiles);
-    
-            // Render existing files
+            // Saved files: a button the viewer's delegated listener picks up. Their URL is a
+            // /download/<key> one, which toPreviewUrl rewrites to the same-origin route.
             existingFiles.forEach(file => {
-                const fileLink = document.createElement('a');
-                fileLink.href = file.url;
-                fileLink.target = '_blank';
-                fileLink.textContent = file.name;
-                fileLink.style.display = 'block';
-                previewContainer.appendChild(fileLink);
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'btn btn-link p-0 align-baseline';
+                button.dataset.receiptUrl = file.url;
+                button.dataset.receiptName = file.name;
+                button.textContent = file.name;
+                button.style.display = 'block';
+                button.style.minHeight = '44px';
+                previewContainer.appendChild(button);
             });
-            
-            const files = Array.from(fileInput.files); // Get selected files
-            files.forEach(file => {
-                const fileReader = new FileReader();
-        
-                fileReader.onload = function (e) {
-                    const fileType = file.type;
-        
-                    if (fileType.startsWith('image/')) {
-                        // Image preview
-                        const img = document.createElement('img');
-                        img.src = e.target.result;
-                        img.alt = file.name;
-                        img.style.maxWidth = '100%';
-                        img.style.height = 'auto';
-                        previewContainer.appendChild(img);
-                    } else if (fileType === 'application/pdf') {
-                        // PDF preview
-                        const embed = document.createElement('embed');
-                        embed.src = e.target.result;
-                        embed.type = 'application/pdf';
-                        embed.style.width = '100%';
-                        embed.style.height = '300px';
-                        previewContainer.appendChild(embed);
-                    } else {
-                        // Unsupported file type
-                        const fallback = document.createElement('p');
-                        fallback.textContent = `Cannot preview "${file.name}".`;
-                        previewContainer.appendChild(fallback);
-        
-                        // Add a download link
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = e.target.result;
-                        downloadLink.download = file.name;
-                        downloadLink.textContent = 'Download';
-                        downloadLink.style.display = 'block';
-                        previewContainer.appendChild(downloadLink);
-                    }
-                };
-        
-                // Read the file as a data URL
-                fileReader.readAsDataURL(file);
+
+            // Just-picked files: drawn straight from the File object, never via a data URL.
+            Array.from(fileInput.files).forEach(file => {
+                const host = document.createElement('div');
+                host.style.cursor = 'pointer';
+                host.title = 'Open full preview';
+                previewContainer.appendChild(host);
+                const kind = window.ReceiptPreview.kind(file.type || file.name);
+                window.ReceiptPreview.render(host, file, { kind: kind, maxPages: 1, title: file.name });
+                host.addEventListener('click', function () {
+                    openReceiptViewer(file, kind, file.name);
+                });
             });
         }
 

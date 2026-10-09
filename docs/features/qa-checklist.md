@@ -254,6 +254,14 @@ server-side it calls Xero's Accounts API via `get_accounts_from_xero` to list ba
       entry, so confirm it's caught later rather than accepted forever.
 - [ ] Every expense line must carry a receipt before the day can be submitted
       (`validate_drafts`) — try reaching Ending with one bare line.
+- [ ] **A receipt always opens the full-screen viewer, never a new tab and never a
+      download.** Check all four pages that show one: the Expenses step (upload box, the
+      Expense Details tiles, and a non-image/non-PDF receipt), the report detail page's
+      **Files** column, `edit_report`'s existing *and* just-picked files, and the index
+      page's new-row **Preview** button. A file that cannot be drawn shows the viewer's own
+      sentence rather than offering itself for download.
+- [ ] Escape closes the receipt viewer only — the Expense Details modal under it stays
+      open, and a second Escape closes that.
 - [ ] `account_id`, `contact_id`, `account_code`, `contact_name` are derived properties, not
       columns — a Xero id matching no synced row logs a warning and leaves the link null
       rather than erroring (only visible from a DB check).

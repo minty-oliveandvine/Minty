@@ -1,0 +1,195 @@
+{# The receipt viewer: one receipt, full screen, on any page that shows receipts.
+
+   Include ONCE per page, immediately before </body>. It brings its own markup, its own CSS and
+   its own script, and it binds ONE delegated click listener, so a template only has to mark a
+   control up:
+
+     <button type="button" data-receipt-key="{{ key }}" data-receipt-name="invoice.pdf">
+     <button type="button" data-receipt-url="{{ url }}" data-receipt-name="invoice.pdf">
+
+   `data-receipt-key` is an S3 key; `data-receipt-url` is any URL, including a /download/<key>
+   one, which is rewritten to report.preview_file (same origin, Content-Disposition: inline) so
+   pdf.js can fetch the bytes. A file no browser can draw says so in the viewer - it never
+   downloads and never opens a new tab.
+
+   The styles are deliberately plain CSS as well as Tailwind classes: report_detail.html and
+   edit_report.html load Bootstrap only, so Tailwind utilities are inert there. #}
+
+<div id="receiptViewerModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[200] p-2 sm:p-4 hidden" onclick="closeReceiptViewer()" role="dialog" aria-modal="true" aria-labelledby="receiptViewerTitle">
+  <div class="receipt-viewer-card bg-white rounded-lg shadow-xl p-4 sm:p-6 w-full max-w-5xl mx-auto h-[94vh] flex flex-col" onclick="event.stopPropagation()">
+    <div class="receipt-viewer-head flex items-center justify-between gap-3 mb-4">
+      <h2 id="receiptViewerTitle" class="text-xl font-bold text-gray-900">Receipt</h2>
+    </div>
+    <p id="receiptViewerName" class="-mt-3 mb-3 truncate text-sm text-gray-500"></p>
+    <div id="receiptViewerBody" class="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-2"></div>
+    <div class="receipt-viewer-foot mt-4 flex justify-center">
+      <button type="button" onclick="closeReceiptViewer()" class="flex-1 bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Geometry without Tailwind, for the Bootstrap-only pages. */
+  #receiptViewerModal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background-color: rgba(0, 0, 0, 0.5);
+  }
+  #receiptViewerModal.hidden { display: none; }
+  #receiptViewerModal .receipt-viewer-card {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 64rem;
+    height: 94vh;
+    margin: 0 auto;
+    padding: 1rem;
+    background: #fff;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+  }
+  #receiptViewerModal .receipt-viewer-head { display: flex; align-items: center; justify-content: space-between; }
+  #receiptViewerModal #receiptViewerTitle { margin: 0; font-size: 1.25rem; font-weight: 700; }
+  #receiptViewerModal #receiptViewerName {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #receiptViewerModal #receiptViewerBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.5rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+  }
+  #receiptViewerModal #receiptViewerBody img {
+    display: block;
+    margin: 0 auto;
+    max-width: 100%;
+    height: auto;
+  }
+  #receiptViewerModal .receipt-preview-message {
+    padding: 1.5rem 1rem;
+    text-align: center;
+    color: #6b7280;
+  }
+  #receiptViewerModal .receipt-viewer-foot { margin-top: 1rem; display: flex; justify-content: center; }
+  #receiptViewerModal .receipt-viewer-foot button {
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding: 0.75rem 1rem;
+    color: #fff;
+    background: #54d3da;
+    border: 0;
+    border-radius: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  #receiptViewerModal .receipt-viewer-foot button:hover { background: rgba(84, 211, 218, 0.8); }
+  @media (min-width: 640px) {
+    #receiptViewerModal { padding: 1rem; }
+    #receiptViewerModal .receipt-viewer-card { padding: 1.5rem; border-radius: 0.5rem; }
+  }
+  /* A receipt control is a button, not a link: it must not look like one on Bootstrap pages. */
+  [data-receipt-key],
+  [data-receipt-url] { cursor: pointer; }
+</style>
+
+<script src="{{ url_for('static', filename='js/receipt_preview.js') }}"></script>
+<script>
+  /** Body overflow as it was before the viewer opened; restored on close whatever is underneath. */
+  var receiptViewerPrevBodyOverflow = null;
+
+  /** A saved receipt's bytes from this origin (report.preview_file), for pdf.js. */
+  function receiptPreviewUrl(s3Key) {
+    const base = '{{ url_for("report.preview_file", filename="") }}'.replace(/\/+$/, '');
+    return base + '/' + String(s3Key || '').replace(/^\/+/, '');
+  }
+
+  /**
+   * A /download/<key> URL redirects to a presigned B2 URL, which is cross-origin and so no use
+   * to pdf.js or an iframe. Swap it for the same-origin preview route; leave anything else be.
+   */
+  function toPreviewUrl(url) {
+    const downloadBase = '{{ url_for("report.download_file", filename="") }}'.replace(/\/+$/, '');
+    const s = String(url || '');
+    if (downloadBase && s.indexOf(downloadBase + '/') === 0) {
+      return receiptPreviewUrl(s.slice(downloadBase.length + 1));
+    }
+    return s;
+  }
+
+  // The receipt, larger, in a modal on this page (2026-10-05): an image or a PDF drawn page by
+  // page. A PDF used to open a new tab with an <iframe> (nothing on Android, page 1 on iOS)
+  // and an image a black full-screen overlay.
+  function openReceiptViewer(source, kind, title) {
+    const modal = document.getElementById('receiptViewerModal');
+    const body = document.getElementById('receiptViewerBody');
+    if (!modal || !body || !window.ReceiptPreview) return;
+    // The whole window, not the page's phone card: reparented to the document body, so no
+    // card can clip it
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    document.getElementById('receiptViewerName').textContent = title || '';
+    modal.classList.remove('hidden');
+    if (receiptViewerPrevBodyOverflow === null) {
+      receiptViewerPrevBodyOverflow = document.body.style.overflow;
+    }
+    document.body.style.overflow = 'hidden';
+    window.ReceiptPreview.render(body, source, { kind: kind, title: title || 'Receipt' });
+  }
+
+  /** Open a receipt by S3 key or by URL, picking the renderer from the file's name. */
+  function openReceiptByKey(keyOrUrl, name) {
+    if (!window.ReceiptPreview) return;
+    const label = name || String(keyOrUrl || '').split('/').pop() || 'Receipt';
+    openReceiptViewer(keyOrUrl, window.ReceiptPreview.kind(label), label);
+  }
+
+  function closeReceiptViewer() {
+    const modal = document.getElementById('receiptViewerModal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    modal.classList.add('hidden');
+    document.getElementById('receiptViewerBody').replaceChildren();
+    // Put back whatever the page had - an Expense Details modal underneath keeps it 'hidden'.
+    document.body.style.overflow = receiptViewerPrevBodyOverflow || '';
+    receiptViewerPrevBodyOverflow = null;
+  }
+
+  // Escape closes the receipt only - not a modal under it, which the page's own Escape handler
+  // (registered later) would close next.
+  document.addEventListener('keydown', (event) => {
+    const modal = document.getElementById('receiptViewerModal');
+    if (event.key !== 'Escape' || !modal || modal.classList.contains('hidden')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeReceiptViewer();
+  });
+
+  // ONE delegated listener, so no template needs its own JS. Attributes rather than inline
+  // onclick because a file name can contain a quote.
+  document.addEventListener('click', (event) => {
+    const el = event.target.closest('[data-receipt-key], [data-receipt-url]');
+    if (!el) return;
+    event.preventDefault();
+    const name = el.getAttribute('data-receipt-name') || '';
+    const key = el.getAttribute('data-receipt-key');
+    if (key) {
+      openReceiptByKey(receiptPreviewUrl(key), name || key.split('/').pop() || '');
+      return;
+    }
+    const url = el.getAttribute('data-receipt-url') || '';
+    openReceiptByKey(toPreviewUrl(url), name);
+  });
+</script>
