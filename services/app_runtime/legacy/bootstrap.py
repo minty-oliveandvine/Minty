@@ -296,10 +296,12 @@ def create_app():
                                                        hub_company_invitation_cancel,
                                                        hub_company_invitation_resend,
                                                        hub_company_invite, hub_company_member,
-                                                       hub_company_xero_disconnect)
+                                                       hub_company_xero_disconnect,
+                                                       hub_company_xero_release)
     for hub_write in (hub_company_invite, hub_company_invitation_cancel,
                       hub_company_invitation_resend, hub_company_member,
-                      hub_company_integration, hub_company_xero_disconnect):
+                      hub_company_integration, hub_company_xero_disconnect,
+                      hub_company_xero_release):
         csrf.exempt(hub_write)
     # minty-web's Terms modal records the acceptance the same way: bearer only, and the row
     # can only ever be the token's own user's (blueprints/legal/routes/hub.py).
@@ -319,7 +321,8 @@ def create_app():
                                                   onboarding_sales_methods,
                                                   onboarding_saved_step,
                                                   onboarding_update_entity,
-                                                  onboarding_xero_disconnect)
+                                                  onboarding_xero_disconnect,
+                                                  onboarding_xero_release)
     csrf.exempt(onboarding_create_entity)
     csrf.exempt(onboarding_modules)
     csrf.exempt(onboarding_sales_methods)
@@ -333,6 +336,7 @@ def create_app():
     csrf.exempt(onboarding_saved_step)
     csrf.exempt(onboarding_update_entity)
     csrf.exempt(onboarding_xero_disconnect)
+    csrf.exempt(onboarding_xero_release)
     # minty-web's /login and /login/confirm call these from a different origin (port
     # 3000) — no session cookie, so they need CSRF exemption.
     from blueprints.auth.routes.email_auth import (email_request_code,

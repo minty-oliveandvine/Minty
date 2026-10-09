@@ -31,6 +31,9 @@ from models.db import Entity, User, UserEntity, db
 from services.permission_policy import is_superuser
 
 NOTICE_SALT = "hub-flash"
+#: The blocked-Xero-connect hand-over (``sign_conflict``) - its own salt, so a notice token
+#: cannot be read as a conflict or the other way round.
+CONFLICT_SALT = "hub-xero-conflict"
 #: How long a signed hand-over stays readable: long enough for the landing's round trip,
 #: short enough that a bookmarked or shared URL shows nothing.
 NOTICE_MAX_AGE_SECONDS = 300
@@ -174,3 +177,51 @@ def read_notices(token: str | None) -> list[dict]:
         for item in data[:MAX_NOTICES]
         if isinstance(item, dict) and isinstance(item.get("message"), str) and item["message"].strip()
     ]
+
+
+# --- the blocked-connect hand-over -----------------------------------------------------
+
+
+def _conflict_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=CONFLICT_SALT)
+
+
+def sign_conflict(entity_id, name: str, can_move: bool) -> str:
+    """The company already holding the Xero organisation, signed for the trip to the tab
+    that was refused (``?xero_conflict=``).
+
+    A notice says what went wrong; this says enough to DO something about it, so the tab can
+    offer to move the organisation: which company holds it, what it is called, and whether
+    this person may free it (``XERO_SETTINGS_UPDATE`` there). It is signed and short-lived
+    for the same reason the notices are - the id rides in a URL the person can see and
+    edit, and the move is a real disconnect. Nothing here is authority: the release route
+    checks the permission again on the way in.
+    """
+    return _conflict_serializer().dumps(
+        {"from": str(entity_id), "name": str(name or "")[:MAX_NOTICE_LENGTH], "can_move": bool(can_move)}
+    )
+
+
+def read_conflict(token: str | None) -> dict | None:
+    """What ``sign_conflict`` sent, or None for no token, an expired one or a forged one.
+
+    Never raises, like ``read_notices``: a tab must draw whatever the URL carries.
+    """
+    if not token:
+        return None
+    try:
+        data = _conflict_serializer().loads(token, max_age=NOTICE_MAX_AGE_SECONDS)
+    except SignatureExpired:
+        logger.info("Xero conflict hand-over: expired, nothing shown")
+        return None
+    except BadSignature:
+        logger.warning("Xero conflict hand-over: the signature did not verify, nothing shown")
+        return None
+    if not isinstance(data, dict) or not str(data.get("from") or "").strip():
+        logger.warning("Xero conflict hand-over: not a conflict, nothing shown")
+        return None
+    return {
+        "entity_id": str(data["from"]).strip(),
+        "entity_name": str(data.get("name") or ""),
+        "can_move": bool(data.get("can_move")),
+    }

@@ -326,6 +326,157 @@ def test_disconnecting_says_so_and_a_failure_says_so_too(app, client, shop, monk
     assert call(client, app, "POST", "/api/me/company/xero/disconnect", shop["cashier"], entity).status_code == 403
 
 
+# --- a refused Xero connect, and the move it offers ----------------------------------------------
+#
+# One Xero organisation belongs to one company. A refused connect used to be a message alone -
+# and when the organisation was held by the person's OWN other company it was not even refused:
+# the other company was unlinked silently and the connect reported a success. Now the refusal
+# hands the holder back (signed) so the tab can offer to move the organisation, and the move is
+# a release of that company, authorized on that company.
+
+
+def _hold(app, db, entity, org="tenant-X", name="Xero Org Ltd"):
+    """Give ``entity`` a live Xero connection to ``org``."""
+    with app.app_context():
+        from models.db import Entity
+
+        row = db.session.get(Entity, entity.id)
+        row.xero_org_id = org
+        row.xero_tenant_name = name
+        row.status = "connected"
+        row.connected_by_user_id = None
+        db.session.commit()
+
+
+def _signed(app, entity, name, can_move=True):
+    from blueprints.entity.services.entity_list import sign_conflict
+
+    with app.app_context():
+        return sign_conflict(entity.id, name, can_move)
+
+
+def test_a_refused_connect_names_the_company_holding_the_organisation(app, client, db, shop):
+    """The tab is told WHICH company holds it, what the organisation is called, and whether
+    this person may free it - enough to offer the move rather than only explain."""
+    _hold(app, db, shop["other"])
+    token = _signed(app, shop["other"], "Other Co")
+
+    page = call(client, app, "GET", "/api/me/company/integration", shop["admin"], shop["entity"].id,
+                query={"xero_conflict": token}).get_json()
+
+    assert page["xero_conflict"] == {
+        "entity_id": str(shop["other"].id),
+        "entity_name": "Other Co",
+        "organisation": "Xero Org Ltd",
+        "can_move": True,
+    }
+
+
+def test_the_conflict_is_settled_against_the_database_not_the_token(app, client, db, shop):
+    """The token was signed before the Xero round trip, so the tab can be reloaded long after.
+    A holder that no longer holds anything, or one that is this very company, offers nothing -
+    and can_move is re-read rather than believed."""
+    # Nothing held any more (freed in the meantime): no dialog to raise.
+    gone = _signed(app, shop["other"], "Other Co")
+    assert call(client, app, "GET", "/api/me/company/integration", shop["admin"], shop["entity"].id,
+                query={"xero_conflict": gone}).get_json()["xero_conflict"] is None
+
+    # The company being viewed: it would offer to disconnect it from itself.
+    _hold(app, db, shop["entity"])
+    itself = _signed(app, shop["entity"], "Olive & Vine")
+    assert call(client, app, "GET", "/api/me/company/integration", shop["admin"], shop["entity"].id,
+                query={"xero_conflict": itself}).get_json()["xero_conflict"] is None
+
+    # can_move comes from the permission now, whatever the token claimed. The cashier is not
+    # in "Other Co" at all, so there is nothing to offer them.
+    _hold(app, db, shop["other"])
+    lying = _signed(app, shop["other"], "Other Co", can_move=True)
+    held = call(client, app, "GET", "/api/me/company/integration", shop["cashier"], shop["entity"].id,
+                query={"xero_conflict": lying}).get_json()["xero_conflict"]
+    assert held["can_move"] is False
+
+
+def test_a_forged_or_absent_conflict_offers_nothing(app, client, db, shop):
+    _hold(app, db, shop["other"])
+    for token in (None, "not-a-token", _signed(app, shop["other"], "Other Co") + "x"):
+        page = call(client, app, "GET", "/api/me/company/integration", shop["admin"], shop["entity"].id,
+                    query={"xero_conflict": token} if token else None).get_json()
+        assert page["xero_conflict"] is None, token
+
+
+def test_the_move_releases_the_other_company_and_nothing_else(app, client, db, shop):
+    _hold(app, db, shop["other"])
+
+    done = call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], shop["entity"].id,
+                json={"entity_id": str(shop["other"].id)})
+
+    assert done.status_code == 200, done.get_json()
+    assert "Other Co" in done.get_json()["message"]
+    with app.app_context():
+        from models.db import Entity
+
+        freed = db.session.get(Entity, shop["other"].id)
+        assert freed.xero_org_id is None and freed.status == "disconnected"
+        # The company being connected is untouched: connecting it is the NEXT step, through
+        # Xero's consent screen, not something this route does.
+        assert db.session.get(Entity, shop["entity"].id).xero_org_id is None
+
+
+def test_the_move_is_authorized_on_the_company_being_freed(app, client, db, shop):
+    """The permission that counts is on the OTHER company - its own Disconnect's permission.
+    A cashier may not free it, and a company this person has no permission on is refused even
+    though they may read the tab they asked from."""
+    _hold(app, db, shop["other"])
+    entity = shop["entity"].id
+
+    refused = call(client, app, "POST", "/api/me/company/xero/release", shop["cashier"], entity,
+                   json={"entity_id": str(shop["other"].id)})
+    assert refused.status_code == 403
+    with app.app_context():
+        from models.db import Entity
+
+        assert db.session.get(Entity, shop["other"].id).xero_org_id == "tenant-X"
+
+    # A manager may change this tab but may not disconnect that company from Xero.
+    assert call(client, app, "POST", "/api/me/company/xero/release", shop["manager"], entity,
+                json={"entity_id": str(shop["other"].id)}).status_code == 403
+
+
+def test_the_move_refuses_nonsense_and_self_release(app, client, db, shop):
+    entity = shop["entity"].id
+    assert call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], entity,
+                json={}).status_code == 422
+    # A company does not release itself.
+    assert call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], entity,
+                json={"entity_id": str(entity)}).status_code == 422
+    assert call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], entity,
+                json={"entity_id": "not-a-uuid"}).status_code == 403
+    assert call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], entity,
+                json={"entity_id": "11111111-1111-1111-1111-111111111111"}).status_code == 403
+
+
+def test_releasing_something_already_free_lets_the_move_go_on(app, client, db, shop):
+    """Not a refusal: the organisation is free, which is all the move needed."""
+    ok = call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], shop["entity"].id,
+              json={"entity_id": str(shop["other"].id)})
+    assert ok.status_code == 200
+    assert "already disconnected" in ok.get_json()["message"]
+
+
+def test_a_failed_release_says_the_organisation_is_still_in_use(app, client, db, shop, monkeypatch):
+    _hold(app, db, shop["other"])
+    import blueprints.xero.services.disconnect as disconnect
+
+    def boom(_entity_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(disconnect, "disconnect_entity_from_xero", boom)
+    failed = call(client, app, "POST", "/api/me/company/xero/release", shop["admin"], shop["entity"].id,
+                  json={"entity_id": str(shop["other"].id)})
+    assert failed.status_code == 502
+    assert "still in use" in failed.get_json()["error"]
+
+
 # --- the Flask addresses hand over ---------------------------------------------------------------
 
 
