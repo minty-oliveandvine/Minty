@@ -39,7 +39,8 @@ card's two buttons; focus goes back where it was when the dialog closes.
 ## "Leave without saving?" (Figma A-11)
 
 `MintyLeaveGuard.watch(isDirty)` arms it for a page with unsaved changes; minty-web's
-`LeaveDialog` words: "You have unsaved changes." / "Your changes will be lost if you leave this
+`LeaveDialog` (`components/ui/LeaveDialog.tsx` there, moved out of the subscription feature on
+2026-10-09 when Entity & Integration needed it too) words: "You have unsaved changes." / "Your changes will be lost if you leave this
 page.", the "dont" Minty, **Discard changes** (teal outline) and **Go Back** (teal).
 
 - A click on a link that would leave the page is held (on `window`, in the capture phase, before
@@ -55,9 +56,12 @@ page.", the "dont" Minty, **Discard changes** (teal outline) and **Go Back** (te
 - `saving()` before the page's own `form.submit()`; `ask(proceed)` for an exit that is not a
   link.
 
-minty-payment-request-web's `lib/leaveGuard.ts` (`useLeaveGuard`, `guardLeave`) does the same with the
-same rules, for its Payment Request Settings; there, Back/Forward inside the Next app are soft
-navigations and leave without asking (a documented gap).
+minty-payment-request-web's `lib/leaveGuard.ts` (`useLeaveGuard`, `guardLeave`) does the same with
+the same rules, for its Payment Request Settings, and since 2026-10-09 minty-web has the same file
+(copied, not re-written - change all three). Both Next apps hold Back/Forward too, which this
+guard does not: they push a history SENTINEL at their own address while dirty, so a soft Back pops
+that instead of leaving, and the Navigation API's entry index tells a several-entry jump from a
+single step. Flask gets the browser's own prompt there instead.
 
 ## Where it is used
 
@@ -66,6 +70,10 @@ navigations and leave without asking (a documented gap).
   Delete).
 - minty-payment-request-web Payment Request Settings (its `docs/features/settings.md`): the leave guard, and its
   Logout asks first.
+- minty-web, since 2026-10-09 (its `docs/features/company-settings.md`): Entity & Integration, the
+  billing details and edit-card screens, and Logout. Adding a card does not ask - the fields are
+  Stripe's, in its iframe.
 
 Not yet: the report pages' modals. (Users' and Entity & Integration's went with their pages
-to minty-web in phase 2, where they are minty-web's own `ConfirmDialog`.) They change when their page is next worked on.
+to minty-web in phase 2, where they are minty-web's own `ConfirmDialog` - and, for leaving, its
+own copy of this guard.) They change when their page is next worked on.
