@@ -238,7 +238,7 @@ Every repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusa
 | minty-web | `next-web.yml` | - |
 | minty-payment-request-web | `next-web.yml` | - |
 | minty-onboarding-web | `next-web.yml` | - |
-| daily-minty-landing-page | `next-web.yml` | - (triggers on `master` / `Newlandingpages`) |
+| minty-www (was daily-minty-landing-page) | `next-web.yml` | - |
 | minty-infra | its own `check.yml` (`terraform fmt` / `validate`, no credentials) | - |
 
 - **`MINTY_READ_TOKEN`** - a fine-grained PAT with read access to the *contents* of
@@ -255,8 +255,8 @@ Every repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusa
 - Browser tests run from Minty's `e2e.yml`, not in each repo's CI - they need the whole stack.
   The exception is the landing page, whose Playwright config starts its own server.
 - `minty-infra`'s `github.tf` does **not** set required status checks yet, so a red run blocks no
-  merge; and on GitHub Free, rulesets and environments exist only on the three public repos
-  (`github_pro = false`).
+  merge; and on GitHub Free, rulesets and environments exist only on public repos - which is now
+  all seven application repos, leaving only `minty-infra` itself ungated (`github_pro = false`).
 
 ### Hosting as code (`minty-infra`, Option B)
 
@@ -288,9 +288,11 @@ whether that host exists today** — every "no" is created by the apply, not alr
   link: `blueprints/shared/hub_api.py` and `pettycash/core/hooks.py` use it as the **CORS allowed
   origin** for Flask's hub bearer API, so naming the wrong host there stops `/api/me/entities`
   and `/api/me/profile` working in the browser with nothing in the logs.
-  `login.dailyminty.com` is attached to the same Vercel project and still works — every path
-  exists on both hosts — but nothing in the code routes to it (`hub_login.py` builds
-  `{MINTY_WEB_URL}/login`), so Terraform leaves it unmanaged.
+  `login.dailyminty.com` was a second address on the same Vercel project with nothing routing to
+  it; it was **detached 2026-10-09** and no longer serves the hub. It was never in Terraform
+  state, so nothing was applied. The hub's two open pages are **`/login`** (log in, invitations)
+  and **`/signup`** (make an account — its own route since 2026-10-09); `hub_login.py` builds
+  both, and `proxy.ts` 307s the old `/login?mode=signup` to `/signup`.
 - The two **`no`**s in the Production column are services on Render's free plan with no custom
   domain. Anything that assumes `subscription-api.dailyminty.com` resolves today is wrong.
 - Every `*_URL` above is set by Terraform from that one table; no dashboard edit.

@@ -27,8 +27,8 @@ The entity roles, lowest to highest: `entity_base` → `cashier` → `shop_manag
 
 All four end in Flask-Login's `login_user()`; the session is the same afterwards.
 
-**The sign-in PAGE is minty-web's `/login` since phase 2 (2026-10-05)** - log in, sign up
-(`?mode=signup`) and invitations (`?invite=&email=&fn=&ln=`), with the code on `/login/confirm`
+**The sign-in PAGE is minty-web's `/login` since phase 2 (2026-10-05)** - log in and invitations
+(`?invite=&email=&fn=&ln=`); **sign-up is its own page, `/signup`** (2026-10-09), with the code on `/login/confirm`
 (`minty-web/features/auth`, its `docs/features/authentication.md`). Until then they were Flask's
 `/` (`templates/login/index.html`) and `/register` (`register.html`) plus minty-onboarding-web's
 `/auth` + `/auth/confirm`; those pages are deleted, and `/register` and onboarding's `/auth*` only
@@ -98,8 +98,9 @@ The sign-in page clears the invite from its address bar on arrival and hands it 
 cancelled from the company's Users tab (minty-web, phase 2).
 
 ### Sign-up with approval (legacy)
-`GET/POST /register` creates nothing - it forwards to the sign-in page's `?mode=signup` (phase
-2), and sign-up runs through the OTP path above. The approval gate remains for older
+`GET/POST /register` creates nothing - it forwards to the hub's `/signup` (phase 2; the address
+was `/login?mode=signup` until 2026-10-09 - `hub_login_url(mode="signup")` builds it, so the mode
+is the PATH and never a query parameter), and sign-up runs through the OTP path above. The approval gate remains for older
 accounts that were never approved (`POST /approve_user/<id>` / `reject_user` on the
 `/admin` list).
 

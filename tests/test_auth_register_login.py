@@ -43,7 +43,7 @@ def test_register_post_does_not_create_user_without_otp(app, client, db_session)
 
     # Forwarded to the hub's sign-up; no user is created.
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/login?mode=signup")
+    assert response.headers["Location"].endswith("/signup")
     with app.app_context():
         assert User.query.filter_by(email="new.user@test.com").first() is None
 
