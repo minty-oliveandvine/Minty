@@ -2,6 +2,7 @@
 
 import html
 from typing import Protocol
+from urllib.parse import urlencode
 
 import requests
 from flask import (current_app, flash, get_flashed_messages, jsonify, redirect,
@@ -109,13 +110,26 @@ def _to_hub_tab(entity_id, tab: str):
     the company. These Flask addresses stay as the way there - the sidebar, old links, the
     payments app's pills and every ``url_for`` here (the Xero callback lands on the
     integration tab) - and whatever was flashed on the way travels signed in ``?flash=``, which
-    the tab's read hands back as ``notices``."""
+    the tab's read hands back as ``notices``.
+
+    ``?xero_conflict=`` rides along the same way when a Xero connect was refused because
+    another company already holds the organisation (``_refuse_conflict``): a notice says what
+    happened, and this says enough for the tab to offer the move. It is forwarded rather than
+    built here, because only the callback knows which company holds it."""
     from blueprints.entity.routes.modules import minty_web_company_path, minty_web_landing_url
     from blueprints.entity.services.entity_list import sign_notices
 
     org = Entity.query.get_or_404(entity_id)
     notices = sign_notices(get_flashed_messages(with_categories=True))
-    path = minty_web_company_path(entity_id, f"/settings/{tab}") + (f"?flash={notices}" if notices else "")
+    carried = {}
+    if notices:
+        carried["flash"] = notices
+    conflict = (request.args.get("xero_conflict") or "").strip()
+    if conflict:
+        carried["xero_conflict"] = conflict
+    path = minty_web_company_path(entity_id, f"/settings/{tab}") + (
+        f"?{urlencode(carried)}" if carried else ""
+    )
     return redirect(minty_web_landing_url(path, org, current_user.id))
 
 

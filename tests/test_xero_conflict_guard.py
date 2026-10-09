@@ -13,11 +13,14 @@ Core helper (``_conflict_still_live_on_xero``):
   4. Conflict entity's tenant gone from Xero       -> ghost (reconcile, allow)
   5. Xero /connections returns non-200             -> ghost (reconcile, allow)
   6. Xero /connections raises                       -> ghost (reconcile, allow)
-  7. Same-org re-authorization (the reported bug):
+  7. Same-org re-authorization:
        fresh_connections contains the tenant but the other entity's own token
        is dead -> ghost (reconcile, allow) — proves we do NOT use
-       fresh_connections to decide, so re-authorizing the same org for a new
-       entity no longer falsely blocks.
+       fresh_connections to decide.
+  7b. A claim held by the SAME user -> blocked without probing (2026-10-09).
+       It used to be unlinked silently, which reported a success and cost the
+       other company its Xero connection with nobody told. The way on is the
+       move the UI offers, which asks first.
 
 Connect callback guard (end-to-end through ``xero_callback``):
   8. Real live conflict on a DIFFERENT entity      -> blocked, no write
@@ -462,18 +465,23 @@ def test_live_connected_claimant_still_blocks(monkeypatch):
 # same token row as the user connecting now. Re-authorizing the org revives it,
 # which makes the live probe answer "org present" for ANY org the user just
 # authorized — it cannot tell a live claim from a dead one. These tests pin the
-# behaviour that falls out of that: a same-user claim is unlinked, not blocked.
+# behaviour that falls out of that: the probe is skipped and the claim stands, so
+# a same-user claim BLOCKS like any other. Freeing the org is the move the UI
+# offers, which asks first; nothing here may write.
 # ===========================================================================
 
-def test_same_user_live_claimant_is_unlinked_not_blocked(monkeypatch):
-    """THE REPORTED BUG: connect entity A, revoke Minty from inside the Xero
-    website, then connect entity B to the same org.
+def test_same_user_live_claimant_blocks_and_moves_nothing(monkeypatch):
+    """Your own other company holds the org: BLOCK, and leave it alone.
 
-    A still reads status="connected" (a website-side revoke never reaches us)
-    and A's connector is the same user connecting now. The shared token is alive
-    and Xero lists the org, so the probe would "confirm" a conflict and block B
-    forever. Since the probe cannot answer here, defer to the user's intent:
-    release A's claim and let B through.
+    Connect entity A, then connect entity B to the same org. A's connector is the
+    user connecting now, so the shared token makes the probe answer "org present"
+    for any org they just authorized - it cannot tell a live claim from a dead
+    one. The claim therefore stands.
+
+    Until 2026-10-09 this released A's claim and let B through, silently: the
+    owner saw the ordinary success message and no error, while A lost Xero with
+    nobody told. Freeing an org is now always asked for - the caller offers the
+    move (release A, then connect B) and NOTHING here may write.
     """
     app = _build_app()
     session = _SessionStub()
@@ -482,7 +490,7 @@ def test_same_user_live_claimant_is_unlinked_not_blocked(monkeypatch):
     )
     entity_a.connected_by_user_id = "me"
     _patch_claimants(monkeypatch, [entity_a], session)
-    # Exactly the state that makes the probe lie: token alive, org listed.
+    # Exactly the state that makes the probe useless: token alive, org listed.
     monkeypatch.setattr(
         xero_routes, "get_xero_token_user_for_entity",
         lambda *_a, **_kw: SimpleNamespace(access_token="revived-token"),
@@ -494,22 +502,22 @@ def test_same_user_live_claimant_is_unlinked_not_blocked(monkeypatch):
             "tenant-X", "e-b", connecting_user_id="me",
         )
 
-    assert result is None, (
-        "re-linking your own org to another entity must not be blocked by an "
-        "unverifiable same-user claim"
+    assert result is entity_a, (
+        "an org held by this person's own other company must block, not be taken"
     )
-    assert entity_a.xero_org_id is None, "entity A's claim must be released"
-    assert entity_a.status == "disconnected"
-    assert entity_a.connected_by_user_id is None
-    assert session.commit_calls == 1
+    # The refusal moves nothing: A is exactly as it was, and nothing was saved.
+    assert entity_a.xero_org_id == "tenant-X"
+    assert entity_a.status == "connected"
+    assert entity_a.connected_by_user_id == "me"
+    assert session.commit_calls == 0
 
 
 def test_same_user_claim_does_not_probe_xero(monkeypatch):
     """The same-user case must not consult Xero at all.
 
-    Reaching for the probe is what produced the false block, so this asserts the
-    branch short-circuits BEFORE any token/network work rather than merely
-    ignoring the answer.
+    The probe cannot answer here whatever it returns (the token is shared), so
+    the branch short-circuits BEFORE any token/network work rather than asking
+    and then ignoring the answer - a round trip that could only mislead.
     """
     app = _build_app()
     session = _SessionStub()
@@ -533,7 +541,7 @@ def test_same_user_claim_does_not_probe_xero(monkeypatch):
             "tenant-X", "e-b", connecting_user_id="me",
         )
 
-    assert result is None
+    assert result is entity_a
 
 
 def test_other_user_live_claim_still_blocks(monkeypatch):
@@ -588,8 +596,8 @@ def test_other_user_dead_claim_still_allows(monkeypatch):
 
 
 def test_unknown_connecting_user_falls_back_to_probe(monkeypatch):
-    """Without a connecting_user_id we cannot prove a claim is the same user's,
-    so fall back to the live probe rather than unlinking on a guess."""
+    """Without a connecting_user_id we cannot tell whose claim it is, so fall
+    back to the live probe rather than assuming on a guess."""
     app = _build_app()
     session = _SessionStub()
     live = _make_entity(
@@ -609,7 +617,7 @@ def test_unknown_connecting_user_falls_back_to_probe(monkeypatch):
     assert result is live, "no connecting_user_id -> keep the old probe path"
 
 
-def test_claimant_with_no_connector_is_probed_not_unlinked(monkeypatch):
+def test_claimant_with_no_connector_is_probed(monkeypatch):
     """connected_by_user_id is NULL: that is not 'the same user', so it must not
     take the same-user branch. It falls through to the probe, which finds no
     usable token and reconciles it as a ghost."""
@@ -633,11 +641,11 @@ def test_claimant_with_no_connector_is_probed_not_unlinked(monkeypatch):
     assert orphan.xero_org_id is None
 
 
-def test_mixed_claimants_other_user_wins(monkeypatch):
+def test_mixed_claimants_both_block_and_neither_moves(monkeypatch):
     """Duplicates where one claimant is the user's own and another is a live
-    claim by someone else: the same-user row is released, but the other user's
-    live claim still blocks. Order matters — the block must survive the earlier
-    unlink."""
+    claim by someone else: both are real conflicts now, so the first one found
+    blocks and no row is touched. (It used to release the same-user row and
+    block on the other.)"""
     app = _build_app()
     session = _SessionStub()
     mine = _make_entity(
@@ -660,8 +668,11 @@ def test_mixed_claimants_other_user_wins(monkeypatch):
             "tenant-X", "e-new", connecting_user_id="me",
         )
 
-    assert result is theirs, "another user's live claim must still block"
-    assert mine.xero_org_id is None, "the user's own stale row is still released"
+    assert result is mine, "the first real claim found blocks"
+    # Refusing moves nothing, on either company.
+    assert mine.xero_org_id == "tenant-X"
+    assert theirs.xero_org_id == "tenant-X"
+    assert session.commit_calls == 0
 
 
 def test_no_claimants_means_org_is_free(monkeypatch):
@@ -741,6 +752,11 @@ def _patch_callback_common(monkeypatch, *, user, entities_by_id, session,
         ),
     )
     monkeypatch.setattr(xero_routes, "normalize_email", lambda e: e)
+    # The refusal asks whether this person may free the other company (_refuse_conflict).
+    # Unpatched it reaches the real permission tables, and the callback's own except turns
+    # that into the generic "I couldn't connect that" - so the refusal under test would be
+    # swallowed and the test would pass on the wrong message.
+    monkeypatch.setattr(xero_routes, "has_permission", lambda *_a, **_kw: True)
     monkeypatch.setattr(xero_routes, "resolve_user_by_email", lambda *_a, **_kw: user)
     monkeypatch.setattr(xero_routes, "_connect_initiator_mismatch", lambda *_a, **_kw: None)
     monkeypatch.setattr(xero_routes, "_resolve_connect_entity", lambda *_a, **_kw: target_entity)
@@ -762,6 +778,151 @@ def _patch_callback_common(monkeypatch, *, user, entities_by_id, session,
                         lambda loc: SimpleNamespace(status_code=302, location=loc))
     monkeypatch.setattr(xero_routes, "upsert_user_token", lambda *_a, **_k: None)
     monkeypatch.setattr(xero_routes, "current_user", SimpleNamespace(username="u@example.com"))
+
+
+def _event_empty_but_token_sees(tenant_ids):
+    """A `requests` stub where the AUTH EVENT granted nothing but the token still sees
+    ``tenant_ids`` - what Xero answers when the organisation picked is already connected to
+    the app, so there was nothing new to grant."""
+    def _get(url, *_a, **_kw):
+        tenants = [] if "authEventId=" in str(url) else tenant_ids
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: [{"tenantId": t, "tenantName": "Org"} for t in tenants],
+        )
+
+    return SimpleNamespace(get=_get, delete=lambda *_a, **_kw: SimpleNamespace(status_code=204))
+
+
+def test_an_empty_auth_event_names_the_company_holding_the_org(monkeypatch):
+    """THE REPORTED BUG (2026-10-09): the owner connected an organisation already connected
+    to another Minty company and was told *"No organization was picked on Xero's approval
+    screen"* - blamed for a choice they had made.
+
+    Xero grants nothing when the organisation is already connected to the app, so
+    `/connections?authEventId=` comes back EMPTY and the conflict guard below never ran. The
+    empty case now asks what the token can see and names the holder instead.
+    """
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity_new = _make_entity("entity-new", xero_org_id=None, status="onboarding")
+    holder = _make_entity("entity-old", xero_org_id="tenant-X", name="OldCo")
+    holder.connected_by_user_id = "u1"  # the same person's other company
+
+    _patch_callback_common(
+        monkeypatch, user=user,
+        entities_by_id={"entity-new": entity_new},
+        session=session, connect_tenant="tenant-X", conflict_entity=holder,
+    )
+    monkeypatch.setattr(xero_routes, "requests", _event_empty_but_token_sees(["tenant-X"]))
+    said = []
+    monkeypatch.setattr(xero_routes, "flash", lambda message, *_a, **_k: said.append(str(message)))
+
+    with app.test_request_context("/callback?state=entity_connect:entity-new&code=c"):
+        response = xero_routes.xero_callback()
+
+    assert response.status_code == 302
+    assert any("already connected to \"OldCo\"" in m for m in said), said
+    assert not any("No organization was picked" in m for m in said), said
+    assert not any("not connected to Xero yet" in m for m in said), said
+    # Nothing moved: the holder keeps its organisation, the target gets none.
+    assert holder.xero_org_id == "tenant-X"
+    assert entity_new.xero_org_id is None
+
+
+def test_an_empty_auth_event_with_nothing_held_still_says_nothing_was_picked(monkeypatch):
+    """The other reason the event is empty: the person really did approve without choosing.
+    The token sees no organisation at all, so the original message is the true one."""
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity_new = _make_entity("entity-new", xero_org_id=None, status="onboarding")
+
+    _patch_callback_common(
+        monkeypatch, user=user,
+        entities_by_id={"entity-new": entity_new},
+        session=session, connect_tenant="tenant-X", conflict_entity=None,
+    )
+    monkeypatch.setattr(xero_routes, "requests", _event_empty_but_token_sees([]))
+    said = []
+    monkeypatch.setattr(xero_routes, "flash", lambda message, *_a, **_k: said.append(str(message)))
+
+    with app.test_request_context("/callback?state=entity_connect:entity-new&code=c"):
+        response = xero_routes.xero_callback()
+
+    assert response.status_code == 302
+    assert any("not connected to Xero yet" in m for m in said), said
+    assert entity_new.xero_org_id is None
+
+
+def test_reconnect_with_an_empty_auth_event_names_the_holder(monkeypatch):
+    """The owner's actual route: the Entity & Integration tab's Connect button goes to
+    ``/xero_reconnect``, so the reconnect branch is the one that said "No organization was
+    picked". Same cause, same answer."""
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity_new = _make_entity("entity-new", xero_org_id=None, status="disconnected")
+    holder = _make_entity("entity-old", xero_org_id="tenant-X", name="OldCo")
+    holder.connected_by_user_id = "u1"
+
+    _patch_callback_common(
+        monkeypatch, user=user,
+        entities_by_id={"entity-new": entity_new},
+        session=session, connect_tenant="tenant-X", conflict_entity=holder,
+    )
+    monkeypatch.setattr(xero_routes, "requests", _event_empty_but_token_sees(["tenant-X"]))
+    said = []
+    monkeypatch.setattr(xero_routes, "flash", lambda message, *_a, **_k: said.append(str(message)))
+
+    with app.test_request_context(
+        "/callback?state=entity_reconnect:u1&code=c&entity_id=entity-new"
+    ):
+        response = xero_routes.xero_callback()
+
+    assert response.status_code == 302
+    assert any("already connected to \"OldCo\"" in m for m in said), said
+    assert not any("No organization was picked" in m for m in said), said
+    assert holder.xero_org_id == "tenant-X"
+    assert entity_new.xero_org_id is None
+
+
+def test_an_empty_auth_event_revokes_nothing(monkeypatch):
+    """What this token can see was granted by EARLIER auth events - the other company's - so
+    handing one back would disconnect THAT company. The refusal must only refuse."""
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity_new = _make_entity("entity-new", xero_org_id=None, status="onboarding")
+    holder = _make_entity("entity-old", xero_org_id="tenant-X", name="OldCo")
+    holder.connected_by_user_id = "u1"
+
+    _patch_callback_common(
+        monkeypatch, user=user,
+        entities_by_id={"entity-new": entity_new},
+        session=session, connect_tenant="tenant-X", conflict_entity=holder,
+    )
+
+    deleted = []
+
+    def _get(url, *_a, **_kw):
+        tenants = [] if "authEventId=" in str(url) else ["tenant-X"]
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: [{"id": "conn-1", "tenantId": t, "tenantName": "Org"} for t in tenants],
+        )
+
+    monkeypatch.setattr(
+        xero_routes, "requests",
+        SimpleNamespace(get=_get, delete=lambda url, *_a, **_kw: deleted.append(url) or SimpleNamespace(status_code=204)),
+    )
+    monkeypatch.setattr(xero_routes, "flash", lambda *_a, **_k: None)
+
+    with app.test_request_context("/callback?state=entity_connect:entity-new&code=c"):
+        xero_routes.xero_callback()
+
+    assert deleted == [], "a refusal on an empty auth event must revoke nothing"
 
 
 def test_callback_blocks_real_live_conflict(monkeypatch):

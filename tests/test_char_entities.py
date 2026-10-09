@@ -296,6 +296,53 @@ def test_xero_disconnect_flips_the_company_to_disconnected(world, company, clien
     assert row.xero_org_id is None
 
 
+def test_the_wizard_can_free_another_companys_xero_org_but_only_with_permission(
+    world, company, client, app, db, monkeypatch
+):
+    """``POST /api/onboarding/xero/release`` - the move the wizard offers when the Xero
+    organisation picked is already connected to another company.
+
+    What matters: the company freed is the one in the BODY, authorized on itself, and it ends
+    up ``disconnected`` - not ``onboarding``, which ``/xero/disconnect`` leaves behind and
+    which would make a live company look mid-wizard. A stranger naming its id frees nothing.
+    """
+    import requests
+
+    monkeypatch.setattr(requests, "delete", lambda url, **kw: type("R", (), {"status_code": 204})())
+    monkeypatch.setattr(
+        requests, "get",
+        lambda url, **kw: type("R", (), {"status_code": 200,
+                                         "json": lambda self: [{"id": "conn-1", "tenantId": "t-1"}]})(),
+    )
+    with app.app_context():
+        F.connect_xero(db, world["admin"], company, tenant_id="t-1",
+                       tokens={"access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 1800})
+
+    stranger = None
+    with app.app_context():
+        stranger = F.make_user(db, "nobody@test.com")
+    refused = client.post("/api/onboarding/xero/release", json={"entity_id": company.id},
+                          headers=onboarding_bearer(app, stranger.id))
+    assert refused.status_code == 403
+    assert entity_row(app, company.id).xero_org_id == "t-1", "a refusal frees nothing"
+
+    assert client.post("/api/onboarding/xero/release", json={},
+                       headers=onboarding_bearer(app, world["admin"].id)).status_code == 400
+
+    done = client.post("/api/onboarding/xero/release", json={"entity_id": company.id},
+                       headers=onboarding_bearer(app, world["admin"].id))
+    assert done.status_code == 200, done.data[:300]
+    assert done.get_json()["released"] is True
+    row = entity_row(app, company.id)
+    assert row.xero_org_id is None
+    assert row.status == "disconnected", "the company freed is disconnected, never 'onboarding'"
+
+    # Already free: the move can go on, so this is an answer rather than a refusal.
+    again = client.post("/api/onboarding/xero/release", json={"entity_id": company.id},
+                        headers=onboarding_bearer(app, world["admin"].id))
+    assert again.status_code == 200 and again.get_json()["released"] is False
+
+
 # ---- deleting -----------------------------------------------------------------------------------
 
 

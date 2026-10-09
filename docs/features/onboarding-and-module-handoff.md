@@ -32,7 +32,7 @@ header). The endpoints, in wizard order:
 | 1 Basic | `create`, `entity/<id>` (edit an in-progress company) |
 | 2 Modules | `modules` (Flask), `plans` (Django), the billing routes `payment-method`, `billing/*`, `billing/authorize` (minty-subscription-api) |
 | 3 Invite | `invite` (GET/POST), `invite/cancel` |
-| 4 Accounting | Xero connect is Minty's `/xero_connect` with the entity in the state; `xero/disconnect` |
+| 4 Accounting | Xero connect is Minty's `/xero_connect` with the entity in the state; `xero/disconnect`; `xero/release` frees an organisation another company holds, for the move the conflict dialog offers ([xero-integration.md](xero-integration.md) §1.1) |
 | 5–7 Petty cash | `sales-methods`, `opening-balance`, `account-codes`, `contacts`, `contacts/create` |
 | 8 Bills | `bill-codes` |
 | 9 All Set | `finalize` (minty-onboarding-api) — flips the company live (`status`), then starts the card-free trials of the chosen modules on minty-subscription-api (`trial_end` in the answer; null when no module has one). A failed trial start fails finalize, and the All Set screen offers Try again |
