@@ -307,6 +307,10 @@ server-side it calls Xero's Accounts API via `get_accounts_from_xero` to list ba
 - **Finalize and the All Set step (step 9)** — served by minty-onboarding-api, not Minty;
   its own checklist (`minty-onboarding-api/docs/features/qa-checklist.md`) covers it,
   including the "never land a test session on saved step 9" trap.
+- **Required-field marks** — Flask's ~33 mandatory-but-unmarked fields were audited on
+  2026-10-09 when the four Next.js frontends were marked, and deliberately left alone here.
+  The findings, the two existing Flask markers, the Bootstrap-only trap and three bugs the
+  audit turned up are in [required-field-marks.md](required-field-marks.md).
 - **The email OTP's actual inbox delivery** — ends at a real mailbox; this checklist only
   covers what Minty does before and after the mail is sent.
 
