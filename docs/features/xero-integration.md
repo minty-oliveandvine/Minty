@@ -21,7 +21,8 @@ does not survive the round-trip. `GET /callback`:
    `entities.connected_by_user_id`;
 2. binds the tenant: `entities.xero_org_id`, `xero_tenant_name`, `status = connected`
    (`EntityStatus`: `onboarding` / `connected` / `disconnected`). One organisation may be
-   connected to one company at a time — connecting it elsewhere disconnects the other;
+   connected to one company at a time, and connecting it elsewhere is **refused** — see
+   §1.1;
 3. starts the **background sync** (`sync_all_accounts_and_contacts_background`, one thread,
    three sections): contacts → `xero_contact_sync`, the chart of accounts → `account_info`
    (+ `entity_account_xero` for the expense picker) and the bill account codes →
@@ -29,6 +30,59 @@ does not survive the round-trip. `GET /callback`:
    across that boundary by design). `GET /api/entity/<id>/xero-sync-status` reports the
    sync's progress for the settings page; the cached rows are also what the pages use when
    Xero is down.
+
+### 1.1 One organisation, one company — and the move (2026-10-09)
+
+`_live_org_claimant` (`xero/routes/routes.py`) decides this on every connect and reconnect.
+Every company whose `xero_org_id` matches the tenant the person picked is examined:
+
+| the other company's claim | what happens |
+|---|---|
+| `status = "disconnected"` | a stale claim our own status disowns: cleared, connect allowed |
+| held by **another** user | live-probed with **its own** connector token; a live claim **blocks** |
+| held by the **same** user | **blocks** without probing — the token is shared, so the probe cannot answer |
+| no connector / probe fails / tenant gone | a ghost: reconciled, connect allowed |
+
+**The same-user case used to be the silent one.** It unlinked the other company and let the
+connect through, so the person saw the ordinary "Connected to Xero!" message and no error at
+all, while their other company lost Xero with nobody told. It blocks now, and freeing an
+organisation is always asked for.
+
+**The empty auth event is the same story, and it used to lie.** Xero grants nothing when the
+organisation picked is already connected to the app, so `GET /connections?authEventId=<id>`
+comes back **empty** and the guard above never runs — the callback bailed out first and said
+*"No organization was picked on Xero's approval screen"*, blaming the person for a choice they
+had made (the owner reported exactly this on 2026-10-09). That branch now asks what the token
+can see at all (`_all_connections` → `_claimed_elsewhere`, the unfiltered `/connections`) and
+names the holder; only when the token sees no organisation does it still say nothing was
+picked. **It revokes nothing** — what the token sees was granted by earlier auth events, so
+handing one back would disconnect the other company.
+
+A refusal `_revoke_new_grant`s (the OAuth exchange has already completed, so the grant exists
+on Xero's side — except on an empty auth event, where there is no new grant) and then
+`_refuse_conflict` flashes one sentence AND signs the holder into the redirect — `sign_conflict` / `read_conflict` (`entity/services/entity_list.py`, its own salt,
+the notices' 5-minute life). `?xero_conflict=` rides `_to_hub_tab` to minty-web, where
+`/api/me/company/integration` answers it as `xero_conflict` (`_conflict` re-settles it against
+the database: the holder must still hold something, must not be the company being viewed, and
+`can_move` is re-read). Onboarding gets `conflict_entity_id` + `conflict_can_move` on its
+return instead. Both then draw the **"That Xero organisation is taken"** dialog.
+
+**The move** the dialog offers is two steps, because the refused attempt's grant was handed
+back and there is no token left to reuse (and storing one against a refused connect is not
+something to keep):
+
+1. free the organisation — `POST /api/me/company/xero/release` (minty-web) or
+   `POST /api/onboarding/xero/release` (the wizard), **authorized on the company being
+   freed**, not the one being viewed: `XERO_SETTINGS_UPDATE` there, its own Disconnect's
+   permission. Both defer to `disconnect_entity_from_xero`, so it ends `disconnected` —
+   the wizard's own `xero/disconnect` leaves `onboarding`, which is wrong for a live company;
+2. then the browser goes back through `/xero_reconnect` (or `/xero_connect`) for this company.
+
+Without the permission there is no move, only the company to ask. Nothing is written by
+refusing, and a failed release keeps the dialog open to retry. Pinned by
+`tests/test_xero_conflict_guard.py`, `tests/test_hub_company_settings.py` and
+`tests/test_char_entities.py`; the dialogs by minty-web's `screens.test.tsx` and
+minty-onboarding-web's `e2e/xero.spec.ts`.
 
 The sync **replaces** the cached rows, and `entity_pettycash_settings` has nine FKs into
 them (`ON DELETE SET NULL`), so a re-sync after an organisation switch clears the petty-cash
@@ -129,6 +183,8 @@ with Xero stubbed, the lock, the expense-line lookup by Xero ids), `tests/test_c
 and `tests/test_char_xero_tokens.py` (the cache and the token rules), `tests/test_xero_report_republish.py`,
 `tests/test_xero_org_switch_invalidation.py`, `tests/test_xero_entity_connect_race.py`,
 `tests/test_xero_contact_sync_no_mass_delete.py` (the republish, org-switch and sync
-guards), and — the only thing that talks to Xero — `e2e/04_xero_publish.spec.ts` with
+guards), `tests/test_xero_conflict_guard.py` with `tests/test_hub_company_settings.py` and
+`tests/test_char_entities.py` (one org = one company, and the move — §1.1),
+and — the only thing that talks to Xero — `e2e/04_xero_publish.spec.ts` with
 `E2E_XERO=1` against a shop linked to a Demo Company (what it found on 2026-09-18 is in
 `docs/modernisation/modernisation_plan.md`, Phase E).

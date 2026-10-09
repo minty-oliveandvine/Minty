@@ -405,12 +405,53 @@ def hub_company_integration():
         refusal = _save_integration(user, entity_id, _body())
         if refusal is not None:
             return refusal
-        return hub_api.respond({**_integration_page(user, entity_id), "notices": [], "message": "Settings saved!"})
+        return hub_api.respond(
+            {**_integration_page(user, entity_id), "notices": [], "xero_conflict": None, "message": "Settings saved!"}
+        )
 
     early, user, entity_id = _open(Permission.XERO_SETTINGS_VIEW, "You don't have permission to see this company's settings.")
     if early is not None:
         return early
-    return hub_api.respond({**_integration_page(user, entity_id), "notices": read_notices(request.args.get("flash"))})
+    return hub_api.respond(
+        {
+            **_integration_page(user, entity_id),
+            "notices": read_notices(request.args.get("flash")),
+            "xero_conflict": _conflict(user, entity_id, request.args.get("xero_conflict")),
+        }
+    )
+
+
+def _conflict(user, entity_id, token: str | None) -> dict | None:
+    """The company holding the Xero organisation this company's connect was refused for,
+    for the tab's "move it here" dialog - or None when there is nothing to offer.
+
+    ``read_conflict`` only proves the hand-over is ours and unexpired. Three things are
+    settled HERE, against the database as it is now, because the token was signed before the
+    round trip and a person can reload the tab, or edit the URL, long after:
+
+    * the other company must still hold an organisation. Free it (here, or on its own tab)
+      and a reload stops offering the move instead of failing on it.
+    * it must not be this company. A token naming the company being viewed would offer to
+      disconnect it from itself.
+    * ``can_move`` is this person's permission on the OTHER company, re-read rather than
+      trusted from the token. The release route checks it again; this only decides whether
+      the button is drawn.
+    """
+    from blueprints.entity.services.entity_list import read_conflict
+    from models.db import Entity, db
+
+    held = read_conflict(token)
+    if held is None or str(held["entity_id"]) == str(entity_id):
+        return None
+    other = db.session.get(Entity, held["entity_id"])
+    if other is None or not other.xero_org_id:
+        return None
+    return {
+        "entity_id": str(other.id),
+        "entity_name": other.name,
+        "organisation": other.xero_tenant_name or None,
+        "can_move": has_permission(user, Permission.XERO_SETTINGS_UPDATE, other.id),
+    }
 
 
 def _save_integration(user, entity_id, data: dict):
@@ -478,5 +519,77 @@ def hub_company_xero_disconnect():
             502,
         )
     logger.info(f"Xero disconnected entity={entity_id} actor={user.id}")
-    return hub_api.respond({**_integration_page(user, entity_id), "notices": [], "message": "You're disconnected from Xero."})
+    return hub_api.respond(
+        {
+            **_integration_page(user, entity_id),
+            "notices": [],
+            "xero_conflict": None,
+            "message": "You're disconnected from Xero.",
+        }
+    )
+
+
+@entity_bp.route("/api/me/company/xero/release", methods=["POST", "OPTIONS"])
+def hub_company_xero_release():
+    """Free the Xero organisation held by ANOTHER company, so it can be connected here.
+
+    The first half of the move the Entity & Integration tab offers when a connect was
+    refused ("this organisation is already connected to X"): this disconnects X, and the tab
+    then sends the person back through Xero's consent screen for the company they were
+    connecting. Two steps, not one, because the grant the refused attempt created was handed
+    back to Xero - there is no token left to reuse, and keeping one would mean storing
+    somebody's Xero tokens against a connect that was refused.
+
+    THE COMPANY FREED IS THE ONE IN THE BODY, not the ``?entity=`` the tab is showing, so it
+    is authorized on its own: ``XERO_SETTINGS_UPDATE`` on the company being disconnected,
+    which is the permission its own Disconnect button asks for. ``?entity=`` still has to be
+    a company this person belongs to (``_open``), and the two must differ - a company does
+    not release itself.
+
+    Disconnecting is the canonical ``disconnect_entity_from_xero``: it revokes at Xero,
+    clears the cached Xero data and leaves that company ``disconnected``, which is exactly
+    what its own tab would have done.
+    """
+    early, user, entity_id = _open(
+        Permission.XERO_SETTINGS_UPDATE, "You don't have permission to change this company's settings."
+    )
+    if early is not None:
+        return early
+
+    from blueprints.xero.services.disconnect import disconnect_entity_from_xero
+    from models.db import Entity, db
+
+    release_id = str(_body().get("entity_id") or "").strip()
+    if not release_id:
+        return hub_api.refuse("I need to know which company to disconnect from Xero.", 422)
+    if release_id == str(entity_id):
+        return hub_api.refuse("That company is the one you're connecting.", 422)
+    try:
+        uuid.UUID(release_id)
+    except ValueError:
+        return hub_api.refuse(_NO_COMPANY, 403)
+    other = db.session.get(Entity, release_id)
+    if other is None:
+        return hub_api.refuse(_NO_COMPANY, 403)
+    # The permission that counts: on the company being freed, not the one being viewed.
+    if not has_permission(user, Permission.XERO_SETTINGS_UPDATE, other.id):
+        return hub_api.refuse(
+            f"Only an accountant or admin of \"{other.name}\" can disconnect it from Xero.", 403
+        )
+    if not other.xero_org_id:
+        # Already free - the move can go on, so this is an answer and not a refusal.
+        logger.info(f"Xero release: entity={release_id} already free actor={user.id}")
+        return hub_api.respond({"message": f"\"{other.name}\" is already disconnected from Xero."})
+
+    try:
+        disconnect_entity_from_xero(other.id)
+    except Exception:
+        logger.exception(f"Xero release failed entity={release_id} actor={user.id}")
+        return hub_api.refuse(
+            f"I couldn't disconnect \"{other.name}\" from Xero, so the organisation is still "
+            "in use there. Mind trying again?",
+            502,
+        )
+    logger.info(f"Xero released entity={release_id} for={entity_id} actor={user.id}")
+    return hub_api.respond({"message": f"\"{other.name}\" is disconnected from Xero."})
 

@@ -55,7 +55,9 @@ Flask draws ONE tab: Petty Cash Settings = `settings_entity.html`
 Entity & Integration and Module are minty-web's** (`/entity/<shortid>/<name>/settings/<tab>`,
 phase 2 - 2026-10-05, `minty-web/docs/features/company-settings.md`): their Flask addresses stay
 as HAND-OVERS (`routes/settings.py::_to_hub_tab` - a company-scoped token, and whatever was
-flashed on the way signed into `?flash=`; the Xero reconnect's outcome reaches the tab that way),
+flashed on the way signed into `?flash=`, plus `?xero_conflict=` when a connect was refused
+because another company holds the organisation; the Xero reconnect's outcome reaches the tab
+that way),
 over Flask's bearer routes `/api/me/company/*` (`routes/hub_settings.py`, below). The Jinja pages
 (`settings_users_bills_ui.html` and its five partials, `settings_xero_bills_ui.html`) and their
 session JSON routes are deleted.
@@ -72,7 +74,7 @@ without Petty Cash); the payments app's own sidebar opens its Payment Request Se
 
 | Tab | Route | What it edits | Who |
 |---|---|---|---|
-| Entity & Integration | minty-web; `GET /entity/<co>/settings/integration` hands over. Reads `GET /api/me/company/integration`, saves `PATCH` (name / `country_code` / `currency_id`), `POST /api/me/company/xero/disconnect` | the company name, country & currency, the Xero connection ([xero-integration.md](xero-integration.md)) | read `XERO_SETTINGS_VIEW` (cashier+); save `XERO_SETTINGS_UPDATE` (accountant+); rename `ENTITY_RENAME` (admin) |
+| Entity & Integration | minty-web; `GET /entity/<co>/settings/integration` hands over. Reads `GET /api/me/company/integration`, saves `PATCH` (name / `country_code` / `currency_id`), `POST /api/me/company/xero/disconnect`, `POST /api/me/company/xero/release` (free another company's Xero organisation - authorized on THAT company; [xero-integration.md](xero-integration.md) §1.1) | the company name, country & currency, the Xero connection ([xero-integration.md](xero-integration.md)) | read `XERO_SETTINGS_VIEW` (cashier+); save `XERO_SETTINGS_UPDATE` (accountant+); rename `ENTITY_RENAME` (admin) |
 | Petty Cash Settings | `GET/POST /entity/<co>/settings/petty-cash` (Petty Cash on only) | country & currency, the Xero account mapping - the accounts and contacts the dashboard's "Setup Required" asks for ([xero-integration.md](xero-integration.md) §3) - the sales settlement methods and the petty-cash account codes, at least one of which stays ticked ([petty-cash-settings.md](petty-cash-settings.md)) | `ENTITY_UPDATE` / `COA_UPDATE` / `COA_CREATE` / `COA_DELETE` - as above |
 | Users | minty-web; `GET /entity/<co>/settings/users` hands over. Reads `GET /api/me/company/users` | members with role, who pays for the company (the billing-group payer, looked up separately from the role), pending invitations; per row whether this person may change the role / remove | read `USER_VIEW_ALL` and invite `USER_INVITE` (shop manager+); change a role `USER_ROLE_ASSIGN` (shop manager+); remove `USER_ROLE_DELETE` (accountant+) - each also the rank rule below |
 | Module | `GET /entity/<co>/settings/modules` | a hand-over to minty-web's Module page ([modules-and-subscriptions.md](modules-and-subscriptions.md)) | `MODULE_VIEW` |

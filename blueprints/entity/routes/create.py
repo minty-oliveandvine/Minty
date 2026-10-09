@@ -995,6 +995,49 @@ def onboarding_xero_disconnect():
     return _cors(resp)
 
 
+@entity_bp.route("/api/onboarding/xero/release", methods=["POST", "OPTIONS"])
+def onboarding_xero_release():
+    """Free the Xero organisation held by ANOTHER company, so this wizard can connect it.
+
+    POST {entity_id} - the company to disconnect, which is NOT the one being onboarded. The
+    wizard offers this when a connect was refused because that company already holds the
+    organisation ("one org = one company"); it disconnects there and then sends the person
+    back through ``/xero_connect`` for the company they are onboarding. Nothing is freed
+    unless the person asks: a refusal on its own moves nothing.
+
+    Not ``/xero/disconnect``: that one leaves the company it clears in ``onboarding``
+    status, which is right for the company being onboarded and wrong for a live one. This
+    uses the canonical ``disconnect_entity_from_xero``, so the company freed ends up
+    ``disconnected`` exactly as its own Disconnect button would leave it.
+
+    Authorized on the company being freed - ``XERO_SETTINGS_UPDATE`` there, the permission
+    its own Disconnect asks for - and never on the onboarding one. Same JWT/CORS contract as
+    the other onboarding endpoints.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    entity_id = (payload.get("entity_id") or "").strip()
+    if not entity_id:
+        resp = jsonify({"error": "entity_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_xero import release_entity_xero
+
+    data, status = release_entity_xero(user_id, entity_id)
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
 @entity_bp.route("/api/onboarding/bill-codes", methods=["GET", "POST", "OPTIONS"])
 def onboarding_bill_codes():
     """Token-authenticated Bill Account Code settings (onboarding Step 7).

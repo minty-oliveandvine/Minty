@@ -148,3 +148,50 @@ def disconnect_entity_xero(user_id, entity_id):
             "onboarding disconnect failed entity=%s: %s", entity_id, exc
         )
         return {"error": "Failed to disconnect from Xero. Please try again."}, 500
+
+
+def release_entity_xero(user_id, entity_id):
+    """Free the Xero organisation held by another company, so an onboarding company can
+    connect it. Returns ``(data, status)``.
+
+    The wizard's half of the move offered when a connect is refused ("one org = one
+    company"). Not ``disconnect_entity_xero``: that leaves the company it clears in
+    ``onboarding`` status, which is right for the company being onboarded and wrong for the
+    live one being freed. This defers to the canonical
+    ``xero.services.disconnect.disconnect_entity_from_xero``, so the company ends up
+    ``disconnected`` exactly as its own Disconnect button would leave it.
+
+    Authorized on the company being freed - ``XERO_SETTINGS_UPDATE`` there, the permission
+    its own Disconnect asks for.
+    """
+    from blueprints.xero.services.disconnect import disconnect_entity_from_xero
+
+    entity_id = (entity_id or "").strip()
+    if not entity_id:
+        return {"error": "entity_id is required"}, 400
+
+    if not has_permission_by_user_id(
+        user_id, Permission.XERO_SETTINGS_UPDATE, entity_id
+    ):
+        return {"error": "Access denied"}, 403
+
+    org = Entity.query.get(entity_id)
+    if not org:
+        return {"error": "Entity not found"}, 404
+
+    name = org.name
+    if not org.xero_org_id:
+        # Already free, so the move can go on: an answer, not a refusal.
+        logger.info("onboarding release: entity %s already free", entity_id)
+        return {"ok": True, "released": False, "entity_name": name}, 200
+
+    try:
+        disconnect_entity_from_xero(org.id)
+    except Exception as exc:  # noqa: BLE001 - the wizard says so and the person may retry
+        logger.error("onboarding release failed entity=%s: %s", entity_id, exc)
+        return {
+            "error": f'I could not disconnect "{name}" from Xero, so the organisation is '
+                     "still in use there. Mind trying again?"
+        }, 502
+    logger.info("onboarding release: entity %s disconnected", entity_id)
+    return {"ok": True, "released": True, "entity_name": name}, 200
