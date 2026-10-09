@@ -203,9 +203,24 @@ holds `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET`.
 
 ## 8. Branches and deployments
 
-`main` deploys **production**; `development` deploys the **development** environment. Each
-service's variables are set per environment in its host's dashboard (Render or Vercel —
-whichever hosts that service); none are committed.
+**This section describes the shape `minty-infra` creates, and most of it is NOT live yet
+(checked against the Render, Vercel, Supabase and B2 APIs on 2026-10-08).** What is actually
+running today:
+
+- **There is no production/development split at all.** Render has four Minty services, *all* on
+  `branch=development`, and all with auto-deploy **off**. Two of them carry the production
+  domains (`pettycash.`, `payment-backend.`). Vercel's production builds also come from
+  `development`.
+- `minty-billing-api` and `onboarding-backend` are on the **free plan with no custom domain**, so
+  `subscription-api.dailyminty.com` and `onboarding-api.dailyminty.com` **do not exist yet**.
+- One Supabase project and one schema (`pettycashv3`) serve every backend; one B2 bucket serves
+  every environment.
+- Each service's variables come from its own Render env group (`New-Petty-Cash` and the other
+  three), not from the `minty-shared-<env>` group described below.
+
+So, forward-looking: `main` **will deploy** production and `development` the development
+environment, once `minty-infra` is applied. Until then the dashboards are the source of truth
+(as §8's "Cutover checklist" already says) and variables are set per service there.
 
 ### CI (the shared workflows)
 
@@ -255,24 +270,44 @@ Option A (the three Next.js apps on Cloudflare Workers, `dailyminty.com` on Clou
 backends still on Render) stays parked on the `infra-cloudflare` branches of `minty-infra`,
 Minty and the three Next.js repos.
 
-| Service | Production | Development | Host |
-|---|---|---|---|
-| Petty Cash | `pettycash.dailyminty.com` | `dev-pettycash.dailyminty.com` | Render |
-| Subscription API | `subscription-api.dailyminty.com` | `dev-subscription-api.dailyminty.com` | Render |
-| Payment Request API | `payment-backend.dailyminty.com` | `dev-payment-backend.dailyminty.com` | Render |
-| Onboarding API | `onboarding-api.dailyminty.com` | `dev-onboarding-api.dailyminty.com` | Render |
-| Minty web hub | `login.dailyminty.com` | `dev-login.dailyminty.com` | Vercel |
-| Payment Request web | `payment.dailyminty.com` | `dev-payment.dailyminty.com` | Vercel |
-| Onboarding web | `onboarding.dailyminty.com` | `dev-onboarding.dailyminty.com` | Vercel |
+`minty-infra/services.tf` holds this table and nothing else generates a hostname. **"live?" says
+whether that host exists today** — every "no" is created by the apply, not already there.
 
+| Service | Production | live? | Development | live? | Host |
+|---|---|---|---|---|---|
+| Petty Cash | `pettycash.dailyminty.com` | yes | `dev-pettycash.dailyminty.com` | no | Render |
+| Subscription API | `subscription-api.dailyminty.com` | **no** | `dev-subscription-api.dailyminty.com` | no | Render |
+| Payment Request API | `payment-backend.dailyminty.com` | yes | `dev-payment-backend.dailyminty.com` | no | Render |
+| Onboarding API | `onboarding-api.dailyminty.com` | **no** | `dev-onboarding-api.dailyminty.com` | no | Render |
+| Minty web hub | `my.dailyminty.com` | yes | `dev-my.dailyminty.com` | no | Vercel |
+| Payment Request web | `payment.dailyminty.com` | yes | `dev-payment.dailyminty.com` | no | Vercel |
+| Onboarding web | `onboarding.dailyminty.com` | yes | `dev-onboarding.dailyminty.com` | no | Vercel |
+
+- **The hub is `my.dailyminty.com`** (corrected 2026-10-09; this table said `login.` and was
+  wrong). That is what `MINTY_WEB_URL` is set to on every live service, and it is not just a
+  link: `blueprints/shared/hub_api.py` and `pettycash/core/hooks.py` use it as the **CORS allowed
+  origin** for Flask's hub bearer API, so naming the wrong host there stops `/api/me/entities`
+  and `/api/me/profile` working in the browser with nothing in the logs.
+  `login.dailyminty.com` is attached to the same Vercel project and still works — every path
+  exists on both hosts — but nothing in the code routes to it (`hub_login.py` builds
+  `{MINTY_WEB_URL}/login`), so Terraform leaves it unmanaged.
+- The two **`no`**s in the Production column are services on Render's free plan with no custom
+  domain. Anything that assumes `subscription-api.dailyminty.com` resolves today is wrong.
 - Every `*_URL` above is set by Terraform from that one table; no dashboard edit.
-- `APP_ENV`, `SECRET_KEY` and `DATABASE_URL` come from one Render env group per environment
-  (`minty-shared-<env>`), so a `SECRET_KEY` rotation is one value and one apply.
+- `APP_ENV`, `SECRET_KEY` and `DATABASE_URL` **will come** from one Render env group per
+  environment (`minty-shared-<env>`), so a `SECRET_KEY` rotation is one value and one apply.
+  Today they are set per service in the four `New-*` groups, which `render.tf` does not model —
+  `minty-infra/terraform.tfvars`'s `extra_env` carries what it does not write.
 - The subscription pass runs as an hourly Render cron job (`manage.py subscriptions tick`) in
-  production; `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Render service.
-- Render deploys a branch only after its CI checks pass. Vercel's development environment is
-  the preview deployment of the `development` branch.
-- `S3_URL` uses a key scoped to one bucket per environment (development gets its own bucket).
+  production; `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Render service. **The cron job does not
+  exist yet** — it is created with the production stage.
+- Render **will deploy** a branch only after its CI checks pass (`auto_deploy_trigger =
+  "checksPass"`). Auto-deploy is currently **off** on every Render service, so that apply turns
+  it on for the first time. Vercel's development environment is the preview deployment of the
+  `development` branch.
+- `S3_URL` **will use** a key scoped to one bucket per environment (development gets its own
+  bucket). Today one bucket, `pettycash`, serves every environment, and production's key is a B2
+  application key holding **all 27 capabilities** with no bucket restriction.
 
 And:
 
