@@ -19,6 +19,11 @@ DIRS = ["blueprints", "models", "services", "pettycash", "cli", "scripts"]
 ALLOWED = {
     # the default when DATABASE_URL carries no ?schema= (blueprints/shared/schema.py reads it)
     "services/app_runtime/env.py",
+    # the name docs/schema/seed_catalogue.sql is WRITTEN against, which this script rewrites to
+    # whatever schema it is loading into. That literal is a property of the file, not of the
+    # environment - the SQL files are outside this rule by design (see the module docstring), so
+    # the one script that rewrites them has to know the name they use.
+    "scripts/load_catalogue.py",
 }
 SKIP_PREFIXES = ("scripts/schema_migration/",)  # the pipeline names the schema it builds
 
