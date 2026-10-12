@@ -603,9 +603,6 @@
    ],
    "touches": [],
    "touches_via_service": {
-    "outstanding_terms_context": [
-     "date"
-    ],
     "get_trial_modules_for_entities": [
      "company"
     ],
@@ -2673,72 +2670,8 @@
    "in_scope": false
   },
   {
-   "endpoint": "legal.accept_page",
-   "rule": "/legal/accept",
-   "methods": [
-    "GET"
-   ],
-   "touches": [
-    "date"
-   ],
-   "touches_via_service": {},
-   "in_scope": true
-  },
-  {
-   "endpoint": "legal.accept_submit",
-   "rule": "/legal/accept",
-   "methods": [
-    "POST"
-   ],
-   "touches": [
-    "system_role"
-   ],
-   "touches_via_service": {},
-   "in_scope": true
-  },
-  {
    "endpoint": "legal.user_consents",
    "rule": "/minty/api/users/<user_id>/consents",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.terms",
-   "rule": "/legal/terms",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.terms_version",
-   "rule": "/legal/terms/<version>",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.privacy",
-   "rule": "/legal/privacy",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.privacy_version",
-   "rule": "/legal/privacy/<version>",
    "methods": [
     "GET"
    ],
@@ -2751,16 +2684,6 @@
    "rule": "/legal/invite-terms-status",
    "methods": [
     "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.content",
-   "rule": "/legal/content/<kind>",
-   "methods": [
-    "GET"
    ],
    "touches": [],
    "touches_via_service": {},
@@ -3318,7 +3241,7 @@
   }
  ],
  "summary": {
-  "routes": 178,
-  "in_scope": 111
+  "routes": 171,
+  "in_scope": 109
  }
 }

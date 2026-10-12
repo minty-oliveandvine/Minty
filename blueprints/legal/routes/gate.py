@@ -15,10 +15,17 @@ not partly broken. Locked out.
 
 Three entries are load-bearing and must never be removed:
 
-  * the legal blueprint  — the screen we redirect to, and the documents it
-                           asks people to read;
+  * entity.entity_list   — where this gate SENDS people. It hands the browser
+                           to minty-web, which draws the acceptance panel. Gate
+                           it and the redirect points at a page we block: a
+                           loop with no exit, for everybody;
   * auth.logout          — someone who refuses must be able to leave;
-  * the login endpoints  — or nobody can authenticate to reach the screen.
+  * the login endpoints  — or nobody can authenticate to reach the panel.
+
+There is no Flask acceptance screen any more (`/legal/accept` and the
+`templates/legal/` panel were deleted on 2026-10-12, when the documents moved
+to minty-web), so the two bearer routes minty-web posts to and the invite
+status route are the only `legal` endpoints left on the list.
 
 -----------------------------------------------------------------------------
 IT FAILS OPEN, DELIBERATELY
@@ -38,7 +45,6 @@ from loguru import logger
 from blueprints.legal import legal_bp
 from blueprints.legal.services.consent import has_consent
 from blueprints.legal.services.gate import (mark_session_agreed,
-                                            remember_intended_destination,
                                             session_agreed_to_current)
 from legal import registry
 
@@ -79,16 +85,17 @@ ALLOWED_ENDPOINTS = frozenset(
         # that one renders a template and stays gated.
         "invitation.accept_invitation_page",
         # --- Where the gate sends people ----------------------------------
-        # The acceptance panel is rendered as a modal over the Select Company
-        # list, so this endpoint MUST be reachable without having agreed —
-        # otherwise the gate redirects to a page it blocks, which is a loop
-        # with no exit.
+        # THE critical entry. This route renders nothing: it hands the browser
+        # to minty-web's company list, which draws the acceptance panel over
+        # itself. Gate it and the gate redirects to a page it blocks — a loop
+        # with no exit, for every person who owes an acceptance.
         #
-        # The cost is that someone who has not agreed can load this one page
-        # and, by removing the modal in devtools, read their company NAMES.
-        # They still cannot ENTER any of them: every other entity route stays
-        # gated. That is a deliberate, bounded trade for putting the panel
-        # where the design asks for it.
+        # The cost is that someone who has not agreed reaches minty-web's list
+        # and, by removing the panel in devtools, could read their company
+        # NAMES (the panel renders the page inert, not absent — see
+        # minty-web's components/ui/TermsGate.tsx). They still cannot ENTER
+        # any of them: every other entity route stays gated, here. A
+        # deliberate, bounded trade, unchanged by the move.
         "entity.entity_list",
         # --- The acceptance flow itself -----------------------------------
         # Listed one by one rather than allowing the whole `legal` blueprint.
@@ -97,27 +104,19 @@ ALLOWED_ENDPOINTS = frozenset(
         # who has not agreed. Listing endpoints means a NEW legal route is
         # gated until someone deliberately opens it — the safe default.
         #
-        # These seven are load-bearing: without them the gate redirects to a
-        # page it blocks, which is a loop with no exit.
-        "legal.accept_page",
-        "legal.accept_submit",
-        "legal.terms",
-        "legal.terms_version",
-        "legal.privacy",
-        "legal.privacy_version",
+        # Which version is live. Read by the sign-up screen before anyone is
+        # logged in (minty-web asks it, then fetches that version's text from
+        # its own registry), so it must answer to a caller who owes an
+        # acceptance and happens to send a session cookie too.
         "legal.current",
-        # The document body as JSON. The onboarding app reads this to show the
-        # Terms inline and gate its tick box on reaching the end — a
-        # cross-origin iframe cannot be scroll-tracked, so it needs the markup.
-        "legal.content",
         # Asked by the sign-in screen before anyone is logged in, to decide
         # whether an invitee still needs the tick box at all.
         "legal.invite_terms_status",
-        # minty-web's Terms modal (routes/hub.py) - the same acceptance flow drawn by
-        # another app, so load-bearing for the same reason as accept_submit. Its calls are
-        # bearer-only and normally carry no session, so the gate never sees them; but a
-        # client that sends the session cookie too (a same-origin deployment, a fetch with
-        # credentials) would otherwise be refused the very route that lets it agree.
+        # minty-web's Terms panel (routes/hub.py) - the acceptance flow itself since
+        # 2026-10-12, and the only one. Its calls are bearer-only and normally carry no
+        # session, so the gate never sees them; but a client that sends the session cookie
+        # too (a same-origin deployment, a fetch with credentials) would otherwise be
+        # refused the very route that lets it agree.
         "legal.hub_terms_status",
         "legal.hub_terms_accept",
     }
@@ -140,13 +139,6 @@ def _wants_json() -> bool:
     )
 
 
-def _intended_destination() -> str:
-    """The path the person was trying to reach, query string included."""
-    full = request.full_path or request.path
-    # Flask appends a bare "?" when there is no query string.
-    return full[:-1] if full.endswith("?") else full
-
-
 @legal_bp.before_app_request
 def require_terms_acceptance():
     try:
@@ -165,17 +157,16 @@ def require_terms_acceptance():
         if endpoint == "static" or endpoint in ALLOWED_ENDPOINTS:
             return None
 
-        # No document to show → do not block. You cannot ask someone to agree
-        # to something that does not exist, and blocking here is not merely
-        # useless, it is an infinite redirect: the gate sends them to
-        # /legal/accept, which finds no document and bounces them back to the
-        # dashboard, which the gate blocks again. A mistyped
-        # CURRENT_TERMS_VERSION would lock out every user in the system.
+        # Nothing to ask for → do not block. The live version has no entry in
+        # the manifest (legal/registry.py), so this app could not record an
+        # agreement to it even if someone gave one, and minty-web's panel
+        # cannot be answered. A mistyped CURRENT_TERMS_VERSION would otherwise
+        # lock out every user in the system.
         if registry.get_current(registry.TERMS) is None:
             logger.error(
-                "Terms gate is NOT enforcing: no document for current version "
-                f"{registry.current_version(registry.TERMS)!r}. Nobody can be "
-                "asked to agree until this is fixed."
+                "Terms gate is NOT enforcing: current version "
+                f"{registry.current_version(registry.TERMS)!r} is not in the "
+                "manifest. Nobody can be asked to agree until this is fixed."
             )
             return None
 
@@ -204,14 +195,11 @@ def require_terms_acceptance():
                 403,
             )
 
-        # Remembered in the SESSION, never round-tripped through the URL: a
-        # destination taken from the query string can be pointed off-site,
-        # which would turn the acceptance screen into a phishing hop.
-        remember_intended_destination(_intended_destination())
-        # The Select Company list, which renders the acceptance panel as a
-        # modal over itself. /legal/accept still exists and still works; it is
-        # the fallback for anyone who arrives by a path that does not pass
-        # through here.
+        # The company list, which hands over to minty-web, which draws the
+        # acceptance panel over itself. There is no Flask fallback screen any
+        # more, and the page they were trying to reach is NOT remembered: the
+        # panel lifts where the person stands, in minty-web, and never comes
+        # back here to resume a Flask destination.
         return redirect(url_for("entity.entity_list"))
 
     except Exception:

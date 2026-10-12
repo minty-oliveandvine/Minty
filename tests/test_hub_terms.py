@@ -71,19 +71,29 @@ def _consents(app, user_id):
 # --- what is owed ----------------------------------------------------------------------
 
 
-def test_a_first_time_reader_is_shown_the_live_document(app, client, olive, hub):
+def test_a_first_time_reader_is_told_which_version_is_owed(app, client, olive, hub):
+    """The version and its FINGERPRINT - no wording and no links.
+
+    The documents moved to minty-web on 2026-10-12: it holds the text and the public pages,
+    this app names the version and the hash it will record. The `sha256` is what lets the
+    client check that the document it is about to show is the one being asked for.
+    """
     body = client.get("/api/me/terms", headers=_auth(app, olive.id)).get_json()
 
     from legal import registry
 
-    document = registry.get_current(registry.TERMS)
+    entry = registry.get_current(registry.TERMS)
     assert body["owed"] is True
-    assert body["document"]["version"] == document.version
-    assert body["document"]["html"] == document.html
-    assert body["document"]["effective_date"] == document.effective_date
-    assert body["document"]["show_draft_notice"] == document.show_draft_notice
+    assert body["document"] == {
+        "version": entry.version,
+        "effective_date": entry.effective_date,
+        "sha256": entry.sha256,
+        "show_draft_notice": entry.show_draft_notice,
+    }
     assert body["is_update"] is False and body["previous_version"] is None
-    assert body["links"] == {"terms": "/legal/terms", "privacy": "/legal/privacy", "previous": None}
+    # No wording, and no links to pages this app no longer serves.
+    assert "html" not in body["document"]
+    assert "links" not in body
 
 
 def test_nothing_is_owed_once_agreed(app, client, olive, hub, db):
@@ -95,8 +105,16 @@ def test_nothing_is_owed_once_agreed(app, client, olive, hub, db):
     assert client.get("/api/me/terms", headers=_auth(app, olive.id)).get_json() == {"owed": False}
 
 
-def test_an_older_agreement_reads_as_an_update_with_its_link(app, client, olive, hub, db, monkeypatch):
-    """Agreed to an older version: asked again, told which one, and given its link."""
+def test_an_older_agreement_reads_as_an_update_naming_the_version_agreed(
+    app, client, olive, hub, db, monkeypatch
+):
+    """Agreed to an older version: asked again, and told which one.
+
+    The LINK to that older version is minty-web's own page (`/terms/<version>`), built from
+    `previous_version` - this app no longer serves it, so it no longer names it.
+    """
+    from dataclasses import replace
+
     from blueprints.legal.services.consent import record_consent
     from legal import registry
 
@@ -104,37 +122,76 @@ def test_an_older_agreement_reads_as_an_update_with_its_link(app, client, olive,
         record_consent(olive.id, source="gate")
         db.session.commit()
     live = _live_version()
-    # a newer version goes live, backed by the same wording so the registry can serve it
+    # a newer version goes live, with a manifest entry of its own
+    entry = registry.get_version(registry.TERMS, live)
     monkeypatch.setattr(registry, "CURRENT_TERMS_VERSION", "beta-next")
-    monkeypatch.setitem(registry._DOCUMENTS, (registry.TERMS, "beta-next"), registry.get_document(registry.TERMS, live))
+    monkeypatch.setitem(
+        registry.MANIFEST,
+        (registry.TERMS, "beta-next"),
+        replace(entry, version="beta-next", sha256="e" * 64),
+    )
 
     body = client.get("/api/me/terms", headers=_auth(app, olive.id)).get_json()
     assert body["owed"] is True
     assert body["is_update"] is True and body["previous_version"] == live
-    assert body["links"]["previous"] == f"/legal/terms/{live}"
+    assert body["document"]["version"] == "beta-next"
+    assert body["document"]["sha256"] == "e" * 64
 
 
 # --- accepting -------------------------------------------------------------------------
 
 
-def test_accepting_records_a_hub_consent_with_the_registrys_fingerprint(app, client, olive, hub):
+def test_accepting_records_a_hub_consent_with_the_manifests_fingerprint(app, client, olive, hub):
     from legal import registry
 
+    expected = registry.get_current(registry.TERMS).sha256
     resp = client.post(
         "/api/me/terms/accept",
-        json={"accepted": True, "terms_version": _live_version(), "document_hash": "forged"},
+        # The client says which document it showed; this app records its OWN hash.
+        json={"accepted": True, "terms_version": _live_version(), "document_hash": expected},
         headers=_auth(app, olive.id),
     )
 
     assert resp.status_code == 200
     assert resp.get_json() == {"ok": True, "terms_version": _live_version()}
     assert resp.headers["Access-Control-Allow-Origin"] == HUB
-    # the hash is the registry's, whatever the client sent
     assert _consents(app, olive.id) == [
-        (_live_version(), "hub", registry.get_current(registry.TERMS).sha256, "hub-test-agent")
+        (_live_version(), "hub", expected, "hub-test-agent")
     ]
     # and nothing is owed any more - here, and at Flask's own gate
     assert client.get("/api/me/terms", headers=_auth(app, olive.id)).get_json() == {"owed": False}
+
+
+def test_a_client_that_showed_other_wording_is_refused(app, client, olive, hub):
+    """The canary, since the client now genuinely holds the document (2026-10-12).
+
+    A `document_hash` that is not the manifest's means minty-web is serving wording this app
+    would misrecord - a stale bundle, or a curl. Refused, and NOTHING is written: a consent
+    row naming wording nobody was shown is worse than no row. The hash is never stored, and
+    the value sent proves nothing on its own - this is a canary, not an integrity control.
+    """
+    resp = client.post(
+        "/api/me/terms/accept",
+        json={"accepted": True, "terms_version": _live_version(), "document_hash": "f" * 64},
+        headers=_auth(app, olive.id),
+    )
+
+    assert resp.status_code == 409
+    assert resp.get_json() == {"error": "document_mismatch"}
+    assert _consents(app, olive.id) == []
+
+
+def test_a_client_too_old_to_send_a_hash_is_still_accepted(app, client, olive, hub):
+    """Omitted is not wrong: a bundle that predates the check is not a bundle showing the
+    wrong document, and refusing it would lock those readers out of agreeing at all."""
+    resp = client.post(
+        "/api/me/terms/accept",
+        json={"accepted": True, "terms_version": _live_version()},
+        headers=_auth(app, olive.id),
+    )
+
+    assert resp.status_code == 200
+    assert len(_consents(app, olive.id)) == 1
 
 
 def test_accepting_twice_keeps_one_record(app, client, olive, hub):

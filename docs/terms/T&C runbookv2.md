@@ -1,14 +1,41 @@
 # Terms of Use Acceptance — Technical Design Document
 
-**Source of the legal text:** `legal/terms/beta-1.md` — the Markdown is the master since 2026-09-18 (the Word original was converted to it and retired; its wording was identical)
+**Source of the legal text:** `minty-web/lib/legal/documents/terms/beta-1.md` — the Markdown is
+the master since 2026-09-18 (the Word original was converted to it and retired; its wording was
+identical), and it moved out of this repo on 2026-10-12 (see the banner below)
 **First version to ship:** `beta-1`
 **Status:** Phase 1 (per-user) BUILT. Phase 2 (per-entity) planned — see §6.
 
-**Not yet production-ready.** One blocker remains, content rather than code:
-`legal/privacy/beta-1.md` is a 20-line placeholder that says so in its own text
-and is unpinned in `_PINNED_HASHES`. `terms/beta-1` was completed and pinned on
-2026-09-18 (date, contact email and address filled; its acceptance screen no
-longer shows the "Draft" banner). See Dependencies.
+**Not yet production-ready.** One blocker remains, content rather than code: the Privacy Policy
+(`minty-web/lib/legal/documents/privacy/beta-1.md`) is a 20-line placeholder that says so in its
+own text and is unpinned in both version tables. `terms/beta-1` was completed and pinned on
+2026-09-18 (date, contact email and address filled; its panel no longer shows the "Draft"
+banner). See Dependencies.
+
+---
+
+> ## ⚠️ SUPERSEDED IN PART — the documents moved on 2026-10-12
+>
+> **The documents and every page that shows them are minty-web's now.** This document is kept as
+> the record of the design and the product decisions; where it describes WHERE something lives,
+> read it against the two feature docs, which are current:
+> [`docs/features/legal-terms.md`](../features/legal-terms.md) (this app's half: the manifest, the
+> record, the gate) and `minty-web/docs/features/legal.md` (the documents, the renderer, the
+> pages).
+>
+> The split: **this app names the version; minty-web supplies the text.**
+>
+> | This document says | Actually, since 2026-10-12 |
+> |---|---|
+> | `legal/terms/*.md`, `legal/privacy/*.md`, `legal/render.py` | `minty-web/lib/legal/` — documents, renderer and the same pinned-hash table |
+> | `GET /legal/terms`, `/legal/privacy` and their versions (§4.2) | **deleted, 404.** minty-web's `/terms`, `/privacy`, `/terms/<version>` — the addresses are on `my.dailyminty.com`, with no redirect left behind |
+> | `GET /legal/accept`, `POST /legal/accept` (§4.3, §4.4) | **deleted** with `templates/legal/`. minty-web's panel is the only one; it posts to `POST /api/me/terms/accept` (§4.8) |
+> | `GET /legal/content/<kind>` | **deleted.** minty-web serves its own document as JSON (`/api/legal/<kind>/<version>`) |
+> | `legal/registry.py` holds the text | a text-free **manifest**: versions, dates, fingerprints. `verify_pinned_hashes()` is `verify_manifest()` and can no longer check the wording |
+> | the gate remembers the page you wanted | it does not: the panel lifts where you stand, in minty-web |
+>
+> §4.1 (`GET /legal/current`) and §4.5 (`POST /legal/invite-terms-status`) survive, and §4.1's
+> response no longer carries URLs. Everything in §3 (the data model), §4.6–§4.8, §5 and §6 stands.
 
 ---
 
@@ -30,11 +57,12 @@ The work has three parts:
    the exact words they saw.
 3. **A blocking screen after login.** If a logged-in person has not agreed to
    the current version, they see this screen and cannot use Minty until they do.
-   It renders as a **modal over the Select Company list** (`/entity`), not as a
-   separate page — see §2 Flow B. `/legal/accept` still exists as the fallback
-   route and as the canonical URL for the flow. **Since 2026-09-29, with
-   always since phase 2**, `/entity` hands the browser to minty-web's list, and
-   minty-web draws the same panel over every page of its own — see §4.8.
+   It renders as a **modal over the Select Company list**, not as a separate
+   page — see §2 Flow B. The gate redirects to `/entity`, which hands the
+   browser to minty-web's list, and minty-web draws the panel over every page
+   of its own — see §4.8. **Since 2026-10-12 that is the only panel there is:**
+   `/legal/accept` and `templates/legal/` are deleted, so minty-web being up is
+   part of this app's sign-in path for anyone who owes an acceptance.
 
 Part 3 sounds like a backup plan. It is not. It is the only part that covers
 people who are already using Minty today, and it is the only part that works
@@ -343,81 +371,64 @@ Login required: **no**
 ```json
 {
   "terms_version": "beta-1",
-  "terms_url": "/legal/terms",
-  "privacy_url": "/legal/privacy",
-  "effective_date": "2026-07-02"
+  "privacy_version": "beta-1",
+  "effective_date": "18 September 2026"
 }
 ```
 
----
-
-### 4.2 `GET /legal/terms` and `GET /legal/terms/<version>`
-
-Shows the Terms as a normal web page. The second form shows an older version.
-
-Login required: **no** — someone signing up does not have an account yet.
-
-| Code | When |
-|---|---|
-| `200` | Page shown |
-| `404` | That version does not exist |
-
-Same two routes exist for `/legal/privacy`.
-
-Each page has a **Download a copy** button linking to the PDF for that version.
-The web page is the main form; the PDF is a convenience.
+`terms_url`/`privacy_url` were removed on 2026-10-12: they pointed at pages this app no longer
+serves. A client links to minty-web's own `/terms` and `/privacy`. This route is the reason a
+client never hardcodes a version string, and it is why it survived the move — the wording is
+minty-web's, the **version** is ours.
 
 ---
 
-### 4.3 `GET /legal/accept`
+### 4.2 ~~`GET /legal/terms` and `GET /legal/terms/<version>`~~ — MOVED 2026-10-12
 
-The standalone acceptance page. Shows the Terms in a scrollable box, a link to
-the Privacy Policy, one unticked box, an **Accept & Continue** button, and a
-**Decline** link (which logs out).
+**Deleted from this app; they 404.** The documents are minty-web's: `/terms`,
+`/terms/<version>`, `/privacy`, `/privacy/<version>`, static pages built from the `.md` at
+build time, open to anyone with no cookie. The second form still shows an older version, and
+old versions are still never deleted — a consent row names the version that person read.
 
-**This is no longer where the gate sends people.** The gate redirects to
-`/entity`, where the same panel renders as a modal over the Select Company
-list. This route remains as the fallback for anyone arriving by a path that
-does not pass through `/entity`, and as the canonical URL for the flow.
+Still true of those pages, wherever they live: no login (someone signing up has no account
+yet), a `404` for a version that does not exist, and **the SHA-256 at the foot**, so a consent
+row can be checked against the wording without database access (`blueprints/legal/routes/admin.py`
+sends auditors there).
 
-Page and modal share three partials — `legal/_terms_styles.html`,
-`_terms_panel.html`, `_terms_script.html` — so the two cannot drift apart.
-
-Login required: **yes**
-
-| Code | When |
-|---|---|
-| `200` | Screen shown |
-| `302` → their dashboard | They have already agreed; nothing to do |
-
-If they are out of date rather than brand new, the page also shows a short "what
-changed" note.
+No **Download a copy** button was ever built, and the fingerprint is deliberately taken over the
+`.md` rather than a PDF: PDF writers embed a creation timestamp, so building the same PDF twice
+yields two different fingerprints.
 
 ---
 
-### 4.4 `POST /legal/accept`
+### 4.3 ~~`GET /legal/accept`~~ — DELETED 2026-10-12
 
-Saves the agreement from the blocking screen.
+The standalone acceptance page, and the three partials it shared with the modal
+(`legal/_terms_styles.html`, `_terms_panel.html`, `_terms_script.html`), are gone. It had
+stopped being where the gate sent people in 2026-09-29, and it was a second copy of a panel
+minty-web already drew — two places to change the wording and two places for a bug to hide.
 
-Login required: **yes**. CSRF-protected (a standard check that the request came
-from our own page).
+Everything it did is minty-web's `components/ui/TermsModal`: the Terms in a scrollable box
+locked until read to its end, a link to the Privacy Policy, one unticked box, **Accept &
+Continue**, **Cancel** (which logs out), and the "what changed" note with a link to the version
+the person previously agreed to.
 
-**Request**
+The cost is recorded in [`docs/features/legal-terms.md`](../features/legal-terms.md): there is
+no Flask screen to fall back on if minty-web is down.
 
-```json
-{
-  "terms_version": "beta-1",
-  "accepted": true
-}
-```
+---
 
-**Responses**
+### 4.4 ~~`POST /legal/accept`~~ — DELETED 2026-10-12
 
-| Code | Body | When |
-|---|---|---|
-| `200` | `{"status": "success", "redirect_url": "/dashboard"}` | Saved |
-| `400` | `{"status": "error", "message": "Please tick the box to continue."}` | Box not ticked |
-| `409` | `{"status": "error", "code": "version_changed", "terms_version": "beta-2"}` | The Terms changed while they had the page open. Screen reloads with the new text. |
+Saved the agreement from the blocking screen. The screen is gone, so this is too; the
+acceptance is **`POST /api/me/terms/accept`** (§4.8), which makes the same checks through the
+same function (`services/consent.accept_current_terms`) and has no `redirect_url` to give —
+the panel lifts where the person stands.
+
+The checks it made, which §4.8 still makes: `400` when the box was not ticked, `409`
+`version_changed` when the Terms changed while the panel sat open (the client re-reads and asks
+again). CSRF-protected because it was a session POST from our own page; §4.8 is bearer-only and
+therefore CSRF-exempt.
 
 ---
 
@@ -479,21 +490,33 @@ users in that business.
 
 ---
 
-### 4.8 `GET /api/me/terms` and `POST /api/me/terms/accept` *(minty-web's panel, 2026-09-29)*
+### 4.8 `GET /api/me/terms` and `POST /api/me/terms/accept` *(minty-web's panel, 2026-09-29; the only one since 2026-10-12)*
 
 Flask's `/entity` sends the browser to minty-web (always, since phase 2) whether or
-not an acceptance is owed, and minty-web draws the panel (a port of
-`_terms_panel.html`) over every page of its own. These two routes are what it reads
-and posts (`blueprints/legal/routes/hub.py`). Bearer token, not the session; CORS for
-minty-web; CSRF-exempt.
+not an acceptance is owed, and minty-web draws the panel over every page of its own.
+These two routes are what it reads and posts (`blueprints/legal/routes/hub.py`).
+Bearer token, not the session; CORS for minty-web; CSRF-exempt.
+
+**Since 2026-10-12 they carry no wording.** minty-web holds the documents, so this app sends
+the version and its fingerprint and minty-web reads that version's text from its own registry.
+Two owners of one fact would mean a deploy skew could refuse sign-ups, so: **this app names the
+version, minty-web supplies the text.**
 
 - `GET /api/me/terms` → `{"owed": false}`, or `{"owed": true, "document": {version,
-  effective_date, html, show_draft_notice}, "is_update", "previous_version", "links":
-  {terms, privacy, previous}}`.
-- `POST /api/me/terms/accept` `{"accepted": true, "terms_version": "beta-1"}` → the
-  same checks as §4.4 (one function, `accept_current_terms`): `400` not ticked, `409`
-  `{"error": "version_changed", "terms_version": <live>}`, `500` no document, else the
-  record with `source = "hub"` and `200 {"ok": true, "terms_version": <live>}`.
+  effective_date, sha256, show_draft_notice}, "is_update", "previous_version"}`. No `html`
+  and no `links` — minty-web owns both. The `sha256` is what lets the client check that the
+  document it is about to show is the one being asked for; if the two disagree it shows
+  nobody anything and logs loudly (it fails open, as the gate does).
+- `POST /api/me/terms/accept` `{"accepted": true, "terms_version": "beta-1", "document_hash":
+  "<the fingerprint of what was shown>"}` → the same checks as the deleted §4.4 (one function,
+  `accept_current_terms`): `400` not ticked, `409` `{"error": "version_changed",
+  "terms_version": <live>}`, `500` no manifest entry, else the record with `source = "hub"`
+  and `200 {"ok": true, "terms_version": <live>}`.
+
+  `document_hash` is **compared to the manifest and then discarded** — never stored. The client
+  picks the value it sends, so it proves nothing on its own; it is a canary against a stale
+  minty-web bundle (or a curl) filing a consent row against wording nobody saw, answered with
+  `409 {"error": "document_mismatch"}` and an ERROR log. Omitted, it is not checked.
 
 Both are on the gate's allowed list (§5.2), and an agreement given there is honoured
 by the gate on the next Flask page — it falls back to the database when the session
@@ -506,7 +529,7 @@ is logged in but has not agreed:
 
 | Request type | Response |
 |---|---|
-| Normal page view | `302` redirect to `/entity`, which renders the panel as a modal |
+| Normal page view | `302` redirect to `/entity`, which hands over to minty-web, which draws the panel |
 | Background/JavaScript request | `403` with `{"status": "error", "code": "terms_acceptance_required"}` |
 
 The split matters. Minty's screens make a lot of background requests, and a
@@ -532,18 +555,26 @@ real.
 The blocking check runs on every request. It must skip a small list of pages, or
 nobody can ever escape it:
 
-- `/legal/accept` — the standalone screen
-- `/legal/terms`, `/legal/privacy` and their older versions
-- `entity.entity_list` — **where the gate now sends people.** Without this the
+- `entity.entity_list` — **where the gate sends people.** Without this the
   gate redirects to a page it blocks, which is a loop with no exit
+- `/legal/current` — which version is live, read before anyone is signed in
+- `POST /legal/invite-terms-status` — whether an invitee still owes consent
+- `GET /api/me/terms` and `POST /api/me/terms/accept` — the acceptance flow
+  itself, drawn by minty-web. Bearer-only, so the gate normally never sees
+  them; a client that also sends the session cookie would otherwise be refused
+  the very route that lets it agree
 - **log out** — someone who refuses must always be able to leave
 - the login and email-code pages
 - static files (images, styles)
 - health checks used by the server
 
-**The cost of allowing `entity.entity_list`:** someone who has not agreed can
-load that one page and, by removing the modal in devtools, read their company
-NAMES. They still cannot enter any of them — every other entity route stays
+(`/legal/accept`, `/legal/terms` and `/legal/privacy` were on this list until 2026-10-12.
+The screen is deleted and the documents are on minty-web's origin, so the gate never sees
+those requests at all.)
+
+**The cost of allowing `entity.entity_list`:** someone who has not agreed reaches that page —
+which hands over to minty-web's list — and, by removing the panel in devtools, could read their
+company NAMES. They still cannot enter any of them — every other entity route stays
 gated. That is a deliberate, bounded trade for putting the panel where the
 design asks for it. If it ever becomes unacceptable, render the list empty
 server-side whenever terms are outstanding, so there is nothing behind the
@@ -744,10 +775,10 @@ The mockups place it in the entity-onboarding wizard (a separate Next.js app,
 9 steps, Bearer-token auth to Flask). Two engineering notes for whoever picks
 this up:
 
-- The wizard authenticates with a **Bearer token**, while `POST /legal/accept`
-  is session-based `@login_required`. A wizard-side acceptance needs either a
-  token-authenticated endpoint or `credentials: 'include'` plus CORS. This is a
-  real decision, not a detail.
+- The wizard authenticates with a **Bearer token**. This was a real decision when the only
+  acceptance route was the session-based `POST /legal/accept`; it is now settled, because
+  §4.8's `POST /api/me/terms/accept` is bearer-only and CSRF-exempt by design. A per-entity
+  acceptance would follow that shape rather than inventing a third one.
 - The Figma shows the panel with the step bar visible and **no step active** —
   i.e. a gate in front of step 1, not a step in the sequence. Implementing it
   that way avoids touching step numbering, the resume logic

@@ -109,7 +109,7 @@ Query or write through the session without declaring a table or running raw SQL.
 | blueprints/auth | 8 | dashboard.py, email_auth.py, email_auth.py, identity.py, login.py, password_reset.py, permissions.py, register.py |
 | blueprints/entity | 14 | billing_sync.py, create.py, list.py, modules.py, modules.py, onboarding_account_codes.py, onboarding_invites.py, onboarding_state.py, onboarding_xero.py, payment_methods.py, settings.py, shared.py, xero_account_mapping_post.py, xero_mapping_form_context.py |
 | blueprints/invitation | 3 | accept.py, api.py, invite.py |
-| blueprints/legal | 4 | accept.py, admin.py, consent.py, documents.py |
+| blueprints/legal | 3 | admin.py, consent.py, consent_status.py (accept.py and documents.py: see the 2026-10-12 move to minty-web) |
 | blueprints/report | 21 | api.py, cash_count.py, cash_denominations.py, create.py, deposit.py, download.py, ending.py, expense.py, export_screenshot.py, history.py, history_query.py, legacy.py, module_guard.py, opening.py, report_detail.py, report_detail.py, report_download.py, sales.py, share.py, shared.py, submitted.py |
 | blueprints/subscription | 16 | access_sweep.py, cards.py, catalog.py, checkout.py, consent.py, money.py, notices.py, notify.py, panel.py, payment_methods.py, policy.py, portal.py, portal.py, renewals.py, store.py, transfers.py |
 | blueprints/user_management | 6 | admin_dashboard.py, approve_reject_access.py, create_user.py, find_user.py, roles.py, roles.py |

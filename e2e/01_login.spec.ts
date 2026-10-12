@@ -1,4 +1,9 @@
 // Signing in, the terms modal, the entity list. Every other spec depends on this working.
+//
+// The terms modal is MINTY-WEB's (its components/ui/TermsModal), over its /entities: /entity has
+// handed the browser there since phase 2, and since 2026-10-12 minty-web holds the documents
+// too, so there is no Flask panel to fall back on. This spec therefore needs minty-web running -
+// requireStack() only probes Flask, so a failure here with Flask green means minty-web is down.
 import { expect, test } from '@playwright/test';
 import { ENTITY_LIST_URL, login, requireCredentials, requireSharedAccount, requireStack, termsTickBox } from './helpers';
 
@@ -25,6 +30,7 @@ test.describe('login and terms', () => {
   test('a person who owes the terms sees them over the entity list (never answered here)', async ({ page }) => {
     // scripts/e2e_seed.py removes the shared account's consent, so it owes the Terms. Nothing
     // may accept on it (minty-web's rule): the panel is checked, then the page is left as it is.
+    // The panel is minty-web's, drawing a document minty-web holds.
     const creds = requireSharedAccount();
     await page.goto('/login');
     await page.locator('#username').fill(creds.email);

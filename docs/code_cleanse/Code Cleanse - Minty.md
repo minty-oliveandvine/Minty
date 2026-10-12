@@ -21,7 +21,7 @@ Still three quarters of the whole cleanse, but the shape has shifted. The subscr
 | blueprints/subscription/ | 42 | 23 |  | 5 | 18 |  |
 | blueprints/xero/ | 18 | 9 |  | 2 | 6 | 1 |
 | blueprints/user_management/ | 18 | 3 |  |  | 2 | 1 |
-| blueprints/legal/ | 11 | 3 |  |  | 3 |  |
+| blueprints/legal/ | 7 | 1 |  |  | 1 |  |
 | blueprints/invitation/ | 8 | 1 |  |  | 1 |  |
 | blueprints/shared/ | 3 | 0 |  |  |  |  |
 | services/ | 24 | 8 |  |  | 7 | 1 |
@@ -208,17 +208,20 @@ Almost nothing - one blind catch, one complex function, one dead schemas.py.
 
 *The other 15 files in this area are clean - formatter pass only.*
 
-### blueprints/legal/   3 of 11 files need work
+### blueprints/legal/   1 of 7 files need work
 
-Two blind catches and one unused import.
+One blind catch. Two of the three findings below were **closed by deletion on 2026-10-12**,
+when the legal documents moved to minty-web: `routes/accept.py` is gone with the acceptance
+screen, and `routes/documents.py` became `routes/consent_status.py` (its blind catch survived
+with `invite_terms_status`, where it is the documented fail-safe).
 
 | Pri | File | Ruff | What to do |
 | --- | --- | --- | --- |
-| P3 | blueprints/legal/routes/accept.py | F401(1) | Remove 1 unused import - auto-fixable. |
-| P3 | blueprints/legal/routes/documents.py | BLE001(1) | Narrow 1 blind `except Exception`: name the exception each one expects, or log a reason before swallowing. |
-| P3 | blueprints/legal/routes/gate.py | BLE001(1) | Narrow 1 blind `except Exception`: name the exception each one expects, or log a reason before swallowing. |
+| ~~P3~~ | ~~blueprints/legal/routes/accept.py~~ | ~~F401(1)~~ | GONE 2026-10-12 - file deleted with the Flask acceptance screen. |
+| ~~P3~~ | ~~blueprints/legal/routes/documents.py~~ | ~~BLE001(1)~~ | Now `routes/consent_status.py`; the blind catch is deliberate and logged (`invite-terms-status` must fail safe, never 500 the sign-in screen). |
+| P3 | blueprints/legal/routes/gate.py | BLE001(1) | Deliberate and documented: the gate FAILS OPEN on an unexpected error, loudly. Not to be narrowed without re-reading that module's docstring. |
 
-*The other 8 files in this area are clean - formatter pass only.*
+*The other files in this area are clean - formatter pass only.*
 
 ### blueprints/invitation/   1 of 8 files need work
 

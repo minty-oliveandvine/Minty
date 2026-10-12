@@ -1,7 +1,12 @@
-"""Session state for Terms acceptance, and the return-path rules.
+"""Session state for Terms acceptance, and what is owed.
 
-Shared between the accept screen (Phase 3) and the request gate (Phase 4), so
-both agree on what "already agreed" means and where a person goes afterwards.
+The request gate (`routes/gate.py`) and minty-web's panel (`routes/hub.py`)
+read from here, so they cannot disagree about what "already agreed" means.
+
+There is no return path any more. The Flask acceptance screen was deleted on
+2026-10-12 when the documents moved to minty-web: the panel now lifts where
+the person stands, in minty-web, and never comes back here to resume a Flask
+destination, so the gate no longer remembers one.
 
 WHY THE SESSION STORES A VERSION, NOT A FLAG
 --------------------------------------------
@@ -21,15 +26,10 @@ from __future__ import annotations
 
 from flask import session
 
-from blueprints.shared.safe_redirect import safe_internal_path
 from legal import registry
 
 # Cached answer: the version this session has been confirmed against.
 TERMS_OK_SESSION_KEY = "terms_ok"
-
-# Where to send the person once they accept. Kept in the SESSION rather than in
-# the URL — see remember_intended_destination below.
-TERMS_NEXT_SESSION_KEY = "terms_next"
 
 
 def mark_session_agreed(version: str | None = None) -> None:
@@ -54,41 +54,22 @@ def clear_session_agreement() -> None:
     hazard the per-login reset in bootstrap.py already handles for other flags.
     """
     session.pop(TERMS_OK_SESSION_KEY, None)
-    session.pop(TERMS_NEXT_SESSION_KEY, None)
-
-
-# The destination is remembered in the session rather than round-tripped through
-# the URL, so the check below is defence in depth: a redirect that can be steered
-# off-site turns the acceptance screen into a phishing hop. The rule itself is the
-# shared one (blueprints/shared/safe_redirect.py).
-
-
-def remember_intended_destination(path: str | None) -> None:
-    safe = safe_internal_path(path)
-    if safe:
-        session[TERMS_NEXT_SESSION_KEY] = safe
-
-
-def take_intended_destination() -> str | None:
-    """Pop the remembered destination, re-validating on the way out.
-
-    Re-validated because the session is storage like any other: if anything
-    ever writes to that key without going through `remember_intended_destination`,
-    this is the last place to catch it.
-    """
-    return safe_internal_path(session.pop(TERMS_NEXT_SESSION_KEY, None))
+    # "terms_next" was the remembered destination, dropped with the Flask
+    # acceptance screen (2026-10-12). Still popped here so a session cookie
+    # written by the previous release does not carry a stale key around.
+    session.pop("terms_next", None)
 
 
 def terms_owed(user_id) -> dict | None:
     """What `user_id` still has to agree to, or None when nothing is owed.
 
     No session involved - the one answer to "does this person owe an acceptance, and of
-    what", for every place that asks: the panel over the Select Company list and the
-    standalone /legal/accept page (through `outstanding_terms_context`, which adds the
-    session cache), and minty-web's Terms modal (`routes/hub.py`, bearer, no session).
+    what". Since 2026-10-12 there is one asker left: minty-web's Terms panel
+    (`routes/hub.py`, bearer, no session), which draws the document it holds itself. The
+    `document` here is a manifest ENTRY, not the wording (`legal/registry.py`).
 
-    None also when there is no current document: nobody can be asked to agree to
-    something that does not exist (see the gate's fail-open reasoning).
+    None also when the live version is not in the manifest: nobody can be asked to agree to
+    something this app could not record (see the gate's fail-open reasoning).
     """
     from blueprints.legal.services.consent import consents_for_user, has_consent
 
@@ -106,38 +87,3 @@ def terms_owed(user_id) -> dict | None:
         "is_update": bool(previous),
         "previous_version": previous[0].terms_version if previous else None,
     }
-
-
-def outstanding_terms_context() -> dict | None:
-    """Context for rendering the acceptance panel, or None if nothing is due.
-
-    The panel is drawn in two places — the standalone /legal/accept page and
-    the modal over the Select Company list — and both need exactly this set of
-    values (`terms_owed`, which minty-web's Terms modal reads too). Building it
-    there means none of them can disagree about whether somebody still owes an
-    acceptance, or about which version they last agreed to.
-
-    Returns None when there is nothing to ask for: not logged in, no current
-    document (see the gate's fail-open reasoning), or already agreed. As a side
-    effect it re-syncs the session cache when the database says yes but the
-    session had not caught up.
-
-    Imports are local: this module is imported at request time by the gate,
-    which runs before *every* request, and pulling the models in at module
-    scope would give the legal service a load-time dependency on the ORM.
-    """
-    from flask_login import current_user
-
-    if not getattr(current_user, "is_authenticated", False):
-        return None
-
-    if registry.get_current(registry.TERMS) is None:
-        return None
-
-    if session_agreed_to_current():
-        return None
-
-    owed = terms_owed(current_user.id)
-    if owed is None:
-        mark_session_agreed()
-    return owed

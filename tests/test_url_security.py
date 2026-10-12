@@ -253,7 +253,11 @@ def test_state_changing_routes_refuse_get(shop, client):
 @pytest.mark.parametrize(
     "path",
     ["/insert_xero_transaction", "/remove/connections/all", "/api/refresh_xero_token",
-     "/mytoken", "/event_id", "/debug/xero-settings/abc", "/Minty_Report_X/ending?token=abc"],
+     "/mytoken", "/event_id", "/debug/xero-settings/abc", "/Minty_Report_X/ending?token=abc",
+     # The legal documents and the acceptance screen moved to minty-web (2026-10-12), with no
+     # redirect left behind: the addresses are my.dailyminty.com/terms and /privacy.
+     "/legal/accept", "/legal/terms", "/legal/terms/beta-1", "/legal/privacy",
+     "/legal/privacy/beta-1", "/legal/content/terms"],
 )
 def test_deleted_routes_are_gone(client, path):
     assert client.get(path).status_code == 404

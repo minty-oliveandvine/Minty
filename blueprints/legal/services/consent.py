@@ -11,14 +11,21 @@ at sign-up the `User` row and its consent row must land in ONE transaction, so
 there is never an account without an agreement, nor an agreement without an
 account. A commit in here would break that guarantee by splitting the two.
 
-The gate (`POST /legal/accept`) owns its own transaction and commits itself.
+The acceptance route (`POST /api/me/terms/accept`) owns its own transaction
+and commits itself.
 
 THE HASH IS NEVER TAKEN FROM THE CLIENT
 ---------------------------------------
 The caller says which *version* was shown; the wording's fingerprint is looked
-up server-side from legal/registry.py. A client that could supply the hash
-could choose what it claims to have agreed to, which would make the record
-worthless in exactly the situation it exists for.
+up server-side from legal/registry.py's MANIFEST. A client that could supply
+the hash could choose what it claims to have agreed to, which would make the
+record worthless in exactly the situation it exists for.
+
+This matters MORE since the documents moved to minty-web (2026-10-12), because
+the client now genuinely holds the wording and does send a `document_hash`.
+That value is COMPARED to the manifest by the route and then discarded - it
+never reaches this module, and nothing here will write a hash it did not look
+up itself.
 """
 
 from __future__ import annotations
@@ -65,8 +72,9 @@ def record_consent(
     """Record that `user_id` agreed to `version` (default: the live version).
 
     Returns the row — the existing one if this person had already agreed to
-    this version. Returns None only if the version has no document behind it,
-    which is a misconfiguration rather than a user error.
+    this version. Returns None only if the version has no manifest entry (or an
+    entry with no fingerprint), which is a misconfiguration rather than a user
+    error.
 
     Idempotent. Does NOT commit; see the module docstring.
     """
@@ -78,12 +86,12 @@ def record_consent(
         )
 
     version = version or registry.current_version(registry.TERMS)
-    document = registry.get_document(registry.TERMS, version)
-    if document is None:
+    entry = registry.get_version(registry.TERMS, version)
+    if entry is None or not entry.sha256:
         logger.error(
-            f"Refusing to record consent for {user_id}: no Terms document for "
-            f"version {version!r}. A consent row naming a version we cannot "
-            "produce is unverifiable."
+            f"Refusing to record consent for {user_id}: no manifest entry (or no "
+            f"fingerprint) for Terms version {version!r}. A consent row naming a "
+            "version we cannot produce a fingerprint for is unverifiable."
         )
         return None
 
@@ -97,7 +105,7 @@ def record_consent(
     consent = TermsConsent(
         user_id=user_id,
         terms_version=version,
-        document_hash=document.sha256,
+        document_hash=entry.sha256,
         source=source,
         ip_address=ip_address,
         user_agent=user_agent,
@@ -141,18 +149,17 @@ ACCEPT_FAILED = "failed"
 def accept_current_terms(
     user_id: str, *, accepted: bool, submitted_version: str, source: str
 ) -> tuple[str, str]:
-    """The person's "Accept & Continue", wherever the panel was drawn: ``(outcome, live_version)``.
+    """The person's "Accept & Continue": ``(outcome, live_version)``.
 
-    ONE place for the checks both acceptance screens make - Minty's own (``POST
-    /legal/accept``, the panel over its Select Company list) and minty-web's modal
-    (``POST /api/me/terms/accept``). The tick box on screen is a convenience; THIS is the
+    The checks the acceptance route makes (``POST /api/me/terms/accept``, minty-web's panel -
+    the only one since 2026-10-12). The tick box on screen is a convenience; THIS is the
     check, since a client can send whatever it likes:
 
       * not ticked -> ``not_ticked``;
       * the Terms changed while the panel sat open -> ``version_changed``: recording now
         would file the agreement against wording that is no longer live, an accurate record
         of the wrong thing - the client re-reads and asks again;
-      * the version has no document behind it -> ``failed`` (a misconfiguration);
+      * the version has no manifest entry behind it -> ``failed`` (a misconfiguration);
       * otherwise the consent is recorded (idempotently) -> ``recorded``.
 
     Does NOT commit, like ``record_consent``: each route owns its transaction.
@@ -167,7 +174,7 @@ def accept_current_terms(
         )
         return ACCEPT_VERSION_CHANGED, live_version
     if record_consent(user_id, source=source) is None:
-        # Only reachable if the document vanished between the two checks above.
+        # Only reachable if the manifest entry vanished between the two checks above.
         return ACCEPT_FAILED, live_version
     return ACCEPT_RECORDED, live_version
 
