@@ -14,6 +14,12 @@ the token is the 60-minute `scope: "onboarding"` JWT; `entity_id` resumes an in-
 company; `fresh=1` starts a brand-new one (what `GET /entity/create` sends). Invitations
 land on the wizard's `/auth` page the same way (with the invite token instead).
 
+`POST /entity/create` (the old create form) is a fallback no page reaches any more, and its
+phone rule is the old one: `_normalize_contact_phone` stores 8–11 bare digits. The wizard has
+stored E.164 (`+85291234567`) since 2026-10-12 and reads a digits-only row as a number under
+the company's Country, so a row written there still opens, but it is a second shape. Bring the
+form onto E.164 or delete it before anything reads `contact_phone` outside the wizard.
+
 ## `/api/onboarding/*` — served by two backends, same paths
 
 Every wizard call is under `/api/onboarding/`. **Both** Minty (`blueprints/entity/routes/create.py`)

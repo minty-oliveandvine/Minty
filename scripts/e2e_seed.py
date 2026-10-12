@@ -141,7 +141,10 @@ def main() -> int:
         hk = CountryInfo.query.filter_by(country_code="HK").first()
         if hk is None:
             db.session.add(CountryInfo(country_code="HK", alpha3_code="HKG", country_name_en="Hong Kong",
-                                       currency_id=hkd.id, is_active=True, display_order=1))
+                                       currency_id=hkd.id, phone_code="+852", is_active=True, display_order=1))
+        elif not (hk.phone_code or "").strip():
+            # The onboarding API refuses a phone whose dial code is not in country_info.
+            hk.phone_code = "+852"
         def module(code, name, description):
             row = EntityFunction.query.filter_by(function_code=code).first()
             if row is None:

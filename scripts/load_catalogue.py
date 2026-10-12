@@ -1,4 +1,5 @@
-"""Load docs/schema/seed_catalogue.sql into ONE named schema, and prove it landed.
+"""Load docs/schema/seed_catalogue.sql (and seed_country_phone_codes.sql) into ONE named schema,
+and prove it landed.
 
     .venv/Scripts/python.exe scripts/load_catalogue.py                         # $DATABASE_URL, its ?schema=
     .venv/Scripts/python.exe scripts/load_catalogue.py --schema development
@@ -25,14 +26,17 @@ What it does
    ``pg_harness.build_schema(uri, rename_to="<schema>")``.
 4. Rewrites ``pettycashv3.`` to ``<schema>.`` when they differ, and FAILS if nothing was
    rewritten - a renamed prefix would otherwise seed the wrong place without a word.
-5. Runs the file in one transaction, then COUNTS ``billing_plan``, ``billing_policy`` and the
-   HKD ``currency_info`` row, and fails loudly if any is empty. A cold start with no
+5. Runs each file (each is its own transaction), then COUNTS ``billing_plan``,
+   ``billing_policy`` and the HKD ``currency_info`` row, and fails loudly if any is empty. A cold start with no
    ``billing_plan`` is the bug CI caught, where a trial start had no plan and the suite read as
-   a 45-second navigation timeout.
+   a 45-second navigation timeout. It also fails when ``country_info`` has rows but none carries
+   a ``phone_code``: minty-onboarding-api refuses every phone number there. A cold start has no
+   countries at all, which is reported, not refused.
 
-Idempotent, because the file is: every INSERT is ``ON CONFLICT DO NOTHING`` and nothing is ever
-UPDATEd, so a price edited in the database is never silently reverted. Changing a price or a
-window means changing the row AND ``seed_catalogue.sql`` together.
+Idempotent, because the files are: every catalogue INSERT is ``ON CONFLICT DO NOTHING`` and
+nothing is ever UPDATEd, so a price edited in the database is never silently reverted; the dial
+codes only fill an EMPTY ``phone_code``. Changing a price, a window or a code means changing the
+row AND its file together.
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CATALOGUE = REPO_ROOT / "docs" / "schema" / "seed_catalogue.sql"
+PHONE_CODES = REPO_ROOT / "docs" / "schema" / "seed_country_phone_codes.sql"
+SEED_FILES = (CATALOGUE, PHONE_CODES)
 
 # The schema the file is written against. Everything else is a rewrite of this.
 FILE_SCHEMA = "pettycashv3"
@@ -98,9 +104,10 @@ def main() -> int:
     if not args.uri:
         print("error: no database URI. Pass --uri or set DATABASE_URL.", file=sys.stderr)
         return 2
-    if not CATALOGUE.is_file():
-        print(f"error: {CATALOGUE} is missing.", file=sys.stderr)
-        return 2
+    for path in SEED_FILES:
+        if not path.is_file():
+            print(f"error: {path} is missing.", file=sys.stderr)
+            return 2
 
     uri, uri_schema = split_schema(args.uri)
     schema = args.schema or uri_schema or FILE_SCHEMA
@@ -113,19 +120,22 @@ def main() -> int:
         )
         return 2
 
-    sql = CATALOGUE.read_text(encoding="utf-8")
-    if schema != FILE_SCHEMA:
-        sql, rewrites = re.subn(rf"\b{re.escape(FILE_SCHEMA)}\.", f"{schema}.", sql)
-        if rewrites == 0:
-            print(
-                f"error: nothing to rewrite - {CATALOGUE.name} holds no '{FILE_SCHEMA}.' prefix, so "
-                f"it would have seeded the wrong schema in silence. Has the file changed?",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"rewrote {rewrites} '{FILE_SCHEMA}.' reference(s) to '{schema}.'")
-    else:
-        print(f"schema is {FILE_SCHEMA}: the file is used as written")
+    scripts = []
+    for path in SEED_FILES:
+        sql = path.read_text(encoding="utf-8")
+        if schema != FILE_SCHEMA:
+            sql, rewrites = re.subn(rf"\b{re.escape(FILE_SCHEMA)}\.", f"{schema}.", sql)
+            if rewrites == 0:
+                print(
+                    f"error: nothing to rewrite - {path.name} holds no '{FILE_SCHEMA}.' prefix, so "
+                    f"it would have seeded the wrong schema in silence. Has the file changed?",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"{path.name}: rewrote {rewrites} '{FILE_SCHEMA}.' reference(s) to '{schema}.'")
+        else:
+            print(f"{path.name}: schema is {FILE_SCHEMA}, the file is used as written")
+        scripts.append(sql)
 
     print(f"target: {redact(uri)}  schema={schema}")
 
@@ -149,13 +159,14 @@ def main() -> int:
                 return 1
 
             if args.dry_run:
-                statements = len([s for s in sql.split(";") if s.strip()])
+                statements = sum(len([s for s in sql.split(";") if s.strip()]) for sql in scripts)
                 print(f"--dry-run: schema exists; {statements} statement(s) would run. Nothing loaded.")
                 conn.rollback()
                 return 0
 
-            cur.execute(sql)
-            conn.commit()
+            for sql in scripts:
+                cur.execute(sql)
+                conn.commit()
 
             # The catalogue is what a subscription journey cannot start without, so the counts
             # are checked rather than trusted. Same guard stack-e2e.yml runs.
@@ -165,6 +176,10 @@ def main() -> int:
             policy = cur.fetchone()[0]
             cur.execute(f"SELECT count(*) FROM {schema}.currency_info WHERE currency_code = 'HKD'")
             hkd = cur.fetchone()[0]
+            cur.execute(
+                f"SELECT count(*), count(NULLIF(TRIM(phone_code), '')) FROM {schema}.country_info"
+            )
+            countries, coded = cur.fetchone()
     finally:
         conn.close()
 
@@ -176,6 +191,17 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    print(f"country_info={countries}  with phone_code={coded}")
+    if countries and not coded:
+        print(
+            "error: country_info has rows but no dial codes after loading, so the onboarding "
+            "wizard's Phone Number has no codes to offer and its API refuses every number.",
+            file=sys.stderr,
+        )
+        return 1
+    if not countries:
+        print("note: country_info is empty (a cold start), so there were no dial codes to fill.")
 
     print("ok")
     return 0
