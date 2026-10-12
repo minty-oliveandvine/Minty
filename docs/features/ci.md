@@ -1,9 +1,51 @@
 # CI and the stack E2E job
 
-Every Minty repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusable
+Every Minty **app** repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusable
 workflow in the public [`minty-oliveandvine/.github`](https://github.com/minty-oliveandvine/.github)
 repo, pinned at `@v1`. That repo's README is the reference for the inputs; this page covers
 Minty's two workflows and how to rehearse the stack job locally.
+
+## The one documented exception: `minty-shared-ts`
+
+`minty-shared-ts` (`@minty/shared`, created 2026-10-12) carries its **own** 20-line `ci.yml`
+instead of calling into `.github`, deliberately:
+
+- `next-web.yml` ends in `next build`, and a library published as source has nothing to build;
+- a reusable workflow with exactly one caller is not shared CI. The stated reason `.github` exists
+  is that fixing CI for all of them is one change in one place, which needs an *all*. This is the
+  same judgement the modernisation plan already makes for `py-package.yml`, deferred until
+  `minty-db` / `minty-shared-py` exist.
+
+It runs checkout -> Node 24 (what `next-web.yml` defaults to, and what Vercel builds the consumers
+with) -> `npm ci` -> `typecheck` -> `lint` -> `test`. **The day a second TypeScript package
+exists, this becomes `ts-package.yml` in `.github` and both call it.**
+
+### A shared change is proven in the consumer, not here
+
+The package's CI never compiles a consumer - that would mean checking out other repos. Instead a
+release is a git tag and each app bumps its pin in its own branch, so **that app's** CI and its
+Vercel preview build run against the new tag before `development` moves:
+
+```
+minty-shared-ts: development -> green -> main -> git tag -a vX.Y -> push the tag
+each consumer:   npm install "git+https://github.com/minty-oliveandvine/minty-shared-ts.git#vX.Y"
+                 -> push a BRANCH -> check / check green + preview build green -> merge
+```
+
+Two rules that are not style:
+
+- **The lockfile will say `git+ssh://`, and that is expected.** npm normalises any GitHub URL
+  you type - including `git+https://...` - to the `github:` shorthand in `package.json` and a
+  `git+ssh://` resolution in `package-lock.json`. For a **public** repo npm falls back to HTTPS,
+  so `npm ci` works with no SSH key anywhere (verified 2026-10-12 by forcing ssh to fail, for both
+  `npm install` and `npm ci`). **This is one of the reasons the package repo is public**: make it
+  private and every CI and Vercel install breaks until a deploy key exists.
+- **A tag here is immutable** - the opposite of `.github`'s `v1`, which moves by design. npm
+  caches git dependencies, so a moved tag hands two machines different code under one pin. No
+  `#main` or `#development` pins anywhere.
+
+Never push a pin bump straight to `development`: Vercel auto-deploys on push and production builds
+from that branch, so a pin that cannot install becomes a failed production build.
 
 The design, and the four corrections the survey of 2026-10-07 forced on it, are in
 [`../modernisation/modernisation_plan.md`](../modernisation/modernisation_plan.md), section

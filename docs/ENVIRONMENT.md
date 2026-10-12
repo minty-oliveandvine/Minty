@@ -31,6 +31,23 @@ Each domain has a slot `N`: its web app listens on `30N0`, its API on `80N0`. Ho
 | Onboarding web | `minty-onboarding-web` | Next.js | 3030 | `onboarding-web` |
 | Onboarding API | `minty-onboarding-api` | Django | 8030 | `onboarding-api` |
 | PostgreSQL | — | Postgres 15 | 5432 (the Docker stack publishes 5433) | `db` |
+| Shared TypeScript | `minty-shared-ts` | npm package `@minty/shared` | **none — a library** | none |
+
+`minty-shared-ts` has no port, no URL and no environment variable of its own: it is a package the
+Next.js apps compile into themselves, installed from a **pinned git tag** and never from a
+registry. minty-web and minty-payment-request-web take the design tokens *and* the sidebar;
+minty-onboarding-web takes `theme.css` only; `minty-www` cannot (Tailwind v3 / React 18 / Next 14)
+and keeps the same font stacks in its own `tailwind.config.ts`. Flask is not a consumer.
+
+```
+npm install "git+https://github.com/minty-oliveandvine/minty-shared-ts.git#v0.1"
+```
+
+npm normalises that to the `github:` shorthand in `package.json` and a `git+ssh://` URL in
+`package-lock.json`, and **that is fine while the repo is public**: npm falls back to HTTPS, so
+`npm ci` works with no SSH key (verified 2026-10-12 with ssh forced to fail). It would stop
+working the day the repo went private. See `docs/features/ci.md` for the release and pin-bump
+flow, and why its tags are immutable.
 
 Old local ports, for reference: hub 3002, subscription API 8004, Flask 5001, payment-request
 web 3000, payment-request API 8000, onboarding web 3001, onboarding API 8001.
@@ -240,6 +257,7 @@ Every repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusa
 | minty-onboarding-web | `next-web.yml` | - |
 | minty-www (was daily-minty-landing-page) | `next-web.yml` | - |
 | minty-infra | its own `check.yml` (`terraform fmt` / `validate`, no credentials) | - |
+| minty-shared-ts | its own `ci.yml` (typecheck / lint / test; **a documented exception** - see `docs/features/ci.md`) | - |
 
 - **`MINTY_READ_TOKEN`** - a fine-grained PAT with read access to the *contents* of
   `minty-oliveandvine/Minty` only. The three Django APIs' Postgres test pass builds its database
