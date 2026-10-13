@@ -17,7 +17,7 @@ from loguru import logger
 from blueprints.entity import entity_bp
 from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from blueprints.shared.enums import EntityStatus
-from blueprints.shared import bearer_api
+from blueprints.shared import bearer_api, preview_origin
 from blueprints.entity.forms import CreateEntityForm
 from blueprints.entity.services.payment_methods import (
     list_sales_methods_grouped, replace_sales_methods)
@@ -32,7 +32,7 @@ class _PyCountryCountry(Protocol):
 # --- Onboarding handoff helpers -------------------------------------------
 
 def _onboarding_base_url() -> str:
-    return bearer_api.onboarding_origin()
+    return preview_origin.handoff_origin("onboarding", bearer_api.onboarding_origin())
 
 
 def _mint_onboarding_token(user_id) -> str:
@@ -100,9 +100,8 @@ def _cors(resp):
     """Allow the onboarding origin to call the API cross-origin (token auth).
 
     ``PUT`` beyond the portal's list: the wizard updates the entity in place."""
-    return bearer_api.cors(
-        resp, _onboarding_base_url(), methods="GET, POST, PUT, OPTIONS"
-    )
+    origin = preview_origin.cors_origin((bearer_api.onboarding_origin(),), ("onboarding",))
+    return bearer_api.cors(resp, origin, methods="GET, POST, PUT, OPTIONS")
 
 
 def _resolve_country_code(value: str) -> str:

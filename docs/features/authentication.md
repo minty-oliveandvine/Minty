@@ -314,6 +314,41 @@ The entitlement claims in the token are a hint only: minty-payment-request-api r
 `entity_function_map` (`GET /api/auth/entitlements`) and the DB decides what the module
 shows.
 
+### 6.1 Branch preview sets — handing back into a preview (2026-10-13)
+
+A branch's previews are one SET of hosts, `https://pr-<branch>-<app>.dailyminty.com` for `my`,
+`payment-request`, `onboarding` (and `www`), kept complete by the `.github` repo's
+`vercel-preview-set.yml` (minty-infra `CUTOVER.md` section 6). Where **`PREVIEW_ORIGIN_REGEX`** is
+set, Flask hands a person back into the set they came from instead of the configured front ends
+(`blueprints/shared/preview_origin.py`):
+
+- Every trip a front end makes to Flask carries `?return_origin=<its origin>` (minty-web
+  `lib/handoff.ts`, minty-payment-request-web `withReturnOrigin` from `@minty/shared`). A
+  `before_request` hook registered FIRST - before the expired-session redirect, the Terms gate and
+  `login_required` - keeps the set's slug in `session["preview_set"]`; a configured origin (the
+  person went back to a normal host) and logging out leave it.
+- **Only a same-site navigation names a set, and a set lapses after 30 minutes** (security review,
+  2026-10-13). The browser's `Sec-Fetch-Site` is `same-site` for a trip from another
+  dailyminty.com host - our front ends - and `none`/`cross-site` for a link in an email or on
+  another site, which is ignored; so a crafted link cannot park a signed-in person's session in a
+  set and route the tokens of later Flask-started hand-offs into a preview. Each same-site trip
+  from a set host renews it.
+- Every hand-off then goes to that set's host for the target app: `hub_login_url`, the minty-web
+  and payments `/landing`, the onboarding launch and the Xero return (`bearer_api`'s origins
+  through `preview_origin.handoff_origin`). Outside a request (mail, jobs) there is no set.
+- CORS never reads the session: the hub routes echo a set origin for `my`/`payment-request`, the
+  onboarding routes for `onboarding`, and refuse every other.
+- The stored set is re-checked against the regex on every read, so unsetting the variable turns
+  it all off at once. A value that could let in any host outside `https://pr-…\.dailyminty\.com$`
+  (no anchors, a top-level `|`, another domain) refuses to boot
+  (`services/app_runtime/env.preview_origin_regex`; the APIs' `config/preview_origin.py` apply the
+  same rule to their CORS).
+- `next` stays path-only (`safe_redirect.py` is unchanged): the set chooses the host, never the URL.
+
+**Which environment carries it is minty-infra's `var.preview_backend`: production until the
+November launch (owner, 2026-10-13), development after** - so until then a preview signs in with
+production tokens against production data.
+
 ## 7. Xero OAuth tokens (the company's accounting connection)
 
 Different thing from sign-in: a **per-user** `user_token` row (access token, refresh token,
@@ -358,6 +393,7 @@ the payment module counts as leaving.
 | `PETTY_CASH_URL` | absolute links in mail and hand-offs, and the Xero redirect URI |
 | `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL` | minty-web's and minty-payment-request-web's origins - the hand-offs, and the hub routes' CORS |
 | `SUBSCRIPTION_API_URL` | minty-subscription-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8000`) |
+| `PREVIEW_ORIGIN_REGEX` | optional: the branch preview sets Flask may hand back into (section 6.1); unset = off |
 | `IDLE_TIMEOUT_SECONDS` | the presence window (there is no idle logout) |
 
 Every service's variables are listed in [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md).
@@ -372,7 +408,7 @@ Every service's variables are listed in [`docs/ENVIRONMENT.md`](../ENVIRONMENT.m
 write route has a check), `tests/test_terms_gate.py`, `tests/test_invitation*.py`,
 `tests/test_billing_relogin_handback.py` (the return from the payment module),
 `tests/test_xero_scopes.py` (connect and reconnect request the same minimal scope set),
-`tests/test_zz_no_token_logging.py`, `tests/test_url_security.py` (the redirect rule, `/enter`'s
+`tests/test_zz_no_token_logging.py`, `tests/test_preview_origin.py` (preview sets, 6.1), `tests/test_url_security.py` (the redirect rule, `/enter`'s
 token and membership checks, the headers, the redacted access log, GET refusals, the deleted
 routes, the download and export guards), `tests/test_sidebar.py` (`/me/sidebar-token`, the hub's two
 origins), `tests/test_email_english_only.py` (every path refuses a non-English address); in the browser, `e2e/01_login.spec.ts` (login, wrong

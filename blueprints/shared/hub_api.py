@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from flask import jsonify, make_response, request
 
-from blueprints.shared import bearer_api
+from blueprints.shared import bearer_api, preview_origin
 
 #: Everything the hub's routes answer between them. A preflight for a method not named here
 #: is refused by the browser before a route is reached, so this is a real constraint.
@@ -45,9 +45,8 @@ def allowed_origins() -> tuple[str, ...]:
 
 
 def cors(resp):
-    allowed = allowed_origins()
-    origin = (request.headers.get("Origin") or "").rstrip("/")
-    return bearer_api.cors(resp, origin if origin in allowed else allowed[0], methods=METHODS)
+    origin = preview_origin.cors_origin(allowed_origins(), ("my", "payment-request"))
+    return bearer_api.cors(resp, origin, methods=METHODS)
 
 
 def respond(payload, status: int = 200):

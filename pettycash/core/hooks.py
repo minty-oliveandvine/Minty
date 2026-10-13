@@ -12,6 +12,7 @@ from flask_wtf.csrf import CSRFError
 from loguru import logger
 from werkzeug.exceptions import HTTPException
 
+from blueprints.shared import preview_origin
 from blueprints.shared.safe_redirect import safe_referrer
 from pettycash.core import http_hardening
 from models.db import Entity
@@ -49,7 +50,8 @@ def drop_flashes_leaving_flask(response):
     if response.status_code not in (301, 302, 303, 307, 308) or "_flashes" not in session:
         return response
     location = urlsplit(response.location or "")
-    if f"{location.scheme}://{location.netloc}" not in _sibling_app_origins():
+    origin = f"{location.scheme}://{location.netloc}"
+    if origin not in _sibling_app_origins() and not preview_origin.is_set_origin(origin):
         return response
     for category, message in session.pop("_flashes"):
         log = logger.warning if category in ("danger", "error") else logger.info

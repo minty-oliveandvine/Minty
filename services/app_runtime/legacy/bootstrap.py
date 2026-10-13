@@ -31,9 +31,9 @@ from models.db import db
 from pettycash.core.blueprint_loader import (register_blueprints,
                                              register_compat_alias)
 from pettycash.core.hooks import init_app as init_hooks
-from blueprints.shared import entity_ref
+from blueprints.shared import entity_ref, preview_origin
 from blueprints.shared.schema import SCHEMA
-from services.app_runtime.env import (database_url, is_development,
+from services.app_runtime.env import (database_url, is_development, preview_origin_regex,
                                       parse_s3_url, parse_smtp_url)
 
 load_dotenv()
@@ -136,6 +136,11 @@ def create_app():
     # Before any blueprint adds a rule: the <entity:...> converter and its resolver
     # (company addresses /entity/<shortid>/<name>, blueprints/shared/entity_ref.py).
     entity_ref.init_app(app)
+    # Preview sets (blueprints/shared/preview_origin.py): refuse to boot on a loose
+    # PREVIEW_ORIGIN_REGEX, and remember ?return_origin= FIRST - before the expired-session
+    # redirect, the Terms gate and login_required send the person anywhere.
+    preview_origin_regex()
+    app.before_request(preview_origin.capture)
     register_blueprints(app)
     # Old page addresses, each a 308 to its new one (blueprints/shared/legacy_addresses.py).
     from blueprints.shared.legacy_addresses import legacy_bp

@@ -58,6 +58,54 @@ def url_env(name: str, default: str) -> str:
     return (os.environ.get(name) or default).rstrip("/")
 
 
+_PREVIEW_PREFIX = "^https://pr-"
+_PREVIEW_SUFFIX = r"\.dailyminty\.com$"
+
+
+def _has_top_level_bar(value: str) -> bool:
+    """A ``|`` outside every group and class splits the anchors off into separate branches."""
+    depth, in_class, i = 0, False, 0
+    while i < len(value):
+        ch = value[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if in_class:
+            in_class = ch != "]"
+        elif ch == "[":
+            in_class = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "|" and depth == 0:
+            return True
+        i += 1
+    return False
+
+
+def preview_origin_regex() -> re.Pattern[str] | None:
+    """``PREVIEW_ORIGIN_REGEX``: the origins of a branch's preview set, or None (unset = off).
+
+    minty-infra ``services.tf`` writes it onto ONE environment's services. A value that could
+    let in any origin outside ``https://pr-…\\.dailyminty\\.com`` raises ``ValueError`` - a typo
+    must never open the hand-off to another host. The Django APIs apply the same rule
+    (``config/preview_origin.py`` in each)."""
+    value = (os.environ.get("PREVIEW_ORIGIN_REGEX") or "").strip()
+    if not value:
+        return None
+    if (not (value.startswith(_PREVIEW_PREFIX) and value.endswith(_PREVIEW_SUFFIX))
+            or _has_top_level_bar(value)):
+        raise ValueError(
+            "PREVIEW_ORIGIN_REGEX must be one pattern from ^https://pr- to \\.dailyminty\\.com$ "
+            "with no top-level |."
+        )
+    try:
+        return re.compile(value)
+    except re.error as exc:
+        raise ValueError(f"PREVIEW_ORIGIN_REGEX does not compile: {exc}") from None
+
+
 # --------------------------------------------------------------------------- database
 
 

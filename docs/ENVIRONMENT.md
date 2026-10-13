@@ -145,13 +145,13 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 - Optional: `EXPENSE_AI_*` / `GEMINI_API_KEY` / `GOOGLE_CLOUD_PROJECT`, the
   legal flags (`REQUIRE_TERMS_AT_SIGNUP`, `CURRENT_TERMS_VERSION`, `CURRENT_PRIVACY_VERSION`),
   `INVITATION_*`, `AUTO_SUPERUSER_EMAILS`, `DD_CLIENT_TOKEN`, `LOG_LEVEL`, `SESSION_TYPE`,
-  `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker).
+  `RUN_MIGRATIONS` / `DB_WAIT_SECONDS` / `GUNICORN_WORKERS` (Docker), `PREVIEW_ORIGIN_REGEX`.
 
 **Payment Request API (`minty-payment-request-api`, Django)**
 - Required: `APP_ENV`, `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, `S3_URL`,
   `PETTY_CASH_URL`, `PAYMENT_REQUEST_WEB_URL`, `ONBOARDING_WEB_URL`.
 - Optional: `CORS_ALLOWED_ORIGINS` (default `PAYMENT_REQUEST_WEB_URL,ONBOARDING_WEB_URL`),
-  `LOG_LEVEL`, `RUN_MIGRATIONS`, `DB_WAIT_SECONDS`.
+  `PREVIEW_ORIGIN_REGEX`, `LOG_LEVEL`, `RUN_MIGRATIONS`, `DB_WAIT_SECONDS`.
 
 **Subscription API (`minty-subscription-api`, Django)**
 - Required: `APP_ENV`, `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, `SMTP_URL`, `MAIL_FROM`,
@@ -159,14 +159,20 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
   `PAYMENT_REQUEST_WEB_URL`, `SUBSCRIPTION_SCHEDULER_*`.
 - Optional: `PETTY_CASH_PUBLIC_URL`, `SUBSCRIPTION_EMAIL`, `ONBOARDING_EMAIL`,
   `CORS_ALLOWED_ORIGINS` (default `MINTY_WEB_URL,PAYMENT_REQUEST_WEB_URL,PETTY_CASH_PUBLIC_URL`),
-  `LOG_LEVEL`.
+  `PREVIEW_ORIGIN_REGEX`, `LOG_LEVEL`.
 
 **Onboarding API (`minty-onboarding-api`, Django)**
 - Required: `APP_ENV`, `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, `PETTY_CASH_URL`,
   `SUBSCRIPTION_API_URL` (since 2026-10-06: cards, billing consent and finalize's trial start;
   outside development the service refuses to start without it), `ONBOARDING_WEB_URL`,
   `DISPLAY_TIMEZONE`.
-- Optional: `CORS_ALLOWED_ORIGINS` (default `ONBOARDING_WEB_URL`), `LOG_LEVEL`.
+- Optional: `CORS_ALLOWED_ORIGINS` (default `ONBOARDING_WEB_URL`), `PREVIEW_ORIGIN_REGEX`, `LOG_LEVEL`.
+
+`PREVIEW_ORIGIN_REGEX` (Flask and the three APIs, unset = off) admits a branch preview set's
+origins, `https://pr-<branch>-<app>.dailyminty.com`: the APIs add it to CORS, Flask also hands
+back into the set (`docs/features/authentication.md` 6.1). minty-infra sets it, narrowed per
+service, on ONE environment's backends only (`var.preview_backend`: production until the November
+launch, then development); every service refuses to boot on a looser value.
 
 **Minty web hub (`minty-web`, Next.js)**: `PETTY_CASH_URL`, `SUBSCRIPTION_API_URL`,
 `PAYMENT_REQUEST_WEB_URL`.

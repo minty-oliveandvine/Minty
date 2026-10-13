@@ -200,3 +200,42 @@ def test_the_app_is_configured_from_the_urls(app):
     assert app.config["APP_ENV"] == "development"
     with app.app_context():
         assert get_s3_bucket() == "dummy-bucket"
+
+
+# --- PREVIEW_ORIGIN_REGEX --------------------------------------------------------------------
+
+PREVIEW = r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding)\.dailyminty\.com$"
+
+
+@pytest.mark.parametrize("raw", [None, "", "   "])
+def test_preview_origin_regex_unset_is_off(monkeypatch, raw):
+    if raw is None:
+        monkeypatch.delenv("PREVIEW_ORIGIN_REGEX", raising=False)
+    else:
+        monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", raw)
+    assert env.preview_origin_regex() is None
+
+
+def test_preview_origin_regex_reads_the_terraform_value(monkeypatch):
+    monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", f" {PREVIEW} ")
+    pattern = env.preview_origin_regex()
+    assert pattern.fullmatch("https://pr-feat-x-my.dailyminty.com")
+    assert not pattern.fullmatch("https://pr-feat-x-www.dailyminty.com")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        r".*",
+        r"https://pr-.*\.dailyminty\.com$",
+        r"^https://pr-.*\.dailyminty\.com",
+        r"^http://pr-.*\.dailyminty\.com$",
+        r"^https://pr-.*\.vercel\.app$",
+        r"^https://pr-a|.*\.dailyminty\.com$",
+        r"^https://pr-(.*\.dailyminty\.com$",
+    ],
+)
+def test_a_loose_preview_origin_regex_is_refused(monkeypatch, raw):
+    monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", raw)
+    with pytest.raises(ValueError, match="PREVIEW_ORIGIN_REGEX"):
+        env.preview_origin_regex()
