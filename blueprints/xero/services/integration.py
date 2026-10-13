@@ -140,6 +140,49 @@ def get_accounts_from_xero(
         return []
 
 
+def _fetch_organisation(access_token, xero_org_id):
+    """GET the Xero Organisation for ``xero_org_id``. Raises on any failure.
+
+    Picks the organisation whose ``OrganisationID`` matches, else the only one in the
+    answer (the endpoint is tenant-scoped, so it holds one).
+    """
+    response = requests.get(
+        "https://api.xero.com/api.xro/2.0/Organisation",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Xero-Tenant-Id": str(xero_org_id),
+            "Accept": "application/json",
+        },
+        timeout=15,
+    )
+    logger.info("Xero Organisation: status={} org={}", response.status_code, xero_org_id)
+    if response.status_code != 200:
+        raise RuntimeError(f"Xero Organisation answered {response.status_code}")
+    orgs = response.json().get("Organisations") or []
+    org = next(
+        (o for o in orgs if o.get("OrganisationID") == xero_org_id),
+        orgs[0] if orgs else None,
+    )
+    if not org:
+        raise RuntimeError("Xero Organisation answered no organisation")
+    return org
+
+
+def get_financial_year_end(access_token, xero_org_id):
+    """``(day, month)`` of the organisation's financial year end. Raises on any failure.
+
+    Stored on ``entities.financial_year_end_day`` / ``_month`` whenever Xero is connected
+    (schema decision 16); a connect that cannot read it fails rather than saving a company
+    without one.
+    """
+    org = _fetch_organisation(access_token, xero_org_id)
+    day, month = org.get("FinancialYearEndDay"), org.get("FinancialYearEndMonth")
+    if not (isinstance(day, int) and isinstance(month, int)
+            and 1 <= day <= 31 and 1 <= month <= 12):
+        raise RuntimeError(f"Xero Organisation has no usable financial year end: {day!r}/{month!r}")
+    return day, month
+
+
 def get_organisation_lock_dates(access_token, xero_org_id):
     """Fetch PeriodLockDate and EndOfYearLockDate from Xero Organisation API.
 
@@ -166,31 +209,7 @@ def get_organisation_lock_dates(access_token, xero_org_id):
         return dt_hk.date()
 
     try:
-        url = "https://api.xero.com/api.xro/2.0/Organisation"
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Xero-Tenant-Id": str(xero_org_id),
-            "Accept": "application/json",
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        logger.info("get_organisation_lock_dates: status=%s org=%s", response.status_code, xero_org_id)
-
-        if response.status_code != 200:
-            logger.warning(
-                "get_organisation_lock_dates: non-200 response org=%s status=%s",
-                xero_org_id, response.status_code,
-            )
-            return {"period_lock_date": None, "end_of_year_lock_date": None}
-
-        orgs = response.json().get("Organisations", [])
-        org = next(
-            (o for o in orgs if o.get("OrganisationID") == xero_org_id),
-            orgs[0] if orgs else None,
-        )
-        if not org:
-            logger.warning("get_organisation_lock_dates: no org found for org=%s", xero_org_id)
-            return {"period_lock_date": None, "end_of_year_lock_date": None}
-
+        org = _fetch_organisation(access_token, xero_org_id)
         period_lock_date = _parse_xero_date(org.get("PeriodLockDate"))
         end_of_year_lock_date = _parse_xero_date(org.get("EndOfYearLockDate"))
         logger.info(

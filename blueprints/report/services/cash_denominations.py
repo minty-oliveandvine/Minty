@@ -99,9 +99,10 @@ def resolve_denominations_for_entity(entity_id):
     """Denominations an entity logs, ordered for display.
 
     Starts from the active catalog for the entity's currency, then applies the
-    entity's overrides. An entity with no override rows gets its currency
-    defaults — which is why creating an entity needs no denomination seed, and
-    why a denomination added to a currency later shows up automatically.
+    entity's ``entity_cash_setting`` rows (on/off and order). Setting a currency
+    writes one row per active denomination (entity/services/cash_settings.py);
+    a denomination with no row - every one, for an entity created before that,
+    and one added to the currency later - counts as on, in catalog order.
 
     Returns a list of CashInfo rows with ``display_order`` already resolved.
     Empty list means the entity's currency has no catalog — the caller must

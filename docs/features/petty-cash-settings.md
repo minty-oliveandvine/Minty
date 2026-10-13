@@ -81,9 +81,13 @@ exist before a company is created (the onboarding wizard's Step 1 reads them fro
 
 ## Denominations (the cash count)
 
-`cash_info` is the catalogue of a currency's notes and coins; `entity_cash_setting` is a
-per-company override (a row only where the company diverges — a company with none logs
-every active denomination of its currency and picks up new ones automatically);
+`cash_info` is the catalogue of a currency's notes and coins; `entity_cash_setting` holds
+the company's own list: setting a currency (creation, the onboarding wizard, this page, the
+hub's Entities & Integration save) writes one row per active denomination of it and drops
+any other currency's rows, keeping rows already there so the company's on/off and order
+survive a re-save (`entity/services/cash_settings.py`; minty-onboarding-api has the same
+rule). A denomination with no row — every one for a company created before 2026-10-12, or one
+added to the currency later — counts as on;
 `entity_cash_detail` is the cash in stock per denomination after each count.
 `resolve_denominations_for_entity` in `cash_denominations.py` is the one resolver; the
 cash-count page's calculator and the `.docx` export's `qty*` placeholders read from it.

@@ -23,7 +23,7 @@ from blueprints.shared.safe_redirect import safe_internal_path, safe_next
 from blueprints.xero import xero_bp
 from blueprints.xero.services.integration import (
     _get_entity_xero_data_from_db, get_accounts_from_xero, get_auth_token,
-    get_contacts_from_xero)
+    get_contacts_from_xero, get_financial_year_end)
 from blueprints.xero.services.settings import (get_entity_account_settings,
                                                sync_entity_xero_status)
 from services.helpers.xero_bridge import get_entity_contact_settings
@@ -396,6 +396,24 @@ def _reconcile_ghost_conflict(conflict) -> None:
     conflict.xero_org_id = None
     conflict.connected_by_user_id = None
     db.session.commit()
+
+
+def _financial_year_end_or_revoke(access_token, connections, tenant_id, entity_id):
+    """``(day, month)`` from the Xero Organisation, or None after handing the grant back.
+
+    A connection must carry the company's financial year end (entities.financial_year_end_*),
+    so when Xero cannot give it the connect fails: logged loudly, and - like a refused
+    conflict - the grant this callback just created is revoked so Xero matches our state.
+    """
+    try:
+        return get_financial_year_end(access_token, tenant_id)
+    except Exception as err:
+        logger.error(
+            f"Xero connect failed: no financial year end for entity {entity_id} "
+            f"(tenant {tenant_id}): {err}"
+        )
+        _revoke_new_grant(access_token, connections, tenant_id)
+        return None
 
 
 def _revoke_new_grant(access_token, connections, tenant_id) -> None:
@@ -1084,6 +1102,21 @@ def xero_callback():
                                     # Integration tab, where Connect lives.
                                     return redirect(
                                         url_for("entity.entity_list"))
+                                # The financial year end is part of a connection:
+                                # a connect that cannot read it from Xero's
+                                # Organisation fails (owner, 2026-10-12) - before
+                                # anything is written, the new grant handed back.
+                                fy_end = _financial_year_end_or_revoke(
+                                    response.get("access_token"), curr_conn,
+                                    tenant_id, entity.id,
+                                )
+                                if fy_end is None:
+                                    flash(
+                                        "I couldn't connect that to Xero. Mind trying again?", "danger", )
+                                    if from_onboarding:
+                                        return _onboarding_xero_return(False)
+                                    return redirect(
+                                        url_for("entity.entity_create_success"))
                                 # ``user`` is already the user resolved from the
                                 # Xero id_token email above. Do NOT re-fetch via
                                 # current_user: /callback has no @login_required
@@ -1108,6 +1141,8 @@ def xero_callback():
                                 entity.xero_tenant_name = curr_conn[0].get(
                                     "tenantName"
                                 )
+                                (entity.financial_year_end_day,
+                                 entity.financial_year_end_month) = fy_end
                                 # Mid-onboarding, leave status == "onboarding" so
                                 # the resume flow (entity list badge, modules.py
                                 # resume, /api/onboarding/state step derivation)
@@ -1344,6 +1379,19 @@ def xero_callback():
                                                 conflict, user
                                             )["token"],
                                         ))
+                                # As on connect: no financial year end, no
+                                # reconnect - checked before anything is written.
+                                fy_end = _financial_year_end_or_revoke(
+                                    response.get("access_token"), curr_conn,
+                                    tenant_id, entity_id,
+                                )
+                                if fy_end is None:
+                                    flash(
+                                        "I couldn't reconnect that to Xero, so it's still disconnected. Mind trying again?", "danger", )
+                                    return redirect(
+                                        url_for(
+                                            "entity_settings",
+                                            entity_id=entity_id))
                                 entity = Entity.query.filter(
                                     Entity.id == entity_id
                                 ).first()
@@ -1365,6 +1413,8 @@ def xero_callback():
                                     entity.xero_tenant_name = curr_conn[0].get(
                                         "tenantName"
                                     )
+                                    (entity.financial_year_end_day,
+                                     entity.financial_year_end_month) = fy_end
                                 entity.status = "connected"
                                 entity.last_connected_at = datetime.now()
                                 entity.connected_by_user_id = user.id

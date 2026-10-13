@@ -5,6 +5,7 @@
 from flask import url_for
 from loguru import logger
 
+from blueprints.entity.services.cash_settings import sync_cash_settings
 from blueprints.xero.services.settings import \
     check_entity_xero_settings_complete
 from blueprints.shared.enums import SaleType
@@ -86,6 +87,7 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_id, *,
         # The creator becomes the entity admin by policy.
         db.session.add(UserEntity(user_id=user_id, entity_id=entity.id, role="admin"))
         create_default_entity_settings(entity.id)
+        sync_cash_settings(entity.id, currency_id)
         db.session.commit()
 
         # Seed module entitlements so entity_function_map is always populated

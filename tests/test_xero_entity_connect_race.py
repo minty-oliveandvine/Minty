@@ -133,6 +133,8 @@ def _make_entity(entity_id: str) -> SimpleNamespace:
         status=None,
         last_connected_at=None,
         connected_by_user_id=None,
+        financial_year_end_day=None,
+        financial_year_end_month=None,
     )
 
 
@@ -199,6 +201,8 @@ def _patch_all(monkeypatch, *, user, by_id: dict, latest, session, from_onboardi
     monkeypatch.setattr(xero_routes, "url_for", lambda endpoint, **_kw: f"/{endpoint}")
     monkeypatch.setattr(xero_routes, "redirect", lambda loc: SimpleNamespace(status_code=302, location=loc))
     monkeypatch.setattr(xero_routes, "upsert_user_token", lambda *_a, **_kw: None)
+    # Xero's Organisation answers a 31 March year end
+    monkeypatch.setattr(xero_routes, "get_financial_year_end", lambda *_a, **_kw: (31, 3))
     monkeypatch.setattr(
         xero_routes,
         "_onboarding_xero_return",
@@ -229,9 +233,64 @@ def test_entity_resolved_by_id_in_state(monkeypatch):
     assert entity_a.xero_org_id == "xero-tenant-abc"
     assert entity_a.status == "connected"
     assert entity_a.xero_tenant_name == "Acme Ltd"
+    assert (entity_a.financial_year_end_day, entity_a.financial_year_end_month) == (31, 3)
     assert entity_b.xero_org_id is None
     assert entity_b.status is None
     assert session.commit_calls == 1
+
+
+def test_no_financial_year_end_fails_the_connect(monkeypatch):
+    """The year end is part of a connection: when Xero's Organisation can't give it, the
+    connect fails before anything is written, and the grant just made is handed back."""
+    app = _build_app()
+    session = _SessionStub()
+    user_a = _make_user("user-a", "alice@example.com")
+    entity_a = _make_entity("entity-a")
+    _patch_all(monkeypatch, user=user_a, by_id={"entity-a": entity_a}, latest=entity_a, session=session)
+
+    def _no_year_end(*_a, **_kw):
+        raise RuntimeError("Xero Organisation answered 403")
+
+    revoked = []
+    monkeypatch.setattr(xero_routes, "get_financial_year_end", _no_year_end)
+    monkeypatch.setattr(xero_routes, "_revoke_new_grant", lambda *a, **_kw: revoked.append(a))
+
+    with app.test_request_context("/callback?state=entity_connect:entity-a&code=test-code"):
+        response = xero_routes.xero_callback()
+
+    assert response.status_code == 302
+    assert response.location == "/entity.entity_create_success"
+    assert entity_a.xero_org_id is None and entity_a.status is None
+    assert entity_a.financial_year_end_day is None
+    assert session.commit_calls == 0
+    assert [a[2] for a in revoked] == ["xero-tenant-abc"]
+
+
+def test_no_financial_year_end_fails_an_onboarding_connect(monkeypatch):
+    """From onboarding the failure goes back to the wizard as "not connected"."""
+    app = _build_app()
+    session = _SessionStub()
+    user_a = _make_user("user-a", "alice@example.com")
+    entity_a = _make_entity("entity-a")
+    _patch_all(monkeypatch, user=user_a, by_id={"entity-a": entity_a}, latest=entity_a, session=session)
+    returned = []
+    monkeypatch.setattr(xero_routes, "get_financial_year_end",
+                        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("no org")))
+    monkeypatch.setattr(xero_routes, "_revoke_new_grant", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        xero_routes, "_onboarding_xero_return",
+        lambda connected, *_a, **_kw: returned.append(connected) or SimpleNamespace(
+            status_code=302, location="/onboarding"),
+    )
+
+    with app.test_request_context(
+        "/callback?state=entity_connect_onboarding:entity-a&code=test-code"
+    ):
+        xero_routes.xero_callback()
+
+    assert returned == [False]
+    assert entity_a.xero_org_id is None
+    assert session.commit_calls == 0
 
 
 def test_race_condition_two_concurrent_users(monkeypatch):

@@ -102,6 +102,7 @@ def test_xero_entity_connect_callback_does_not_assign_user_company(monkeypatch):
         },
     )
     monkeypatch.setattr(xero_routes, "decode_jwt", fake_decode_jwt)
+    monkeypatch.setattr(xero_routes, "get_financial_year_end", lambda *_a, **_kw: (30, 6))
     monkeypatch.setattr(xero_routes, "requests", SimpleNamespace(get=fake_requests_get))
     monkeypatch.setattr(xero_routes, "db", SimpleNamespace(session=session))
     monkeypatch.setattr(xero_routes, "desc", lambda value: value)
@@ -128,4 +129,5 @@ def test_xero_entity_connect_callback_does_not_assign_user_company(monkeypatch):
     assert response.location == "/entity.entity_list"
     assert fake_entity.xero_org_id == "tenant-1"
     assert fake_entity.status == "connected"
+    assert (fake_entity.financial_year_end_day, fake_entity.financial_year_end_month) == (30, 6)
     assert session.commit_calls == 1

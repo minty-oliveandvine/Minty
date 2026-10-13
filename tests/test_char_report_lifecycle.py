@@ -181,6 +181,70 @@ def test_the_withdrawal_source_is_kept_on_every_save_of_the_opening(shop, client
     assert source() == "personal"
 
 
+def _onboarded(app, entity, *, opening, start):
+    """What onboarding Step 5 leaves: the opening balance and start date on the settings row."""
+    from models.db import EntityPettycashSettings, db as _db
+
+    with app.app_context():
+        _db.session.add(EntityPettycashSettings(entity_id=entity.id, opening_balance=opening, start_date=start))
+        _db.session.commit()
+
+
+def _opening_of(app, entity, day):
+    from models.db import Report
+
+    with app.app_context():
+        row = Report.query.filter_by(entity_id=entity.id, transaction_date=day).one()
+        return money(row.opening_balance)
+
+
+def test_the_first_report_offers_the_onboarding_balance_and_date(shop, client, app):
+    owner, entity = shop
+    _onboarded(app, entity, opening=750, start=REPORT_DATE)
+    F.login(client, owner)
+
+    html = client.get(f"/report/opening?entity_id={entity.id}", follow_redirects=True).get_data(as_text=True)
+
+    assert 'name="opening_balance" value="750.0"' in html
+    assert f'name="transaction_date" value="{F.iso(REPORT_DATE)}"' in html
+
+
+def test_the_first_report_opens_at_the_onboarding_balance_whatever_the_form_says(shop, client, app):
+    """The hidden field is the browser's; the first report's opening is the server's."""
+    owner, entity = shop
+    _onboarded(app, entity, opening=750, start=REPORT_DATE)
+    F.login(client, owner)
+
+    resp = open_report(client, entity, REPORT_DATE, opening="99999.00")
+
+    assert "/reports/new/sale" in resp.headers["Location"], resp.headers.get("Location")
+    assert _opening_of(app, entity, REPORT_DATE) == money("750.00")
+
+
+def test_the_first_report_cannot_start_before_the_onboarding_date(shop, client, app):
+    owner, entity = shop
+    _onboarded(app, entity, opening=750, start=REPORT_DATE)
+    F.login(client, owner)
+
+    resp = open_report(client, entity, REPORT_DATE - timedelta(days=1))
+
+    assert resp.status_code == 302
+    assert "/sale" not in resp.headers.get("Location", "")
+    assert client.get(
+        f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE - timedelta(days=1))}"
+    ).status_code == 404
+
+
+def test_without_an_onboarding_start_date_the_form_balance_stands(shop, client, app):
+    """A company onboarded before the settings columns were written keeps the old path."""
+    owner, entity = shop
+    F.login(client, owner)
+
+    open_report(client, entity, REPORT_DATE, opening="1000.00")
+
+    assert _opening_of(app, entity, REPORT_DATE) == money("1000.00")
+
+
 def test_draft_totals_404_before_any_report_exists(shop, client):
     owner, entity = shop
     F.login(client, owner)

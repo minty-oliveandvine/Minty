@@ -10,6 +10,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from blueprints.report import report_bp
 from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
+                                               first_report_defaults,
                                                future_date_error,
                                                header_publishing_status_for,
                                                recalculate_report,
@@ -28,31 +29,19 @@ from utils import jsonify
 
 
 def _onboarding_floor_date(entity_id):
-    """The earliest date a first report may use: the onboarding opening date.
+    """The earliest date a first report may use: the onboarding start date.
 
-    Onboarding seeds an opening draft-status report whose ``transaction_date`` is the
-    date the user chose to start reporting from. That date is the floor for the
-    first report (replaces the legacy "within 7 days from today" window).
-    Returns a date, or None if no onboarding draft exists.
+    Onboarding saves the date the user chose to start reporting from as
+    ``entity_pettycash_settings.start_date``; it is the floor for the first report
+    (replaces the legacy "within 7 days from today" window). None when not set.
     """
-    # Draft-only: this is the onboarding seed draft (seed_opening_draft).
-    # Unfiltered, once drafts live in `report`, "earliest row for the entity"
-    # would resolve to the oldest SUBMITTED report and move the floor date.
-    opening_draft = (
-        Report.query.filter(
-            Report.company == entity_id,
-            Report.status == "draft",
-        )
-        .order_by(Report.transaction_date.asc())
-        .first()
-    )
-    return opening_draft.transaction_date if opening_draft else None
+    return first_report_defaults(entity_id)[1]
 
 
 def _first_report_date_error(selected_date, today, entity_id):
     """Validate a first report's date.
 
-    Floor is the onboarding date (the opening draft's transaction_date) so the
+    Floor is the onboarding start date (entity_pettycash_settings.start_date) so the
     rule is the same whether or not the user arrived straight from the
     onboarding wizard. Future dates are always rejected; the onboarding date is
     enforced as the lower bound when one exists. Returns an error message if out
@@ -480,6 +469,16 @@ def report_opening(id=None, entity_id=None):
                 raise ValueError(
                     f"Invalid transaction date format: {transaction_date_str}"
                 )
+
+            # The FIRST report opens at the onboarding balance - read on the server, never
+            # trusted from the form's hidden field. Only for a company onboarding gave a start
+            # date; edit mode re-saves a posted report and keeps the normal path.
+            onboarding_opening, onboarding_start = first_report_defaults(entity_id)
+            if onboarding_start and not is_edit_mode and not Report.query.filter(
+                Report.company == entity_id,
+                Report.transaction_date < transaction_date,
+            ).first():
+                opening_balance = onboarding_opening
 
             if (opening_balance + cash_addition) < 0:
                 flash(
@@ -1093,7 +1092,8 @@ def report_opening(id=None, entity_id=None):
                             "No closing balance or cash count data found, defaulting opening balance to 0"
                         )
             else:
-                opening_balance = 0
+                # Nothing before this date: the first report opens at the onboarding balance.
+                opening_balance = first_report_defaults(entity_id)[0]
         else:
             # No selected date, use the latest report overall
             last_report = (
@@ -1128,17 +1128,18 @@ def report_opening(id=None, entity_id=None):
                             f"No closing balance or cash count data found, defaulting opening balance to 0 (from report {last_report.id})"
                         )
             else:
-                opening_balance = 0
+                # No report yet: the first one opens at the onboarding balance.
+                opening_balance = first_report_defaults(entity_id)[0]
 
         # Use selected date if provided, otherwise calculate next transaction
-        # date
+        # date; a first report defaults to the onboarding start date.
         if selected_date:
             next_transaction_date = selected_date
         else:
             next_transaction_date = (
                 (last_report.transaction_date + timedelta(days=1))
                 if last_report
-                else None
+                else first_report_defaults(entity_id)[1]
             )
 
         is_first_report = last_report is None
@@ -1155,10 +1156,12 @@ def report_opening(id=None, entity_id=None):
             "bank_account": "",
         }
 
+        # The page shows (and posts) this as the starting cash; a first report
+        # starts from the opening balance worked out above - the onboarding one.
         yesterday_closing_balance = (
             last_report.closing_balance
             if last_report and last_report.closing_balance is not None
-            else 0
+            else (opening_balance if is_first_report else 0)
         )
         safebox_balance = (
             last_report.safe_box_balance

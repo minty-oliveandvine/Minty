@@ -10,7 +10,7 @@ that JavaScript; the pytest suite renders the templates but executes none of it.
 
 | Step | Route | What is entered | Where it goes |
 |---|---|---|---|
-| Opening | `GET/POST /entity/<co>/petty-cash/reports/new/opening` (a new day; `.../reports/<id>/opening` for an existing report) | the float carried forward, a cash addition/withdrawal and its source ("withdrawal from": bank or director) | `report.opening_balance`, `cash_addition`, `withdrawal_from` |
+| Opening | `GET/POST /entity/<co>/petty-cash/reports/new/opening` (a new day; `.../reports/<id>/opening` for an existing report) | the float carried forward (a company's first report: the onboarding opening balance and start date from `entity_pettycash_settings`, read on the server), a cash addition/withdrawal and its source ("withdrawal from": bank or director) | `report.opening_balance`, `cash_addition`, `withdrawal_from` |
 | Sales | `.../reports/new/sale`, `.../reports/<id>/sale` | one amount per sales method — cash, the electronic methods and the delivery platforms the company set up (`sales[<bucket>][<method>]`) | `report_sale` rows (one per method; the class is still importable as `ReportSaleDetail`) |
 | Expenses | `.../reports/new/expense`, `.../reports/<id>/expense` | one line per receipt: supplier (a synced Xero contact), account (a synced expense account), amount, remarks, the receipt file(s) | `report_expense` rows + attachment rows |
 | Deposit | `.../reports/new/deposit`, `.../reports/<id>/deposit` | the cash banked today (the page shows the cash on hand before it) | `report.bank_deposit` |

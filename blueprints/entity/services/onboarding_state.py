@@ -28,7 +28,7 @@ from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
 from blueprints.shared.enums import SaleType
-from models.db import (Entity, EntityPettycashSettings, Report, EntitySaleSetting, SaleInfo, UserEntity, db)
+from models.db import (Entity, EntityPettycashSettings, EntitySaleSetting, SaleInfo, UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
@@ -180,28 +180,19 @@ def _sales_methods_state(entity_id: str) -> dict:
 def _opening_balance_state(entity_id: str) -> dict | None:
     """Saved petty-cash opening balance (Step 5) for resume rehydration.
 
-    Reads the opening ``report_draft`` seeded by ``seed_opening_draft`` (keyed by
-    ``company`` = entity_id). Onboarding stores the starting cash in
-    ``opening_balance`` (with ``cash_addition`` 0); both are returned so the
-    frontend can bind to either. ``None`` when no opening draft exists yet.
+    Reads ``opening_balance`` and ``start_date`` from ``entity_pettycash_settings``
+    (written by ``save_opening_balance``). The starting cash is an opening balance, never
+    an addition, so ``cash_addition`` is 0 and ``adjusted_opening_balance`` the amount; all
+    are returned so the frontend can bind to either. ``None`` until a start date is saved.
     """
-    # Read-only: only the balance fields are consumed. Migrated to `report`.
-    draft = (
-        Report.query.filter(
-            Report.company == entity_id,
-            Report.status == "draft",
-        )
-        .order_by(Report.transaction_date.asc())
-        .first()
-    )
-    if draft is None:
+    row = EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
+    if row is None or row.start_date is None:
         return None
-    tx = draft.transaction_date
     return {
-        "opening_date": tx.isoformat() if tx else None,
-        "opening_balance": draft.opening_balance,
-        "cash_addition": draft.cash_addition,
-        "adjusted_opening_balance": draft.adjusted_opening_balance,
+        "opening_date": row.start_date.isoformat(),
+        "opening_balance": row.opening_balance,
+        "cash_addition": 0.0,
+        "adjusted_opening_balance": row.opening_balance,
     }
 
 

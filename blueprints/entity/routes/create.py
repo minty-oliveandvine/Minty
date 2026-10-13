@@ -19,6 +19,7 @@ from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from blueprints.shared.enums import EntityStatus
 from blueprints.shared import bearer_api
 from blueprints.entity.forms import CreateEntityForm
+from blueprints.entity.services.cash_settings import sync_cash_settings
 from blueprints.entity.services.payment_methods import (
     list_sales_methods_grouped, replace_sales_methods)
 from blueprints.entity.services.shared import create_entity_for_user
@@ -648,6 +649,8 @@ def onboarding_update_entity(entity_id):
         currency_info = CurrencyInfo.query.get(currency_id)
         if currency_info:
             entity.currency_format = currency_info.symbol or "$"
+        # The denominations follow the currency; committed with the save below.
+        sync_cash_settings(entity.id, currency_id)
 
     # --- Contact details ------------------------------------------------------
     # Keyed off presence, not truthiness: both fields are optional, so "" is a
@@ -802,11 +805,11 @@ def onboarding_sales_methods():
 
 @entity_bp.route("/api/onboarding/opening-balance", methods=["POST", "OPTIONS"])
 def onboarding_opening_balance():
-    """Token-authenticated petty-cash opening balance (onboarding Step 4).
+    """Token-authenticated petty-cash opening balance (onboarding Step 5).
 
-    POST {entity_id, opening_date, cash_addition} → seeds the first 'opening'
-    report draft for that date with the beginning amount recorded as
-    cash_addition. Same JWT/CORS contract as the other onboarding endpoints.
+    POST {entity_id, opening_date, opening_balance} → saves the beginning amount and
+    start date on the entity's petty-cash settings; the first report opens from them.
+    Same JWT/CORS contract as the other onboarding endpoints.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -824,13 +827,16 @@ def onboarding_opening_balance():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.report.services.shared import seed_opening_draft
+    from blueprints.report.services.shared import save_opening_balance
 
-    data, status = seed_opening_draft(
+    amount = payload.get("cash_addition")
+    if amount is None:
+        amount = payload.get("opening_balance")
+    data, status = save_opening_balance(
         user_id,
         entity_id,
         payload.get("opening_date") or payload.get("transaction_date"),
-        payload.get("cash_addition", payload.get("opening_balance", 0)),
+        amount,
     )
     resp = jsonify(data)
     resp.status_code = status

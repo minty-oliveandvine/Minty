@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from datetime import datetime, timedelta
 
@@ -237,52 +238,38 @@ def update_draft_progress(
             flag_modified(report_draft, "completed_sections")
 
 
-def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
-    """Create/update the first 'opening' report draft from onboarding (Step 4).
+def save_opening_balance(user_id, entity_id, start_date, amount):
+    """Save the onboarding opening balance and start date (onboarding Step 5).
 
-    The onboarding 'beginning petty cash amount' is recorded as the draft's
-    ``opening_balance`` for the chosen date (with ``cash_addition`` left at 0) so
-    the petty-cash starting cash balance matches the amount entered during
-    onboarding, rather than appearing as an addition to the cash drawer. The
-    adjusted opening still equals the amount, so day 1's closing balance — and
-    therefore the opening that carries into every subsequent day — is unchanged.
-    This only affects the first onboarding day; future reports derive their
-    opening from the previous day's closing balance (report create flow), a
-    separate path this function does not touch. Idempotent per entity while the
-    entity is still pre-first-report: re-saving on revisit updates the SAME
-    onboarding draft in place — including moving its ``transaction_date`` when
-    the user changes the opening date — rather than seeding a second draft. The
-    selected date is honoured as-is (no first-report 7-day window — onboarding
-    deliberately lets the user pick any start date in the current month).
+    Both land on the company's ``entity_pettycash_settings`` row; no report is written. The
+    FIRST report reads them (``first_report_defaults``): the amount is its opening balance -
+    cash already in the drawer, never a cash addition - and the date its default and
+    earliest date. Once a report is posted the first report has already used them, so a
+    change is refused (409) rather than silently doing nothing. No seven-day window: any
+    past date is allowed; the future boundary is Hong Kong midnight, not UTC.
 
-    Once the entity has any posted ``Report``, onboarding is over and this
-    falls back to keying on (entity, date) so it can only ever touch a draft
-    for the exact date requested and never disturbs an unrelated day's
-    in-progress draft.
-
-    Returns ``(data, status_code)``.
+    minty-onboarding-api's ``onboarding/services/opening_balance.py`` is the same function
+    behind the same path; change the two together. Returns ``(data, status_code)``.
     """
-    from models.db import User
+    from models.db import EntityPettycashSettings
     from services.permission_policy import (Permission,
                                             has_permission_by_user_id)
 
     if not has_permission_by_user_id(user_id, Permission.REPORT_EDIT_OWN, entity_id):
         return {"error": "Access denied"}, 403
 
-    if isinstance(transaction_date, str):
+    if isinstance(start_date, str):
         try:
-            tx_date = datetime.strptime(transaction_date.strip(), "%Y-%m-%d").date()
+            start = datetime.strptime(start_date.strip(), "%Y-%m-%d").date()
         except (ValueError, AttributeError):
             return {"error": "Invalid date format (expected YYYY-MM-DD)"}, 400
     else:
-        tx_date = transaction_date
-    if not tx_date:
+        start = start_date
+    if not start:
         return {"error": "A start date is required"}, 400
 
-    # Reject future start dates. Anchored to Hong Kong time so the boundary is
-    # the users' local midnight, not the server's (UTC) midnight.
     today_hk = datetime.now(tz).date()
-    if tx_date > today_hk:
+    if start > today_hk:
         return {
             "error": (
                 "Start date cannot be in the future. "
@@ -290,114 +277,57 @@ def seed_opening_draft(user_id, entity_id, transaction_date, cash_addition):
             )
         }, 400
 
-    amount = safe_float(cash_addition)
-    if amount < 0:
+    try:
+        value = float(str(amount).strip() or 0) if amount is not None else 0.0
+    except ValueError:
+        return {"error": "Opening amount must be a number"}, 400
+    if not math.isfinite(value):
+        return {"error": "Opening amount must be a number"}, 400
+    value = round(value, 2)
+    if value < 0:
         return {"error": "Opening amount cannot be negative"}, 400
 
-    # Submitted reports only. Drafts live in `report` since Stage 4a, so an
-    # unfiltered check finds the onboarding opening draft this very function
-    # created on a previous call and refuses to update it — which is what
-    # broke the "all set" page after the r0 backfill ran.
     if Report.query.filter(
         Report.company == entity_id,
-        Report.transaction_date == tx_date,
         db.or_(Report.status.is_(None), Report.status != "draft"),
     ).first():
-        return {"error": f"A report for {tx_date} already exists."}, 409
+        return {
+            "error": "Your first report is already posted, so the opening balance can't change."
+        }, 409
 
-    user = User.query.get(user_id)
-    username = user.username if user else None
-    adjusted = amount  # opening_balance (amount) + cash_addition (0)
-
-    # While the entity is still pre-first-report (no posted Report at all), the
-    # single existing draft IS the onboarding opening draft. Bind it by entity
-    # alone so a revisit that changes the opening date UPDATES this same draft
-    # (moving its transaction_date) instead of seeding a duplicate for the new
-    # date. Order by date.asc() to pick the earliest draft as the canonical
-    # opening draft in the (unexpected) event more than one exists.
-    #
-    # After the first Report is posted, onboarding is over: fall back to keying
-    # on the exact (entity, date) so we can only ever touch a draft for the
-    # requested date and never disturb an unrelated day's in-progress draft.
-    # WRITE FLIP (Step 2): reads AND writes `report` directly. The paired
-    # report row has existed since Stage 4a, so there is nothing left for
-    # report_draft to hold that this function needs.
-    entity_has_posted_report = (
-        db.session.query(Report.id)
-        .filter(
-            Report.company == entity_id,
-            db.or_(Report.status.is_(None), Report.status != "draft"),
-        )
-        .first()
-        is not None
-    )
-    if entity_has_posted_report:
-        draft = Report.query.filter(
-            Report.company == entity_id,
-            Report.transaction_date == tx_date,
-            Report.status == "draft",
-        ).first()
-    else:
-        draft = (
-            Report.query.filter(
-                Report.company == entity_id,
-                Report.status == "draft",
-            )
-            .order_by(Report.transaction_date.asc())
-            .first()
-        )
-
-    if draft:
-        # Move the draft to the (possibly changed) requested date. When the
-        # user edits the opening date on revisit this updates the existing
-        # onboarding draft in place rather than leaving a stale one behind.
-        draft.transaction_date = tx_date
-        draft.opening_balance = amount
-        draft.cash_addition = 0.0
-        draft.adjusted_opening_balance = adjusted
-        draft.closing_balance = adjusted
-        draft.next_transaction_date = tx_date + timedelta(days=1)
-        if username:
-            draft.uploaded_by = username
-        # The onboarding opening balance is seeded here, but the user still
-        # starts their first report at Opening so they can see/confirm it — so
-        # we don't pre-mark the opening section complete.
-        created = False
-    else:
-        # Creates a `report` row directly — no report_draft. The row IS the
-        # draft, distinguished by status='draft'.
-        draft = Report(
-            transaction_date=tx_date,
-            next_transaction_date=tx_date + timedelta(days=1),
-            opening_balance=amount,
-            cash_addition=0.0,
-            adjusted_opening_balance=adjusted,
-            cashsale_total=0.0, nocashsale_total=0.0, total_sales=0.0,
-            expense_total=0.0, bank_deposit=0.0,
-            closing_balance=adjusted,
-            current_section="opening",  # start the first report at opening
-            completed_sections=[],
-            uploaded_by=username,  # resolved to created_by by the model
-            entity_id=entity_id,
-            status="draft",
-        )
-        db.session.add(draft)
-        created = True
-
-    db.session.flush()
+    # Step 5 runs before Step 6 (account codes) creates the row, so it may not exist yet.
+    row = EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
+    if row is None:
+        row = EntityPettycashSettings(entity_id=entity_id)
+        db.session.add(row)
+    row.opening_balance = value
+    row.start_date = start
     db.session.commit()
     logger.info(
-        "seed_opening_draft: entity=%s date=%s opening_balance=%s created=%s draft=%s",
-        entity_id, tx_date, amount, created, draft.id,
+        "save_opening_balance: entity={} start={} amount={}", entity_id, start, value
     )
     return {
-        "draft_id": draft.id,
-        "transaction_date": tx_date.isoformat(),
-        "opening_balance": amount,
+        "opening_date": start.isoformat(),
+        "opening_balance": value,
         "cash_addition": 0.00,
-        "adjusted_opening_balance": adjusted,
-        "created": created,
+        "adjusted_opening_balance": value,
     }, 200
+
+
+def first_report_defaults(entity_id):
+    """``(opening_balance, start_date)`` for the entity's FIRST report, from its settings.
+
+    Onboarding saves both on ``entity_pettycash_settings`` (``save_opening_balance``); the
+    first report opens at the amount and defaults to - and may not be dated before - the
+    date. A company with no row or no values opens at 0 with no floor.
+    """
+    from models.db import EntityPettycashSettings
+
+    row = EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
+    if row is None:
+        return 0.0, None
+    opening = float(row.opening_balance) if row.opening_balance is not None else 0.0
+    return opening, row.start_date
 
 
 def cleanup_partial_submission_data(draft_id, logger=None):

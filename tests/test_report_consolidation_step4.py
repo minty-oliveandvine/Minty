@@ -143,20 +143,19 @@ class TestLoadBearingStatusFilters:
             "the sibling delete sweep must filter status == 'draft'"
         )
 
-    def test_onboarding_floor_date_is_scoped_to_drafts(self):
-        """The onboarding floor date must come from the opening DRAFT.
+    def test_onboarding_floor_date_comes_from_the_settings(self):
+        """The onboarding floor date is entity_pettycash_settings.start_date.
 
-        Unfiltered, "earliest row for this entity" resolves to the oldest
-        SUBMITTED report and silently moves the floor date, letting a first
-        report be back-dated before onboarding.
+        It used to be the earliest onboarding DRAFT, where a missing status
+        filter let the oldest SUBMITTED report move the floor. Onboarding seeds
+        no draft since 2026-10-12, so no report row may feed the floor at all.
         """
         src = _source("blueprints/report/routes/opening.py")
         idx = src.find("def _onboarding_floor_date")
         assert idx != -1
-        block = src[idx:idx + 1200]
-        assert 'Report.status == "draft"' in block, (
-            "_onboarding_floor_date must filter status == 'draft'"
-        )
+        block = src[idx:src.find("\ndef ", idx + 1)]
+        assert "first_report_defaults(entity_id)" in block
+        assert "Report.query" not in block
 
     def test_statement_export_excludes_drafts_null_safely(self):
         """The statements export must exclude drafts, NULL-safely.

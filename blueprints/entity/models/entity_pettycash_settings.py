@@ -1,4 +1,4 @@
-from blueprints.shared.column_types import MintyUuid
+from blueprints.shared.column_types import MintyUuid, Money
 from models.db import db
 from blueprints.shared.schema import SCHEMA
 
@@ -12,6 +12,11 @@ class EntityPettycashSettings(db.Model):
         db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"),
         primary_key=True,
     )
+
+    # Onboarding Step 5: the cash in the drawer on day one and the date reporting starts;
+    # the first report opens from them (report/services/shared.first_report_defaults).
+    opening_balance = db.Column(Money(), nullable=True)
+    start_date = db.Column(db.Date, nullable=True)
 
     pettycash_account_id = db.Column(
         MintyUuid(),
