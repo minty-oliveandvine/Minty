@@ -7,7 +7,7 @@ from loguru import logger
 from blueprints.report import report_bp
 from blueprints.report.services.cash_denominations import (
     build_denomination_rows, form_field_for,
-    resolve_denominations_for_entity, save_cash_count_details)
+    refresh_cash_stock, resolve_denominations_for_entity, save_cash_count_details)
 from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
                                                header_publishing_status_for,
@@ -372,6 +372,10 @@ def report_cash_count(id=None, entity_id=None):
             # same transaction as the discrepancy it drives, so the two can
             # never be committed out of step.
             save_cash_count_details(current_draft.id, counts_by_cash_id)
+            if current_draft.status != "draft":
+                # Editing a submitted report's count changes the company's stock.
+                db.session.flush()
+                refresh_cash_stock(current_draft.company)
 
             db.session.commit()
 

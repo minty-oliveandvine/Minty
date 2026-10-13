@@ -161,6 +161,26 @@ def get_cash_count_details(report_id):
     }
 
 
+def cash_summary(report_id):
+    """``(actual_cash_total, cash_balance)`` for a report, from the ``report_cash_summary`` view.
+
+    Both are ``None`` when the report was never cash-counted; ``actual_cash_total`` is 0 when
+    its cash-count step is done with no rows (every denomination counted as zero);
+    ``cash_balance`` adds the safe box. One query for what the Ending page used to work out
+    from up to eight.
+    """
+    from blueprints.shared.views import ReportCashSummary
+
+    row = (
+        db.session.query(ReportCashSummary.actual_cash_total, ReportCashSummary.cash_balance)
+        .filter(ReportCashSummary.report_id == report_id)
+        .first()
+    )
+    if row is None or row.actual_cash_total is None:
+        return None, None
+    return float(row.actual_cash_total), float(row.cash_balance)
+
+
 def get_cash_count_total(report_id):
     """Total counted cash for a report.
 
@@ -245,6 +265,74 @@ def counts_to_legacy_columns(counts_by_cash_id):
         column: int(by_denomination.get((value, kind), 0) or 0)
         for column, value, kind in LEGACY_COLUMN_DENOMINATIONS
     }
+
+
+def refresh_cash_stock(entity_id):
+    """Rebuild a company's ``entity_cash_detail`` from its latest SUBMITTED report.
+
+    The rows match the company's current currency: one per active ``cash_info`` denomination
+    of it (``cash_type`` copied from the catalogue); rows of any other currency are deleted.
+    Each row's ``cash_instock`` is the MONEY that report counted for that denomination
+    (quantity x the face value snapshotted on the count row), 0 when it was not counted or
+    there is no submitted report. Rebuilt rather than adjusted, so the order of submits,
+    reverts, deletes and edits cannot leave it out of step, and a draft never touches it.
+
+    Called before the commit of: submit (services/ending.py), revert to draft (same file),
+    delete (routes/report_detail.py) and a submitted report's cash-count save
+    (routes/cash_count.py). Does not commit; the caller does.
+    """
+    from models.db import EntityCashDetail, Report
+
+    entity = Entity.query.filter_by(id=entity_id).first()
+    currency_id = resolve_currency_id(entity) if entity is not None else None
+    catalogue = (
+        CashInfo.query.filter(CashInfo.currency_id == currency_id, CashInfo.is_active.is_(True)).all()
+        if currency_id else []
+    )
+    if entity is not None and not catalogue:
+        logger.warning(
+            f"refresh_cash_stock: entity {entity_id} has no active denominations for its currency "
+            f"({currency_id}) - its stock rows are cleared"
+        )
+    wanted = {str(c.id): c for c in catalogue}
+
+    rows = {str(r.cash_id): r for r in EntityCashDetail.query.filter_by(entity_id=entity_id).all()}
+    for cash_id, row in rows.items():
+        if cash_id not in wanted:
+            db.session.delete(row)
+
+    latest = (
+        Report.query.filter(
+            Report.company == entity_id,
+            db.or_(Report.status.is_(None), Report.status != "draft"),
+        )
+        .order_by(Report.transaction_date.desc())
+        .first()
+    )
+    counted = {}
+    if latest is not None:
+        counted = {
+            str(cash_id): float(amount or 0)
+            for cash_id, amount in db.session.query(
+                ReportCashCount.cash_id,
+                db.func.sum(ReportCashCount.quantity * ReportCashCount.cash_value),
+            )
+            .filter(ReportCashCount.report_id == latest.id)
+            .group_by(ReportCashCount.cash_id)
+        }
+
+    for cash_id, cash in wanted.items():
+        row = rows.get(cash_id)
+        if row is None:
+            row = EntityCashDetail(entity_id=entity_id, cash_id=cash_id)
+            db.session.add(row)
+        row.cash_type = cash.type
+        row.cash_instock = round(counted.get(cash_id, 0.0), 2)
+    db.session.flush()
+    logger.info(
+        f"refresh_cash_stock: entity={entity_id} report={latest.id if latest else None} "
+        f"rows={len(wanted)} removed={len(set(rows) - set(wanted))}"
+    )
 
 
 def legacy_column_counts_for_report(report_id):

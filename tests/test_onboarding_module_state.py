@@ -79,8 +79,10 @@ def _both_views(entity_id):
     from blueprints.entity.routes.modules import _is_module_enabled
     from blueprints.entity.services.modules import MODULE_CODES
     from blueprints.entity.services.onboarding_state import _enabled_modules
+    from blueprints.shared.views import EntitySetupSummary
+    from models.db import db
 
-    wizard = sorted(_enabled_modules(entity_id))
+    wizard = sorted(_enabled_modules(db.session.get(EntitySetupSummary, str(entity_id))))
     gate = sorted(c for c in MODULE_CODES if _is_module_enabled(entity_id, c))
     return wizard, gate
 
@@ -136,7 +138,10 @@ def test_the_wizard_lands_on_the_module_step_when_nothing_is_granted(app, db_ses
     entity = type("_E", (), {"status": "onboarding"})()
 
     with app.app_context():
-        modules = onboarding_state._enabled_modules(entity_id)
+        from blueprints.shared.views import EntitySetupSummary
+        from models.db import db
+
+        modules = onboarding_state._enabled_modules(db.session.get(EntitySetupSummary, entity_id))
         step = onboarding_state._derive_current_step(
             entity, modules, {"connected": False}, False
         )

@@ -82,10 +82,18 @@ def create_entity_for_user(user_id, entity_name, country_code, currency_id, *,
             country_code=country_code or None,
             currency_id=currency_id or None,
         )
+        if status == "onboarding":
+            # NULL = "never saved". Left out, the column's database default (9) says
+            # "finished", and resume and the reminder email treat the company as done.
+            entity.onboarding_saved_step = None
         db.session.add(entity)
         db.session.commit()
-        # The creator becomes the entity admin by policy.
-        db.session.add(UserEntity(user_id=user_id, entity_id=entity.id, role="admin"))
+        # The creator becomes the entity admin by policy, and joins now (the schema gives
+        # joined_at no default; an invitee gets it on accepting).
+        from datetime import datetime, timezone
+
+        db.session.add(UserEntity(user_id=user_id, entity_id=entity.id, role="admin",
+                                  joined_at=datetime.now(timezone.utc)))
         create_default_entity_settings(entity.id)
         sync_cash_settings(entity.id, currency_id)
         db.session.commit()

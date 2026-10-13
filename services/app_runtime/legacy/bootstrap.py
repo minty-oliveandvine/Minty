@@ -316,6 +316,7 @@ def create_app():
                                                   onboarding_create_entity,
                                                   onboarding_invite,
                                                   onboarding_invite_cancel,
+                                                  onboarding_invite_resend,
                                                   onboarding_modules,
                                                   onboarding_opening_balance,
                                                   onboarding_sales_methods,
@@ -332,6 +333,7 @@ def create_app():
     csrf.exempt(onboarding_contacts_create)
     csrf.exempt(onboarding_invite)
     csrf.exempt(onboarding_invite_cancel)
+    csrf.exempt(onboarding_invite_resend)
     csrf.exempt(onboarding_bill_codes)
     csrf.exempt(onboarding_saved_step)
     csrf.exempt(onboarding_update_entity)

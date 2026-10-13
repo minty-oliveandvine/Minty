@@ -129,15 +129,31 @@ def _enabled_state(entity_id: str) -> dict[str, bool]:
 def get_enabled_modules_for_entities(entity_ids: list[str]) -> dict[str, set[str]]:
     """Map each entity id to the set of module codes that are enabled for it.
 
-    Built on ``_enabled_state`` so it shares the same fail-closed default
-    (map row → OFF). Used at onboarding finalize to decide which modules get a
-    card-free trial — the wizard's Step 2 selection always writes explicit rows,
-    so nothing here depends on a fallback.
+    One query on the ``entity_setup_summary`` view for any number of companies (the company
+    list asked two per company before 2026-10-13). Same fail-closed rule as
+    ``_enabled_state``: a module is on only where its map row says ``is_enabled``; no row is
+    OFF. An id the view does not know maps to the empty set.
     """
-    result: dict[str, set[str]] = {}
-    for entity_id in entity_ids:
-        state = _enabled_state(entity_id)
-        result[entity_id] = {code for code, on in state.items() if on}
+    from blueprints.shared.views import EntitySetupSummary
+
+    result: dict[str, set[str]] = {entity_id: set() for entity_id in entity_ids}
+    if not entity_ids:
+        return result
+    rows = (
+        db.session.query(
+            EntitySetupSummary.entity_id,
+            EntitySetupSummary.pettycash_module_enabled,
+            EntitySetupSummary.bill_module_enabled,
+        )
+        .filter(EntitySetupSummary.entity_id.in_([str(e) for e in entity_ids]))
+        .all()
+    )
+    by_id = {str(e): e for e in entity_ids}
+    for entity_id, pettycash_on, bill_on in rows:
+        key = by_id.get(str(entity_id), str(entity_id))
+        result[key] = ({MODULE_PETTY_CASH} if pettycash_on else set()) | (
+            {MODULE_BILL} if bill_on else set()
+        )
     return result
 
 

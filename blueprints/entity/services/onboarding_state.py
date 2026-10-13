@@ -28,7 +28,8 @@ from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
                                                 MODULE_PETTY_CASH)
 from blueprints.entity.services.onboarding_invites import list_invites
 from blueprints.shared.enums import SaleType
-from models.db import (Entity, EntityPettycashSettings, EntitySaleSetting, SaleInfo, UserEntity, db)
+from blueprints.shared.views import EntitySetupSummary
+from models.db import (Entity, EntitySaleSetting, SaleInfo, UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
@@ -47,25 +48,20 @@ STEP_BILLS = 8
 STEP_ALL_SET = 9
 
 
-def _enabled_modules(entity_id: str) -> list[str]:
-    """Module codes currently enabled for the entity, in ``MODULE_CODES`` order.
+def _enabled_modules(setup) -> list[str]:
+    """Module codes enabled for the entity, in ``MODULE_CODES`` order, from its
+    ``entity_setup_summary`` row.
 
-    Delegates to ``modules._enabled_state`` rather than resolving the map itself. It
-    used to be a third copy of that resolution and it had DRIFTED: where no map row
-    existed it fell back to the catalog's ``is_active`` (which defaults True), and with
-    no catalog row at all it granted Petty Cash outright. Both are the permissive
-    default that ``_is_module_enabled`` deliberately dropped -- "the catalog's
-    ``is_active`` says whether a module is offered at all, never who may use it" -- so
-    the wizard reported modules enabled that the request gate then denied.
-
-    Concretely: a fresh entity with no map rows answered ``[PETTY_CASH, BILL]`` here, so
-    ``_derive_current_step`` skipped STEP_MODULE and landed the user past the very
-    selection they had not made yet. Delegating fixes that and drops an N+1 query.
+    The view applies the request gate's fail-closed rule (a module is on only where its
+    map row says ``is_enabled``; no row is OFF), so the wizard can no longer report a module
+    the gate would deny - the drift an older copy of this resolution had, falling back to the
+    catalog's ``is_active`` and landing a fresh entity past STEP_MODULE.
     """
-    from blueprints.entity.services.modules import _enabled_state
-
-    state = _enabled_state(entity_id)
-    return [code for code in MODULE_CODES if state.get(code)]
+    if setup is None:  # no such company: nothing is granted
+        return []
+    on = {MODULE_PETTY_CASH: bool(setup.pettycash_module_enabled),
+          MODULE_BILL: bool(setup.bill_module_enabled)}
+    return [code for code in MODULE_CODES if on.get(code)]
 
 
 def _reconcile_xero_disconnect(entity: Entity) -> None:
@@ -132,24 +128,19 @@ def _reconcile_xero_disconnect(entity: Entity) -> None:
     )
 
 
-def _xero_state(entity: Entity) -> dict:
-    """Xero connection picture for the wizard, from the entities row."""
-    _reconcile_xero_disconnect(entity)
-    connected = bool(entity.xero_org_id)
+def _xero_state(setup) -> dict:
+    """Xero connection picture for the wizard, from the entity's setup row (read after
+    ``_reconcile_xero_disconnect``, so a revoked connection already reads as gone)."""
     return {
-        "connected": connected,
-        "org": entity.xero_tenant_name or "",
+        "connected": bool(setup.xero_org_linked),
+        "org": setup.xero_tenant_name or "",
     }
 
 
-def _account_codes_done(entity_id: str) -> bool:
-    """True once the petty-cash account-code mapping has been saved (Step 6).
-
-    The pettycash settings row carries the core mappings; a non-empty
-    ``pettycash_account_id`` marks the step as completed.
-    """
-    row = EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
-    return bool(row and getattr(row, "pettycash_account_id", None))
+def _account_codes_done(setup) -> bool:
+    """True once the petty-cash account-code mapping has been saved (Step 6): the core
+    ``pettycash_account_id`` is set."""
+    return setup.pettycash_account_id is not None
 
 
 def _sales_methods_state(entity_id: str) -> dict:
@@ -177,22 +168,22 @@ def _sales_methods_state(entity_id: str) -> dict:
     }
 
 
-def _opening_balance_state(entity_id: str) -> dict | None:
+def _opening_balance_state(setup) -> dict | None:
     """Saved petty-cash opening balance (Step 5) for resume rehydration.
 
-    Reads ``opening_balance`` and ``start_date`` from ``entity_pettycash_settings``
-    (written by ``save_opening_balance``). The starting cash is an opening balance, never
-    an addition, so ``cash_addition`` is 0 and ``adjusted_opening_balance`` the amount; all
-    are returned so the frontend can bind to either. ``None`` until a start date is saved.
+    ``opening_balance`` and ``start_date`` from the entity's setup row (they live on
+    ``entity_pettycash_settings``, written by ``save_opening_balance``). The starting cash is
+    an opening balance, never an addition, so ``cash_addition`` is 0 and
+    ``adjusted_opening_balance`` the amount; all are returned so the frontend can bind to
+    either. ``None`` until a start date is saved.
     """
-    row = EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()
-    if row is None or row.start_date is None:
+    if setup.start_date is None:
         return None
     return {
-        "opening_date": row.start_date.isoformat(),
-        "opening_balance": row.opening_balance,
+        "opening_date": setup.start_date.isoformat(),
+        "opening_balance": setup.opening_balance,
         "cash_addition": 0.0,
-        "adjusted_opening_balance": row.opening_balance,
+        "adjusted_opening_balance": setup.opening_balance,
     }
 
 
@@ -242,12 +233,16 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
     if not entity:
         return {"error": "Entity not found"}, 404
 
-    modules = _enabled_modules(entity_id)
-    xero = _xero_state(entity)
-    account_codes_done = _account_codes_done(entity_id)
+    # The live Xero check may clear a revoked connection, so it runs before the one read of
+    # the entity's setup row (entity_setup_summary) that the rest of the picture comes from.
+    _reconcile_xero_disconnect(entity)
+    setup = db.session.get(EntitySetupSummary, str(entity_id))
+    modules = _enabled_modules(setup)
+    xero = _xero_state(setup)
+    account_codes_done = _account_codes_done(setup)
     current_step = _derive_current_step(entity, modules, xero, account_codes_done)
     sales_methods = _sales_methods_state(entity_id)
-    opening_balance = _opening_balance_state(entity_id)
+    opening_balance = _opening_balance_state(setup)
 
     # Pending invites are best-effort: a permission gap there shouldn't break
     # resume, so fall back to an empty list rather than failing the request.

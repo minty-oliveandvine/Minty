@@ -211,3 +211,105 @@ def test_amounts_are_stored_exactly(world, client, app):
     client.post(OPENING, json={"entity_id": entity_id, "opening_date": date.today().isoformat(),
                                "opening_balance": "1234.56"}, headers=headers)
     assert Decimal(str(settings_row(app, entity_id)[0])) == Decimal("1234.56")
+
+
+# ---- round 2 (2026-10-13) -----------------------------------------------------------------
+
+
+def detail_rows(app, entity_id) -> int:
+    from models.db import EntityCashDetail
+
+    with app.app_context():
+        return EntityCashDetail.query.filter_by(entity_id=entity_id).count()
+
+
+def entity_value(app, entity_id, field):
+    from models.db import Entity
+
+    with app.app_context():
+        return getattr(Entity.query.get(entity_id), field)
+
+
+def test_setting_a_currency_writes_no_stock_rows(world, client, app):
+    """entity_cash_detail is filled when a Petty Cash report is submitted, never by onboarding."""
+    headers = bearer(app, world["admin"].id)
+    entity_id = create(client, headers)
+    client.put(f"/api/onboarding/entity/{entity_id}", json={"currency_id": world["jpy"].id},
+               headers=headers)
+    assert detail_rows(app, entity_id) == 0
+
+
+def test_the_opening_balance_needs_a_currency(world, client, app):
+    headers = bearer(app, world["admin"].id)
+    resp = client.post("/api/onboarding/create", json={"entity_name": "No Cur Co"}, headers=headers)
+    entity_id = resp.get_json()["entity_id"]
+
+    resp = client.post(OPENING, json={"entity_id": entity_id, "opening_date": date.today().isoformat(),
+                                      "opening_balance": "100"}, headers=headers)
+
+    assert resp.status_code == 400
+    assert "currency" in resp.get_json()["error"].lower()
+    assert settings_row(app, entity_id) is None
+
+
+def test_the_creator_joins_when_the_company_is_created(world, client, app):
+    from models.db import UserEntity
+
+    entity_id = create(client, bearer(app, world["admin"].id))
+    with app.app_context():
+        membership = UserEntity.query.filter_by(entity_id=entity_id, user_id=world["admin"].id).one()
+        assert membership.joined_at is not None
+
+
+def test_a_new_company_has_no_saved_step(world, client, app):
+    """NULL means "never saved"; the column's database default (9) would mean "finished"."""
+    entity_id = create(client, bearer(app, world["admin"].id))
+    assert entity_value(app, entity_id, "onboarding_saved_step") is None
+
+
+def test_the_browser_timezone_is_saved(world, client, app):
+    headers = bearer(app, world["admin"].id)
+    resp = client.post("/api/onboarding/create", json={
+        "entity_name": "Tz Co", "country_code": "HK", "currency_code": "HKD",
+        "timezone": "Asia/Hong_Kong",
+    }, headers=headers)
+    entity_id = resp.get_json()["entity_id"]
+    assert entity_value(app, entity_id, "timezone") == "Asia/Hong_Kong"
+
+    client.put(f"/api/onboarding/entity/{entity_id}", json={"timezone": "Asia/Singapore"},
+               headers=headers)
+    assert entity_value(app, entity_id, "timezone") == "Asia/Singapore"
+
+
+def test_an_unknown_timezone_is_refused(world, client, app):
+    resp = client.post("/api/onboarding/create", json={
+        "entity_name": "Bad Tz Co", "country_code": "HK", "timezone": "Mars/Olympus",
+    }, headers=bearer(app, world["admin"].id))
+    assert resp.status_code == 400
+
+
+def test_create_takes_the_country_s_currency_when_none_is_sent(world, client, app):
+    resp = client.post("/api/onboarding/create", json={"entity_name": "Country Co", "country_code": "HK"},
+                       headers=bearer(app, world["admin"].id))
+    entity_id = resp.get_json()["entity_id"]
+    assert str(entity_value(app, entity_id, "currency_id")) == str(world["hkd"].id)
+
+
+def test_countries_carry_their_currency(world, client, app):
+    resp = client.get("/api/onboarding/countries", headers=bearer(app, world["admin"].id))
+    hk = next(c for c in resp.get_json()["countries"] if c["country_code"] == "HK")
+    assert str(hk["currency_id"]) == str(world["hkd"].id)
+
+
+def test_currencies_carry_their_decimal_places(world, client, app):
+    resp = client.get("/api/onboarding/currencies", headers=bearer(app, world["admin"].id))
+    hkd = next(c for c in resp.get_json()["currencies"] if c["iso_code"] == "HKD")
+    assert hkd["decimal_places"] == 2
+
+
+def test_an_amount_finer_than_the_currency_is_refused(world, client, app):
+    headers = bearer(app, world["admin"].id)
+    entity_id = create(client, headers)
+    resp = client.post(OPENING, json={"entity_id": entity_id, "opening_date": date.today().isoformat(),
+                                      "opening_balance": "10.005"}, headers=headers)
+    assert resp.status_code == 400

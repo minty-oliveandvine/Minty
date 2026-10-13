@@ -586,6 +586,16 @@
    "in_scope": false
   },
   {
+   "endpoint": "entity.onboarding_invite_resend",
+   "rule": "/api/onboarding/invite/resend",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
    "endpoint": "entity.onboarding_invite_cancel",
    "rule": "/api/onboarding/invite/cancel",
    "methods": [
@@ -3241,7 +3251,7 @@
   }
  ],
  "summary": {
-  "routes": 171,
+  "routes": 172,
   "in_scope": 109
  }
 }

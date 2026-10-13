@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import json
-import math
 import os
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 
 from loguru import logger
@@ -251,7 +251,7 @@ def save_opening_balance(user_id, entity_id, start_date, amount):
     minty-onboarding-api's ``onboarding/services/opening_balance.py`` is the same function
     behind the same path; change the two together. Returns ``(data, status_code)``.
     """
-    from models.db import EntityPettycashSettings
+    from models.db import CurrencyInfo, Entity, EntityPettycashSettings
     from services.permission_policy import (Permission,
                                             has_permission_by_user_id)
 
@@ -277,13 +277,23 @@ def save_opening_balance(user_id, entity_id, start_date, amount):
             )
         }, 400
 
+    # The amount is cash in a currency, and the first report counts it in that currency's
+    # denominations (cash_info) - so there is no opening balance without one.
+    entity = Entity.query.filter_by(id=entity_id).first()
+    currency = CurrencyInfo.query.get(entity.currency_id) if entity and entity.currency_id else None
+    if currency is None:
+        return {"error": "Set the company's currency first."}, 400
+    places = currency.decimal_places
+
     try:
-        value = float(str(amount).strip() or 0) if amount is not None else 0.0
-    except ValueError:
+        exact = Decimal(str(amount).strip() or "0") if amount is not None else Decimal(0)
+    except InvalidOperation:
         return {"error": "Opening amount must be a number"}, 400
-    if not math.isfinite(value):
+    if not exact.is_finite():
         return {"error": "Opening amount must be a number"}, 400
-    value = round(value, 2)
+    if exact.normalize().as_tuple().exponent < -places:
+        return {"error": f"That amount has more decimal places than the currency allows ({places})."}, 400
+    value = float(exact)
     if value < 0:
         return {"error": "Opening amount cannot be negative"}, 400
 

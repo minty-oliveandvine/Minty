@@ -15,8 +15,8 @@ from loguru import logger
 from user_agents import parse
 
 from blueprints.report import report_bp
-from blueprints.report.services.cash_denominations import \
-    legacy_column_counts_for_report
+from blueprints.report.services.cash_denominations import (
+    cash_summary, legacy_column_counts_for_report)
 from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, ShopExpense, db, SaleInfo)
 from services.helpers.docx import convert_docx_to_pdf
 from services.permission_policy import can_view_report
@@ -259,7 +259,11 @@ def generate_pdf_report(id):
                 context[f"qty{idx}_{denom}"] = qty
                 context[f"amt{idx}_{denom}"] = amount
                 drawer_total += amount
-        context["drawer_total"] = drawer_total
+        # The template's per-denomination placeholders only know the nine legacy HKD names,
+        # so their sum misses any other note or coin (HK$200, the $10 coin, another
+        # currency). The total is the counted cash itself (report_cash_summary).
+        counted_total = cash_summary(report.id)[0]
+        context["drawer_total"] = counted_total if counted_total is not None else drawer_total
 
         opening_balance = data.get("opening_balance", 0)
         cash_addition = report.cash_addition if report.cash_addition else 0
