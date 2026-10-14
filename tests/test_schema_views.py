@@ -1,11 +1,13 @@
 """The schema's views, read the way the code will read them (2026-10-13).
 
 * ``report_cash_summary`` - a report's counted cash. An all-zero count stores no
-  ``report_cash_count`` rows, so "the cash-count step is done and nothing was counted" must
-  read 0, not NULL ("never counted"). That rule used to live only in ``Report.actual_cash_total``.
+  ``report_cash_count`` rows, so the view reads NULL for it, as for "never counted";
+  ``Report.actual_cash_total`` (and ``cash_summary()``) make it 0 when the cash-count step is
+  done. c5a05 put that rule in the view; it was withdrawn on 2026-10-14.
 * ``entity_setup_summary`` - one row per company: Xero, modules, how many of the six petty-cash
   accounts and three contacts are mapped, bill account codes, the opening balance. It existed
-  only in Supabase; the setup checks, the company list and onboarding resume read it now.
+  only in Supabase; the setup checks, the company list and onboarding resume read it now. It
+  has no ``pettycash_account_id`` / ``bill_accounts_default_inactive`` (c5a05's, withdrawn).
 """
 
 from __future__ import annotations
@@ -94,11 +96,15 @@ def test_a_counted_report_sums_its_denominations_and_adds_the_safe_box(app, db, 
     assert _cash_summary(app, db, rid) == (Decimal("320.00"), Decimal("370.00"))
 
 
-def test_an_all_zero_count_reads_zero_not_never_counted(app, db, shop):
-    """Zero quantities store no rows; the done cash-count step is what makes it 0."""
+def test_an_all_zero_count_reads_null_in_the_view_and_zero_in_the_code(app, db, shop):
+    """Zero quantities store no rows; the done cash-count step is what makes it 0 - in code."""
+    from blueprints.report.services.cash_denominations import cash_summary
+
     _owner, entity, _cur = shop
     rid = _report(app, db, entity, date(2026, 9, 1), sections=["opening", "cash_count"], safe_box=5)
-    assert _cash_summary(app, db, rid) == (Decimal("0"), Decimal("5"))
+    assert _cash_summary(app, db, rid) == (None, None)
+    with app.app_context():
+        assert cash_summary(rid) == (0.0, 5.0)
 
 
 def test_a_report_never_counted_reads_null(app, db, shop):
@@ -135,7 +141,6 @@ def test_setup_summary_counts_what_is_mapped(app, db, shop):
                 {"e": entity.id, "c": code, "a": active},
             )
         db.session.commit()
-        pettycash_account_id = str(acc[0].id)
 
     row = _setup(app, db, entity.id)
     assert row["xero_connected"] is True and row["xero_org_linked"] is True
@@ -144,7 +149,6 @@ def test_setup_summary_counts_what_is_mapped(app, db, shop):
     assert (row["pettycash_contacts_set"], row["pettycash_contacts_total"]) == (1, 3)
     assert row["xero_accounts_synced"] == 3
     assert row["bill_accounts_set"] == 2
-    assert str(row["pettycash_account_id"]) == pettycash_account_id
     assert row["opening_balance"] == Decimal("750.00") and row["start_date"] == date(2026, 9, 1)
 
 
@@ -154,4 +158,5 @@ def test_a_company_with_nothing_set_up_has_a_row_of_zeros(app, db, shop):
     assert row["xero_org_linked"] is False
     assert (row["pettycash_accounts_set"], row["pettycash_contacts_set"]) == (0, 0)
     assert row["bill_accounts_set"] == 0
-    assert row["pettycash_account_id"] is None and row["opening_balance"] is None
+    assert row["opening_balance"] is None
+    assert "pettycash_account_id" not in row and "bill_accounts_default_inactive" not in row

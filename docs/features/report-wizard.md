@@ -68,10 +68,10 @@ cash count's denominations come from the currency's catalogue
 the counted total against it and records the discrepancy (`discrepancy_type` short/over,
 the amount, and the reason).
 
-The counted total is read from the `report_cash_summary` view (`cash_summary(report_id)`;
-`Report.actual_cash_total` reads it too): NULL means never counted - the Ending page then
-shows the closing balance - and 0 means the cash-count step is done with every denomination
-zero (zero quantities store no rows; the view's rule since 2026-10-13). The `.docx` export's
+The counted total is `Report.actual_cash_total` (`cash_summary(report_id)` adds the safe
+box): None means never counted - the Ending page then shows the closing balance - and 0
+means the cash-count step is done with every denomination zero (zero quantities store no
+rows, so the model applies that rule; the `report_cash_summary` view reads NULL for both). The `.docx` export's
 drawer total is the same figure, so a denomination outside the template's nine legacy HKD
 slots still counts.
 

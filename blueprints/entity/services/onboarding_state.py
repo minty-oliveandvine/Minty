@@ -29,7 +29,8 @@ from blueprints.entity.services.modules import (MODULE_BILL, MODULE_CODES,
 from blueprints.entity.services.onboarding_invites import list_invites
 from blueprints.shared.enums import SaleType
 from blueprints.shared.views import EntitySetupSummary
-from models.db import (Entity, EntitySaleSetting, SaleInfo, UserEntity, db)
+from models.db import (Entity, EntityPettycashSettings, EntitySaleSetting, SaleInfo,
+                       UserEntity, db)
 from services.auth.token_service import get_xero_token_user_for_entity
 
 _XERO_CONNECTIONS_URL = "https://api.xero.com/connections"
@@ -137,10 +138,11 @@ def _xero_state(setup) -> dict:
     }
 
 
-def _account_codes_done(setup) -> bool:
+def _account_codes_done(entity_id) -> bool:
     """True once the petty-cash account-code mapping has been saved (Step 6): the core
-    ``pettycash_account_id`` is set."""
-    return setup.pettycash_account_id is not None
+    ``pettycash_account_id`` is set on ``entity_pettycash_settings``."""
+    settings = db.session.get(EntityPettycashSettings, str(entity_id))
+    return settings is not None and settings.pettycash_account_id is not None
 
 
 def _sales_methods_state(entity_id: str) -> dict:
@@ -239,7 +241,7 @@ def get_onboarding_state(user_id, entity_id: str) -> tuple[dict, int]:
     setup = db.session.get(EntitySetupSummary, str(entity_id))
     modules = _enabled_modules(setup)
     xero = _xero_state(setup)
-    account_codes_done = _account_codes_done(setup)
+    account_codes_done = _account_codes_done(entity_id)
     current_step = _derive_current_step(entity, modules, xero, account_codes_done)
     sales_methods = _sales_methods_state(entity_id)
     opening_balance = _opening_balance_state(setup)

@@ -22,7 +22,7 @@ class EntityCashDetail(db.Model):
         MintyUuid(), db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"), primary_key=True
     )
     cash_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.cash_info.id"), primary_key=True)
-    cash_type = db.Column(pg_enum(CashType), nullable=False)
+    cash_type = db.Column(pg_enum(CashType), nullable=True)
     cash_instock = db.Column(Money(), nullable=True)
     description = db.Column(db.Text)
     desc = synonym("description")

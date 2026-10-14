@@ -162,23 +162,19 @@ def get_cash_count_details(report_id):
 
 
 def cash_summary(report_id):
-    """``(actual_cash_total, cash_balance)`` for a report, from the ``report_cash_summary`` view.
+    """``(actual_cash_total, cash_balance)`` for a report, from ``Report.actual_cash_total``.
 
     Both are ``None`` when the report was never cash-counted; ``actual_cash_total`` is 0 when
     its cash-count step is done with no rows (every denomination counted as zero);
-    ``cash_balance`` adds the safe box. One query for what the Ending page used to work out
-    from up to eight.
+    ``cash_balance`` adds the safe box.
     """
-    from blueprints.shared.views import ReportCashSummary
+    from models.db import Report
 
-    row = (
-        db.session.query(ReportCashSummary.actual_cash_total, ReportCashSummary.cash_balance)
-        .filter(ReportCashSummary.report_id == report_id)
-        .first()
-    )
-    if row is None or row.actual_cash_total is None:
+    report = db.session.get(Report, report_id)
+    total = report.actual_cash_total if report is not None else None
+    if total is None:
         return None, None
-    return float(row.actual_cash_total), float(row.cash_balance)
+    return total, total + float(report.safe_box_balance or 0)
 
 
 def get_cash_count_total(report_id):
