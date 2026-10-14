@@ -3,3 +3,4 @@ from blueprints.petty_cash_api import guard  # noqa: F401  (the door, before eve
 
 from . import company  # noqa: F401
 from . import home  # noqa: F401
+from . import opening  # noqa: F401

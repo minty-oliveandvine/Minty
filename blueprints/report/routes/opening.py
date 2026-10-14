@@ -8,15 +8,16 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report import report_bp
-from blueprints.report.services.history import log_history
+from blueprints.report.services.opening import (OpeningRefused, find_draft,
+                                                first_report_date_error,
+                                                first_report_opening, onboarding_floor_date,
+                                                opening_state, save_opening)
 from blueprints.report.services.shared import (check_user_has_entities,
-                                               first_report_defaults,
                                                future_date_error,
                                                header_publishing_status_for,
                                                recalculate_report,
                                                resolve_report_entity_id,
-                                               safe_float,
-                                               update_draft_progress)
+                                               safe_float)
 from blueprints.shared.entity_display import build_entity_acronym
 from models.db import Entity, Report, db, tz
 from services.auth.token_service import (ensure_valid_token,
@@ -28,36 +29,10 @@ from services.permission_policy import Permission, has_permission
 from utils import jsonify
 
 
-def _onboarding_floor_date(entity_id):
-    """The earliest date a first report may use: the onboarding start date.
-
-    Onboarding saves the date the user chose to start reporting from as
-    ``entity_pettycash_settings.start_date``; it is the floor for the first report
-    (replaces the legacy "within 7 days from today" window). None when not set.
-    """
-    return first_report_defaults(entity_id)[1]
-
-
-def _first_report_date_error(selected_date, today, entity_id):
-    """Validate a first report's date.
-
-    Floor is the onboarding start date (entity_pettycash_settings.start_date) so the
-    rule is the same whether or not the user arrived straight from the
-    onboarding wizard. Future dates are always rejected; the onboarding date is
-    enforced as the lower bound when one exists. Returns an error message if out
-    of range, else None.
-    """
-    future_err = future_date_error(selected_date, today)
-    if future_err:
-        return future_err
-
-    onboarding_date = _onboarding_floor_date(entity_id)
-    if onboarding_date and selected_date < onboarding_date:
-        return (
-            f"Transaction date must be on or after your onboarding date "
-            f"({onboarding_date})."
-        )
-    return None
+# The date rules, what the page shows and the save live in blueprints/report/services/opening.py,
+# shared with the Petty Cash API (minty-petty-cash-web); these names are kept for the code below.
+_onboarding_floor_date = onboarding_floor_date
+_first_report_date_error = first_report_date_error
 
 
 @report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/opening", methods=["GET", "POST"])
@@ -473,12 +448,10 @@ def report_opening(id=None, entity_id=None):
             # The FIRST report opens at the onboarding balance - read on the server, never
             # trusted from the form's hidden field. Only for a company onboarding gave a start
             # date; edit mode re-saves a posted report and keeps the normal path.
-            onboarding_opening, onboarding_start = first_report_defaults(entity_id)
-            if onboarding_start and not is_edit_mode and not Report.query.filter(
-                Report.company == entity_id,
-                Report.transaction_date < transaction_date,
-            ).first():
-                opening_balance = onboarding_opening
+            if not is_edit_mode:
+                onboarding_opening = first_report_opening(entity_id, transaction_date)
+                if onboarding_opening is not None:
+                    opening_balance = onboarding_opening
 
             if (opening_balance + cash_addition) < 0:
                 flash(
@@ -579,277 +552,31 @@ def report_opening(id=None, entity_id=None):
                 logger.info(
                     f"Updated report {existing_report.id} in edit mode")
             else:
-                # When id is provided (e.g. from URL), load that specific
-                # draft; else find any draft for (entity, date)
-                draft_id_param = id or request.form.get("draft_id")
-                # WRITE FLIP: these feed report_draft below, which is then
-                # mutated — so they must read the same table the writes land on.
-                if draft_id_param:
-                    existing_draft = Report.query.filter(
-                        Report.id == draft_id_param,
-                        Report.company == entity_id,
-                        Report.status == "draft",
-                    ).first()
-                else:
-                    existing_draft = Report.query.filter(
-                        Report.company == entity_id,
-                        Report.transaction_date == transaction_date,
-                        Report.status == "draft",
-                    ).first()
+                # When id is provided (e.g. from URL), load that specific draft; else any draft for
+                # (entity, date).
+                existing_draft = find_draft(entity_id, transaction_date, id or request.form.get("draft_id"))
 
-            if existing_draft and not (is_edit_mode and existing_report):
-                logger.info(
-                    f"Found existing draft {existing_draft.id} for date {transaction_date}, updating it"
+            try:
+                report_draft = save_opening(
+                    entity_id,
+                    current_user,
+                    transaction_date,
+                    opening_balance,
+                    cash_addition,
+                    withdrawal,
+                    action_type,
+                    existing_draft=None if (is_edit_mode and existing_report) else existing_draft,
                 )
-                # Update existing draft - preserve all existing data, only
-                # update opening fields; track last editor
-                report_draft = existing_draft
-                report_draft.uploaded_by = current_user.username
-                report_draft.opening_balance = opening_balance
-                report_draft.cash_addition = cash_addition
-                report_draft.adjusted_opening_balance = opening_balance + cash_addition
-                report_draft.next_transaction_date = transaction_date + \
-                    timedelta(days=1)
-                logger.info(
-                    f"Updating existing draft {report_draft.id} for opening data"
-                )
-            else:
-                # Before creating a new draft: ensure no report and no other
-                # draft for this (entity, date)
-                # Submitted reports only — see the note above. Without the
-                # status filter this finds the draft-shaped report row that
-                # ensure_report_row_for_draft created moments earlier.
-                any_report_for_date = Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date == transaction_date,
-                    db.or_(Report.status.is_(None), Report.status != "draft"),
-                ).first()
-                if any_report_for_date:
-                    logger.warning(
-                        f"Report already submitted for date {transaction_date}, not creating draft"
-                    )
-                    raise ValueError(
-                        f"A report for {transaction_date} already exists."
-                    )
-                # WRITE FLIP: aliased to report_draft below and mutated.
-                any_draft_for_date = Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date == transaction_date,
-                    Report.status == "draft",
-                ).first()
-                if any_draft_for_date:
-                    report_draft = any_draft_for_date
-                    report_draft.uploaded_by = current_user.username
-                    report_draft.opening_balance = opening_balance
-                    report_draft.cash_addition = cash_addition
-                    report_draft.adjusted_opening_balance = (
-                        opening_balance + cash_addition
-                    )
-                    report_draft.next_transaction_date = transaction_date + \
-                        timedelta(days=1)
-                    report_draft.cash_addition_type = withdrawal
-                    if not report_draft.completed_sections:
-                        report_draft.completed_sections = []
-                    if "opening" not in report_draft.completed_sections:
-                        report_draft.completed_sections.append("opening")
-                    flag_modified(report_draft, "completed_sections")
-                    logger.info(
-                        f"Reusing existing draft {report_draft.id} for date {transaction_date}"
-                    )
-                else:
-                    logger.info(
-                        f"No existing draft found, creating new draft for date {transaction_date}"
-                    )
-                    # Fetch the last report to determine next transaction date
-                    last_report = (
-                        # SUBMITTED only. The error this drives says "the day after your
-                        # last submitted report" — but since Stage 4a a draft also lives
-                        # in `report`, so unfiltered this treats the user's OWN
-                        # in-progress draft as the last submitted report and demands the
-                        # next day, bouncing them off their own report.
-                        Report.query.filter(
-                            Report.company == entity_id,
-                            db.or_(Report.status.is_(None), Report.status != "draft"),
-                        )
-                        .order_by(Report.transaction_date.desc())
-                        .first()
-                    )
-                    logger.info(
-                        f"Last report found: {last_report.id if last_report else 'None'} on date {last_report.transaction_date if last_report else 'N/A'}"
-                    )
+            except OpeningRefused as refused:
+                flash(refused.message, "danger")
+                if entity_id:
+                    return redirect(url_for("entity.report_dashboard", id=entity_id))
+                return redirect(url_for("entity.entity_list"))
 
-                    # Determine the expected date and validate transaction_date.
-                    # Hong Kong time so the "future" boundary is the users' local
-                    # midnight, not the server's (UTC) midnight.
-                    today = datetime.now(tz).date()
-                    if last_report:
-                        # If a report has been submitted, only the day after the
-                        # submitted date is allowed (consecutive days, no gaps).
-                        expected_date = last_report.transaction_date + timedelta(days=1)
-                        if expected_date > today:
-                            logger.warning(
-                                f"Next report date {expected_date} is in the future (today {today})"
-                            )
-                            flash(
-                                "Transaction date cannot be in the future. "
-                                f"You can only create reports for dates up to {today}.",
-                                "danger",
-                            )
-                            if entity_id:
-                                return redirect(
-                                    url_for(
-                                        "entity.report_dashboard",
-                                        id=entity_id))
-                            else:
-                                return redirect(url_for("entity.entity_list"))
-                        if transaction_date != expected_date:
-                            logger.warning(
-                                f"Transaction date {transaction_date} is not the day after the last submitted report date {last_report.transaction_date}"
-                            )
-                            flash(
-                                f"Reports go one day at a time - this one needs to be {expected_date}, the day after your last submitted report ({last_report.transaction_date}).",
-                                "danger",
-                            )
-                            if entity_id:
-                                return redirect(
-                                    url_for(
-                                        "entity.report_dashboard",
-                                        id=entity_id))
-                            else:
-                                return redirect(url_for("entity.entity_list"))
-
-                        next_transaction_date = transaction_date + \
-                            timedelta(days=1)
-                    else:
-                        logger.info(
-                            "No previous reports found; this is the first report."
-                        )
-                        today = datetime.now(tz).date()
-
-                        # First report: may start on or after the onboarding
-                        # date (no 7-day floor), up to today. Same rule whether
-                        # or not the user arrived straight from onboarding.
-                        first_err = _first_report_date_error(
-                            transaction_date, today, entity_id
-                        )
-                        if first_err:
-                            logger.warning(
-                                f"First report date {transaction_date} rejected: {first_err}"
-                            )
-                            flash(first_err, "danger")
-                            if entity_id:
-                                return redirect(
-                                    url_for(
-                                        "entity.report_dashboard",
-                                        id=entity_id))
-                            else:
-                                return redirect(url_for("entity.entity_list"))
-
-                        next_transaction_date = transaction_date + \
-                            timedelta(days=1)
-
-                    # Calculate adjusted opening balance
-                    adjusted_opening_balance = opening_balance + cash_addition
-
-                    # WRITE FLIP (Step 2): creates a `report` row directly.
-                    # The row IS the draft — status='draft' distinguishes it.
-                    report_draft = Report(
-                        transaction_date=transaction_date,
-                        next_transaction_date=next_transaction_date,
-                        opening_balance=opening_balance,
-                        cash_addition=cash_addition,
-                        adjusted_opening_balance=adjusted_opening_balance,
-                        # Set all sales to 0 for opening entry
-                        cashsale_total=0.0,
-                        nocashsale_total=0.0,
-                        total_sales=0.0,
-                        expense_total=0.0,
-                        bank_deposit=0.0,
-                        closing_balance=adjusted_opening_balance,
-                        # Initialize progress tracking
-                        current_section="opening",
-                        completed_sections=[],
-                        created_by=current_user.id,
-                        cash_addition_type=withdrawal,
-                        entity_id=entity_id,
-                        status="draft",
-                    )
-                db.session.add(report_draft)
-                # flush() to assign the id before anything downstream uses it.
-                # ensure_report_row_for_draft is gone: report_draft IS a Report
-                # now, so there is no second row to create.
-                db.session.flush()
-                logger.info(
-                    f"Creating new draft {report_draft.id} with opening data and all sections initialized to 0.0"
-                )
-
-            # Save the draft
-            db.session.commit()
-
-            logger.info(
-                f"Successfully saved draft {report_draft.id} for date {transaction_date}"
-            )
-            logger.info("Opening form - Draft details:")
-            logger.info(f"  ID: {report_draft.id}")
-            logger.info(f"  Company: {report_draft.company}")
-            logger.info(f"  Transaction date: {report_draft.transaction_date}")
-            logger.info(f"  Username: {report_draft.uploaded_by}")
-            logger.info(f"  Status: {report_draft.status}")
-
-            # Store withdrawal information for later use when publishing to
-            # Xero. The only place an existing draft's source is updated; it waited for a
-            # hidden bank_account field until 2026-10-05, which was empty when the company
-            # had no petty-cash account set, and the choice was then dropped. The bank account
-            # is the one on entity_pettycash_settings (schema item 13), not per report.
-            if withdrawal:
-                report_draft.cash_addition_type = withdrawal
-                logger.info(f"Set withdrawal info: type={withdrawal}")
-
-            # Update progress tracking
-            update_draft_progress(
-                report_draft, action_type, "opening", "sales")
-            logger.info(
-                f"Updated progress tracking for draft {report_draft.id}")
-
-            # Commit progress updates
-            db.session.commit()
-
-            # Onboarding hand-off is done once the opening entry is saved —
-            # drop the session flag so later reports use the normal date rules.
+            # Onboarding hand-off is done once the opening entry is saved - drop the session flag so
+            # later reports use the normal date rules.
             if from_onboarding:
                 session.pop("onboarding_opening_entity", None)
-
-            # Debug: Check what was actually saved to database
-            db.session.refresh(report_draft)
-            print(
-                f"DEBUG: After commit - current_section: {report_draft.current_section}"
-            )
-            print(
-                f"DEBUG: After commit - completed_sections: {report_draft.completed_sections}"
-            )
-            print(
-                f"DEBUG: After commit - completed_sections type: {type(report_draft.completed_sections)}"
-            )
-            print(
-                f"DEBUG: After commit - completed_sections length: {len(report_draft.completed_sections) if report_draft.completed_sections else 0}"
-            )
-
-            # Additional debug: Check if the field is actually in the session
-            print(
-                f"DEBUG: Session dirty objects: {[obj for obj in db.session.dirty]}")
-            print(
-                f"DEBUG: Session new objects: {[obj for obj in db.session.new]}")
-
-            # Log the opening entry to draft history
-            log_history(
-                report_id=report_draft.id,
-                company=entity_id,
-                user_id=current_user.id,
-                action="created" if not existing_draft else "updated",
-                field_changed="opening_entry",
-                old_value="None" if not existing_draft else "previous_opening_state",
-                new_value=f"Opening: {opening_balance}, Addition: {cash_addition}, Adjusted: {opening_balance + cash_addition}",
-            )
 
             # Check if the request is AJAX
             if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -912,278 +639,42 @@ def report_opening(id=None, entity_id=None):
                 flash("Something went wrong on my end. Mind trying again?", "danger")
                 return redirect(url_for("report.report_opening"))
 
-    # For GET request, check for existing drafts first
-    # If we have a selected date and found an existing draft for it, use that
-    # Otherwise, check for existing drafts for today or recent dates
-    if not existing_draft:
-        if selected_date:
-            # If user selected a specific date but no draft exists for that date,
-            # we need to create a new draft for that date
-            logger.info(
-                f"No existing draft found for selected date {selected_date}, will create new one"
-            )
-            # Don't look for other drafts, we want to create one for the
-            # selected date
-        else:
-            today = datetime.now(tz).date()
+    # A request to clear the previous day's deposit ("no change"). Nothing sends deposit_type any
+    # more; kept as it was until it is retired with this page.
+    if not existing_draft and selected_date and deposit_type and deposit_type == "no change":
+        last_report = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date < selected_date,
+            db.or_(Report.status.is_(None), Report.status != "draft"),
+        ).order_by(Report.transaction_date.desc()).first()
+        last_draft_report = Report.query.filter(
+            Report.company == entity_id,
+            Report.transaction_date < selected_date,
+            Report.status == "draft",
+        ).order_by(Report.transaction_date.desc()).first()
+        if last_report:
+            last_report.bank_deposit -= last_report.bank_deposit
+            recalculate_report(last_report)
+        if last_draft_report:
+            last_draft_report.bank_deposit -= last_draft_report.bank_deposit
+            recalculate_report(last_draft_report)
+        if last_report or last_draft_report:
+            db.session.commit()
 
-            # Try to find an existing draft for this entity (any user) in the
-            # last 7 days
-            existing_draft = (
-                # GET-path read, migrated to `report` (mirror keeps it current).
-                Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date
-                    # Look back 7 days for recent drafts
-                    >= today - timedelta(days=7),
-                    Report.status == "draft",
-                )
-                .order_by(Report.transaction_date.desc())
-                .first()
-            )
-    if existing_draft:
-        # User has an existing draft, use that data
-        opening_balance = existing_draft.opening_balance or 0
-        next_transaction_date = existing_draft.next_transaction_date
-        is_first_report = False
-
-        # For existing drafts, always consider them as latest/editable (KISS
-        # approach)
-        is_latest_report = True
-
-        yesterday_report = (
-            Report.query.filter(
-                Report.company == entity_id,
-                Report.transaction_date < existing_draft.transaction_date,
-            )
-            .order_by(Report.transaction_date.desc())
-            .first()
-        )
-
-        yesterday_closing_balance = (
-            yesterday_report.closing_balance
-            if yesterday_report and yesterday_report.closing_balance is not None
-            else 0
-        )
-        safebox_balance = (
-            yesterday_report.safe_box_balance
-            if yesterday_report and yesterday_report.safe_box_balance is not None
-            else 0
-        )
-
-        # Prepare draft data for the template
-        draft_report = {
-            "adjusted_opening_balance": existing_draft.adjusted_opening_balance or 0,
-            "cash_addition": existing_draft.cash_addition or 0,
-            "withdrawal": (
-                existing_draft.withdrawal_type
-                if existing_draft.withdrawal_type
-                else "personal"
-            ),
-            "bank_account": "",  # the main bank account on the settings, not per report
-        }
-
-        # Use draft data - ensure we get the most current completed_sections
-        template_data = {
-            "opening_balance": opening_balance,
-            "report": draft_report,
-            # Use draft's transaction date
-            "next_transaction_date": existing_draft.transaction_date,
-            "is_first_report": False,
-            "is_draft": True,
-            "draft_id": existing_draft.id,
-            # Always use the current draft data for stepper
-            "current_section": "opening",  # Always set to current page
-            "completed_sections": existing_draft.completed_sections or [],
-            "bank_accounts": bank_accounts,
-            "withdrawal_type": (
-                existing_draft.withdrawal_type
-                if existing_draft.withdrawal_type
-                else "personal"
-            ),
-            "withdrawal_bank_account": "",  # the main bank account on the settings
-        }
-
-    else:
-        # No existing draft, find the latest report before the selected date
-        if selected_date:
-            # Find the latest report before the selected date
-            # Submitted only. This is deliberately paired with the draft-only
-            # query below and BOTH get their bank_deposit zeroed under
-            # "no change". Unfiltered, the two now resolve to the same logical
-            # report (drafts live in `report` since Stage 4a) and the
-            # adjustment would be applied twice to one row.
-            last_report = (
-                Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date < selected_date,
-                    db.or_(Report.status.is_(None), Report.status != "draft")) .order_by(
-                    Report.transaction_date.desc()) .first())
-
-            # The opening balance chains off the PREVIOUS report whatever its
-            # status: a draft's closing balance is exactly what the next report
-            # should open from. last_report above is submitted-only on purpose
-            # (it is paired with last_draft_report for the deposit adjustment,
-            # and both being unfiltered would zero one row's bank_deposit
-            # twice) — so it must NOT be reused here. Doing so made the opening
-            # balance fall through to 0 whenever only drafts preceded the date,
-            # which is what deleting a draft exposed.
-            prev_report_any_status = (
-                Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date < selected_date,
-                )
-                .order_by(Report.transaction_date.desc())
-                .first()
-            )
-
-            # Draft-only: the paired `last_report` query above is already the
-            # Report side of this pair, so leaving it unfiltered would make the
-            # two resolve to the same row once the tables merge, and the
-            # bank_deposit adjustment below would be applied twice.
-            # WRITE FLIP: mutated below (bank_deposit zeroed under "no
-            # change"), so it must read the table the write lands on. Still
-            # draft-only — last_report above is the submitted-only half of the
-            # pair, and both being unfiltered would zero one row twice.
-            last_draft_report = (
-                Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date < selected_date,
-                    Report.status == "draft",
-                )
-                .order_by(Report.transaction_date.desc())
-                .first()
-            )
-
-            if deposit_type and deposit_type == "no change":
-                if last_report:
-                    last_report.bank_deposit -= last_report.bank_deposit
-                    recalculate_report(last_report)
-                if last_draft_report:
-                    last_draft_report.bank_deposit -= last_draft_report.bank_deposit
-                    recalculate_report(last_draft_report)
-                if last_report or last_draft_report:
-                    db.session.commit()
-
-            # Get opening balance from previous day's closing balance (calculated value)
-            # Fallback to cash count balance for backward compatibility with
-            # old data
-            if prev_report_any_status:
-                # Prioritize closing_balance (calculated value) over
-                # actual_cash_total (physical count)
-                if prev_report_any_status.closing_balance is not None:
-                    opening_balance = prev_report_any_status.closing_balance
-                    logger.info(
-                        f"Using previous day's closing balance as opening balance: {opening_balance} (from report {prev_report_any_status.id})"
-                    )
-                else:
-                    # actual_cash_total lives on `report` since r1a01. The
-                    # report_cashcount_draft fallback went in Step 4a-5 —
-                    # r7a07 backfilled the history onto `report`.
-                    fallback_total = prev_report_any_status.actual_cash_total
-                    if fallback_total is not None:
-                        opening_balance = fallback_total
-                        logger.info(
-                            f"Using previous day's cash count balance as opening balance (fallback): {opening_balance}"
-                        )
-                    else:
-                        opening_balance = 0
-                        logger.info(
-                            "No closing balance or cash count data found, defaulting opening balance to 0"
-                        )
-            else:
-                # Nothing before this date: the first report opens at the onboarding balance.
-                opening_balance = first_report_defaults(entity_id)[0]
-        else:
-            # No selected date, use the latest report overall
-            last_report = (
-                Report.query.filter_by(company=entity_id)
-                .order_by(Report.transaction_date.desc())
-                .first()
-            )
-            # Get opening balance from previous day's closing balance (calculated value)
-            # Fallback to cash count balance for backward compatibility with
-            # old data
-            if last_report:
-                # Prioritize closing_balance (calculated value) over
-                # actual_cash_total (physical count)
-                if last_report.closing_balance is not None:
-                    opening_balance = last_report.closing_balance
-                    logger.info(
-                        f"Using previous day's closing balance as opening balance: {opening_balance} (from report {last_report.id})"
-                    )
-                else:
-                    # actual_cash_total lives on `report` since r1a01. The
-                    # report_cashcount_draft fallback went in Step 4a-5 —
-                    # r7a07 backfilled the history onto `report`.
-                    fallback_total = last_report.actual_cash_total
-                    if fallback_total is not None:
-                        opening_balance = fallback_total
-                        logger.info(
-                            f"Using previous day's cash count balance as opening balance (fallback): {opening_balance} (from report {last_report.id})"
-                        )
-                    else:
-                        opening_balance = 0
-                        logger.info(
-                            f"No closing balance or cash count data found, defaulting opening balance to 0 (from report {last_report.id})"
-                        )
-            else:
-                # No report yet: the first one opens at the onboarding balance.
-                opening_balance = first_report_defaults(entity_id)[0]
-
-        # Use selected date if provided, otherwise calculate next transaction
-        # date; a first report defaults to the onboarding start date.
-        if selected_date:
-            next_transaction_date = selected_date
-        else:
-            next_transaction_date = (
-                (last_report.transaction_date + timedelta(days=1))
-                if last_report
-                else first_report_defaults(entity_id)[1]
-            )
-
-        is_first_report = last_report is None
-
-        # For new reports (no id parameter), always consider them as
-        # latest/editable
-        is_latest_report = True
-
-        # Prepare production data for the template
-        default_report = {
-            "adjusted_opening_balance": opening_balance,
-            "cash_addition": 0,
-            "withdrawal": "personal",
-            "bank_account": "",
-        }
-
-        # The page shows (and posts) this as the starting cash; a first report
-        # starts from the opening balance worked out above - the onboarding one.
-        yesterday_closing_balance = (
-            last_report.closing_balance
-            if last_report and last_report.closing_balance is not None
-            else (opening_balance if is_first_report else 0)
-        )
-        safebox_balance = (
-            last_report.safe_box_balance
-            if last_report and last_report.safe_box_balance is not None
-            else 0
-        )
-
-        # Use production data
-        template_data = {
-            "opening_balance": opening_balance,
-            "report": default_report,
-            "next_transaction_date": next_transaction_date,
-            "is_first_report": is_first_report,
-            "is_draft": False,
-            "draft_id": None,
-            # For new reports, start with opening as current and no completed
-            # sections
-            "current_section": "opening",
-            "completed_sections": [],
-            "withdrawal_type": "personal",
-            "withdrawal_bank_account": "",
-        }
+    # What the page shows: the day's draft, else what the day opens from (the service).
+    state = opening_state(entity_id, selected_date, draft=existing_draft)
+    existing_draft = state["draft"]
+    is_latest_report = True  # a new day's report is always the latest, and editable
+    yesterday_closing_balance = state["yesterday_closing_balance"]
+    safebox_balance = state["safebox_balance"]
+    template_data = {
+        "opening_balance": state["opening_balance"],
+        "report": state["report"],
+        "next_transaction_date": state["next_transaction_date"],
+        "is_first_report": state["is_first_report"],
+        "is_draft": existing_draft is not None,
+        "draft_id": existing_draft.id if existing_draft else None,
+    }
 
     personal_bank_account = get_entity_account_settings(
         str(entity_id), "pettycash")

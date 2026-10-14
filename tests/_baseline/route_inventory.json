@@ -3303,10 +3303,35 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.opening_page",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/opening",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_opening_step",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/opening",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "report",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 176,
-  "in_scope": 113
+  "routes": 178,
+  "in_scope": 115
  }
 }

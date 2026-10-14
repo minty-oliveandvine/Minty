@@ -150,8 +150,8 @@ class TestLoadBearingStatusFilters:
         filter let the oldest SUBMITTED report move the floor. Onboarding seeds
         no draft since 2026-10-12, so no report row may feed the floor at all.
         """
-        src = _source("blueprints/report/routes/opening.py")
-        idx = src.find("def _onboarding_floor_date")
+        src = _source("blueprints/report/services/opening.py")
+        idx = src.find("def onboarding_floor_date")
         assert idx != -1
         block = src[idx:src.find("\ndef ", idx + 1)]
         assert "first_report_defaults(entity_id)" in block
