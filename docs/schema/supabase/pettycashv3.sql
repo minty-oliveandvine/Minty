@@ -386,21 +386,21 @@ CREATE TABLE pettycashv3.entity_pettycash_settings (
 CREATE TABLE pettycashv3.cash_info (
   id          UUID                  NOT NULL DEFAULT gen_random_uuid(),
   currency_id UUID                  NOT NULL,
-  type        pettycashv3.cash_type NOT NULL,
+  type        pettycashv3.cash_type NULL,
   cash_value  NUMERIC(12,2)         NOT NULL,
   cash_name   VARCHAR(20)           NULL,
   description TEXT                  NULL,
   is_active     BOOLEAN             NOT NULL DEFAULT TRUE,
   display_order INTEGER             NOT NULL DEFAULT 0,
   CONSTRAINT cash_info_pkey PRIMARY KEY (id),
-  CONSTRAINT uq_cash_info_currency_value_type UNIQUE (currency_id, cash_value, type),
+  CONSTRAINT cash_info_currency_value_key UNIQUE (currency_id, cash_value),
   CONSTRAINT fk_cash_currency FOREIGN KEY (currency_id) REFERENCES pettycashv3.currency_info (id) ON DELETE RESTRICT
 );
 
 CREATE TABLE pettycashv3.entity_cash_detail (
   entity_id    UUID                  NOT NULL,
   cash_id      UUID                  NOT NULL,
-  cash_type    pettycashv3.cash_type NOT NULL,
+  cash_type    pettycashv3.cash_type NULL,
   cash_instock NUMERIC(14,2)         NULL,
   description  TEXT                  NULL,
   CONSTRAINT entity_cash_detail_pkey PRIMARY KEY (entity_id, cash_id),
@@ -1203,10 +1203,8 @@ CREATE INDEX idx_bill_entity_published
 
 CREATE VIEW pettycashv3.report_cash_summary AS
 SELECT r.id                                      AS report_id,
-       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
-                                                 AS actual_cash_total,
-       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
-         + COALESCE(r.safe_box_balance, 0)       AS cash_balance
+       c.total                                   AS actual_cash_total,
+       c.total + COALESCE(r.safe_box_balance, 0) AS cash_balance
   FROM pettycashv3.report r
   LEFT JOIN (SELECT report_id,
                     SUM(quantity * cash_value) AS total
@@ -1216,8 +1214,7 @@ SELECT r.id                                      AS report_id,
 
 COMMENT ON VIEW pettycashv3.report_cash_summary IS
   'Replaces report.actual_cash_total. NULL actual_cash_total means the report '
-  'was never cash-counted; a report whose cash-count step is done with no rows '
-  '(every denomination counted as zero) reads 0.';
+  'was never cash-counted, which is not the same as counting zero.';
 
 CREATE VIEW pettycashv3.tracker AS
 SELECT e.name AS "entities.name",
@@ -1274,10 +1271,8 @@ SELECT e.id AS entity_id,
        COALESCE(ai.n, 0) AS xero_accounts_synced,
        COALESCE(ba.n_active, 0) AS bill_accounts_set,
        COALESCE(ba.n_default, 0) AS bill_accounts_default,
-       COALESCE(ba.n_default_inactive, 0) AS bill_accounts_default_inactive,
        eps.opening_balance,
        eps.start_date,
-       eps.pettycash_account_id,
        a_pc.name AS pettycash_account_name,
        a_pc.xero_code AS pettycash_account_code,
        a_bk.name AS bank_account_name,
@@ -1316,12 +1311,11 @@ SELECT e.id AS entity_id,
         SELECT count(*) AS n FROM pettycashv3.account_info x WHERE x.entity_id = e.id) ai ON true
   LEFT JOIN LATERAL (
         SELECT count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted) AS n_active,
-               count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted AND b.is_default) AS n_default,
-               count(*) FILTER (WHERE b.is_default AND NOT b.is_deleted AND NOT b.is_active) AS n_default_inactive
+               count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted AND b.is_default) AS n_default
           FROM pettycashv3.entity_bill_account_xero b
          WHERE b.entity_id = e.id) ba ON true;
 
 COMMENT ON VIEW pettycashv3.entity_setup_summary IS
   'One row per company: Xero connection, modules on, how many of the six petty-cash '
-  'accounts and three contacts are mapped, bill account codes (active, default, a default '
-  'left inactive), and the petty-cash settings (opening balance, start date, mapped names).';
+  'accounts and three contacts are mapped, bill account codes (active, default), and the '
+  'petty-cash settings (opening balance, start date, mapped names).';

@@ -1,33 +1,36 @@
 -- =====================================================================
---  CASH CATALOGUE + VIEWS (c5a05, 2026-10-13)
+--  WITHDRAW c5a05 (2026-10-14)
 --
---  TARGET: a pettycashv3-shaped schema - local dev `postgres` by default.
+--  TARGET: a pettycashv3-shaped schema that c5a05_cash_catalogue_and_views.sql
+--  was applied to (local `postgres` and Supabase pettycashv3, 2026-10-13/14).
 --  Run with psql; the schema is a variable, and nothing commits unless asked:
 --
---    psql "$URL" -v ON_ERROR_STOP=1 -v schema=pettycashv3 -f c5a05_cash_catalogue_and_views.sql
+--    psql "$URL" -v ON_ERROR_STOP=1 -v schema=pettycashv3 -f c5a05_down.sql
 --        -> runs everything, prints the checks, ROLLS BACK
 --    ... -v apply=1 ...
 --        -> the same, then COMMIT
 --
---  A database built from docs/schema/01_schema_rebased.sql after 2026-10-13
---  already has all of this; this script brings an older build up to it.
+--  Afterwards the database matches docs/schema/01_schema_rebased.sql again,
+--  which is the shape Supabase had before c5a05 (checked against the local
+--  copy `pettycashv3_supabase`). c5a05 itself was deleted from the repo; the
+--  code no longer needs any of it:
+--    - onboarding's "account codes done" reads entity_pettycash_settings
+--      (Flask and minty-onboarding-api), and finalize's "default bill code
+--      must be ticked" reads entity_bill_account_xero (minty-onboarding-api);
+--    - the all-zero cash count reads 0 through Report.actual_cash_total again.
 --
---  ------------------------------------------------------------------
 --  WHAT
 --
---    cash_info.type NOT NULL; unique on (currency_id, cash_value, type)
---        - HKD's $10 note and $10 coin are two denominations. The key had left
---          type out (pettycashv2's uq_cash_info_currency_value_type never did).
---    entity_cash_detail.cash_type NOT NULL (copied from cash_info.type).
---    report_cash_summary: a report whose cash-count step is done with no rows
---        reads 0, not NULL (the rule Report.actual_cash_total carried alone).
---    entity_setup_summary: (re)created - one row per company's setup state,
---        from the Supabase original plus pettycash_account_id and
---        bill_accounts_default_inactive.
+--    cash_info: type nullable; unique on (currency_id, cash_value) again, so a
+--        note and a coin of the same face value cannot both exist.
+--    entity_cash_detail.cash_type nullable.
+--    report_cash_summary: no zero rule - an all-zero count reads NULL here.
+--    entity_setup_summary: recreated without pettycash_account_id and
+--        bill_accounts_default_inactive (the Supabase original).
 --
---  FAILS LOUDLY, ON PURPOSE: SET NOT NULL refuses if any cash_info row has no
---  type, and the new key refuses if two rows share (currency, value, type).
---  Fix the data, never weaken the constraint.
+--  FAILS LOUDLY, ON PURPOSE: the (currency, value) key refuses if two rows of a
+--  currency share a face value (a note and a coin). The "before" check counts
+--  them; retire one of each pair first, never skip the key.
 -- =====================================================================
 
 \if :{?schema}
@@ -38,25 +41,23 @@
 BEGIN;
 SET LOCAL search_path TO :"schema";
 
--- before
-SELECT count(*) AS cash_info_rows,
-       count(*) FILTER (WHERE type IS NULL) AS untyped
-  FROM cash_info;
+-- before: face values held twice in one currency (must be 0)
+SELECT count(*) AS shared_face_values
+  FROM (SELECT currency_id, cash_value FROM cash_info
+         GROUP BY currency_id, cash_value HAVING count(*) > 1) d;
 
-ALTER TABLE cash_info ALTER COLUMN type SET NOT NULL;
-ALTER TABLE cash_info DROP CONSTRAINT IF EXISTS cash_info_currency_value_key;
 ALTER TABLE cash_info DROP CONSTRAINT IF EXISTS uq_cash_info_currency_value_type;
+ALTER TABLE cash_info DROP CONSTRAINT IF EXISTS cash_info_currency_value_key;
 ALTER TABLE cash_info
-  ADD CONSTRAINT uq_cash_info_currency_value_type UNIQUE (currency_id, cash_value, type);
+  ADD CONSTRAINT cash_info_currency_value_key UNIQUE (currency_id, cash_value);
+ALTER TABLE cash_info ALTER COLUMN type DROP NOT NULL;
 
-ALTER TABLE entity_cash_detail ALTER COLUMN cash_type SET NOT NULL;
+ALTER TABLE entity_cash_detail ALTER COLUMN cash_type DROP NOT NULL;
 
 CREATE OR REPLACE VIEW report_cash_summary AS
 SELECT r.id                                      AS report_id,
-       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
-                                                 AS actual_cash_total,
-       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
-         + COALESCE(r.safe_box_balance, 0)       AS cash_balance
+       c.total                                   AS actual_cash_total,
+       c.total + COALESCE(r.safe_box_balance, 0) AS cash_balance
   FROM report r
   LEFT JOIN (SELECT report_id,
                     SUM(quantity * cash_value) AS total
@@ -66,8 +67,7 @@ SELECT r.id                                      AS report_id,
 
 COMMENT ON VIEW report_cash_summary IS
   'Replaces report.actual_cash_total. NULL actual_cash_total means the report '
-  'was never cash-counted; a report whose cash-count step is done with no rows '
-  '(every denomination counted as zero) reads 0.';
+  'was never cash-counted, which is not the same as counting zero.';
 
 DROP VIEW IF EXISTS entity_setup_summary;
 CREATE VIEW entity_setup_summary AS
@@ -96,10 +96,8 @@ SELECT e.id AS entity_id,
        COALESCE(ai.n, 0) AS xero_accounts_synced,
        COALESCE(ba.n_active, 0) AS bill_accounts_set,
        COALESCE(ba.n_default, 0) AS bill_accounts_default,
-       COALESCE(ba.n_default_inactive, 0) AS bill_accounts_default_inactive,
        eps.opening_balance,
        eps.start_date,
-       eps.pettycash_account_id,
        a_pc.name AS pettycash_account_name,
        a_pc.xero_code AS pettycash_account_code,
        a_bk.name AS bank_account_name,
@@ -138,15 +136,14 @@ SELECT e.id AS entity_id,
         SELECT count(*) AS n FROM account_info x WHERE x.entity_id = e.id) ai ON true
   LEFT JOIN LATERAL (
         SELECT count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted) AS n_active,
-               count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted AND b.is_default) AS n_default,
-               count(*) FILTER (WHERE b.is_default AND NOT b.is_deleted AND NOT b.is_active) AS n_default_inactive
+               count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted AND b.is_default) AS n_default
           FROM entity_bill_account_xero b
          WHERE b.entity_id = e.id) ba ON true;
 
 COMMENT ON VIEW entity_setup_summary IS
   'One row per company: Xero connection, modules on, how many of the six petty-cash '
-  'accounts and three contacts are mapped, bill account codes (active, default, a default '
-  'left inactive), and the petty-cash settings (opening balance, start date, mapped names).';
+  'accounts and three contacts are mapped, bill account codes (active, default), and the '
+  'petty-cash settings (opening balance, start date, mapped names).';
 
 -- after
 SELECT conname, pg_get_constraintdef(oid) AS definition
@@ -157,6 +154,9 @@ SELECT table_name, column_name, is_nullable
  WHERE table_schema = :'schema'
    AND ((table_name = 'cash_info' AND column_name = 'type')
      OR (table_name = 'entity_cash_detail' AND column_name = 'cash_type'));
+SELECT count(*) AS setup_summary_columns
+  FROM information_schema.columns
+ WHERE table_schema = :'schema' AND table_name = 'entity_setup_summary';
 SELECT count(*) AS companies_in_setup_summary FROM entity_setup_summary;
 SELECT count(*) AS reports_in_cash_summary FROM report_cash_summary;
 

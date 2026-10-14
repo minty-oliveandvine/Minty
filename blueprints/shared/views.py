@@ -5,9 +5,6 @@ They sit on their OWN ``MetaData``, never ``db.Model``'s: everything that walks
 audit - treats what it finds as a table, and a view is not one. Query them through
 ``db.session`` like any model; nothing here ever inserts or updates.
 
-* ``ReportCashSummary`` - a report's counted cash. ``actual_cash_total`` is NULL when the
-  report was never cash-counted and 0 when its cash-count step is done with no rows (every
-  denomination counted as zero); ``cash_balance`` adds the safe box.
 * ``EntitySetupSummary`` - one row per company: Xero, modules, how many of the six petty-cash
   accounts and three contacts are mapped (and their names), bill account codes, the opening
   balance. Only the columns the code reads are mapped.
@@ -19,15 +16,6 @@ from blueprints.shared.column_types import MintyUuid, Money
 from blueprints.shared.schema import SCHEMA
 
 ViewBase = declarative_base(metadata=MetaData())
-
-
-class ReportCashSummary(ViewBase):
-    __tablename__ = "report_cash_summary"
-    __table_args__ = {"schema": SCHEMA, "info": {"is_view": True}}
-
-    report_id = Column(MintyUuid(), primary_key=True)
-    actual_cash_total = Column(Money())
-    cash_balance = Column(Money())
 
 
 #: The six petty-cash account slots and three contact slots, as (view column, label), in the
@@ -63,10 +51,8 @@ class EntitySetupSummary(ViewBase):
     pettycash_contacts_set = Column(Integer)
     pettycash_contacts_total = Column(Integer)
     bill_accounts_set = Column(BigInteger)  # count(*)
-    bill_accounts_default_inactive = Column(BigInteger)  # count(*)
     opening_balance = Column(Money())
     start_date = Column(Date)
-    pettycash_account_id = Column(MintyUuid())
     pettycash_account_name = Column(String(80))
     bank_account_name = Column(String(80))
     cash_sale_account_name = Column(String(80))

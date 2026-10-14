@@ -81,8 +81,10 @@ exist before a company is created (the onboarding wizard's Step 1 reads them fro
 
 ## Denominations (the cash count)
 
-`cash_info` is the catalogue of a currency's notes and coins, unique on (currency, value,
-**type**) since 2026-10-13 - HKD's $10 note and $10 coin are two rows - with `type` NOT NULL.
+`cash_info` is the catalogue of a currency's notes and coins, unique on (currency, value), so
+a note and a coin of the same face value cannot both exist (HKD's $10 is a note). c5a05 keyed
+it on type too and made `type` NOT NULL on 2026-10-13; that was withdrawn on 2026-10-14
+(`migrations/c5a05_down.sql`).
 `entity_cash_setting` holds
 the company's own list: setting a currency (creation, the onboarding wizard, this page, the
 hub's Entities & Integration save) writes one row per active denomination of it and drops
