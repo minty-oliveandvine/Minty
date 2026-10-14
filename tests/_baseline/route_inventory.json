@@ -3342,10 +3342,38 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.home",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/home",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "entities",
+    "user",
+    "currency_info",
+    "entity_account_xero"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.deposit_correction",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/deposit-correction",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "report"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 180,
-  "in_scope": 113
+  "routes": 182,
+  "in_scope": 115
  }
 }

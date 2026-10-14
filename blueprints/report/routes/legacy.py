@@ -127,8 +127,18 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
     # Rewrites a report's bank deposit and pushes the change to Xero, so it needs a
     # signed-in member allowed to edit this company's reports. It used to take GET
     # and no login at all.
+    payload, status = correct_previous_deposit(entity_id, request.get_json() or {})
+    response = jsonify(payload)
+    response.status_code = status
+    return response
+
+
+def correct_previous_deposit(entity_id: str, form_data: dict) -> tuple[dict, int]:
+    """The dashboard's "Before You Start" correction of the previous day's bank deposit:
+    ``(payload, status)``. Shared by the route above and the Petty Cash API's
+    ``POST /deposit-correction`` (blueprints/petty_cash_api); the caller has already checked
+    ``REPORT_EDIT_ENTITY``. Kept in this module so the names its tests patch here still apply."""
     try:
-        form_data = request.get_json() or {}
         logger.info(
             f"check_dept_bank_yest_module - Received data: {form_data}")
         amount = safe_float(form_data.get("amount", 0))
@@ -148,15 +158,14 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
         ).first()
         if report is None:
             update_after_deposit_change(entity_id, date, amount)
-            response = jsonify(
+            return (
                 {
                     "status": "warning",
                     "message": "No previous report found to update.",
                     "redirect_url": url_for("report.report_opening", entity_id=entity_id, transaction_date=redirect_date),
-                }
+                },
+                200,
             )
-            response.status_code = 200
-            return response
 
         previous_deposit = report.bank_deposit or 0.0
         is_published = report.publishing_status == "completed"
@@ -173,7 +182,7 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
             if not pettycash_settings:
                 missing.append("Petty Cash Account")
             if missing:
-                response = jsonify(
+                return (
                     {
                         "status": "error",
                         "message": (
@@ -183,20 +192,18 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
                             "Settings → Petty Cash before correcting this deposit."
                         ),
                         "missing_settings": missing,
-                    }
+                    },
+                    409,
                 )
-                response.status_code = 409
-                return response
 
         if amount > previous_deposit:
-            response = jsonify(
+            return (
                 {
                     "status": "error",
                     "message": "That deposit is larger than the previous one — could you double-check the amount?",
-                }
+                },
+                400,
             )
-            response.status_code = 400
-            return response
 
         updated_report = update_after_deposit_change(entity_id, date, amount) or report
 
@@ -241,7 +248,7 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
                 else "Local report updated, but Xero sync failed."
             )
 
-        response = jsonify(
+        return (
             {
                 "status": response_status,
                 "message": response_message,
@@ -252,18 +259,16 @@ def report_check_dept_bank_yest(entity_id: str) -> Any:
                 "is_published": is_published,
                 "xero_status": xero_status,
                 "redirect_url": url_for("report.report_opening", entity_id=entity_id, transaction_date=redirect_date),
-            }
+            },
+            200,
         )
-        response.status_code = 200
-        return response
     except Exception:
         # Fail-safe fallback: keep behavior from legacy implementation
-        logger.error("Error processing check_dept_bank_yest_module")
-        response = jsonify(
+        logger.exception("Error processing check_dept_bank_yest_module")
+        return (
             {
                 "status": "error",
                 "message": "Something went wrong on my end while checking that deposit. Mind trying again?",
-            }
+            },
+            500,
         )
-        response.status_code = 500
-        return response

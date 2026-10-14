@@ -49,8 +49,10 @@ The hand-off is in `blueprints/entity/routes/modules.py`. Flask is the only mint
 | Method · path (under `/api/petty-cash/v1/companies/<id>`) | Answers |
 |---|---|
 | `GET ""` | `{company: {id, name, role, role_label, currency: {code, decimal_places} \| null}, person: {id, first_name, last_name, name, initials, email}}`: what the app shell needs before any page |
+| `GET /home` | The dashboard's state. It comes from `entity/services/dashboard.py::dashboard_state`, the same function the Jinja dashboard reads. Fields: `server_today` (Hong Kong), `currency_code`, `latest` (the latest report, drafts included, and its deposit with whether it can be corrected), `draft` (the newest), `draft_date` (the earliest draft: the calendar's floor), `published` (submitted days, by date), `today_has_report`, `today_is_latest_report`, `xero_settings`, and `permissions` (`read_only` for a superuser outside the company, `correct_deposit`). The live Xero bank-account read the Jinja page makes is left out, because it feeds a control that page never shows. |
+| `POST /deposit-correction` | `{kind: "change" \| "no", date, amount}`: the "Before You Start" correction of the previous day's deposit. Needs `REPORT_EDIT_ENTITY`, and bad input is refused with a 422. The work is `report/routes/legacy.py::correct_previous_deposit`, shared with the Jinja page's `/api/check-dept-bank-yest`. It may reverse or update the deposit in Xero. The answer adds `next_transaction_date` (the day to open next) in place of the Jinja page's Flask `redirect_url`. |
 
-The launch page, Daily Closing, Daily Report, history, settings and Xero publish routes are added wave by wave as the redesign lands. Each new route needs a row here, an entry in `tests/_baseline/route_inventory.json` and its tests.
+The app is ported from Flask's pages one at a time (`development` of minty-petty-cash-web): dashboard, then the report wizard, history, settings and Xero publish. Each new route needs a row here, an entry in `tests/_baseline/route_inventory.json` and its tests.
 
 ## Tests
 
