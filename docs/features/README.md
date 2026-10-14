@@ -20,6 +20,7 @@ the new hub (`../minty-web` + `../minty-subscription-api`). Each of those repos 
 | Companies, members, invitations, the superuser's admin | [entities-and-members.md](entities-and-members.md) |
 | Currency, denominations, sales methods, the Xero mapping | [petty-cash-settings.md](petty-cash-settings.md) |
 | The daily report — opening to submitted | [report-wizard.md](report-wizard.md) |
+| Petty Cash's bearer API for minty-petty-cash-web (fails closed) and `/handoff/petty-cash-web` | [petty-cash-api.md](petty-cash-api.md) |
 | Receipts: storage, naming, the comma trap, downloads | [receipts-and-attachments.md](receipts-and-attachments.md) |
 | History, detail pages, CSV / Excel / docx / screenshot exports, share links | [report-history-and-exports.md](report-history-and-exports.md) |
 | Connecting a company to Xero, syncing, publishing and republishing a day | [xero-integration.md](xero-integration.md) |

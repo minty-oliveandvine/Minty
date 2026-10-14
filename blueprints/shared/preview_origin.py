@@ -1,11 +1,11 @@
 """Preview sets: hand a person back into the branch preview they came from.
 
 A branch's previews live on ``https://pr-<slug>-<app>.dailyminty.com`` - one host per front end
-(``my``, ``payment-request``, ``onboarding``), kept complete by the ``.github`` repo's
+(``my``, ``payment-request``, ``onboarding``, ``petty-cash``), kept complete by the ``.github`` repo's
 ``vercel-preview-set.yml``. Where ``PREVIEW_ORIGIN_REGEX`` is set (minty-infra writes it onto
 ONE environment's services; ``services.app_runtime.env.preview_origin_regex``), a front end
 names itself with ``?return_origin=`` on any navigation to Flask, and Flask keeps the SET - the
-slug - in the session. Every hand-off built after that, to any of the three apps, goes to the
+slug - in the session. Every hand-off built after that, to any of the four apps, goes to the
 same set's host for that app, so crossing apps never leaves the change being previewed.
 
 Unset, nothing here does anything. A stored set is re-checked against the regex on every read,
@@ -38,7 +38,7 @@ SET_TTL_SECONDS = 30 * 60
 #: The set-host shape. The app is read from the END of the label, so a slug may itself contain
 #: an app's name. Same shape as ``@minty/shared/previewSibling``.
 _SET_ORIGIN = re.compile(
-    r"https://pr-([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)-(my|payment-request|onboarding)\.dailyminty\.com"
+    r"https://pr-([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)-(my|payment-request|onboarding|petty-cash)\.dailyminty\.com"
 )
 
 
@@ -58,7 +58,8 @@ def parse(origin: str) -> tuple[str, str] | None:
 def _configured_origins() -> set[str]:
     from blueprints.shared import bearer_api
 
-    return {bearer_api.minty_web_origin(), bearer_api.frontend_origin(), bearer_api.onboarding_origin()}
+    return {bearer_api.minty_web_origin(), bearer_api.frontend_origin(), bearer_api.onboarding_origin(),
+            bearer_api.petty_cash_web_origin()}
 
 
 def capture() -> None:

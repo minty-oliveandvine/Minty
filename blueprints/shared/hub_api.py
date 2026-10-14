@@ -22,9 +22,10 @@ re-authenticates on a 401 it can see.
 
 WHO may call it cross-origin: minty-web, and - since the sidebar (menu + My Profile) was
 copied into it on 2026-09-30 - billing-frontend, whose My Profile reads and saves the same
-``/api/me/profile``. A browser allows one origin per response, so the request's own
-``Origin`` is echoed when it is one of the two, and minty-web's named otherwise (the
-browser then refuses the stranger, which is the point). Flask's own pages call these routes
+``/api/me/profile`` (and minty-petty-cash-web, through the same shared sidebar). A browser
+allows one origin per response, so the request's own ``Origin`` is echoed when it is one of
+them, and minty-web's named otherwise (the browser then refuses the stranger, which is the
+point). Flask's own pages call these routes
 same-origin with the token ``GET /me/sidebar-token`` hands them - no CORS involved.
 """
 
@@ -40,12 +41,13 @@ METHODS = "GET, POST, PATCH, DELETE, OPTIONS"
 
 
 def allowed_origins() -> tuple[str, ...]:
-    """The front ends that may call the hub routes from another origin; minty-web first."""
-    return (bearer_api.minty_web_origin(), bearer_api.frontend_origin())
+    """The front ends that may call the hub routes from another origin; minty-web first.
+    minty-petty-cash-web reads My Profile through the shared sidebar as the payments app does."""
+    return (bearer_api.minty_web_origin(), bearer_api.frontend_origin(), bearer_api.petty_cash_web_origin())
 
 
 def cors(resp):
-    origin = preview_origin.cors_origin(allowed_origins(), ("my", "payment-request"))
+    origin = preview_origin.cors_origin(allowed_origins(), ("my", "payment-request", "petty-cash"))
     return bearer_api.cors(resp, origin, methods=METHODS)
 
 

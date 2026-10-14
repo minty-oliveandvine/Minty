@@ -14,6 +14,7 @@ BLUEPRINTS = (
     ("blueprints.xero", "xero_bp"),
     ("blueprints.invitation", "invitation_bp"),
     ("blueprints.legal", "legal_bp"),
+    ("blueprints.petty_cash_api", "petty_cash_api_bp"),
 )
 
 

@@ -312,6 +312,11 @@ def create_app():
     # can only ever be the token's own user's (blueprints/legal/routes/hub.py).
     from blueprints.legal.routes.hub import hub_terms_accept
     csrf.exempt(hub_terms_accept)
+    # Petty Cash's bearer API (minty-petty-cash-web): the WHOLE blueprint, since every route on
+    # it is bearer only - the company from the address checked against membership, and nothing
+    # in the package reads the session cookie (tests/test_petty_cash_api_door.py holds it to that).
+    from blueprints.petty_cash_api import petty_cash_api_bp
+    csrf.exempt(petty_cash_api_bp)
     # Onboarding app (separate origin) creates the entity via Bearer JWT, not a
     # session cookie — exempt it from CSRF too.
     from blueprints.entity.routes.create import (onboarding_account_codes,

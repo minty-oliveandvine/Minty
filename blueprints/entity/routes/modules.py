@@ -281,6 +281,62 @@ def handoff_minty_web():
     return redirect(minty_web_landing_url(destination, org, current_user.id))
 
 
+def petty_cash_web_company_path(entity_id, sub: str = "") -> str:
+    """One company's Petty Cash on minty-petty-cash-web's origin: ``/entity/<shortid>/<name>/petty-cash<sub>``."""
+    return minty_web_company_path(entity_id, f"/petty-cash{sub}")
+
+
+@entity_bp.route("/handoff/petty-cash-web")
+@login_required
+def handoff_petty_cash_web():
+    """Into minty-petty-cash-web, and back in when its token lapses (its ``lib/handoff.ts``):
+    ``?next=<path on that app>&entity_id=<company>``.
+
+    Like ``/handoff/minty-web``: login-gated, ``next`` a path only. Unlike it, always for ONE
+    company - Petty Cash has no page outside a company - and only one the person belongs to,
+    past onboarding (which goes back to the wizard) and with Petty Cash switched on. No company
+    goes to the hub's company list.
+
+    ``entity_id`` is a uuid or the app's own address form, ``<shortid>/<name>``: the app's cookie
+    lapses with its token, and then its address is all it knows of the company.
+    """
+    raw = (request.args.get("entity_id") or "").strip()
+    if not raw:
+        return redirect(minty_web_entity_list_url(current_user.id))
+
+    from blueprints.shared import entity_ref
+    from blueprints.user_management.services import profile
+
+    entity_id = str(entity_ref.resolve(raw))
+    if profile.entity_context(current_user, entity_id) is None:
+        flash("Hmm, it looks like you don't have permission to look there.", "danger")
+        return redirect(url_for("entity.entity_list"))
+    org = Entity.query.filter(Entity.id == entity_id).first()
+    if org.status == "onboarding":
+        from blueprints.entity.routes.create import onboarding_launch_url
+
+        return redirect(onboarding_launch_url(current_user, entity_name=org.name or "", entity_id=org.id))
+    if not _is_module_enabled(org.id, "PETTY_CASH"):
+        flash("Petty Cash isn't switched on for this company yet - an admin can turn it on in the company's modules.", "warning")
+        return redirect(url_for("entity.entity_list"))
+
+    destination = safe_next(request.args.get("next"), petty_cash_web_company_path(org.id))
+    token = _generate_module_token(
+        current_user.id,
+        org.id,
+        org.xero_org_id,
+        _resolve_user_entity_role(current_user.id, org.id),
+        billing_enabled=_is_module_enabled(org.id, MODULE_BILL),
+        petty_cash_enabled=True,
+    )
+    # Never log this URL: it carries the token.
+    return redirect(
+        f"{preview_origin.handoff_origin('petty-cash', bearer_api.petty_cash_web_origin())}/landing"
+        f"?next={quote(destination, safe='')}"
+        f"&entity_id={org.id}&entity_name={quote(org.name or '', safe='')}&token={token}"
+    )
+
+
 @entity_bp.route("/me/sidebar-token")
 def sidebar_token():
     """The bearer token Flask's own pages hand their sidebar (``static/js/minty_sidebar.js``).

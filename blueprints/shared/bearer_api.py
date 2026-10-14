@@ -36,6 +36,8 @@ PAYMENT_REQUEST_WEB_URL_DEFAULT = "http://localhost:3020"
 ONBOARDING_WEB_URL_DEFAULT = "http://localhost:3030"
 #: Where minty-web (the hub: subscriptions, a company's module settings page) is served from.
 MINTY_WEB_URL_DEFAULT = "http://localhost:3000"
+#: Where minty-petty-cash-web (Petty Cash's own front end) is served from - slot 1, as Flask's 8010.
+PETTY_CASH_WEB_URL_DEFAULT = "http://localhost:3010"
 
 #: What every one of these responses allows a caller to send. Not parametrised: a bearer
 #: token and a JSON body is the whole contract, and a surface needing more is a decision
@@ -68,6 +70,11 @@ def minty_web_origin() -> str:
     return _origin("MINTY_WEB_URL", MINTY_WEB_URL_DEFAULT)
 
 
+def petty_cash_web_origin() -> str:
+    """Origin of minty-petty-cash-web: the Petty Cash API's caller (``blueprints.petty_cash_api``)."""
+    return _origin("PETTY_CASH_WEB_URL", PETTY_CASH_WEB_URL_DEFAULT)
+
+
 def cors(resp, origin: str, *, methods: str = "GET, POST, OPTIONS"):
     """Stamp the cross-origin headers onto ``resp`` and return it.
 
@@ -83,11 +90,8 @@ def cors(resp, origin: str, *, methods: str = "GET, POST, OPTIONS"):
     return resp
 
 
-def user_id_from_bearer() -> str | None:
-    """The ``user_id`` claim of a valid JWT in the ``Authorization`` header, or None.
-
-    Returns a STRING. The ids it is compared against are ``String(36)`` columns, and a
-    decoder that sometimes answered with an int was one of the two copies this replaces.
+def claims_from_bearer() -> dict | None:
+    """Every claim of a valid JWT in the ``Authorization`` header, or None.
 
     Every failure is None rather than an exception: a missing header, a malformed token,
     a bad signature and an expired one are all simply "not authenticated" to the caller,
@@ -98,12 +102,21 @@ def user_id_from_bearer() -> str | None:
     if not header.startswith("Bearer "):
         return None
     try:
-        decoded = jwt.decode(
+        return jwt.decode(
             header[len("Bearer "):].strip(),
             current_app.config.get("SECRET_KEY"),
             algorithms=["HS256"],
         )
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
         return None
-    user_id = decoded.get("user_id")
+
+
+def user_id_from_bearer() -> str | None:
+    """The ``user_id`` claim of a valid JWT in the ``Authorization`` header, or None.
+
+    Returns a STRING. The ids it is compared against are ``String(36)`` columns, and a
+    decoder that sometimes answered with an int was one of the two copies this replaces.
+    """
+    decoded = claims_from_bearer()
+    user_id = decoded.get("user_id") if decoded else None
     return str(user_id) if user_id else None

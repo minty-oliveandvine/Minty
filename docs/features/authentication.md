@@ -310,6 +310,12 @@ included - became a session for any company. `billing-relogin` is the legacy "my
 return. The e2e suites of the two Next apps mint these tokens themselves with the same
 secret (their `e2e/README.md` explains why nothing is bypassed by that).
 
+**minty-petty-cash-web** (2026-10-14) is entered the minty-web way, never the payments way:
+- **Way in.** `GET /handoff/petty-cash-web?next=&entity_id=` (login-gated, `modules.py`) mints a module token for ONE company. The company must be one the person belongs to, past onboarding, with Petty Cash on. `entity_id` may be the app's `<shortid>/<name>` address form. The browser then goes to the app's `/landing`, which keeps the token in its own `petty_cash_*` cookies for exactly the token's lifetime.
+- **No refresh.** A lapsed token comes back through the same route.
+- **Calls.** The app calls Petty Cash's bearer API, `/api/petty-cash/v1/companies/<id>/...` ([petty-cash-api.md](petty-cash-api.md)). That door fails closed and takes only a **module** token.
+- **My Profile.** The app reads My Profile through the hub surface, whose CORS also names `PETTY_CASH_WEB_URL`.
+
 The entitlement claims in the token are a hint only: minty-payment-request-api re-reads
 `entity_function_map` (`GET /api/auth/entitlements`) and the DB decides what the module
 shows.
@@ -317,7 +323,7 @@ shows.
 ### 6.1 Branch preview sets — handing back into a preview (2026-10-13)
 
 A branch's previews are one SET of hosts, `https://pr-<branch>-<app>.dailyminty.com` for `my`,
-`payment-request`, `onboarding` (and `www`), kept complete by the `.github` repo's
+`payment-request`, `onboarding`, `petty-cash` (and `www`), kept complete by the `.github` repo's
 `vercel-preview-set.yml` (minty-infra `CUTOVER.md` section 6). Where **`PREVIEW_ORIGIN_REGEX`** is
 set, Flask hands a person back into the set they came from instead of the configured front ends
 (`blueprints/shared/preview_origin.py`):
@@ -336,8 +342,9 @@ set, Flask hands a person back into the set they came from instead of the config
 - Every hand-off then goes to that set's host for the target app: `hub_login_url`, the minty-web
   and payments `/landing`, the onboarding launch and the Xero return (`bearer_api`'s origins
   through `preview_origin.handoff_origin`). Outside a request (mail, jobs) there is no set.
-- CORS never reads the session: the hub routes echo a set origin for `my`/`payment-request`, the
-  onboarding routes for `onboarding`, and refuse every other.
+- CORS never reads the session: the hub routes echo a set origin for `my`/`payment-request`/
+  `petty-cash`, the onboarding routes for `onboarding`, the Petty Cash API for `petty-cash`, and
+  refuse every other.
 - The stored set is re-checked against the regex on every read, so unsetting the variable turns
   it all off at once. A value that could let in any host outside `https://pr-…\.dailyminty\.com$`
   (no anchors, a top-level `|`, another domain) refuses to boot

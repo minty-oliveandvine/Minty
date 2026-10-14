@@ -119,6 +119,22 @@ def hub_headers(app, user_id, origin="http://hub.minty.test") -> dict:
     return {"Authorization": f"Bearer {token}", "Origin": origin}
 
 
+def petty_cash_headers(app, user_id, origin="http://localhost:3010") -> dict:
+    """What minty-petty-cash-web sends Flask's Petty Cash API: the MODULE token
+    ``/handoff/petty-cash-web`` mints (the ``module`` claim is what the door checks) and its
+    origin."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt
+
+    token = jwt.encode(
+        {"user_id": user_id, "module": "billing", "exp": datetime.now(timezone.utc) + timedelta(minutes=30)},
+        app.config["SECRET_KEY"],
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}", "Origin": origin}
+
+
 def hub_list(client, app, user_id) -> list[dict]:
     """The entity list as the person sees it - minty-web's, read from Flask's bearer API
     (``GET /api/me/entities``) with the token minty-web would hold. Flask's own Jinja list went

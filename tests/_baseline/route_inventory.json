@@ -3017,6 +3017,19 @@
    "in_scope": true
   },
   {
+   "endpoint": "entity.handoff_petty_cash_web",
+   "rule": "/handoff/petty-cash-web",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "user_entity"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
    "endpoint": "entity.my_entities_api",
    "rule": "/api/me/entities",
    "methods": [
@@ -3315,10 +3328,24 @@
    "touches": [],
    "touches_via_service": {},
    "in_scope": false
+  },
+  {
+   "endpoint": "petty_cash_api.company_context",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "user_entity",
+    "currency_info"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 178,
-  "in_scope": 111
+  "routes": 180,
+  "in_scope": 113
  }
 }
