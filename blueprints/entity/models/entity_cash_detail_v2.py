@@ -1,5 +1,12 @@
 """A company's cash-in-stock per denomination (``entity_cash_detail``; was
-``entity_cash_detail_v2`` / ``EntityCashDetailV2`` - the old class name stays importable)."""
+``entity_cash_detail_v2`` / ``EntityCashDetailV2`` - the old class name stays importable).
+
+``cash_instock`` is the MONEY (quantity x face value) the company's latest SUBMITTED report
+counted for that denomination. Rows are made and rebuilt only by
+``report/services/cash_denominations.refresh_cash_stock`` - on submit, revert to draft,
+delete and a submitted report's cash-count edit - one per active ``cash_info`` row of the
+company's current currency. ``cash_type`` is copied from ``cash_info.type``. Onboarding never
+writes it."""
 from sqlalchemy.orm import synonym
 
 from blueprints.shared.column_types import MintyUuid, Money, pg_enum
@@ -15,7 +22,7 @@ class EntityCashDetail(db.Model):
         MintyUuid(), db.ForeignKey(f"{SCHEMA}.entities.id", ondelete="CASCADE"), primary_key=True
     )
     cash_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.cash_info.id"), primary_key=True)
-    cash_type = db.Column(pg_enum(CashType), nullable=True)
+    cash_type = db.Column(pg_enum(CashType), nullable=False)
     cash_instock = db.Column(Money(), nullable=True)
     description = db.Column(db.Text)
     desc = synonym("description")

@@ -9,6 +9,7 @@ from flask import flash, jsonify, redirect, request, url_for
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from blueprints.entity.services.cash_settings import sync_cash_settings
 from blueprints.entity.services.settings import \
     sync_expense_account_info_from_xero
 from blueprints.xero.services.settings import get_account, get_contact
@@ -33,8 +34,10 @@ def apply_country_currency_selection(entity, form) -> None:
     working. An explicit currency selection wins; when only the country is
     supplied, its registry currency is derived. Values that don't resolve
     against country_info / currency_info are ignored (never written raw —
-    both columns are FKs). Shared by the integration minimal save, the
-    entity-tab save, and the Xero mapping save.
+    both columns are FKs). A resolved currency also syncs the company's
+    ``entity_cash_setting`` rows (services/cash_settings.py). Shared by the
+    integration minimal save, the entity-tab save, the hub's Entities &
+    Integration save and the Xero mapping save.
     """
     country_info = None
     country_code = (
@@ -52,6 +55,9 @@ def apply_country_currency_selection(entity, form) -> None:
     if currency_info:
         entity.currency_id = currency_info.id
         entity.currency_format = currency_info.symbol or "$"
+        # The denominations follow the currency (idempotent: a re-save keeps the
+        # company's own choices); committed with the caller's save.
+        sync_cash_settings(entity.id, currency_info.id)
 
 
 def _trunc(value, max_len):

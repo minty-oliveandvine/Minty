@@ -386,21 +386,21 @@ CREATE TABLE pettycashv3.entity_pettycash_settings (
 CREATE TABLE pettycashv3.cash_info (
   id          UUID                  NOT NULL DEFAULT gen_random_uuid(),
   currency_id UUID                  NOT NULL,
-  type        pettycashv3.cash_type NULL,
+  type        pettycashv3.cash_type NOT NULL,
   cash_value  NUMERIC(12,2)         NOT NULL,
   cash_name   VARCHAR(20)           NULL,
   description TEXT                  NULL,
   is_active     BOOLEAN             NOT NULL DEFAULT TRUE,
   display_order INTEGER             NOT NULL DEFAULT 0,
   CONSTRAINT cash_info_pkey PRIMARY KEY (id),
-  CONSTRAINT cash_info_currency_value_key UNIQUE (currency_id, cash_value),
+  CONSTRAINT uq_cash_info_currency_value_type UNIQUE (currency_id, cash_value, type),
   CONSTRAINT fk_cash_currency FOREIGN KEY (currency_id) REFERENCES pettycashv3.currency_info (id) ON DELETE RESTRICT
 );
 
 CREATE TABLE pettycashv3.entity_cash_detail (
   entity_id    UUID                  NOT NULL,
   cash_id      UUID                  NOT NULL,
-  cash_type    pettycashv3.cash_type NULL,
+  cash_type    pettycashv3.cash_type NOT NULL,
   cash_instock NUMERIC(14,2)         NULL,
   description  TEXT                  NULL,
   CONSTRAINT entity_cash_detail_pkey PRIMARY KEY (entity_id, cash_id),
@@ -1203,8 +1203,10 @@ CREATE INDEX idx_bill_entity_published
 
 CREATE VIEW pettycashv3.report_cash_summary AS
 SELECT r.id                                      AS report_id,
-       c.total                                   AS actual_cash_total,
-       c.total + COALESCE(r.safe_box_balance, 0) AS cash_balance
+       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
+                                                 AS actual_cash_total,
+       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
+         + COALESCE(r.safe_box_balance, 0)       AS cash_balance
   FROM pettycashv3.report r
   LEFT JOIN (SELECT report_id,
                     SUM(quantity * cash_value) AS total
@@ -1214,7 +1216,8 @@ SELECT r.id                                      AS report_id,
 
 COMMENT ON VIEW pettycashv3.report_cash_summary IS
   'Replaces report.actual_cash_total. NULL actual_cash_total means the report '
-  'was never cash-counted, which is not the same as counting zero.';
+  'was never cash-counted; a report whose cash-count step is done with no rows '
+  '(every denomination counted as zero) reads 0.';
 
 CREATE VIEW pettycashv3.tracker AS
 SELECT e.name AS "entities.name",
@@ -1244,3 +1247,81 @@ SELECT e.name AS "entities.name",
                greatest(max(b.updated_at), max(b.created_at))       AS latest_bill_update
           FROM pettycashv3.bill b
          WHERE b.entity_id = e.id) bil ON true;
+
+CREATE VIEW pettycashv3.entity_setup_summary AS
+SELECT e.id AS entity_id,
+       e.name AS entity_name,
+       e.status AS entity_status,
+       e.currency_id,
+       e.country_code,
+       e.status = 'connected' AS xero_connected,
+       e.xero_org_id IS NOT NULL AS xero_org_linked,
+       e.xero_org_id,
+       e.xero_tenant_name,
+       e.last_connected_at,
+       e.connected_by_user_id,
+       cu.username AS connected_by_username,
+       COALESCE(m.pettycash_enabled, false) AS pettycash_module_enabled,
+       COALESCE(m.bill_enabled, false) AS bill_module_enabled,
+       (eps.pettycash_account_id IS NOT NULL)::integer + (eps.bank_account_id IS NOT NULL)::integer
+         + (eps.cash_sale_account_id IS NOT NULL)::integer + (eps.discrepancy_bank_account_id IS NOT NULL)::integer
+         + (eps.discrepancy_account_id IS NOT NULL)::integer + (eps.director_account_id IS NOT NULL)::integer
+         AS pettycash_accounts_set,
+       6 AS pettycash_accounts_total,
+       (eps.cash_sale_contact_id IS NOT NULL)::integer + (eps.director_contact_id IS NOT NULL)::integer
+         + (eps.discrepancy_contact_id IS NOT NULL)::integer AS pettycash_contacts_set,
+       3 AS pettycash_contacts_total,
+       COALESCE(ai.n, 0) AS xero_accounts_synced,
+       COALESCE(ba.n_active, 0) AS bill_accounts_set,
+       COALESCE(ba.n_default, 0) AS bill_accounts_default,
+       COALESCE(ba.n_default_inactive, 0) AS bill_accounts_default_inactive,
+       eps.opening_balance,
+       eps.start_date,
+       eps.pettycash_account_id,
+       a_pc.name AS pettycash_account_name,
+       a_pc.xero_code AS pettycash_account_code,
+       a_bk.name AS bank_account_name,
+       a_bk.xero_code AS bank_account_code,
+       a_cs.name AS cash_sale_account_name,
+       a_cs.xero_code AS cash_sale_account_code,
+       a_db.name AS discrepancy_bank_account_name,
+       a_db.xero_code AS discrepancy_bank_account_code,
+       a_dc.name AS discrepancy_account_name,
+       a_dc.xero_code AS discrepancy_account_code,
+       a_dr.name AS director_account_name,
+       a_dr.xero_code AS director_account_code,
+       c_cs.name AS cash_sale_contact_name,
+       c_dr.name AS director_contact_name,
+       c_dc.name AS discrepancy_contact_name,
+       eps.updated_at AS pettycash_settings_updated_at
+  FROM pettycashv3.entities e
+  LEFT JOIN pettycashv3."user" cu ON cu.id = e.connected_by_user_id
+  LEFT JOIN pettycashv3.entity_pettycash_settings eps ON eps.entity_id = e.id
+  LEFT JOIN pettycashv3.account_info a_pc ON a_pc.id = eps.pettycash_account_id
+  LEFT JOIN pettycashv3.account_info a_bk ON a_bk.id = eps.bank_account_id
+  LEFT JOIN pettycashv3.account_info a_cs ON a_cs.id = eps.cash_sale_account_id
+  LEFT JOIN pettycashv3.account_info a_db ON a_db.id = eps.discrepancy_bank_account_id
+  LEFT JOIN pettycashv3.account_info a_dc ON a_dc.id = eps.discrepancy_account_id
+  LEFT JOIN pettycashv3.account_info a_dr ON a_dr.id = eps.director_account_id
+  LEFT JOIN pettycashv3.xero_contact_sync c_cs ON c_cs.id = eps.cash_sale_contact_id
+  LEFT JOIN pettycashv3.xero_contact_sync c_dr ON c_dr.id = eps.director_contact_id
+  LEFT JOIN pettycashv3.xero_contact_sync c_dc ON c_dc.id = eps.discrepancy_contact_id
+  LEFT JOIN LATERAL (
+        SELECT bool_or(ef.function_code = 'PETTY_CASH' AND efm.is_enabled) AS pettycash_enabled,
+               bool_or(ef.function_code = 'PAYMENT_REQUEST' AND efm.is_enabled) AS bill_enabled
+          FROM pettycashv3.entity_function_map efm
+          JOIN pettycashv3.entity_function ef ON ef.id = efm.entity_function_id
+         WHERE efm.entity_id = e.id) m ON true
+  LEFT JOIN LATERAL (
+        SELECT count(*) AS n FROM pettycashv3.account_info x WHERE x.entity_id = e.id) ai ON true
+  LEFT JOIN LATERAL (
+        SELECT count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted) AS n_active,
+               count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted AND b.is_default) AS n_default,
+               count(*) FILTER (WHERE b.is_default AND NOT b.is_deleted AND NOT b.is_active) AS n_default_inactive
+          FROM pettycashv3.entity_bill_account_xero b
+         WHERE b.entity_id = e.id) ba ON true;
+
+COMMENT ON VIEW pettycashv3.entity_setup_summary IS
+  'One row per company: Xero connection, modules on, how many of the six petty-cash '
+  'accounts and three contacts are mapped, bill account codes (active, default, a default '
+  'left inactive), and the petty-cash settings (opening balance, start date, mapped names).';

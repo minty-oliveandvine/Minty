@@ -153,24 +153,16 @@ def test_the_history_api_is_behind_the_acceptance_gate(client, app, db_session):
     assert response.get_json()["code"] == "terms_acceptance_required"
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "/legal/accept",
-        "/legal/terms",
-        "/legal/terms/beta-1",
-        "/legal/privacy",
-        "/legal/privacy/beta-1",
-        "/legal/current",
-    ],
-)
+@pytest.mark.parametrize("url", ["/legal/current"])
 def test_the_acceptance_flow_is_still_reachable_when_blocked(
     client, app, db_session, url
 ):
-    """The narrowed allow-list must not have dropped any of these.
+    """The narrowed allow-list must not have dropped this one.
 
-    Every one is load-bearing: without it the gate redirects to a page it
-    blocks, which is a loop with no exit for every user in the system.
+    It is the last `legal` GET anyone reads while blocked: which version is live. The
+    documents and the acceptance screen it used to sit beside are minty-web's since
+    2026-10-12, on another origin, so the gate never sees those requests
+    (tests/test_terms_gate.py covers what is left of the list).
     """
     blocked_id = _make_user(app, db_session, prefix="blocked")
 

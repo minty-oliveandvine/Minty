@@ -125,89 +125,54 @@ def get_contact(contact_id, company, xero_tenant_id):
             f"Error fetching contact {contact_id} from Xero: {str(e)}")
         return None
 
-_REQUIRED_PETTYCASH_ACCOUNT_COLUMNS = (
-    "pettycash_account_id",
-    "bank_account_id",
-    "cash_sale_account_id",
-    "discrepancy_bank_account_id",
-    "discrepancy_account_id",
-    "director_account_id",
-)
-_REQUIRED_PETTYCASH_CONTACT_COLUMNS = (
-    "cash_sale_contact_id",
-    "director_contact_id",
-    "discrepancy_contact_id",
-)
+def _setup_summary(entity_id):
+    """The company's ``entity_setup_summary`` row, or None (unknown company)."""
+    from blueprints.shared.views import EntitySetupSummary
+
+    return db.session.get(EntitySetupSummary, str(entity_id))
 
 
 def check_entity_xero_settings_complete(entity_id):
-    """Check if entity has all required Xero settings configured from DB."""
+    """True when all six petty-cash accounts and all three contacts are mapped.
+
+    Read from the ``entity_setup_summary`` view - one row, not the settings row plus a count
+    in Python. Logs and answers False on any error, as the dashboard and the publish guard
+    have always relied on.
+    """
     try:
-        Entity.query.get_or_404(entity_id)
-
-        settings_row = EntityPettycashSettings.query.filter_by(
-            entity_id=entity_id
-        ).first()
-        if settings_row is None:
-            logger.info(
-                f"Entity {entity_id} has no entity_pettycash_settings row"
-            )
+        row = _setup_summary(entity_id)
+        if row is None:
+            logger.info(f"Entity {entity_id} has no entity_setup_summary row")
             return False
-
-        accounts_set = sum(
-            1
-            for col in _REQUIRED_PETTYCASH_ACCOUNT_COLUMNS
-            if getattr(settings_row, col)
-        )
-        contacts_set = sum(
-            1
-            for col in _REQUIRED_PETTYCASH_CONTACT_COLUMNS
-            if getattr(settings_row, col)
-        )
-
-        required_account_settings = len(_REQUIRED_PETTYCASH_ACCOUNT_COLUMNS)
-        required_contact_settings = len(_REQUIRED_PETTYCASH_CONTACT_COLUMNS)
         is_complete = (
-            accounts_set >= required_account_settings
-            and contacts_set >= required_contact_settings
+            row.pettycash_accounts_set >= row.pettycash_accounts_total
+            and row.pettycash_contacts_set >= row.pettycash_contacts_total
         )
-
         logger.info(
-            f"Entity {entity_id} Xero settings check: accounts={accounts_set}/{required_account_settings}, "
-            f"contacts={contacts_set}/{required_contact_settings}, complete={is_complete}")
+            f"Entity {entity_id} Xero settings check: "
+            f"accounts={row.pettycash_accounts_set}/{row.pettycash_accounts_total}, "
+            f"contacts={row.pettycash_contacts_set}/{row.pettycash_contacts_total}, "
+            f"complete={is_complete}"
+        )
         return is_complete
     except Exception as e:
         logger.error(f"Error checking entity Xero settings: {str(e)}")
         return False
 
 def get_missing_xero_settings_fields(entity_id):
-    """Return list of missing Xero settings fields for given entity."""
-    missing_fields = []
+    """Labels of the account and contact slots not mapped yet, in the dashboard's order.
+
+    All nine slots (``blueprints/shared/views.PETTYCASH_SLOTS``) - the discrepancy bank
+    account was missing until 2026-10-13, so a company lacking only it saw "Setup Required"
+    with nothing named.
+    """
+    from blueprints.shared.views import PETTYCASH_SLOTS
+
     try:
-        Entity.query.get_or_404(entity_id)
-
-        settings_row = EntityPettycashSettings.query.filter_by(
-            entity_id=entity_id
-        ).first()
-
-        column_to_label = [
-            ("pettycash_account_id", "Main Bank Account"),
-            ("bank_account_id", "Deposit Bank Account"),
-            ("cash_sale_account_id", "Cash Sale Account"),
-            ("cash_sale_contact_id", "Cash Sale Contact"),
-            ("director_account_id", "Owners Account"),
-            ("director_contact_id", "Owners Contact"),
-            ("discrepancy_account_id", "Discrepancy Account"),
-            ("discrepancy_contact_id", "Discrepancy Contact"),
-        ]
-
-        if settings_row is None:
-            missing_fields = [label for _, label in column_to_label]
-        else:
-            for column, label in column_to_label:
-                if not getattr(settings_row, column):
-                    missing_fields.append(label)
-
+        row = _setup_summary(entity_id)
+        missing_fields = (
+            [label for _, label in PETTYCASH_SLOTS] if row is None else row.missing_pettycash_slots
+        )
         logger.info(f"Entity {entity_id} missing settings: {missing_fields}")
         return missing_fields
     except Exception as e:

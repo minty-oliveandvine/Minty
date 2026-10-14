@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report.services.cash_denominations import (
-    get_cash_count_details, get_cash_count_total)
+    cash_summary, get_cash_count_details, refresh_cash_stock)
 from blueprints.report.services.shared import (check_user_has_entities,
                                                cleanup_partial_submission_data,
                                                future_date_error,
@@ -138,6 +138,9 @@ def revert_report_to_draft(report_id):
         # what let the publish flow warn about that.
         report.xero_integrated_yes = was_published
         report.publishing_status = prior_publishing_status
+        # No longer submitted: the stock falls back to the previous submitted report.
+        db.session.flush()
+        refresh_cash_stock(entity_id)
 
         db.session.commit()
     except Exception:
@@ -584,24 +587,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             cash_sales = report.cash_sales if report.cash_sales else 0
 
         total_sales = report.total_sales if report.total_sales else 0
-        # Calculate actual cash balance from cash count data.
-        #
-        # "Has a cash count" is decided by the count ROWS, not by the presence
-        # of a report_cashcount_draft row: Step 3.5 stops writing that table,
-        # so keying on it would send every new report down the else-branch and
-        # report a zero count against a report that was counted.
-        # "Counted" is actual_cash_total being set, not the count rows: a
-        # denomination counted as zero has its row deleted, so an all-zero
-        # count has no rows at all.
-        has_cash_count = (
-            bool(get_cash_count_details(report.id))
-            or report.actual_cash_total is not None
-        )
-        if has_cash_count:
-            total_actual_cash = get_cash_count_total(report.id)
-            safe_box_balance = report.safe_box_balance or 0
-            cash_balance = total_actual_cash + safe_box_balance
-        else:
+        # Calculate actual cash balance from cash count data - one
+        # report_cash_summary row: NULL means never counted (show the closing
+        # balance instead), 0 means counted with every denomination zero.
+        total_actual_cash, cash_balance = cash_summary(report.id)
+        if total_actual_cash is None:
             total_actual_cash = 0
             cash_balance = report.closing_balance if report.closing_balance else 0
 
@@ -1086,15 +1076,10 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             grouped_expenses.values(), key=lambda x: x["amount"], reverse=True
         )
 
-    # Calculate actual cash balance from cash count data.
-    #
-    # Keyed on the count ROWS plus the legacy row, not on the legacy row alone:
-    # Step 3.5 stops writing report_cashcount_draft, so a new report that HAS
-    # been counted has no row there and would otherwise fall to the else-branch.
-    if (
-        bool(get_cash_count_details(current_draft.id))
-        or current_draft.actual_cash_total is not None
-    ):
+    # Calculate actual cash balance from cash count data: one report_cash_summary
+    # row (NULL = never counted, so the closing balance shows instead).
+    total_actual_cash, cash_balance = cash_summary(current_draft.id)
+    if total_actual_cash is not None:
         logger.info(f"Retrieved cash count data for draft {current_draft.id}:")
         # Enumerate what was actually counted rather than the nine fixed
         # columns, so custom denominations show up here too.
@@ -1117,16 +1102,6 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             except Exception:
                 logger.exception("  Counted: failed to format cash count rows")
         logger.info(f"  Safe box balance: {current_draft.safe_box_balance}")
-        logger.info(
-            f"  Stored actual_cash_total: {current_draft.actual_cash_total}"
-        )
-
-        # Total from report_cash_count, falling back to the legacy note/coin
-        # columns for reports predating the backfill.
-        total_actual_cash = get_cash_count_total(current_draft.id)
-        safe_box_balance = current_draft.safe_box_balance or 0
-        cash_balance = total_actual_cash + safe_box_balance
-
         logger.info(f"  Calculated total_actual_cash: {total_actual_cash}")
         logger.info(f"  Final cash_balance: {cash_balance}")
     else:
@@ -1230,10 +1205,7 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                     # answering for reports predating the backfill. Keying on
                     # cashcount_draft alone would block submit outright once
                     # Step 3.5 stops writing that table.
-                    if (
-                        not get_cash_count_details(current_draft.id)
-                        and current_draft.actual_cash_total is None
-                    ):
+                    if cash_summary(current_draft.id)[0] is None:
                         validation_errors.append("Cash count data is missing")
                     # Otherwise no validation: a zero cash count is allowed, and
                     # cash balance (count + safe box) may be <= 0. The
@@ -1418,10 +1390,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         # actual_cash_total off `report`, which cash_count.py
                         # now writes (Step 3.5, Unit 0a).
                         if "cash_count" in completed_sections:
-                            if (
-                                not current_draft.actual_cash_total
-                                or current_draft.actual_cash_total <= 0
-                            ):
+                            counted_total = cash_summary(current_draft.id)[0]
+                            if not counted_total or counted_total <= 0:
                                 logger.warning(
                                     f"Cash count total is zero or negative for report {current_draft.id}"
                                 )
@@ -1439,6 +1409,9 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
                         current_draft.current_section = "submitted"
                         current_draft.status = ReportStatus.SUBMITTED
                         current_draft.submitted_at = datetime.now(timezone.utc)
+                        # The company's cash in stock is this report's count now.
+                        db.session.flush()
+                        refresh_cash_stock(current_draft.company)
 
                         logger.info("Committing database changes...")
                         db.session.commit()

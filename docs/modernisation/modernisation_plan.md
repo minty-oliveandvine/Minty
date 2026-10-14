@@ -2244,6 +2244,28 @@ Rules that follow from it:
   (`"exports"` pointing at `.ts`, consumed via Next's `transpilePackages`) so every consumer
   type-checks against the real contract. Its `lib/api.ts` types are the backend contract; a
   django-ninja schema change and the matching TS type land in the same tag pair.
+  *(Built 2026-10-12 and it holds: per-module subpath exports with no root barrel - a barrel drags
+  `react` and `next/navigation` into minty-payment-request-web's edge `middleware.ts` bundle - and
+  no `@/` alias inside the package, because `tsconfig.paths` does not apply under `node_modules`,
+  so an aliased import resolves in the package's own green CI and then fails in the consumer's
+  build. Consumers type-check the package's `.ts` under THEIR compilerOptions - `skipLibCheck`
+  only skips `.d.ts` - so the package's tsconfig is a copy of theirs.)*
+- **A packaged component's CSS classes are invisible to Tailwind unless the consumer says so, and
+  the failure is SILENT** (2026-10-12). Tailwind v4 never scans `node_modules`, so without a
+  `@source "../node_modules/@minty/shared/src";` line in the consumer's `app/globals.css` every
+  utility class inside a packaged component is dropped from the generated CSS - no error, just an
+  unstyled drawer. (This had already driven `minty-onboarding-web/components/ModalFrame.tsx` to
+  hand-written CSS before the package existed.) Two consequences:
+  - A packaged **stylesheet** is different, and safe: `@import "@minty/shared/theme.css";` is
+    resolved by the bundler exactly like `material-symbols/outlined.css`, and a bad specifier
+    fails the build. So design tokens travel as CSS; only *components* need `@source`.
+  - `@source` must come **after every `@import`**: CSS requires imports to precede other rules, so
+    an `@source` above one silently invalidates it. Placed above minty-payment-request-web's
+    checkbox import, it would have dropped those styles.
+  Every consumer carries `app/__tests__/packagedStyles.test.ts`, which compiles its real
+  `globals.css` with its real Tailwind plugin and asserts the tokens, the ordering, and
+  declarations only the packaged sidebar can produce. It is the only thing that catches a lost
+  line.
 - **Shared Python packages ship typed code**: `minty-shared-py` runs `pyright` in CI on
   `strict` for `auth`, `permissions`, `minty_client`; `minty-db`'s models run at `basic` (they
   describe a schema, not logic) and rely on `django-stubs` for the ORM types.
@@ -2451,7 +2473,8 @@ base-URL change in `apiRoutes.ts` / `flaskBase.ts` or a target change in
 | Django → `minty-billing-api` proxy (since Part 2) | `payment-method*`, `billing/payment-methods*`, `billing/accounts`, `billing/authorize`; `finalize` is native in onboarding-backend (the status flip) + `trials/start` on `minty-billing-api` | done in Part 2 (`BILLING_API_URL`) | — |
 | Django → Flask proxy | `modules` (the `entity_function_map` write) | `minty-accounts-api` | step 5 |
 | Django → Flask proxy | `POST /invite` (email links into a Flask route + template) | `minty-accounts-api` | step 5 |
-| Wizard → Flask direct (`flaskBase.ts`; `app/auth/*`, `TermsModal.tsx`) | `/auth/email/*`, `/logout`, `/legal/*`, `/entity` | `minty-accounts-api` (pages: `minty-web`) | step 5 |
+| Wizard → Flask direct (`flaskBase.ts`) | `/auth/email/*`, `/logout`, `/legal/current`, `/entity` | `minty-accounts-api` (pages: `minty-web`) | step 5 |
+| ~~the legal documents and their pages~~ | ~~`/legal/terms`, `/legal/privacy`, `/legal/content/<kind>`, `/legal/accept`~~ | **DONE 2026-10-12: `minty-web` owns them** (`lib/legal/`, served at `/terms` and `/privacy`); Flask keeps `terms_consent`, the gate and a text-free version manifest. The deleted routes 404 | — |
 | Wizard → Flask direct | `/xero_auth`, `/xero_connect` (OAuth redirect) | `minty-xero-api` | step 3 |
 | All three Django services (`minty-billing-api` included) | `core/`, `shared_models/` copies | `minty-shared-py` + `minty-db` | step 2 |
 | Wizard | own `lib/{api,flaskBase,errorCopy}.ts`, `globals.css` (1,997 lines) | `minty-shared-ts` — **after** its `{ok,error}` typing pass settles (see `i-plan-to-move-mossy-donut.md`) | step 4, opt-in |
@@ -2646,12 +2669,41 @@ minty-web/<path>`: `components/ui/{Sidebar,SideMenu,ViewerBadge,NavMenu}.tsx`, `
 file, `billing-frontend/components/ui/sidebarHost.ts` - the company and modules in the cookie,
 where each item leads from that app, its scroll lock, its logout, how it reaches Flask and
 minty-billing-api - and that file is the list of what `@minty/shared` must take as injection.
-The lift: move minty-web's copies into the package behind that host interface, then delete
-billing-frontend's copies and keep its `sidebarHost.ts`. Flask's pages carry a Jinja port
-(`templates/components/minty_sidebar.html`, `static/js/minty_sidebar.js`,
-`blueprints/shared/sidebar.py`; Minty `docs/features/sidebar.md`) that a TypeScript package
-cannot serve: it retires with those pages in Part 3, not in the lift. Until then a change to
-minty-web's menu or profile is made in all three.
+**DONE 2026-10-12.** The four components and `lib/viewer.ts` are `@minty/shared/sidebar`. Both
+apps keep a thin shim at each old path that re-exports the package and, on its first line, imports
+that app's `components/ui/sidebarHost.ts` for the side effect - which is what guarantees the host
+is registered before anything renders, and why no page, feature or test had to change (899 lines
+of duplicated component became 54 lines of shim in minty-web). The host file this paragraph
+predicted is now exactly that, and **both** apps have one. Three things the interface had to take
+that the prediction missed:
+
+- **The app's router, as a hook (`host.usePathname()`).** The package imports no `next/navigation`
+  at all, and that is not tidiness: `vi.mock("next/navigation")` in a consumer's test **does not
+  reach a module inside `node_modules`**, so a packaged component read the real hook, got `null`
+  outside an app-router tree, and the sidebar stopped closing on a move between pages - visible
+  only in the app's own suite. (`SideMenu` still reads `window.location.pathname`: it is drawn in
+  the drawer's portal, re-rendered each time it opens, and a screen test renders it with no router
+  at all.)
+- **A name (`host.app`).** The "one app, one host" guard cannot key on object identity: Next
+  evaluates a host module once per bundler layer and again on **every HMR edit**, so one file
+  legitimately produces several distinct objects in a page, and identity threw on an ordinary dev
+  reload. Keyed on `app`, re-registering the same app replaces the host (which HMR needs - the old
+  object closes over stale modules), while two different apps in one page is still refused.
+- **The `public/` assets, as a contract.** The menu renders 15 files under `/menu/`, and Next
+  cannot serve a static file out of `node_modules`, so they stay in each app - byte-identical in
+  both. `SIDEBAR_ASSETS` is the package's list of what it draws, and each consumer asserts its own
+  `public/` against it, because a missing file is a broken image rather than an error.
+
+One more trap, in the consumer: minty-web's `test/setup.ts` imported `@/lib/viewer` at the top,
+which now pulls in the host and `next/navigation` **before any test file's `vi.mock` registers**,
+binding the real modules for good. It lazy-imports inside the hook now - which is what
+minty-payment-request-web's `test/setup.dom.ts` had already been doing, for this exact reason.
+
+Flask's pages carry a Jinja port (`templates/components/minty_sidebar.html`,
+`static/js/minty_sidebar.js`, `blueprints/shared/sidebar.py`; Minty `docs/features/sidebar.md`)
+that a TypeScript package cannot serve, and **the shared packages are Next.js-only by the user's
+rule (2026-10-12)**: Flask is not a consumer and gains no "change both" obligation. Those pages
+retire in Part 3.
 
 ## Links between services — one shape (rule 10, added 2026-09-21)
 
@@ -2765,7 +2817,7 @@ tests (the route exists, takes these params). The rows move when a route moves (
 | `minty` | `/api/entity/<id>/subscription-notice` | — | payments-web (→ `billing-api` at Part 2 step 5) |
 | `minty` | `/api/internal/xero/token` | — | payments-api, onboarding-api (→ `xero-api` at Part 3 step 3) |
 | `minty` | `/api/entities/<id>/billing/sync-{chart-accounts,chart-if-changed,contacts-if-changed}` | — | payments-api |
-| `minty` | `/auth/email/request-code`, `/auth/email/verify-code`, `/legal/current`, `/legal/terms`, `/legal/privacy`, `/legal/invite-terms-status`, `/xero_auth`, `/xero_connect` | per route | onboarding-web (→ `accounts-api` / `xero-api` at Part 3) |
+| `minty` | `/auth/email/request-code`, `/auth/email/verify-code`, `/legal/current`, `/legal/invite-terms-status`, `/xero_auth`, `/xero_connect` | per route | onboarding-web (→ `accounts-api` / `xero-api` at Part 3). `/legal/terms` and `/legal/privacy` left this list on 2026-10-12: they are minty-web's own pages now |
 | `minty` | `/api/onboarding/*` | — | onboarding-web's cutover map, onboarding-api's proxies |
 | `hub-web` | `/landing` | the handoff envelope | minty |
 | `hub-web` | `/subscription`, `/subscription/subscriptions`, `/subscription/subscriptions/incoming`, `/entity/<shortid>/<name>/settings/modules` (was `/subscription/entities/<id>/modules` until 2026-10-05, and the plural `/entities/…` until 2026-10-07) | `from` | minty (as `next`), billing-api emails, payments-web portal links |
@@ -3207,7 +3259,12 @@ merge red", not "CI deploys". Two exceptions that need an explicit step:
 - **Shared packages** (`minty-db`, `minty-shared-py`, `minty-shared-ts`) release by git tag from
   `main`; a service bumps its pin in a PR, which runs that service's CI against the new tag.
   No floating `@main` pins anywhere — that is how a shared change silently deploys to five
-  services at once.
+  services at once. **A tag here is immutable**, the opposite of `.github`'s `v1`, which moves by
+  design: npm and pip both cache git dependencies, so a moved tag hands two machines different
+  code under one pin. For the TS package, expect `package-lock.json` to say `git+ssh://` whatever URL you type -
+  npm normalises every GitHub URL to the `github:` shorthand - and expect it to work anyway: npm
+  falls back to HTTPS for a **public** repo, with no SSH key (verified 2026-10-12, `npm install`
+  and `npm ci`, ssh forced to fail). It is one of the reasons the package repo is public.
 
 **Secrets.** *(Corrected 2026-10-07: there is no org-level secret to inherit — `minty-oliveandvine`
 is a user account. `minty-infra`'s `environment_secrets` variable is the single source instead: it
@@ -3378,7 +3435,7 @@ orders anything here.
    - **The maintenance gate Phase E did not have** (decided 2026-09-18 to build it here, not in Flask): one env switch, `MAINTENANCE_MODE`, read by `minty-shared-py` (a middleware every `-api` installs: 503 + `Retry-After` on everything but `/healthz`) and `minty-shared-ts` (every `-web`'s `middleware.ts` renders the maintenance page — billing-frontend's `/maintenance` is the seed), set for every service by one `minty-infra` variable, and exercised by a stack-job journey in the repo that owns it (on: every app shows the page and no API accepts a write; off: normal). Until then a window is held by suspending the Render services, as at the Part 1 cutover.
    - **E2E** (there is no `minty-e2e`; built 2026-10-07 instead as `stack-e2e.yml`, see the CI/CD section): the stack job switches from loading `01_schema_rebased.sql` to a real cold start, `RUN_MIGRATIONS=true` from an empty volume, once `minty-db` owns it — which is the first time the two cold-start paths can be compared. The journeys steps 3 and 5 would break (sign-up→finalize, connect Xero→publish report) already exist in `minty-onboarding-web/e2e` and `Minty/e2e`; what is owed here is the seed's disposable onboarding entity, so `minty-onboarding-web`'s suite can join the job. Contract-type generation into `minty-shared-ts` starts here too.
 3. **`minty-xero-api`** — smallest blast radius (6.2k lines, both Django consumers already behind one env var). No schema work: it imports `minty_db.models`. Cutover = repoint `XERO_API_URL` (rule 10's name for today's `XERO_TOKEN_SERVICE_URL`; the `/api/internal/xero/token` entry moves to the `xero-api` row), then move publish endpoints group by group; onboarding's five Xero proxies and the `/xero_connect` redirect repoint here. Gate: the stack job's Xero journey (`Minty/e2e/04_xero_publish.spec.ts`) + `onboarding/e2e/xero.spec.ts`.
-4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over (behind `MINTY_WEB_HUB` until phase 2 removed it, 2026-10-05, with the Jinja list; sign-in (`features/auth`, `/login`), module choice (`/entity/<shortid>/<name>`, singular since 2026-10-07) and the company's Users and Entity & Integration tabs (`features/company-settings`, `…/settings/{users,integration}` over Flask's `/api/me/company/*`) moved to minty-web the same day, the Flask pages deleted - **phase 2 done, 2026-10-05**); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. *(2026-10-02: the renames (as `minty-payment-request-web/-api` and `minty-onboarding-web/-api`), the port moves and the env-name cut for billing-backend and onboarding are already done, under `docs/ENVIRONMENT.md`'s names. Still owed here: the links modules and guard tests, and payment-request-api's three `requests` sites onto one client module. The landing page's cut is **done, 2026-10-09** - renamed `minty-www`, on `main` + `development`, `WWW_URL` + `WAITLIST_URL` with no `NEXT_PUBLIC_` prefix, and modelled in `minty-infra` as the service `www`; its repo rename landed here too, so only the port move to 3009 is left.)* **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
+4. **`minty-shared-ts` + `minty-web` grows the hub** — *(done early, 2026-09-29, at the user's word: the entity list — `features/entities`, `/entities` — and My Profile — `features/profile`, `/profile`, Figma 10-A/10-B — are in `minty-web`, each a bounded folder like `features/subscription`, over Flask's bearer hub surface (`blueprints/shared/hub_api.py`: `GET /api/me/entities`, `GET`/`PATCH /api/me/profile`; Flask stays their backend until `minty-accounts-api`, step 5). Flask's `/entity` and every "open my profile" link hand over (behind `MINTY_WEB_HUB` until phase 2 removed it, 2026-10-05, with the Jinja list; sign-in (`features/auth`, `/login`), module choice (`/entity/<shortid>/<name>`, singular since 2026-10-07) and the company's Users and Entity & Integration tabs (`features/company-settings`, `…/settings/{users,integration}` over Flask's `/api/me/company/*`) moved to minty-web the same day, the Flask pages deleted - **phase 2 done, 2026-10-05**); the Figma 02 side menu is minty-web's on every page. Still to come here: the handover popups onto the entity list and the banner ladder — the next plan, by the user's call.)* `minty-web` (subscription only since Part 2) takes `billing-frontend/app/{settings,module-selection,landing}` and the Jinja pages (login, register, dashboard/entity list, profile, user admin, legal); `minty-shared-ts` is lifted from `minty-web/lib` (including `lib/links.ts`) + `components/ui`, which the extraction of the subscription folder was built for. *(**The package exists since 2026-10-12**, brought forward on the user's word - nothing in this plan gated it: this step's row carries no `requires`, steps 3-6 are independent cutovers, and step 2's own bullets already assumed the package was there. **v0.1 holds:** `theme.css` (the `@theme` font block that had become three byte-identical copies the same week), the sidebar (`Sidebar`/`SideMenu`/`NavMenu`/`ViewerBadge` + `lib/viewer.ts`) behind the host interface, and four modules each app had its own copy of (`safeNext`, `companyRef`, `leaveGuard`, `emailInput`). Consumers: minty-web and minty-payment-request-web take everything; **minty-onboarding-web takes `theme.css` only** (one `@import`, no `@source`, no `transpilePackages` - it consumes no component, and joining for the components stays gated on its `{ok,error}` typing pass); `minty-www` cannot (Tailwind v3 / React 18 / Next 14) and keeps the same stacks in its own `tailwind.config.ts`. **Deliberately NOT in v0.1:** `Toast` (three incompatible contracts), `Icon` (`<Icon name=>` vs a namespace object), `MintySelect` (a native `<select>` vs a 438-line listbox), `ConfirmDialog` (shares only `title`, and pins ten `public/portal/*.png`), `ModalFrame`, `Header`/`AppHeader`, `auth.ts` (cookie names diverge on purpose), `env.ts`, `moduleClaims.ts`, the api clients, `links.ts`, `time.ts`/`<ZonedTime>` (rule 11, below - it needs the APIs to stop emitting formatted dates) and the openapi type generation. `Wordmark.tsx` is the obvious next addition, once a second app draws the name as text. Its CI is its own 20-line workflow, not a call into `.github`, and that exception is written down in `Minty/docs/features/ci.md`.)* Rename `billing-frontend` → `minty-payments-web` and `billing-backend` → `minty-payments-api` here, since Vercel/Render get reconfigured anyway; **no port moves** (rule 6). The same reconfiguration carries the rule-10 hard cut for the three repos Part 2 step 5 did not touch: billing-backend (`FLASK_APP_URL` / `FRONTEND_APP_URL` / `XERO_TOKEN_SERVICE_URL` → `MINTY_URL` / `PAYMENTS_WEB_URL` / `XERO_API_URL`, `core/links.py`, its three `requests` sites onto `core/minty_client.py`), onboarding (`NEXT_PUBLIC_MODULE1_API_URL` → `NEXT_PUBLIC_MINTY_URL`, `flaskBase.ts` into `lib/links.ts`) and the landing page (`NEXT_PUBLIC_WAITLIST_URL` → `NEXT_PUBLIC_MINTY_URL`), each with its guard test. *(2026-10-02: the renames (as `minty-payment-request-web/-api` and `minty-onboarding-web/-api`), the port moves and the env-name cut for billing-backend and onboarding are already done, under `docs/ENVIRONMENT.md`'s names. Still owed here: the links modules and guard tests, and payment-request-api's three `requests` sites onto one client module. The landing page's cut is **done, 2026-10-09** - renamed `minty-www`, on `main` + `development`, `WWW_URL` + `WAITLIST_URL` with no `NEXT_PUBLIC_` prefix, and modelled in `minty-infra` as the service `www`; its repo rename landed here too, so only the port move to 3009 is left.)* **Rule 11 lands here for the six repos it touches** (section "Time"): `minty-shared-ts` ships `lib/time.ts` + `<ZonedTime>` + the guard, and every `-web` renders dates through it with the browser-zone tooltip; `minty-billing-api` drops its formatted date strings for ISO instants + `timezone` (one encoder, `openapi.json` updated); the wizard's step 1 collects the zone and `onboarding-backend` writes `entities.timezone` and serves `server-time` in it; `minty-payments-api`'s payloads carry `timezone` and its three Hong Kong sites are fixed; `minty-payments-web` loses `BILLING_TIME_ZONE` and its two browser-zone leaks. Every `-web`'s Playwright config pins `timezoneId: "America/Los_Angeles"`. **The handover
    notification moves with the entity list** (decided 2026-09-24): 07-I / A-07 (declined), A-08
    (expired) and 07-L (accepted) fire today over `/subscription` (Subscription & Billing) only
    because that is the one page a payer owns that `minty-web` serves — a handover is news about
@@ -3392,7 +3449,7 @@ orders anything here.
    a `suspended` kind kept apart from Payment failed. Settle first where Day 10's usage count
    comes from (the pettycash side of the boundary) and that `NoticeKind` is a closed union in
    the payments app as well.
-5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal, then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. The entity read and `PATCH` expose `timezone` (validated by `minty_shared.time`), and `minty-web`'s entity settings page gets the select — rule 11's second writer. Gate: every suite the stack job runs, from a cold-started DB.
+5. **`minty-accounts-api`** — login/OTP/JWT first (Flask keeps verifying), then users/roles/invitations/legal (the *record* and the version manifest only: the documents and their pages moved to `minty-web` on 2026-10-12), then entities. Flask's `blueprints/shared/bearer_api.py` starts verifying only. Onboarding's `/auth/*`, `/legal/*` and `POST /invite` repoint here. The entity read and `PATCH` expose `timezone` (validated by `minty_shared.time`), and `minty-web`'s entity settings page gets the select — rule 11's second writer. Gate: every suite the stack job runs, from a cold-started DB.
 6. **`minty-pettycash-api` + `minty-pettycash-web`** — largest (15.5k) but self-contained once entities live in accounts. Carries the **"Partially published" badge** (decision above) — the one piece of report UI that is a change, not a port:
    - *Today (Flask):* `publish.py:2525-2532` writes `publishing_status = 'failed'` whether 1 or all transactions failed, and only the log level differs; the `publish_failed` history row (`publish.py:2547-2553`) stores the reason items but not the counts. `report_history.html:513` and `report_draft_header_badge.html:25` render every `failed` as "Publish failed"; the overlay poller (`report_history.html:1567-1575`) shows "Partially published" when `failed` has any reasons — a total failure with reasons is announced as partial. The three `# show "Partially Published"` comments (`ending.py:763`, `ending.py:1755`, `shared.py:39`) describe a badge that no longer exists.
    - *Port:* the publish orchestrator already returns `succeeded` / `failed` (`publish.py:1919`); write both into the `publish_failed` history row's JSON alongside the reason items. `minty-pettycash-api`'s report list and publish-status endpoints derive `partial = status is failed and latest publish_failed.succeeded > 0` (legacy rows without counts: `partial = False`, they read "Publish failed" as today). `minty-pettycash-web` renders the three states — **Published** / **Partially published** (reasons on hover, republish = selective retry, no duplicate warning) / **Publish failed** — on the report list, the report header badge and the overlay, from the same flag. No schema change; the enum stays at three members.

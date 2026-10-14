@@ -66,13 +66,14 @@ export async function requireStack(): Promise<void> {
 
 /**
  * The terms panel's tick box, over the entity list when the signed-in person still owes an
- * acceptance: Flask's (templates/legal/_terms_panel.html) or - with the minty-web hub on, where
- * /entity hands over to minty-web's /entities - minty-web's TermsModal over the same question.
- * Either stays disabled until the document has been read to its end.
+ * acceptance. ONE panel since 2026-10-12: minty-web's TermsModal, over its /entities, which
+ * /entity hands the browser to. Flask's own panel and its #accept-box went with the documents
+ * (templates/legal/ deleted), so this spec needs minty-web up. The box stays disabled until the
+ * document has been read to its end.
  */
 export function termsTickBox(page: Page) {
   return page
-    .locator('#accept-box, [role="dialog"]:has([aria-label="The Terms & Conditions"]) input[type="checkbox"]')
+    .locator('[role="dialog"]:has([aria-label="The Terms & Conditions"]) input[type="checkbox"]')
     .first();
 }
 

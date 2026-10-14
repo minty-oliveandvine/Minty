@@ -10,6 +10,7 @@ and the rank rule. The guard SERVICES (payer, last admin, nominee) have their ow
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -278,6 +279,8 @@ def test_the_integration_tab_reads_the_company_its_lists_and_its_xero_state(app,
     assert page["company"]["currency_id"] == shop["currency"].id
     assert {"code": "HK", "name": page["countries"][0]["name"]} in page["countries"]
     assert page["xero"]["connected"] is False and page["xero"]["needs_reconnect"] is False
+    # never connected: no date (the card says N/A), never the company's creation date
+    assert page["xero"]["last_connected_at"] is None
     assert page["can_edit"] is False and page["can_rename"] is False
 
 
@@ -308,11 +311,20 @@ def test_saving_the_company_s_settings(app, client, db, shop):
     assert saved.get_json()["message"] == "Settings saved!"
 
 
-def test_disconnecting_says_so_and_a_failure_says_so_too(app, client, shop, monkeypatch):
+def test_disconnecting_says_so_and_a_failure_says_so_too(app, client, db, shop, monkeypatch):
     entity = shop["entity"].id
+    _hold(app, db, shop["entity"])
+    connected = datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)
+    with app.app_context():
+        from models.db import Entity
+
+        db.session.get(Entity, entity).last_connected_at = connected
+        db.session.commit()
     done = call(client, app, "POST", "/api/me/company/xero/disconnect", shop["admin"], entity)
     assert done.status_code == 200, done.get_json()
     assert done.get_json()["xero"]["status"] == "disconnected"
+    # the last connection outlives the disconnect, so the card can say when and offer Reconnect
+    assert datetime.fromisoformat(done.get_json()["xero"]["last_connected_at"]) == connected
 
     import blueprints.xero.services.disconnect as disconnect
 

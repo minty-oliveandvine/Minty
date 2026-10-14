@@ -60,7 +60,7 @@ def get_bill_code_options(user_id, entity_id):
 
     rows = db.session.execute(
         text(
-            f"SELECT account_code, account_name, is_active FROM {_TBL} "
+            f"SELECT account_code, account_name, is_active, is_default FROM {_TBL} "
             "WHERE entity_id = :eid AND is_deleted = false"
         ),
         {"eid": entity_id},
@@ -69,10 +69,13 @@ def get_bill_code_options(user_id, entity_id):
     bill_codes = []
     selected_codes = []
     inactive_count = 0
-    for code, name, is_active in rows:
+    default_code = ""
+    for code, name, is_active, is_default in rows:
         c = (code or "").strip()
         if not c:
             continue
+        if is_default:
+            default_code = c
         bill_codes.append({"code": c, "name": name or ""})
         if is_active:
             selected_codes.append(c)
@@ -86,14 +89,19 @@ def get_bill_code_options(user_id, entity_id):
         "bill_codes": bill_codes,
         "selected_codes": selected_codes,
         "default_all": default_all,
+        # The code a new payment request preselects ("" when none is set).
+        "default_code": default_code,
     }, 200
 
 
-def save_bill_codes(user_id, entity_id, selected_codes):
-    """Persist the Step 7 selection onto ``entity_bill_account_xero.is_active``.
+def save_bill_codes(user_id, entity_id, selected_codes, default_code=None):
+    """Persist the Step 8 selection onto ``entity_bill_account_xero.is_active``.
 
     ``selected_codes`` is the list of account codes that should appear when
-    adding a bill; everything else is deactivated. Returns ``(data, status)``.
+    adding a bill; everything else is deactivated. ``default_code``, when sent, is
+    the one ticked code a new payment request preselects (``is_default``); it must
+    be one of ``selected_codes``, and every other code loses the flag. Not sent
+    leaves the default as it is. Returns ``(data, status)``.
     """
     if not has_permission_by_user_id(user_id, Permission.COA_UPDATE, entity_id):
         return {"error": "Access denied"}, 403
@@ -122,6 +130,9 @@ def save_bill_codes(user_id, entity_id, selected_codes):
     } - {""}
     if listed and not listed.intersection(selected):
         return {"error": "Pick at least one account code."}, 400
+    default = str(default_code).strip() if default_code is not None else None
+    if default and default not in selected:
+        return {"error": "The default account code must be one of the ticked codes."}, 400
 
     try:
         db.session.execute(
@@ -138,12 +149,20 @@ def save_bill_codes(user_id, entity_id, selected_codes):
                 "AND TRIM(account_code) IN :codes"
             ).bindparams(bindparam("codes", expanding=True))
             db.session.execute(stmt, {"eid": entity_id, "codes": selected})
+        if default is not None:
+            db.session.execute(
+                text(
+                    f"UPDATE {_TBL} SET is_default = (TRIM(account_code) = :code), "
+                    "updated_at = NOW() WHERE entity_id = :eid AND is_deleted = false"
+                ),
+                {"eid": entity_id, "code": default},
+            )
         db.session.commit()
 
         logger.info(
             "save_bill_codes: entity=%s selected=%s", entity_id, len(selected)
         )
-        return {"ok": True, "selected_codes": selected}, 200
+        return {"ok": True, "selected_codes": selected, "default_code": default}, 200
     except Exception as exc:  # noqa: BLE001
         db.session.rollback()
         logger.error("save_bill_codes failed entity=%s: %s", entity_id, exc)

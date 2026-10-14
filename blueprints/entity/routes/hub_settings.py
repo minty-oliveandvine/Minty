@@ -372,7 +372,6 @@ def _integration_page(user, entity_id) -> dict:
                 logger.warning(f"Entity & Integration: Xero organisation name not read for {entity_id}: {exc}")
 
     countries, currencies, _country, _currency = country_currency_choices(org)
-    connected_at = org.last_connected_at or org.created_at
     return {
         "company": {
             "id": str(org.id),
@@ -389,7 +388,8 @@ def _integration_page(user, entity_id) -> dict:
             # Meant to be connected but no longer live: no token resolves, or Xero says revoked.
             "needs_reconnect": bool(org.xero_org_id) and (not token_resolved or org.status == "disconnected"),
             "organisation": org.xero_tenant_name if org.xero_org_id else None,
-            "last_connected_at": connected_at.isoformat() if connected_at else None,
+            # Kept through a disconnect; None only when the company was never connected.
+            "last_connected_at": org.last_connected_at.isoformat() if org.last_connected_at else None,
         },
         "can_edit": has_permission(user, Permission.XERO_SETTINGS_UPDATE, entity_id),
         "can_rename": has_permission(user, Permission.ENTITY_RENAME, entity_id),

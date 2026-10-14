@@ -13,8 +13,10 @@ Each run:
 
 * creates the user if missing, sets the password from ``E2E_MINTY_PASSWORD`` (required),
   approved, normal system role, and REMOVES the user's terms consent so the first
-  browser journey always sees the terms modal. Nothing ever accepts on this account
-  (minty-web's Terms rule); the journeys that need a signed-in person use the next one;
+  browser journey always sees the terms modal - minty-web's, over its /entities, and
+  drawing a document minty-web holds (since 2026-10-12), so that journey needs minty-web
+  up. Nothing ever accepts on this account (minty-web's Terms rule); the journeys that
+  need a signed-in person use the next one;
 * creates ``e2e-terms@minty.test`` (same password) WITH the live Terms accepted, every run,
   as a second admin of the Petty Cash shop: the account specs 01-04 sign in as;
 * creates the entity if missing (HKD, HK, Petty Cash module on) with the user as admin,
@@ -139,7 +141,10 @@ def main() -> int:
         hk = CountryInfo.query.filter_by(country_code="HK").first()
         if hk is None:
             db.session.add(CountryInfo(country_code="HK", alpha3_code="HKG", country_name_en="Hong Kong",
-                                       currency_id=hkd.id, is_active=True, display_order=1))
+                                       currency_id=hkd.id, phone_code="+852", is_active=True, display_order=1))
+        elif not (hk.phone_code or "").strip():
+            # The onboarding API refuses a phone whose dial code is not in country_info.
+            hk.phone_code = "+852"
         def module(code, name, description):
             row = EntityFunction.query.filter_by(function_code=code).first()
             if row is None:
@@ -196,8 +201,10 @@ def main() -> int:
         else:
             terms_user.password = generate_password_hash(password, method="pbkdf2:sha256")
             terms_user.approved = True
+        # The fingerprint comes from legal/registry.py's MANIFEST now, not a file: None here
+        # means the live version has no manifest entry, so no consent could be recorded.
         if record_consent(terms_user.id, source=SOURCE_GATE) is None:
-            print("the live Terms version has no document; cannot accept for "
+            print("the live Terms version is not in the manifest; cannot accept for "
                   + E2E_TERMS_EMAIL, file=sys.stderr)
             return 1
         if UserEntity.query.filter_by(user_id=terms_user.id, entity_id=entity.id).first() is None:

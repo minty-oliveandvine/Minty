@@ -778,6 +778,8 @@ def _patch_callback_common(monkeypatch, *, user, entities_by_id, session,
                         lambda loc: SimpleNamespace(status_code=302, location=loc))
     monkeypatch.setattr(xero_routes, "upsert_user_token", lambda *_a, **_k: None)
     monkeypatch.setattr(xero_routes, "current_user", SimpleNamespace(username="u@example.com"))
+    # Xero's Organisation answers a 31 March year end (not what this suite pins)
+    monkeypatch.setattr(xero_routes, "get_financial_year_end", lambda *_a, **_k: (31, 3))
 
 
 def _event_empty_but_token_sees(tenant_ids):
@@ -886,6 +888,74 @@ def test_reconnect_with_an_empty_auth_event_names_the_holder(monkeypatch):
     assert not any("No organization was picked" in m for m in said), said
     assert holder.xero_org_id == "tenant-X"
     assert entity_new.xero_org_id is None
+
+
+def _patch_reconnect_target(monkeypatch, entity):
+    """The reconnect branch finds its company with ``Entity.query.filter(...).first()``;
+    the org guard and the post-save status sync are not what these tests pin."""
+    monkeypatch.setattr(xero_routes, "_live_org_claimant", lambda *_a, **_kw: None)
+    monkeypatch.setattr(xero_routes, "invalidate_entity_xero_cache", lambda *_a, **_kw: None)
+    monkeypatch.setattr(xero_routes, "sync_entity_xero_status", lambda *_a, **_kw: None)
+    monkeypatch.setattr(xero_routes, "Entity", SimpleNamespace(
+        id=object(),
+        query=SimpleNamespace(filter=lambda *_a: SimpleNamespace(first=lambda: entity)),
+    ))
+
+
+def test_reconnect_saves_the_financial_year_end(monkeypatch):
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity = _make_entity("entity-new", xero_org_id=None, status="disconnected")
+    entity.financial_year_end_day = entity.financial_year_end_month = None
+    _patch_callback_common(
+        monkeypatch, user=user, entities_by_id={"entity-new": entity},
+        session=session, connect_tenant="tenant-X", conflict_entity=None,
+    )
+    _patch_reconnect_target(monkeypatch, entity)
+
+    with app.test_request_context(
+        "/callback?state=entity_reconnect:u1&code=c&entity_id=entity-new"
+    ):
+        response = xero_routes.xero_callback()
+
+    assert response.location == "/entity_settings"
+    assert entity.xero_org_id == "tenant-X" and entity.status == "connected"
+    assert (entity.financial_year_end_day, entity.financial_year_end_month) == (31, 3)
+
+
+def test_reconnect_without_a_financial_year_end_fails_and_hands_the_grant_back(monkeypatch):
+    """As on connect: no year end from Xero's Organisation, no reconnect - the company is
+    left exactly as it was and the grant just made is revoked."""
+    app = _build_app()
+    session = _SessionStub()
+    user = SimpleNamespace(id="u1", username="u@example.com", xero_entity_id=None)
+    entity = _make_entity("entity-new", xero_org_id=None, status="disconnected")
+    entity.financial_year_end_day = entity.financial_year_end_month = None
+    _patch_callback_common(
+        monkeypatch, user=user, entities_by_id={"entity-new": entity},
+        session=session, connect_tenant="tenant-X", conflict_entity=None,
+    )
+    _patch_reconnect_target(monkeypatch, entity)
+
+    def _no_year_end(*_a, **_kw):
+        raise RuntimeError("Xero Organisation answered 500")
+
+    revoked, said = [], []
+    monkeypatch.setattr(xero_routes, "get_financial_year_end", _no_year_end)
+    monkeypatch.setattr(xero_routes, "_revoke_new_grant", lambda *a, **_kw: revoked.append(a[2]))
+    monkeypatch.setattr(xero_routes, "flash", lambda message, *_a, **_k: said.append(str(message)))
+
+    with app.test_request_context(
+        "/callback?state=entity_reconnect:u1&code=c&entity_id=entity-new"
+    ):
+        response = xero_routes.xero_callback()
+
+    assert response.location == "/entity_settings"
+    assert entity.xero_org_id is None and entity.status == "disconnected"
+    assert entity.financial_year_end_day is None
+    assert revoked == ["tenant-X"]
+    assert any("still disconnected" in m for m in said), said
 
 
 def test_an_empty_auth_event_revokes_nothing(monkeypatch):

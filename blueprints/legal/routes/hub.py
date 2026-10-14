@@ -1,17 +1,20 @@
 """The Terms gate as minty-web draws it: ``GET /api/me/terms`` and ``POST /api/me/terms/accept``.
 
 Since 2026-09-29 Flask's ``/entity`` hands the browser to minty-web's entity list whether or
-not a Terms acceptance is owed (always, since phase 2), so minty-web draws the acceptance panel
-itself - a port of ``templates/legal/_terms_panel.html``, over every page of that app, the way
-Flask's request gate covers every page of this one. These two routes are what it reads and
-posts. Everything they decide is the Jinja panel's own:
+not a Terms acceptance is owed (always, since phase 2), so minty-web draws the acceptance panel,
+over every page of that app, the way Flask's request gate covers every page of this one. Since
+2026-10-12 it also HOLDS THE DOCUMENT: the ``.md`` files, the renderer and the public pages are
+``minty-web/lib/legal/``, and the Jinja panel this was once a port of is deleted. So these two
+routes no longer serve any wording. The split is **this app names the version, minty-web supplies
+the text**:
 
-* WHAT IS OWED is ``services/gate.terms_owed`` - the function the standalone ``/legal/accept``
-  page reads (through ``outstanding_terms_context``);
-* ACCEPTING is ``services/consent.accept_current_terms`` - the checks ``POST /legal/accept``
-  makes, word for word: not ticked, the version changed under the reader, no document. The
-  document's fingerprint comes from the registry, never from the client, and the row says
-  where it was given: ``source = "hub"``.
+* WHAT IS OWED is ``services/gate.terms_owed`` - which version, whether this is a re-acceptance,
+  and the fingerprint the record will carry. minty-web reads that version's text from its own
+  registry and refuses to draw a panel if the two disagree.
+* ACCEPTING is ``services/consent.accept_current_terms``: not ticked, the version changed under
+  the reader, no manifest entry. The fingerprint recorded comes from the manifest, NEVER from the
+  client - the ``document_hash`` the client sends is compared and then thrown away - and the row
+  says where the agreement was given: ``source = "hub"``.
 
 Bearer-only (``blueprints/shared/hub_api.py``): the calls normally carry no Flask session, so
 the request gate never sees them - and both endpoints are on its allow-list anyway
@@ -23,7 +26,7 @@ no answer.
 
 from __future__ import annotations
 
-from flask import request, url_for
+from flask import request
 from loguru import logger
 
 from blueprints.legal import legal_bp
@@ -34,15 +37,19 @@ from blueprints.legal.services.consent import (ACCEPT_FAILED,
                                                accept_current_terms)
 from blueprints.legal.services.gate import terms_owed
 from blueprints.shared import hub_api
+from legal import registry
 from models.db import db
 
 
 @legal_bp.route("/api/me/terms", methods=["GET", "OPTIONS"])
 def hub_terms_status():
-    """``{owed: false}``, or everything the panel draws: the live document (its HTML is
-    ``legal.render``'s, which escapes the source before applying markup, so it is safe to
-    inject - the same markup ``GET /legal/content/<kind>`` serves the onboarding app), whether
-    this is a re-acceptance and of what, and the links the panel carries."""
+    """``{owed: false}``, or which version is owed: its number, effective date, draft flag and
+    **fingerprint**, plus whether this is a re-acceptance and of what.
+
+    No wording and no links - both are minty-web's own since 2026-10-12. The ``sha256`` is the
+    hash this app will record if that version is agreed to, so the client can check that the
+    document it holds is the one being asked for: a mismatch means the two are deployed out of
+    step, and minty-web shows nobody a document this app would misrecord."""
     early, user = hub_api.guard()
     if early is not None:
         return early
@@ -55,37 +62,37 @@ def hub_terms_status():
     if owed is None:
         return hub_api.respond({"owed": False})
 
-    document = owed["document"]
-    previous = owed["previous_version"]
+    entry = owed["document"]
     return hub_api.respond(
         {
             "owed": True,
             "document": {
-                "version": document.version,
-                "effective_date": document.effective_date,
-                "html": document.html,
-                "show_draft_notice": document.show_draft_notice,
+                "version": entry.version,
+                "effective_date": entry.effective_date,
+                "sha256": entry.sha256,
+                "show_draft_notice": entry.show_draft_notice,
             },
             "is_update": owed["is_update"],
-            "previous_version": previous,
-            # Paths on this app; minty-web prefixes its MINTY_URL. Public pages - a person
-            # held at the gate must be able to read what they are asked to agree to.
-            "links": {
-                "terms": url_for("legal.terms"),
-                "privacy": url_for("legal.privacy"),
-                "previous": url_for("legal.terms_version", version=previous) if previous else None,
-            },
+            "previous_version": owed["previous_version"],
         }
     )
 
 
 @legal_bp.route("/api/me/terms/accept", methods=["POST", "OPTIONS"])
 def hub_terms_accept():
-    """Record the agreement: ``{accepted: true, terms_version}`` -> ``{ok: true}``.
+    """Record the agreement: ``{accepted: true, terms_version, document_hash}`` -> ``{ok: true}``.
 
     400 when not ticked, 409 ``version_changed`` (with the live ``terms_version``) when the
-    Terms changed while the modal sat open - the client re-reads and asks again - and 500
-    when there is no document to agree to.
+    Terms changed while the panel sat open - the client re-reads and asks again - and 500
+    when there is no manifest entry to agree to.
+
+    ``document_hash`` is the fingerprint of the document the client actually showed. It is
+    COMPARED to the manifest and refused on a mismatch (409 ``document_mismatch``), never
+    stored: the client picks the value it sends, so it proves nothing on its own. It is a canary
+    against a stale minty-web bundle - or a curl - filing a consent row against wording nobody
+    was shown, and minty-web checks the same thing before drawing the panel, so it should be
+    unreachable. Omitted, it is not checked: a client too old to send it is not a client sending
+    a wrong one.
     """
     early, user = hub_api.guard()
     if early is not None:
@@ -94,6 +101,19 @@ def hub_terms_accept():
     payload = request.get_json(silent=True)
     payload = payload if isinstance(payload, dict) else {}
     submitted = payload.get("terms_version")
+
+    shown_hash = payload.get("document_hash")
+    if isinstance(shown_hash, str) and shown_hash:
+        entry = registry.get_version(registry.TERMS, submitted) if isinstance(submitted, str) else None
+        expected = entry.sha256 if entry else None
+        if expected and shown_hash != expected:
+            logger.error(
+                f"Terms {submitted!r} fingerprint mismatch for user={user.id}: "
+                f"the client showed {shown_hash}, the manifest says {expected}. "
+                "minty-web and this app are deployed out of step - nothing recorded."
+            )
+            return hub_api.respond({"error": "document_mismatch"}, 409)
+
     outcome, live_version = accept_current_terms(
         user.id,
         accepted=payload.get("accepted") is True,

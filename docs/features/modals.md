@@ -7,8 +7,14 @@ beside it, the sentences, the secondary button and the confirming one in its ton
 `SheetFrame`-style sheets for forms. **Every new modal follows it; an existing one changes when
 its page is next worked on.** The sources are minty-web's
 `features/subscription/components/{ModalFrame,ConfirmDialog,InterruptedDialogs}.tsx` and
-`lib/changeModal.ts`; minty-payment-request-web holds copies at the same paths. Change all three
-together (minty-web, minty-payment-request-web, here).
+`lib/changeModal.ts`. Change both together (minty-web, here).
+
+**minty-payment-request-web left this family on 2026-10-13** (the owner: Part 14 wins there): its
+modals are Part 14's (`components/ui/Overlay.tsx` - `Modal`, `Drawer`; see its
+`docs/features/payment-requests.md`), and its copies of `ModalFrame`, `ConfirmDialog` and
+`changeModal.ts` are deleted. Only the WORDS of "Leave without saving?" are still shared with it
+(`InterruptedDialogs.tsx`). minty-web and this port follow when they migrate to Parts 13–15
+(`docs/design/`).
 
 ## The Flask port
 

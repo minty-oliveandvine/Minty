@@ -3,7 +3,7 @@
 The source of truth for face values used by the cash count. Adding a denomination is an
 INSERT here - no schema change, no code change. Entities pick which of these they log via
 ``EntityCashSetting``. Keyed on currency, not country: a face value is a property of the
-currency. ``cash_id`` (the old serial key) is a synonym of the uuid ``id``.
+currency. Unique on (currency, value, type), so HKD's $10 note and $10 coin are two rows. ``cash_id`` (the old serial key) is a synonym of the uuid ``id``.
 """
 import uuid
 
@@ -20,7 +20,7 @@ class CashInfo(db.Model):
     __table_args__ = {"schema": SCHEMA}
     id = db.Column(MintyUuid(), primary_key=True, default=lambda: str(uuid.uuid4()))
     currency_id = db.Column(MintyUuid(), db.ForeignKey(f"{SCHEMA}.currency_info.id"), nullable=False)
-    type = db.Column(pg_enum(CashType), nullable=True)
+    type = db.Column(pg_enum(CashType), nullable=False)  # note or coin; part of the unique key
     cash_value = db.Column(Money(12, 2), nullable=False)
     cash_name = db.Column(db.String(20))
     description = db.Column(db.Text)

@@ -631,9 +631,9 @@
 --
 --     psql "$URL" -v ON_ERROR_STOP=1 -f docs/schema/01_schema_rebased.sql
 --
--- Builds clean on an empty database: 59 tables, 2 views, 623 columns, 22 enums,
--- 88 foreign keys (measured 2026-09-25 at 620 columns and 22 enums before item 23
--- added its three columns - the line had still read 618 / 21). Every __tablename__ in Minty (44) and every db_table in
+-- Builds clean on an empty database: 60 tables, 3 views, 627 table columns, 22 enums,
+-- 88 foreign keys, 150 indexes (measured 2026-10-13 off a tests/pg_harness.py build,
+-- after entity_setup_summary joined the views; the line had read 59 / 2 / 623). Every __tablename__ in Minty (44) and every db_table in
 -- billing-backend (22) resolves to a table here, the nine renames included.
 --
 -- Then it is FILLED, in this order:
@@ -1461,25 +1461,34 @@ CREATE TABLE pettycash_test.entity_pettycash_settings (
 -- ==================================================================
 
 -- 2.20 cash_info  (권종 마스터 — "desc"→description, country_code→currency_id, serial→uuid)
+--   Unique on (currency, face value, type): HKD's $10 note and $10 coin are two rows. The key
+--   left type out until 2026-10-13, which the pettycashv2 key (uq_cash_info_currency_value_type)
+--   never did. type is NOT NULL: every denomination is a note or a coin.
 CREATE TABLE pettycash_test.cash_info (
   id          UUID                  NOT NULL DEFAULT gen_random_uuid(),
   currency_id UUID                  NOT NULL,
-  type        pettycash_test.cash_type NULL,
+  type        pettycash_test.cash_type NOT NULL,
   cash_value  NUMERIC(12,2)         NOT NULL,
   cash_name   VARCHAR(20)           NULL,
   description TEXT                  NULL,
   is_active     BOOLEAN             NOT NULL DEFAULT TRUE,
   display_order INTEGER             NOT NULL DEFAULT 0,
   CONSTRAINT cash_info_pkey PRIMARY KEY (id),
-  CONSTRAINT cash_info_currency_value_key UNIQUE (currency_id, cash_value),
+  CONSTRAINT uq_cash_info_currency_value_type UNIQUE (currency_id, cash_value, type),
   CONSTRAINT fk_cash_currency FOREIGN KEY (currency_id) REFERENCES pettycash_test.currency_info (id) ON DELETE RESTRICT
 );
 
 -- 2.21 entity_cash_detail  (엔티티별 현금 재고 — 구 entity_cash_detail_v2)
+--   The company's cash in stock per denomination: cash_instock is the MONEY (quantity x
+--   face value) its latest SUBMITTED report counted. Rows are made when a Petty Cash report
+--   is submitted - one per active cash_info denomination of the company's current currency -
+--   and rebuilt on submit, revert to draft, delete and a submitted report's cash-count edit
+--   (report/services/cash_denominations.refresh_cash_stock). cash_type is copied from
+--   cash_info.type. Onboarding never writes it (2026-10-13).
 CREATE TABLE pettycash_test.entity_cash_detail (
   entity_id    UUID                  NOT NULL,
   cash_id      UUID                  NOT NULL,
-  cash_type    pettycash_test.cash_type NULL,
+  cash_type    pettycash_test.cash_type NOT NULL,
   cash_instock NUMERIC(14,2)         NULL,
   description  TEXT                  NULL,
   CONSTRAINT entity_cash_detail_pkey PRIMARY KEY (entity_id, cash_id),
@@ -1490,9 +1499,10 @@ CREATE TABLE pettycash_test.entity_cash_detail (
 -- 2.21b entity_cash_setting  (which denominations an entity actually counts)
 --   Separate from entity_cash_detail, which holds the running stock. Added at
 --   revision c2a02_cash_count, so absent from the schema this file was based on.
+--   Setting a company's currency writes one row per active denomination of it.
 CREATE TABLE pettycash_test.entity_cash_setting (
   entity_id     UUID        NOT NULL,
-  cash_id       UUID        NOT NULL,   -- head still keys this on the old integer cash_id
+  cash_id       UUID        NOT NULL,
   is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
   display_order INTEGER     NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2504,6 +2514,16 @@ CREATE INDEX idx_bill_entity_published
 --  5. VIEWS
 -- ==================================================================
 
+-- ---------------------------------------------------------------------------
+-- UNUSED, KEPT FOR NOW (listed 2026-10-13; no code reads or writes them - decide later):
+--   entities.note, entities.currency_format (written, never read; always "$"),
+--   "user".xero_user_id, "user".last_login,
+--   role, permission, role_permission (permissions come from services/permission_policy.py),
+--   entity_pettycash_settings.discrepancy_bank_account_id (always a copy of
+--   pettycash_account_id; nothing posts to it).
+-- ---------------------------------------------------------------------------
+
+
 -- report_cash_summary - what report.actual_cash_total used to be, computed from
 -- the rows it was always a total of.
 --
@@ -2519,6 +2539,11 @@ CREATE INDEX idx_bill_entity_published
 -- report_cash_count.cash_value instead. Two independent derivations of one
 -- number, agreeing only because both happened inside the same transaction. The
 -- view leaves exactly one.
+--
+-- 2026-10-13: a report whose cash-count step is DONE (completed_sections holds
+-- 'cash_count') but has no rows reads 0 - every denomination counted as zero. That rule
+-- lived only in Report.actual_cash_total; it is here now so the code can read the view.
+-- A report never counted still reads NULL.
 --
 -- NULL IS LOAD-BEARING HERE, AND IS NOT ZERO. save_cash_count_details
 -- (cash_denominations.py:203-221) DELETES the row for a denomination counted as
@@ -2540,8 +2565,10 @@ CREATE INDEX idx_bill_entity_published
 -- not an unknown.
 CREATE VIEW pettycash_test.report_cash_summary AS
 SELECT r.id                                      AS report_id,
-       c.total                                   AS actual_cash_total,
-       c.total + COALESCE(r.safe_box_balance, 0) AS cash_balance
+       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
+                                                 AS actual_cash_total,
+       COALESCE(c.total, CASE WHEN r.completed_sections ? 'cash_count' THEN 0 END)
+         + COALESCE(r.safe_box_balance, 0)       AS cash_balance
   FROM pettycash_test.report r
   LEFT JOIN (SELECT report_id,
                     SUM(quantity * cash_value) AS total
@@ -2551,10 +2578,13 @@ SELECT r.id                                      AS report_id,
 
 COMMENT ON VIEW pettycash_test.report_cash_summary IS
   'Replaces report.actual_cash_total. NULL actual_cash_total means the report '
-  'was never cash-counted, which is not the same as counting zero.';
+  'was never cash-counted; a report whose cash-count step is done with no rows '
+  '(every denomination counted as zero) reads 0.';
 
--- tracker: the per-entity activity summary that exists in production (no code
--- reads it; it is queried by hand). Carried across so the schema swap does not
+-- tracker: the per-entity activity summary that exists in production. tracker-backend
+-- reads it (tracker_app.py), and its own tracker_view_v3.sql has three more columns
+-- (pc_latest_submitted_date, country_code, timezone) than this one - DEFERRED until the
+-- tracker is updated for this schema (2026-10-13); a rebuild from here breaks /api/tracker. Carried across so the schema swap does not
 -- drop it, with two changes: report.company -> report.entity_id (the note below
 -- always said so) and the module code 'BILL' -> 'PAYMENT_REQUEST' (item 20).
 -- The bill vocabulary it filters on (paid / partially_paid / submitted /
@@ -2587,6 +2617,93 @@ SELECT e.name AS "entities.name",
                greatest(max(b.updated_at), max(b.created_at))       AS latest_bill_update
           FROM pettycash_test.bill b
          WHERE b.entity_id = e.id) bil ON true;
+
+-- entity_setup_summary: one row per company describing how far its setup has got.
+-- It existed only in Supabase (created by hand) until 2026-10-13; the code reads it now:
+-- the petty-cash setup check and its "what's missing" list (xero/services/settings.py),
+-- the module flags of GET /api/me/entities (entity/services/entity_list.py), onboarding
+-- resume (both engines) and onboarding finalize's setup rule (minty-onboarding-api).
+-- Two columns are additions to the Supabase original: pettycash_account_id (onboarding's
+-- "account codes done" rule) and bill_accounts_default_inactive (finalize refuses a default
+-- bill code that is not ticked).
+
+CREATE VIEW pettycash_test.entity_setup_summary AS
+SELECT e.id AS entity_id,
+       e.name AS entity_name,
+       e.status AS entity_status,
+       e.currency_id,
+       e.country_code,
+       e.status = 'connected' AS xero_connected,
+       e.xero_org_id IS NOT NULL AS xero_org_linked,
+       e.xero_org_id,
+       e.xero_tenant_name,
+       e.last_connected_at,
+       e.connected_by_user_id,
+       cu.username AS connected_by_username,
+       COALESCE(m.pettycash_enabled, false) AS pettycash_module_enabled,
+       COALESCE(m.bill_enabled, false) AS bill_module_enabled,
+       (eps.pettycash_account_id IS NOT NULL)::integer + (eps.bank_account_id IS NOT NULL)::integer
+         + (eps.cash_sale_account_id IS NOT NULL)::integer + (eps.discrepancy_bank_account_id IS NOT NULL)::integer
+         + (eps.discrepancy_account_id IS NOT NULL)::integer + (eps.director_account_id IS NOT NULL)::integer
+         AS pettycash_accounts_set,
+       6 AS pettycash_accounts_total,
+       (eps.cash_sale_contact_id IS NOT NULL)::integer + (eps.director_contact_id IS NOT NULL)::integer
+         + (eps.discrepancy_contact_id IS NOT NULL)::integer AS pettycash_contacts_set,
+       3 AS pettycash_contacts_total,
+       COALESCE(ai.n, 0) AS xero_accounts_synced,
+       COALESCE(ba.n_active, 0) AS bill_accounts_set,
+       COALESCE(ba.n_default, 0) AS bill_accounts_default,
+       COALESCE(ba.n_default_inactive, 0) AS bill_accounts_default_inactive,
+       eps.opening_balance,
+       eps.start_date,
+       eps.pettycash_account_id,
+       a_pc.name AS pettycash_account_name,
+       a_pc.xero_code AS pettycash_account_code,
+       a_bk.name AS bank_account_name,
+       a_bk.xero_code AS bank_account_code,
+       a_cs.name AS cash_sale_account_name,
+       a_cs.xero_code AS cash_sale_account_code,
+       a_db.name AS discrepancy_bank_account_name,
+       a_db.xero_code AS discrepancy_bank_account_code,
+       a_dc.name AS discrepancy_account_name,
+       a_dc.xero_code AS discrepancy_account_code,
+       a_dr.name AS director_account_name,
+       a_dr.xero_code AS director_account_code,
+       c_cs.name AS cash_sale_contact_name,
+       c_dr.name AS director_contact_name,
+       c_dc.name AS discrepancy_contact_name,
+       eps.updated_at AS pettycash_settings_updated_at
+  FROM pettycash_test.entities e
+  LEFT JOIN pettycash_test."user" cu ON cu.id = e.connected_by_user_id
+  LEFT JOIN pettycash_test.entity_pettycash_settings eps ON eps.entity_id = e.id
+  LEFT JOIN pettycash_test.account_info a_pc ON a_pc.id = eps.pettycash_account_id
+  LEFT JOIN pettycash_test.account_info a_bk ON a_bk.id = eps.bank_account_id
+  LEFT JOIN pettycash_test.account_info a_cs ON a_cs.id = eps.cash_sale_account_id
+  LEFT JOIN pettycash_test.account_info a_db ON a_db.id = eps.discrepancy_bank_account_id
+  LEFT JOIN pettycash_test.account_info a_dc ON a_dc.id = eps.discrepancy_account_id
+  LEFT JOIN pettycash_test.account_info a_dr ON a_dr.id = eps.director_account_id
+  LEFT JOIN pettycash_test.xero_contact_sync c_cs ON c_cs.id = eps.cash_sale_contact_id
+  LEFT JOIN pettycash_test.xero_contact_sync c_dr ON c_dr.id = eps.director_contact_id
+  LEFT JOIN pettycash_test.xero_contact_sync c_dc ON c_dc.id = eps.discrepancy_contact_id
+  LEFT JOIN LATERAL (
+        SELECT bool_or(ef.function_code = 'PETTY_CASH' AND efm.is_enabled) AS pettycash_enabled,
+               bool_or(ef.function_code = 'PAYMENT_REQUEST' AND efm.is_enabled) AS bill_enabled
+          FROM pettycash_test.entity_function_map efm
+          JOIN pettycash_test.entity_function ef ON ef.id = efm.entity_function_id
+         WHERE efm.entity_id = e.id) m ON true
+  LEFT JOIN LATERAL (
+        SELECT count(*) AS n FROM pettycash_test.account_info x WHERE x.entity_id = e.id) ai ON true
+  LEFT JOIN LATERAL (
+        SELECT count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted) AS n_active,
+               count(*) FILTER (WHERE b.is_active AND NOT b.is_deleted AND b.is_default) AS n_default,
+               count(*) FILTER (WHERE b.is_default AND NOT b.is_deleted AND NOT b.is_active) AS n_default_inactive
+          FROM pettycash_test.entity_bill_account_xero b
+         WHERE b.entity_id = e.id) ba ON true;
+
+COMMENT ON VIEW pettycash_test.entity_setup_summary IS
+  'One row per company: Xero connection, modules on, how many of the six petty-cash '
+  'accounts and three contacts are mapped, bill account codes (active, default, a default '
+  'left inactive), and the petty-cash settings (opening balance, start date, mapped names).';
 
 -- ==================================================================
 --  참고: tracker 뷰는 위에서 report.entity_id 기준으로 다시 정의했다.

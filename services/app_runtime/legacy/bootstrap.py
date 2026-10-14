@@ -308,7 +308,7 @@ def create_app():
                       hub_company_integration, hub_company_xero_disconnect,
                       hub_company_xero_release):
         csrf.exempt(hub_write)
-    # minty-web's Terms modal records the acceptance the same way: bearer only, and the row
+    # minty-web's Terms panel records the acceptance the same way: bearer only, and the row
     # can only ever be the token's own user's (blueprints/legal/routes/hub.py).
     from blueprints.legal.routes.hub import hub_terms_accept
     csrf.exempt(hub_terms_accept)
@@ -326,6 +326,7 @@ def create_app():
                                                   onboarding_create_entity,
                                                   onboarding_invite,
                                                   onboarding_invite_cancel,
+                                                  onboarding_invite_resend,
                                                   onboarding_modules,
                                                   onboarding_opening_balance,
                                                   onboarding_sales_methods,
@@ -342,6 +343,7 @@ def create_app():
     csrf.exempt(onboarding_contacts_create)
     csrf.exempt(onboarding_invite)
     csrf.exempt(onboarding_invite_cancel)
+    csrf.exempt(onboarding_invite_resend)
     csrf.exempt(onboarding_bill_codes)
     csrf.exempt(onboarding_saved_step)
     csrf.exempt(onboarding_update_entity)
@@ -355,7 +357,7 @@ def create_app():
     csrf.exempt(email_verify_code)
     # The invite sign-in screen asks whether the invitee still owes the Terms; the
     # invite token rides in the POST body, never the URL. No session, read-only.
-    from blueprints.legal.routes.documents import invite_terms_status
+    from blueprints.legal.routes.consent_status import invite_terms_status
     csrf.exempt(invite_terms_status)
 
     # Once: Mail(app) already runs init_app, and a second call replaced the state it
@@ -390,15 +392,18 @@ def create_app():
     from cli.expense_ai import expense_ai_cli
     app.cli.add_command(expense_ai_cli)
 
-    # Re-check every published legal document against its recorded fingerprint.
-    # A document edited in place silently invalidates every consent row that
-    # points at it, and the damage is only discovered when a record needs to be
-    # defended — years later. Checking at startup turns that into a log line on
-    # the deploy that caused it. Reported, not raised: a fingerprint mismatch
-    # must not take the whole app down, and the acceptance gate is what
-    # actually depends on this.
-    from legal.registry import verify_pinned_hashes
-    verify_pinned_hashes()
+    # Check the legal manifest's own invariants: a live version with no entry
+    # (nobody could be asked to agree, and the gate would stop enforcing) and a
+    # Terms version with no fingerprint to record.
+    #
+    # It CANNOT check the wording any more. The documents moved to minty-web on
+    # 2026-10-12, so a document edited in place is caught by minty-web's
+    # lib/legal/__tests__/registry.test.ts and by the stack e2e job comparing
+    # the two running services - not here. Reported, not raised: a manifest
+    # problem must not take the whole app down, and the ERROR log is what makes
+    # it visible.
+    from legal.registry import verify_manifest
+    verify_manifest()
 
     return (
         app,

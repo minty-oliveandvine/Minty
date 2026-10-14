@@ -19,6 +19,7 @@ from blueprints.shared.email_rules import EMAIL_ASCII_MESSAGE, is_ascii_email
 from blueprints.shared.enums import EntityStatus
 from blueprints.shared import bearer_api, preview_origin
 from blueprints.entity.forms import CreateEntityForm
+from blueprints.entity.services.cash_settings import sync_cash_settings
 from blueprints.entity.services.payment_methods import (
     list_sales_methods_grouped, replace_sales_methods)
 from blueprints.entity.services.shared import create_entity_for_user
@@ -201,6 +202,24 @@ def _normalize_contact_phone(value: str) -> tuple[str | None, str]:
     return digits, ""
 
 
+#: entities.timezone is VARCHAR(30); a few IANA names are longer and cannot be stored.
+_TIMEZONE_MAX = 30
+
+
+def _normalize_timezone(value) -> tuple[str | None, str]:
+    """The browser's IANA zone (sent by step 1 with no field on screen) -> (zone or None,
+    error). Empty is "not sent"; anything sent must be a real IANA name that fits the column.
+    minty-onboarding-api's resolve.timezone is the same rule."""
+    from zoneinfo import available_timezones
+
+    text = (value or "").strip()
+    if not text:
+        return None, ""
+    if len(text) > _TIMEZONE_MAX or text not in available_timezones():
+        return None, "That timezone isn't one I recognise."
+    return text, ""
+
+
 def _normalize_business_email(value: str) -> tuple[str | None, str]:
     """Payload value → (stored email or None, error).
 
@@ -337,14 +356,15 @@ def onboarding_currencies():
             CurrencyInfo.id,
             CurrencyInfo.currency_name,
             CurrencyInfo.currency_code,
+            CurrencyInfo.decimal_places,
         )
         .filter(CurrencyInfo.is_active.is_(True))
         .order_by(CurrencyInfo.currency_name)
         .all()
     )
     resp = jsonify({"currencies": [
-        {"currency_id": cid, "currency_name": name, "iso_code": code}
-        for cid, name, code in rows
+        {"currency_id": cid, "currency_name": name, "iso_code": code, "decimal_places": places}
+        for cid, name, code, places in rows
     ]})
     return _cors(resp)
 
@@ -375,14 +395,17 @@ def onboarding_countries():
         CountryInfo.query.with_entities(
             CountryInfo.country_code,
             CountryInfo.country_name_en,
+            CountryInfo.currency_id,
         )
         .filter(CountryInfo.is_active.is_(True))
         .order_by(CountryInfo.display_order, CountryInfo.country_name_en)
         .all()
     )
     resp = jsonify({"countries": [
-        {"country_id": code, "country_name_en": name, "country_code": code}
-        for code, name in rows
+        # currency_id: the country's own currency, which step 1 preselects.
+        {"country_id": code, "country_name_en": name, "country_code": code,
+         "currency_id": currency}
+        for code, name, currency in rows
     ]})
     return _cors(resp)
 
@@ -494,6 +517,19 @@ def onboarding_create_entity():
         resp = jsonify({"error": f"Unknown currency: {currency_in}"})
         resp.status_code = 400
         return _cors(resp)
+    if not currency_id and country_code:
+        # A country alone still gives the company its currency, as an edit always has.
+        from models.db import CountryInfo
+
+        country_info = CountryInfo.query.get(country_code)
+        if country_info and country_info.currency_id:
+            currency_id = country_info.currency_id
+
+    tz_name, tz_err = _normalize_timezone(data.get("timezone"))
+    if tz_err:
+        resp = jsonify({"error": tz_err})
+        resp.status_code = 400
+        return _cors(resp)
 
     # Optional company contact details (Step 1). Validated before the entity is
     # created so a bad phone/email is a 400 rather than a half-saved entity.
@@ -518,6 +554,8 @@ def onboarding_create_entity():
     entity.status = EntityStatus.ONBOARDING
     entity.contact_phone = contact_phone
     entity.business_email = business_email
+    if tz_name:
+        entity.timezone = tz_name
     _db.session.commit()
 
     resp = jsonify({"entity_id": entity.id, "name": entity.name})
@@ -647,6 +685,8 @@ def onboarding_update_entity(entity_id):
         currency_info = CurrencyInfo.query.get(currency_id)
         if currency_info:
             entity.currency_format = currency_info.symbol or "$"
+        # The denominations follow the currency; committed with the save below.
+        sync_cash_settings(entity.id, currency_id)
 
     # --- Contact details ------------------------------------------------------
     # Keyed off presence, not truthiness: both fields are optional, so "" is a
@@ -668,6 +708,13 @@ def onboarding_update_entity(entity_id):
             resp.status_code = 400
             return _cors(resp)
         entity.business_email = business_email
+    if payload.get("timezone"):
+        tz_name, tz_err = _normalize_timezone(payload.get("timezone"))
+        if tz_err:
+            resp = jsonify({"error": tz_err})
+            resp.status_code = 400
+            return _cors(resp)
+        entity.timezone = tz_name
 
     try:
         _db.session.commit()
@@ -801,11 +848,11 @@ def onboarding_sales_methods():
 
 @entity_bp.route("/api/onboarding/opening-balance", methods=["POST", "OPTIONS"])
 def onboarding_opening_balance():
-    """Token-authenticated petty-cash opening balance (onboarding Step 4).
+    """Token-authenticated petty-cash opening balance (onboarding Step 5).
 
-    POST {entity_id, opening_date, cash_addition} → seeds the first 'opening'
-    report draft for that date with the beginning amount recorded as
-    cash_addition. Same JWT/CORS contract as the other onboarding endpoints.
+    POST {entity_id, opening_date, opening_balance} → saves the beginning amount and
+    start date on the entity's petty-cash settings; the first report opens from them.
+    Same JWT/CORS contract as the other onboarding endpoints.
     """
     if request.method == "OPTIONS":
         return _cors(make_response("", 204))
@@ -823,13 +870,16 @@ def onboarding_opening_balance():
         resp.status_code = 400
         return _cors(resp)
 
-    from blueprints.report.services.shared import seed_opening_draft
+    from blueprints.report.services.shared import save_opening_balance
 
-    data, status = seed_opening_draft(
+    amount = payload.get("cash_addition")
+    if amount is None:
+        amount = payload.get("opening_balance")
+    data, status = save_opening_balance(
         user_id,
         entity_id,
         payload.get("opening_date") or payload.get("transaction_date"),
-        payload.get("cash_addition", payload.get("opening_balance", 0)),
+        amount,
     )
     resp = jsonify(data)
     resp.status_code = status
@@ -1079,7 +1129,8 @@ def onboarding_bill_codes():
         return _cors(resp)
 
     data, status = save_bill_codes(
-        user_id, entity_id, payload.get("selected_codes") or []
+        user_id, entity_id, payload.get("selected_codes") or [],
+        default_code=payload.get("default_code"),
     )
     resp = jsonify(data)
     resp.status_code = status
@@ -1135,6 +1186,38 @@ def onboarding_invite():
         payload.get("first_name") or "",
         payload.get("last_name") or "",
     )
+    resp = jsonify(data)
+    resp.status_code = status
+    return _cors(resp)
+
+
+@entity_bp.route("/api/onboarding/invite/resend", methods=["POST", "OPTIONS"])
+def onboarding_invite_resend():
+    """Token-authenticated resend of a pending onboarding invitation (step 3).
+
+    POST {invitation_id} -> sends it again with a fresh link and expiry; 429
+    {error, retry_after} inside the resend cooldown. Same JWT/CORS contract as the
+    other onboarding endpoints; minty-onboarding-api proxies here.
+    """
+    if request.method == "OPTIONS":
+        return _cors(make_response("", 204))
+
+    user_id = _user_id_from_bearer()
+    if not user_id:
+        resp = jsonify({"error": "Unauthorized"})
+        resp.status_code = 401
+        return _cors(resp)
+
+    payload = request.get_json(silent=True) or {}
+    invitation_id = (payload.get("invitation_id") or "").strip()
+    if not invitation_id:
+        resp = jsonify({"error": "invitation_id is required"})
+        resp.status_code = 400
+        return _cors(resp)
+
+    from blueprints.entity.services.onboarding_invites import resend_invite
+
+    data, status = resend_invite(user_id, invitation_id)
     resp = jsonify(data)
     resp.status_code = status
     return _cors(resp)

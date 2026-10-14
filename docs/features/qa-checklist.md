@@ -91,6 +91,11 @@ company or a real Xero organisation (see "The onboarding-connect race" below for
       holds any token on the entity.
 - [ ] After callback: `entities.xero_org_id`, `xero_tenant_name` are set and
       `status = connected`.
+- [ ] After callback (connect and reconnect): `entities.financial_year_end_day` /
+      `financial_year_end_month` hold the organisation's year end as Xero's *Financial
+      settings* show it. If Xero's Organisation can't be read, the connect fails, nothing
+      on the company changes and the grant is revoked (Xero's *Connected apps* shows no
+      new Minty entry).
 - [ ] Connecting an organisation that is already linked to a **different** company
       disconnects that other company first — one Xero organisation ↔ one company at a
       time. (Use a scratch Demo Company for this check, never a shared/real org — see the
@@ -168,8 +173,19 @@ server-side it calls Xero's Accounts API via `get_accounts_from_xero` to list ba
 - [ ] With yesterday's `closing_balance` null, it falls back to yesterday's
       `actual_cash_total` (the physical count); with that also null, `0`. Confirm the
       fallback order by clearing one on a disposable report.
-- [ ] A brand-new company's first report starts at `0` (`is_first_report`).
-- [ ] A first report's date cannot be before the onboarding draft's `transaction_date`
+- [ ] **DB:** after submitting a report, `SELECT ci.cash_value, ci.type, d.cash_type,
+      d.cash_instock FROM pettycashv3.entity_cash_detail d JOIN pettycashv3.cash_info ci ON
+      ci.id = d.cash_id WHERE d.entity_id = '<id>';` — one row per active denomination of the
+      company's currency, `cash_instock` = quantity × value as counted (0 where not counted).
+      Revert that report to draft (or delete it) and the stock falls back to the previous
+      submitted report, or all 0. A draft's cash count changes nothing.
+- [ ] A company missing only its Discrepancy Bank Account sees "Setup Required" NAMING it
+      (the list skipped it before 2026-10-13).
+- [ ] A company's first report starts at the opening balance onboarding saved
+      (`entity_pettycash_settings.opening_balance`, read on the server — the hidden form
+      field is ignored) and defaults to its `start_date`; a company with no start date saved
+      starts at `0` (`first_report_defaults`, `is_first_report`).
+- [ ] A first report's date cannot be before `entity_pettycash_settings.start_date`
       (`_onboarding_floor_date` / `_first_report_date_error`) — the refusal quotes that date.
 - [ ] No report's date can be in the future (`future_date_error`).
 - [ ] A later report's date must be **exactly** the day after the last submitted one — try

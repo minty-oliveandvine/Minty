@@ -10,7 +10,7 @@ that JavaScript; the pytest suite renders the templates but executes none of it.
 
 | Step | Route | What is entered | Where it goes |
 |---|---|---|---|
-| Opening | `GET/POST /entity/<co>/petty-cash/reports/new/opening` (a new day; `.../reports/<id>/opening` for an existing report) | the float carried forward, a cash addition/withdrawal and its source ("withdrawal from": bank or director) | `report.opening_balance`, `cash_addition`, `withdrawal_from` |
+| Opening | `GET/POST /entity/<co>/petty-cash/reports/new/opening` (a new day; `.../reports/<id>/opening` for an existing report) | the float carried forward (a company's first report: the onboarding opening balance and start date from `entity_pettycash_settings`, read on the server), a cash addition/withdrawal and its source ("withdrawal from": bank or director) | `report.opening_balance`, `cash_addition`, `withdrawal_from` |
 | Sales | `.../reports/new/sale`, `.../reports/<id>/sale` | one amount per sales method — cash, the electronic methods and the delivery platforms the company set up (`sales[<bucket>][<method>]`) | `report_sale` rows (one per method; the class is still importable as `ReportSaleDetail`) |
 | Expenses | `.../reports/new/expense`, `.../reports/<id>/expense` | one line per receipt: supplier (a synced Xero contact), account (a synced expense account), amount, remarks, the receipt file(s) | `report_expense` rows + attachment rows |
 | Deposit | `.../reports/new/deposit`, `.../reports/<id>/deposit` | the cash banked today (the page shows the cash on hand before it) | `report.bank_deposit` |
@@ -67,6 +67,17 @@ cash count's denominations come from the currency's catalogue
 `opening + cash_addition + cash_sales − expenses − bank_deposit`; the cash count compares
 the counted total against it and records the discrepancy (`discrepancy_type` short/over,
 the amount, and the reason).
+
+The counted total is read from the `report_cash_summary` view (`cash_summary(report_id)`;
+`Report.actual_cash_total` reads it too): NULL means never counted - the Ending page then
+shows the closing balance - and 0 means the cash-count step is done with every denomination
+zero (zero quantities store no rows; the view's rule since 2026-10-13). The `.docx` export's
+drawer total is the same figure, so a denomination outside the template's nine legacy HKD
+slots still counts.
+
+**Cash in stock** (`entity_cash_detail`) follows the latest submitted report: submitting,
+reverting to draft, deleting the latest report and editing a submitted report's cash count
+each rebuild it (`refresh_cash_stock`); a draft never touches it.
 
 ## After a report is posted
 

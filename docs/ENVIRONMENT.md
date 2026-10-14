@@ -32,6 +32,23 @@ Each domain has a slot `N`: its web app listens on `30N0`, its API on `80N0`. Ho
 | Onboarding web | `minty-onboarding-web` | Next.js | 3030 | `onboarding-web` |
 | Onboarding API | `minty-onboarding-api` | Django | 8030 | `onboarding-api` |
 | PostgreSQL | — | Postgres 15 | 5432 (the Docker stack publishes 5433) | `db` |
+| Shared TypeScript | `minty-shared-ts` | npm package `@minty/shared` | **none — a library** | none |
+
+`minty-shared-ts` has no port, no URL and no environment variable of its own: it is a package the
+Next.js apps compile into themselves, installed from a **pinned git tag** and never from a
+registry. minty-web and minty-payment-request-web take the design tokens *and* the sidebar;
+minty-onboarding-web takes `theme.css` only; `minty-www` cannot (Tailwind v3 / React 18 / Next 14)
+and keeps the same font stacks in its own `tailwind.config.ts`. Flask is not a consumer.
+
+```
+npm install "git+https://github.com/minty-oliveandvine/minty-shared-ts.git#v0.1"
+```
+
+npm normalises that to the `github:` shorthand in `package.json` and a `git+ssh://` URL in
+`package-lock.json`, and **that is fine while the repo is public**: npm falls back to HTTPS, so
+`npm ci` works with no SSH key (verified 2026-10-12 with ssh forced to fail). It would stop
+working the day the repo went private. See `docs/features/ci.md` for the release and pin-bump
+flow, and why its tags are immutable.
 
 Old local ports, for reference: hub 3002, subscription API 8004, Flask 5001, payment-request
 web 3000, payment-request API 8000, onboarding web 3001, onboarding API 8001.
@@ -211,24 +228,31 @@ holds `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET`.
 
 ## 8. Branches and deployments
 
-**This section describes the shape `minty-infra` creates, and most of it is NOT live yet
-(checked against the Render, Vercel, Supabase and B2 APIs on 2026-10-08).** What is actually
-running today:
+**`minty-infra` is applied: development on 2026-10-09, production on 2026-10-13.** Its
+Terraform is now the source of truth for every hosted variable, and a fresh plan says "No
+changes". Production builds `main` and development builds `development`; the two environments
+differ only in:
 
-- **There is no production/development split at all.** Render has four Minty services, *all* on
-  `branch=development`, and all with auto-deploy **off**. Two of them carry the production
-  domains (`pettycash.`, `payment-backend.`). Vercel's production builds also come from
-  `development`.
-- `minty-billing-api` and `onboarding-backend` are on the **free plan with no custom domain**, so
-  `subscription-api.dailyminty.com` and `onboarding-api.dailyminty.com` **do not exist yet**.
-- One Supabase project and one schema (`pettycashv3`) serve every backend; one B2 bucket serves
-  every environment.
-- Each service's variables come from its own Render env group (`New-Petty-Cash` and the other
-  three), not from the `minty-shared-<env>` group described below.
+| | Development | Production |
+|---|---|---|
+| Branch | `development` | `main` |
+| `APP_ENV` | `development` | `production` |
+| Render | `minty-*-dev`, all free | Petty Cash and payment-request API starter; subscription and onboarding API free |
+| Vercel | the `development` preview, on its `dev-*` domain | the production deployment, promoted after CI |
+| Subscription pass | off (`SUBSCRIPTION_SCHEDULER_ENABLED=0`) | on, in-process (`=1`) |
+| `SMTP_URL` port | 2525 (Render's free plan blocks 25/465/587) | 587 |
+| `LEGAL_SHOW_DRAFT_BANNER` (Flask) | `1` | `0` |
 
-So, forward-looking: `main` **will deploy** production and `development` the development
-environment, once `minty-infra` is applied. Until then the dashboards are the source of truth
-(as §8's "Cutover checklist" already says) and variables are set per service there.
+**Until the November 2026 launch development runs on production's data** (owner, 2026-10-13):
+the same `DATABASE_URL` (`?schema=pettycashv3`), the same `S3_URL` (bucket `pettycash` and its
+scoped key) and the same `SECRET_KEY`, so a hand-off token from either environment is accepted
+by both. It is one switch, `data_from_environment = { development = "production" }` in
+`minty-infra/terraform.tfvars`; removing that line gives development back its own schema
+(`development`), bucket (`minty-development`) and key, which still exist. Minty's development
+migrate secret stays on `?schema=development`, so a migrate run from `development` never touches
+production's schema. Everything else is the same value in both, **Stripe included**
+(`sk_test_`/`pk_test_` until launch): SMTP credentials, `MAIL_FROM`, `SUBSCRIPTION_EMAIL`, Xero,
+`SPIRE_KEY`, the `EXPENSE_AI_*` settings.
 
 ### CI (the shared workflows)
 
@@ -248,6 +272,7 @@ Every repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusa
 | minty-onboarding-web | `next-web.yml` | - |
 | minty-www (was daily-minty-landing-page) | `next-web.yml` | - |
 | minty-infra | its own `check.yml` (`terraform fmt` / `validate`, no credentials) | - |
+| minty-shared-ts | its own `ci.yml` (typecheck / lint / test; **a documented exception** - see `docs/features/ci.md`) | - |
 
 - **`MINTY_READ_TOKEN`** - a fine-grained PAT with read access to the *contents* of
   `minty-oliveandvine/Minty` only. The three Django APIs' Postgres test pass builds its database
@@ -270,26 +295,31 @@ Every repo's `.github/workflows/ci.yml` is about a dozen lines that call a reusa
 
 The repo [`minty-infra`](https://github.com/minty-oliveandvine/minty-infra) brings the
 dashboards into Terraform. **Option B - today's services (Render, Vercel, Supabase, B2,
-GitHub) - was chosen on 2026-10-07** and lives on `minty-infra`'s `main`. Until it is applied
-(`minty-infra/CUTOVER.md`: development first, production in the cutover window), the dashboards
-above stay the source of truth.
+GitHub) - was chosen on 2026-10-07** and lives on `minty-infra`'s `main`. Both stages are
+applied (`minty-infra/CUTOVER.md`); change a hosted variable there, not in a dashboard.
 
 Option A (the three Next.js apps on Cloudflare Workers, `dailyminty.com` on Cloudflare DNS,
 backends still on Render) stays parked on the `infra-cloudflare` branches of `minty-infra`,
 Minty and the three Next.js repos.
 
-`minty-infra/services.tf` holds this table and nothing else generates a hostname. **"live?" says
-whether that host exists today** — every "no" is created by the apply, not already there.
+`minty-infra/services.tf` holds this table and nothing else generates a hostname. Every
+backend host answered its health check on 2026-10-13.
 
-| Service | Production | live? | Development | live? | Host |
-|---|---|---|---|---|---|
-| Petty Cash | `pettycash.dailyminty.com` | yes | `dev-pettycash.dailyminty.com` | no | Render |
-| Subscription API | `subscription-api.dailyminty.com` | **no** | `dev-subscription-api.dailyminty.com` | no | Render |
-| Payment Request API | `payment-backend.dailyminty.com` | yes | `dev-payment-backend.dailyminty.com` | no | Render |
-| Onboarding API | `onboarding-api.dailyminty.com` | **no** | `dev-onboarding-api.dailyminty.com` | no | Render |
-| Minty web hub | `my.dailyminty.com` | yes | `dev-my.dailyminty.com` | no | Vercel |
-| Payment Request web | `payment.dailyminty.com` | yes | `dev-payment.dailyminty.com` | no | Vercel |
-| Onboarding web | `onboarding.dailyminty.com` | yes | `dev-onboarding.dailyminty.com` | no | Vercel |
+| Service | Production | Development | Host |
+|---|---|---|---|
+| Petty Cash | `pettycash.dailyminty.com` | `dev-petty-cash-api.dailyminty.com` | Render |
+| Subscription API | `subscription-api.dailyminty.com` | `dev-subscription-api.dailyminty.com` | Render |
+| Payment Request API | `payment-request-api.dailyminty.com` | `dev-payment-request-api.dailyminty.com` | Render |
+| Onboarding API | `onboarding-api.dailyminty.com` | `dev-onboarding-api.dailyminty.com` | Render |
+| Minty web hub | `my.dailyminty.com` | `dev-my.dailyminty.com` | Vercel |
+| Payment Request web | `payment.dailyminty.com` | `dev-payment-request.dailyminty.com` | Vercel |
+| Onboarding web | `onboarding.dailyminty.com` | `dev-onboarding.dailyminty.com` | Vercel |
+| Marketing site | `www.dailyminty.com` | `dev-www.dailyminty.com` | Vercel |
+
+- **Petty Cash stays on `pettycash.`** until the November 2026 cutover: Xero lists only
+  `https://pettycash.dailyminty.com/callback`, so Xero connect fails on development (its
+  callback is not registered). It becomes `petty-cash-api.` once Xero has that URI.
+- `payment-backend.dailyminty.com` is the old Payment Request API host; nothing reads it.
 
 - **The hub is `my.dailyminty.com`** (corrected 2026-10-09; this table said `login.` and was
   wrong). That is what `MINTY_WEB_URL` is set to on every live service, and it is not just a
@@ -301,28 +331,32 @@ whether that host exists today** — every "no" is created by the apply, not alr
   state, so nothing was applied. The hub's two open pages are **`/login`** (log in, invitations)
   and **`/signup`** (make an account — its own route since 2026-10-09); `hub_login.py` builds
   both, and `proxy.ts` 307s the old `/login?mode=signup` to `/signup`.
-- The two **`no`**s in the Production column are services on Render's free plan with no custom
-  domain. Anything that assumes `subscription-api.dailyminty.com` resolves today is wrong.
 - Every `*_URL` above is set by Terraform from that one table; no dashboard edit.
-- `APP_ENV`, `SECRET_KEY` and `DATABASE_URL` **will come** from one Render env group per
-  environment (`minty-shared-<env>`), so a `SECRET_KEY` rotation is one value and one apply.
-  Today they are set per service in the four `New-*` groups, which `render.tf` does not model —
-  `minty-infra/terraform.tfvars`'s `extra_env` carries what it does not write.
-- The subscription pass runs as an hourly Render cron job (`manage.py subscriptions tick`) in
-  production; `SUBSCRIPTION_SCHEDULER_ENABLED=0` on every Render service. **The cron job does not
-  exist yet** — it is created with the production stage.
-- Render **will deploy** a branch only after its CI checks pass (`auto_deploy_trigger =
-  "checksPass"`). Auto-deploy is currently **off** on every Render service, so that apply turns
-  it on for the first time. Vercel's development environment is the preview deployment of the
-  `development` branch.
-- `S3_URL` **will use** a key scoped to one bucket per environment (development gets its own
-  bucket). Today one bucket, `pettycash`, serves every environment, and production's key is a B2
-  application key holding **all 27 capabilities** with no bucket restriction.
+- `APP_ENV`, `SECRET_KEY` and `DATABASE_URL` come from one Render env group per environment
+  (`minty-shared-<env>`), so a `SECRET_KEY` rotation is one value and one apply. Everything a
+  service reads beyond its wiring is in `minty-infra/terraform.tfvars`'s `extra_env`. The old
+  `New-*` groups are unlinked but still hold secrets; delete them after rotation (CUTOVER §5).
+- The subscription pass runs **in-process** on production's subscription API
+  (`SUBSCRIPTION_SCHEDULER_ENABLED=1`); the Render cron job in `render.tf` is kept but off. That
+  service is free, so the pass sleeps with it and can be skipped silently — accepted while
+  production is a test.
+- Render deploys a branch only after its CI checks pass (`auto_deploy_trigger = "checksPass"`).
+  Development's free Petty Cash service has auto-deploy off and must be set by hand (the
+  provider cannot update a free service; CUTOVER §4). Vercel's development environment is the
+  preview deployment of the `development` branch; production is promoted by the `check / check`
+  deployment check.
+- `S3_URL` uses an 8-capability key scoped to each environment's bucket. Uploads made from
+  development before the split stay in `pettycash`. Delete the old all-capability production
+  key (27 capabilities, no bucket restriction) if it is still there.
+- The old free `minty-subscription-api-old` and `minty-onboarding-api-old` services still run
+  on `development`, with no custom domain, until they are deleted by hand. Their
+  `*.onrender.com` hosts (and other pre-rename hosts) still answer.
 
 And:
 
 - **Migrations are deliberate.** Hosted services run with `RUN_MIGRATIONS=false` (set by
-  `minty-infra`; the image's own default is still `true`, so nothing changes until that apply).
+  `minty-infra`; the image's own default is still `true`, so a service outside Terraform would
+  migrate on start).
   The schema moves only through Minty's manual **migrate** workflow
   (`.github/workflows/migrate.yml`: `current` to look, `upgrade` to apply; production from
   `main` behind the `production-db` environment). Run it **before** merging code that needs
@@ -334,8 +368,8 @@ And:
 
 ### Cutover checklist
 
-Do it in this order — the old variables can stay in place until the end, because nothing
-running yet reads the new ones and nothing new reads the old ones:
+**Done** (development 2026-10-09, production 2026-10-13, through `minty-infra`). Kept as the
+order to follow for a new environment, and step 4 is the post-deploy check:
 
 1. **Set the new variables on every development service** (§5): `APP_ENV`, `DATABASE_URL`
    (with `?schema=pettycashv3`), `S3_URL`, `SMTP_URL`, `MAIL_FROM`, the `*_URL` set - including

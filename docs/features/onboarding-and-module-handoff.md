@@ -14,6 +14,12 @@ the token is the 60-minute `scope: "onboarding"` JWT; `entity_id` resumes an in-
 company; `fresh=1` starts a brand-new one (what `GET /entity/create` sends). Invitations
 land on the wizard's `/auth` page the same way (with the invite token instead).
 
+`POST /entity/create` (the old create form) is a fallback no page reaches any more, and its
+phone rule is the old one: `_normalize_contact_phone` stores 8–11 bare digits. The wizard has
+stored E.164 (`+85291234567`) since 2026-10-12 and reads a digits-only row as a number under
+the company's Country, so a row written there still opens, but it is a second shape. Bring the
+form onto E.164 or delete it before anything reads `contact_phone` outside the wizard.
+
 ## `/api/onboarding/*` — served by two backends, same paths
 
 Every wizard call is under `/api/onboarding/`. **Both** Minty (`blueprints/entity/routes/create.py`)
@@ -29,13 +35,13 @@ header). The endpoints, in wizard order:
 |---|---|
 | reference | `server-time` (HK "today", server-authoritative), `currencies`, `countries` |
 | resume | `state` (everything saved so far, `saved_step`, `current_step`), `saved-step` (Save & Exit) |
-| 1 Basic | `create`, `entity/<id>` (edit an in-progress company) |
+| 1 Basic | `create`, `entity/<id>` (edit an in-progress company); the currency's active denominations are written to `entity_cash_setting` and follow a currency change; picking a country preselects its currency (`countries` carries `currency_id`, and create derives it); the browser's timezone is saved to `entities.timezone` with no field on screen (unknown zone = 400); the creator's `user_entity.joined_at` is set |
 | 2 Modules | `modules` (Flask), `plans` (Django), the billing routes `payment-method`, `billing/*`, `billing/authorize` (minty-subscription-api) |
-| 3 Invite | `invite` (GET/POST), `invite/cancel` |
-| 4 Accounting | Xero connect is Minty's `/xero_connect` with the entity in the state; `xero/disconnect`; `xero/release` frees an organisation another company holds, for the move the conflict dialog offers ([xero-integration.md](xero-integration.md) §1.1) |
-| 5–7 Petty cash | `sales-methods`, `opening-balance`, `account-codes`, `contacts`, `contacts/create` |
-| 8 Bills | `bill-codes` |
-| 9 All Set | `finalize` (minty-onboarding-api) — flips the company live (`status`), then starts the card-free trials of the chosen modules on minty-subscription-api (`trial_end` in the answer; null when no module has one). A failed trial start fails finalize, and the All Set screen offers Try again |
+| 3 Invite | `invite` (GET/POST; each row carries `expires_at` and `expired`), `invite/cancel`, `invite/resend` (fresh link and expiry; 429 `retry_after` inside the cooldown) |
+| 4 Accounting | Xero connect is Minty's `/xero_connect` with the entity in the state (it saves the organisation's financial year end, and fails without one); `xero/disconnect`; `xero/release` frees an organisation another company holds, for the move the conflict dialog offers ([xero-integration.md](xero-integration.md) §1.1) |
+| 5–7 Petty cash | `sales-methods`, `opening-balance` (on `entity_pettycash_settings`, no report — the first report opens from it; needs a currency, and is typed in that currency's `decimal_places`), `account-codes`, `contacts`, `contacts/create` (stamps the contact's `xero_org_id`) |
+| 8 Bills | `bill-codes` (ticked codes, plus an optional `default_code` that must be ticked; the GET returns it) |
+| 9 All Set | `finalize` (minty-onboarding-api) — first refuses (409, `missing: [{step, message}]`, company left `onboarding`) a company whose modules are not set up: Petty Cash needs Xero + all 6 accounts and 3 contacts, Payment Request needs Xero + a ticked bill code (and a ticked default, if one is set), read from `entity_setup_summary`; then flips the company live (`status`), then starts the card-free trials of the chosen modules on minty-subscription-api (`trial_end` in the answer; null when no module has one). A failed trial start fails finalize, and the All Set screen offers Try again |
 
 **The trials are subscriber-less as well as card-free** (the user, 2026-10-08): finalize
 establishes no payer. The wizard's door onto the billing relationship is step 2's billing sheet

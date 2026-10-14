@@ -265,6 +265,9 @@ def create_xero_contact(entity_id, contact_name, access_token, xero_org_id):
                         xero_contact_id=new_contact_id,
                         name=contact_name_from_xero,
                         category="expense_contact",
+                        # The organisation it was made in: an org switch clears contacts by
+                        # org, and an unstamped row would survive into the new one.
+                        xero_org_id=xero_org_id,
                     )
                     db.session.add(contact_sync)
                     db.session.commit()

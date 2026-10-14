@@ -163,7 +163,7 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
 
 - **Redirect targets.** Every redirect to a value the request supplied - `?next=` on
   `/entity/<id>/enter`, `/handoff/minty-web` and `/xero_auth` (checked when stored AND when
-  popped after the Xero round trip), the Terms gate's remembered page, the "back where you
+  popped after the Xero round trip), the "back where you
   came from" Referer redirects in `hooks.py` - goes through ONE rule,
   `blueprints/shared/safe_redirect.py`: a path on this site, no `//host`, no backslash, no
   control character (browsers drop tab/CR/LF, so `/%09/evil.com` arrived as `//evil.com`), no
@@ -239,12 +239,17 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
 
 `blueprints/legal/routes/gate.py::require_terms_acceptance` runs on every request: a
 signed-in user who has not accepted the current terms version is redirected to `/entity`
-(JSON callers get a JSON 403 instead of a redirect; `/legal/accept` is the standalone fallback).
+(JSON callers get a JSON 403 instead of a redirect). There is no Flask acceptance screen -
+`/legal/accept` and `templates/legal/` were deleted on 2026-10-12 when the documents moved to
+minty-web, so **minty-web being up is part of Flask's sign-in path** for anyone who owes an
+acceptance. The page they were trying to reach is not remembered either: the panel lifts where
+they stand, in minty-web.
 `/entity` hands the browser to minty-web whether or not terms are owed (always, since phase 2 -
 the Jinja list and its panel are gone), and minty-web's own gate draws the panel over every
 page of that app, recording through
 `POST /api/me/terms/accept` (bearer, `source = "hub"`). The allow-list is keyed on **endpoint
-names**, not paths: the legal routes (minty-web's two included), the login/OTP endpoints,
+names**, not paths: `legal.current` and the invite status route, minty-web's two bearer
+routes, the login/OTP endpoints,
 logout and `leave-entity`, static files. Versions, pinning and consent records are in
 [legal-terms.md](legal-terms.md).
 

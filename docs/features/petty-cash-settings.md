@@ -81,10 +81,21 @@ exist before a company is created (the onboarding wizard's Step 1 reads them fro
 
 ## Denominations (the cash count)
 
-`cash_info` is the catalogue of a currency's notes and coins; `entity_cash_setting` is a
-per-company override (a row only where the company diverges — a company with none logs
-every active denomination of its currency and picks up new ones automatically);
-`entity_cash_detail` is the cash in stock per denomination after each count.
+`cash_info` is the catalogue of a currency's notes and coins, unique on (currency, value,
+**type**) since 2026-10-13 - HKD's $10 note and $10 coin are two rows - with `type` NOT NULL.
+`entity_cash_setting` holds
+the company's own list: setting a currency (creation, the onboarding wizard, this page, the
+hub's Entities & Integration save) writes one row per active denomination of it and drops
+any other currency's rows, keeping rows already there so the company's on/off and order
+survive a re-save (`entity/services/cash_settings.py`; minty-onboarding-api has the same
+rule). A denomination with no row — every one for a company created before 2026-10-12, or one
+added to the currency later — counts as on;
+`entity_cash_detail` is the company's cash in stock: per denomination, the MONEY its latest
+**submitted** report counted (`cash_instock`; `cash_type` copied from `cash_info`). Its rows
+are made and rebuilt only by `refresh_cash_stock` (`report/services/cash_denominations.py`)
+on submit, revert to draft, delete and a submitted report's cash-count edit - one per active
+denomination of the current currency, other currencies' rows removed, 0 where not counted.
+Onboarding never writes it; a draft never moves it.
 `resolve_denominations_for_entity` in `cash_denominations.py` is the one resolver; the
 cash-count page's calculator and the `.docx` export's `qty*` placeholders read from it.
 

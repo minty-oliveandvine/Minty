@@ -181,6 +181,70 @@ def test_the_withdrawal_source_is_kept_on_every_save_of_the_opening(shop, client
     assert source() == "personal"
 
 
+def _onboarded(app, entity, *, opening, start):
+    """What onboarding Step 5 leaves: the opening balance and start date on the settings row."""
+    from models.db import EntityPettycashSettings, db as _db
+
+    with app.app_context():
+        _db.session.add(EntityPettycashSettings(entity_id=entity.id, opening_balance=opening, start_date=start))
+        _db.session.commit()
+
+
+def _opening_of(app, entity, day):
+    from models.db import Report
+
+    with app.app_context():
+        row = Report.query.filter_by(entity_id=entity.id, transaction_date=day).one()
+        return money(row.opening_balance)
+
+
+def test_the_first_report_offers_the_onboarding_balance_and_date(shop, client, app):
+    owner, entity = shop
+    _onboarded(app, entity, opening=750, start=REPORT_DATE)
+    F.login(client, owner)
+
+    html = client.get(f"/report/opening?entity_id={entity.id}", follow_redirects=True).get_data(as_text=True)
+
+    assert 'name="opening_balance" value="750.0"' in html
+    assert f'name="transaction_date" value="{F.iso(REPORT_DATE)}"' in html
+
+
+def test_the_first_report_opens_at_the_onboarding_balance_whatever_the_form_says(shop, client, app):
+    """The hidden field is the browser's; the first report's opening is the server's."""
+    owner, entity = shop
+    _onboarded(app, entity, opening=750, start=REPORT_DATE)
+    F.login(client, owner)
+
+    resp = open_report(client, entity, REPORT_DATE, opening="99999.00")
+
+    assert "/reports/new/sale" in resp.headers["Location"], resp.headers.get("Location")
+    assert _opening_of(app, entity, REPORT_DATE) == money("750.00")
+
+
+def test_the_first_report_cannot_start_before_the_onboarding_date(shop, client, app):
+    owner, entity = shop
+    _onboarded(app, entity, opening=750, start=REPORT_DATE)
+    F.login(client, owner)
+
+    resp = open_report(client, entity, REPORT_DATE - timedelta(days=1))
+
+    assert resp.status_code == 302
+    assert "/sale" not in resp.headers.get("Location", "")
+    assert client.get(
+        f"/api/get_draft_totals?entity_id={entity.id}&transaction_date={F.iso(REPORT_DATE - timedelta(days=1))}"
+    ).status_code == 404
+
+
+def test_without_an_onboarding_start_date_the_form_balance_stands(shop, client, app):
+    """A company onboarded before the settings columns were written keeps the old path."""
+    owner, entity = shop
+    F.login(client, owner)
+
+    open_report(client, entity, REPORT_DATE, opening="1000.00")
+
+    assert _opening_of(app, entity, REPORT_DATE) == money("1000.00")
+
+
 def test_draft_totals_404_before_any_report_exists(shop, client):
     owner, entity = shop
     F.login(client, owner)
@@ -680,3 +744,104 @@ def test_member_without_report_rights_cannot_open_the_wizard(shop, client, app, 
 
     assert resp.status_code == 302
     assert "/sale" not in resp.headers.get("Location", "")
+
+
+# ---- cash in stock (entity_cash_detail), 2026-10-13 ---------------------------------------
+# A company's stock per denomination is the money its latest SUBMITTED report counted: rows are
+# made on submit (one per active denomination of the company's current currency) and rebuilt on
+# revert, delete and a submitted report's cash-count edit. Drafts never touch it.
+
+
+def stock(app, entity) -> dict:
+    """{face value: money in stock} for the company's entity_cash_detail rows."""
+    from models.db import CashInfo, EntityCashDetail
+
+    with app.app_context():
+        rows = (EntityCashDetail.query.join(CashInfo, CashInfo.id == EntityCashDetail.cash_id)
+                .filter(EntityCashDetail.entity_id == entity.id)
+                .with_entities(CashInfo.cash_value, EntityCashDetail.cash_instock).all())
+    return {money(face): money(amount or 0) for face, amount in rows}
+
+
+def expected_stock(app, entity, counts) -> dict:
+    faces = F.denomination_fields(app, entity.id).values()
+    return {money(f): money(Decimal(str(f)) * counts.get(f, 0)) for f in faces}
+
+
+def test_submitting_a_report_records_the_cash_in_stock(shop, client, app):
+    owner, entity = shop
+    F.login(client, owner)
+
+    _report_id, closing = post_report(client, entity)
+
+    faces = F.denomination_fields(app, entity.id).values()
+    assert stock(app, entity) == expected_stock(app, entity, count_exactly(closing, faces))
+
+
+def test_a_draft_cash_count_leaves_the_stock_alone(shop, client, app):
+    owner, entity = shop
+    F.login(client, owner)
+    closing = walk_to_cash_count(client, entity)
+    faces = F.denomination_fields(app, entity.id).values()
+
+    post_cash_count(client, entity, REPORT_DATE, count_exactly(closing, faces))
+
+    assert stock(app, entity) == {}
+
+
+def test_reverting_the_only_report_empties_the_stock(shop, client, app):
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity)
+
+    client.post(f"/report/{report_id}/convert-to-draft")
+
+    assert stock(app, entity) and set(stock(app, entity).values()) == {money("0")}
+
+
+def test_deleting_the_latest_report_falls_back_to_the_one_before(shop, client, app, s3):
+    owner, entity = shop
+    F.login(client, owner)
+    _first, first_closing = post_report(client, entity, REPORT_DATE)
+    second_id, _ = post_report(client, entity, REPORT_DATE + timedelta(days=1),
+                               opening=str(first_closing), cash="80.00")
+
+    client.post(f"/report/delete/{second_id}")
+
+    faces = F.denomination_fields(app, entity.id).values()
+    assert stock(app, entity) == expected_stock(app, entity, count_exactly(first_closing, faces))
+
+
+def test_after_a_currency_change_the_stock_follows_the_new_currency(shop, client, app, db):
+    from models.db import CashInfo, Entity
+
+    owner, entity = shop
+    F.login(client, owner)
+    report_id, _ = post_report(client, entity)
+    with app.app_context():
+        jpy = F.seed_currency(db, "JPY", denominations=(1000, 100))
+        Entity.query.get(entity.id).currency_id = jpy.id
+        db.session.commit()
+
+    client.post(f"/report/{report_id}/convert-to-draft")
+
+    with app.app_context():
+        jpy_faces = {money(c.cash_value) for c in CashInfo.query.filter_by(currency_id=jpy.id)}
+    assert stock(app, entity) == {face: money("0") for face in jpy_faces}
+
+
+def test_an_all_zero_count_reads_as_counted_zero(shop, client, app):
+    """No rows are stored for zero quantities; the done cash-count step makes it 0, not "never"."""
+    from models.db import Report, db
+
+    owner, entity = shop
+    F.login(client, owner)
+    walk_to_cash_count(client, entity)
+    post_cash_count(client, entity, REPORT_DATE, {}, discrepancy="0")
+
+    with app.app_context():
+        report = Report.query.filter_by(entity_id=entity.id, transaction_date=REPORT_DATE).one()
+        assert report.actual_cash_total == 0.0
+        sql_value = (db.session.query(Report.actual_cash_total)
+                     .filter(Report.id == report.id).scalar())
+        assert sql_value == 0

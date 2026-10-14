@@ -6,9 +6,10 @@ from blueprints.shared.schema import SCHEMA
 class EntityCashSetting(db.Model):
     """Which denominations an entity logs in its cash count (``entity_cash_setting``).
 
-    The cash mirror of EntitySaleSetting. A row exists only where the entity diverges from
-    its currency default, so an entity with no rows sees every active CashInfo row for its
-    currency and automatically picks up denominations added later.
+    The cash mirror of EntitySaleSetting. Setting a company's currency writes one row per
+    active CashInfo row of it (entity/services/cash_settings.py, and minty-onboarding-api's
+    copy for the wizard). An entity with no rows - one created before that - sees every
+    active CashInfo row for its currency.
     """
 
     __tablename__ = "entity_cash_setting"

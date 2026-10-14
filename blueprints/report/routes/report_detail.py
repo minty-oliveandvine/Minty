@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import split_receipt_keys
+from blueprints.report.services.cash_denominations import refresh_cash_stock
 from blueprints.report.services.history import log_history
 from blueprints.report.services.report_detail import has_route
 from blueprints.report.services.s3_storage import (delete_expense_with_receipts,
@@ -499,6 +500,9 @@ def delete_report(id):
             db.session.delete(draft)
 
         db.session.delete(report)
+        # The stock falls back to the latest report still submitted.
+        db.session.flush()
+        refresh_cash_stock(entity_id)
         db.session.commit()
 
         flash("That report's deleted.", "success")

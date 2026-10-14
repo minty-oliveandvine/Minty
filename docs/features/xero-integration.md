@@ -20,7 +20,11 @@ does not survive the round-trip. `GET /callback`:
    **connecting user's** `user_token` row (`upsert_user_token`) and records
    `entities.connected_by_user_id`;
 2. binds the tenant: `entities.xero_org_id`, `xero_tenant_name`, `status = connected`
-   (`EntityStatus`: `onboarding` / `connected` / `disconnected`). One organisation may be
+   (`EntityStatus`: `onboarding` / `connected` / `disconnected`), and the organisation's
+   financial year end — `entities.financial_year_end_day` / `_month`, read from
+   `GET /Organisation` (`integration.get_financial_year_end`) on connect and reconnect.
+   That read happens before anything is written; when it fails the connect fails, the grant
+   just made is revoked and the company stays as it was. One organisation may be
    connected to one company at a time, and connecting it elsewhere is **refused** — see
    §1.1;
 3. starts the **background sync** (`sync_all_accounts_and_contacts_background`, one thread,

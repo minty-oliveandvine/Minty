@@ -462,31 +462,61 @@ def test_unconsented_user_is_sent_to_the_terms_page(company, client):
     assert resp.status_code == 302 and resp.headers["Location"].endswith("/entity"), resp.headers.get("Location")
     listing = client.get("/entity")
     assert listing.status_code == 302 and urlsplit(listing.headers["Location"]).path == "/landing"
-    assert client.get("/legal/accept").status_code == 200
+    # Flask has no acceptance screen since 2026-10-12 - the panel is minty-web's, over the
+    # list it was just sent to. What is still reachable here is "which version is live".
+    assert client.get("/legal/current").status_code == 200
     api = client.get(f"/api/get_draft_totals?entity_id={entity.id}&transaction_date=2026-09-01")
     assert api.status_code == 403 and api.get_json()["code"] == "terms_acceptance_required"
 
 
 def test_accepting_the_terms_opens_the_app(company, client, app):
+    """An acceptance given in minty-web opens every Flask page.
+
+    Recorded through the shared service, which is what `POST /api/me/terms/accept` calls
+    (tests/test_hub_terms.py covers that route itself). The gate falls back to the database
+    whenever its session cache has no answer, which is exactly this case.
+    """
     owner, entity, superuser = company
     F.login(client, owner, accepted_terms=False)
+    from blueprints.legal.models.terms_consent import SOURCE_HUB
+    from blueprints.legal.services.consent import accept_current_terms
     from legal import registry
+    from models.db import db
 
-    resp = client.post("/legal/accept", json={"accepted": True,
-                                              "terms_version": registry.current_version(registry.TERMS)})
+    with app.app_context():
+        outcome, _ = accept_current_terms(
+            owner.id,
+            accepted=True,
+            submitted_version=registry.current_version(registry.TERMS),
+            source=SOURCE_HUB,
+        )
+        db.session.commit()
 
-    assert resp.status_code == 200, resp.data[:300]
+    assert outcome == "recorded"
     assert client.get(f"{F.co(client, entity.id)}/petty-cash").status_code == 200
 
 
-def test_terms_must_be_ticked(company, client):
+def test_terms_must_be_ticked(company, client, app):
+    """The tick box is an interface control; the server is what decides.
+
+    Nothing is recorded without `accepted: true`, so the gate keeps blocking.
+    """
     owner, entity, superuser = company
     F.login(client, owner, accepted_terms=False)
+    from blueprints.legal.models.terms_consent import SOURCE_HUB
+    from blueprints.legal.services.consent import accept_current_terms, has_consent
     from legal import registry
 
-    resp = client.post("/legal/accept", json={"accepted": False,
-                                              "terms_version": registry.current_version(registry.TERMS)})
-    assert resp.status_code == 400
+    with app.app_context():
+        outcome, _ = accept_current_terms(
+            owner.id,
+            accepted=False,
+            submitted_version=registry.current_version(registry.TERMS),
+            source=SOURCE_HUB,
+        )
+        assert outcome == "not_ticked"
+        assert has_consent(owner.id) is False
+
     assert client.get(f"{F.co(client, entity.id)}/petty-cash").status_code == 302
 
 

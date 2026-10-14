@@ -18,7 +18,8 @@ from legal import registry
 
 @pytest.fixture
 def db_session(app):
-    """Yields outside a context (see tests/test_terms_accept_screen.py for why)."""
+    """Yields outside a context: an app context held open across the test would keep the
+    session's identity map alive, and a row written through the client would not be seen."""
 
     from models.db import db
 
@@ -71,38 +72,48 @@ def test_a_blocked_user_can_still_log_out(blocked, db_session):
     """Non-negotiable.
 
     Someone who reads the Terms and refuses must be able to leave. If the gate
-    catches logout, the acceptance screen becomes a trap with no exit.
+    catches logout, the acceptance panel becomes a trap with no exit.
     """
     response = blocked.get("/logout", follow_redirects=False)
     assert response.status_code in (301, 302)
-    assert "/legal/accept" not in response.headers.get("Location", "")
+    assert "/entity" not in response.headers.get("Location", "")
 
 
-def test_a_blocked_user_can_reach_the_acceptance_screen(blocked, db_session):
-    """Otherwise the gate redirects to a page the gate itself blocks — an
-    infinite loop nobody can escape."""
-    assert blocked.get("/legal/accept").status_code == 200
+def test_a_blocked_user_is_sent_to_the_company_list(blocked, db_session):
+    """THE load-bearing allow-list entry. `/entity` hands the browser to minty-web, which
+    draws the acceptance panel; gate it and the gate redirects to a page it blocks — an
+    infinite loop nobody can escape. Since 2026-10-12 there is no Flask screen behind it."""
+    response = blocked.get("/index", follow_redirects=False)
+    assert response.status_code == 302
+    assert "/entity" in response.headers["Location"]
+    assert blocked.get("/entity", follow_redirects=False).status_code in (200, 302)
 
 
-@pytest.mark.parametrize(
-    "url",
-    ["/legal/terms", "/legal/privacy", "/legal/terms/beta-1", "/legal/current"],
-)
-def test_a_blocked_user_can_read_what_they_are_agreeing_to(blocked, db_session, url):
-    assert blocked.get(url).status_code == 200
+def test_a_blocked_user_can_still_ask_which_version_is_live(blocked, db_session):
+    """`/legal/current` is read before anyone is signed in (minty-web's sign-up screen), and
+    by someone held here who sends a session cookie too. The DOCUMENT is minty-web's own
+    (`/terms`), on its origin, so the gate never sees that request at all."""
+    assert blocked.get("/legal/current").status_code == 200
 
 
 def test_a_blocked_user_can_submit_their_acceptance(blocked, db_session, app, user_id):
-    """The POST must not be gated either — blocking it would mean nobody could
-    ever leave the blocked state."""
-    from blueprints.legal.services.consent import has_consent
+    """The acceptance route must not be gated either — blocking it would mean nobody could
+    ever leave the blocked state. It is minty-web's bearer route since 2026-10-12; a client
+    that sends the session cookie as well must still get through (tests/test_hub_terms.py
+    covers what it does)."""
+    # Imported in the test, not at module scope: conftest clears `blueprints.*` between
+    # modules, so a top-level import here would be a stale copy.
+    from blueprints.legal.routes import gate as gate_module
 
+    assert "legal.hub_terms_accept" in gate_module.ALLOWED_ENDPOINTS
+    assert "legal.hub_terms_status" in gate_module.ALLOWED_ENDPOINTS
+    # Not an acceptance (no bearer token), but it proves the gate let it reach the route,
+    # which answers 401 of its own accord rather than 403/302 from the gate.
     response = blocked.post(
-        "/legal/accept",
+        "/api/me/terms/accept",
         json={"accepted": True, "terms_version": registry.CURRENT_TERMS_VERSION},
     )
-    assert response.status_code == 200
-    assert _in_app(app, lambda: has_consent(user_id)) is True
+    assert response.status_code == 401
 
 
 def test_the_health_check_is_never_gated(blocked, db_session):
@@ -127,11 +138,10 @@ def test_login_endpoints_stay_reachable(blocked, db_session):
 # The gate actually gates
 # --------------------------------------------------------------------------
 
-def test_a_page_request_is_redirected_to_the_acceptance_screen(blocked, db_session):
-    """The gate sends people to the Select Company list, which renders the
-    acceptance panel as a modal over itself. /legal/accept still exists and
-    still works — it is the fallback for anyone arriving by a path that does
-    not pass through /entity."""
+def test_a_page_request_is_redirected_to_the_panel(blocked, db_session):
+    """The gate sends people to the company list, which hands the browser to minty-web,
+    which draws the acceptance panel over itself. There is no Flask fallback screen since
+    2026-10-12 - and nothing links to one."""
     response = blocked.get("/index", follow_redirects=False)
     assert response.status_code == 302
     assert "/entity" in response.headers["Location"]
@@ -243,7 +253,10 @@ def test_an_anonymous_visitor_is_not_gated(client, db_session):
     Bearer-token integrations alone — neither populates current_user."""
     response = client.get("/login", follow_redirects=False)
     assert response.status_code in (200, 302)
-    assert "/legal/accept" not in response.headers.get("Location", "")
+    # NOT refused by the gate. Asked as a JSON caller, because an HTML 302 to /entity is
+    # ambiguous - /index redirects there by itself - while the gate's JSON refusal is not.
+    refused = client.get("/index", headers={"Accept": "application/json"})
+    assert refused.status_code != 403
 
 
 def test_an_agreed_user_passes_straight_through(blocked, db_session, app, user_id):
@@ -255,8 +268,10 @@ def test_an_agreed_user_passes_straight_through(blocked, db_session, app, user_i
 
     _in_app(app, _grant)
 
-    response = blocked.get("/index", follow_redirects=False)
-    assert "/legal/accept" not in response.headers.get("Location", "")
+    # NOT refused by the gate. Asked as a JSON caller, because an HTML 302 to /entity is
+    # ambiguous - /index redirects there by itself - while the gate's JSON refusal is not.
+    refused = blocked.get("/index", headers={"Accept": "application/json"})
+    assert refused.status_code != 403
 
 
 def test_an_unmatched_url_still_404s(blocked, db_session):
@@ -268,21 +283,14 @@ def test_an_unmatched_url_still_404s(blocked, db_session):
 # Where they land afterwards
 # --------------------------------------------------------------------------
 
-def test_the_blocked_destination_is_remembered_and_returned_to(
-    blocked, db_session, app
-):
-    from blueprints.legal.services.gate import TERMS_NEXT_SESSION_KEY
-
+def test_the_blocked_destination_is_not_remembered(blocked, db_session):
+    """It used to be, for `/legal/accept` to return to. That screen was deleted on
+    2026-10-12: the panel is minty-web's and lifts where the person stands there, so nothing
+    would ever read the key - and a destination nobody consumes is a session key that only
+    grows."""
     blocked.get("/index?tab=summary", follow_redirects=False)
-
     with blocked.session_transaction() as session:
-        assert session[TERMS_NEXT_SESSION_KEY] == "/index?tab=summary"
-
-    response = blocked.post(
-        "/legal/accept",
-        json={"accepted": True, "terms_version": registry.CURRENT_TERMS_VERSION},
-    )
-    assert response.get_json()["redirect_url"] == "/index?tab=summary"
+        assert "terms_next" not in session
 
 
 # --------------------------------------------------------------------------
@@ -318,15 +326,16 @@ def test_the_session_cache_avoids_a_database_read_per_request(
 def test_a_missing_document_does_not_lock_everyone_out(blocked, db_session):
     """A mistyped CURRENT_TERMS_VERSION must not become an infinite redirect.
 
-    Blocking here would send them to /legal/accept, which finds no document
-    and bounces them to the dashboard, which the gate blocks again — a loop
-    with no exit, for every user in the system, from a one-word config typo.
+    Blocking here would be worse than useless: the live version is not in the manifest, so
+    this app could not record an agreement even if someone gave one, and minty-web's panel
+    could not be answered. A mistyped CURRENT_TERMS_VERSION would lock out every user.
     """
     original = registry.CURRENT_TERMS_VERSION
     registry.CURRENT_TERMS_VERSION = "beta-does-not-exist"
     try:
-        response = blocked.get("/index", follow_redirects=False)
-        assert "/legal/accept" not in response.headers.get("Location", "")
+        refused = blocked.get("/index", headers={"Accept": "application/json"})
+        # NOT refused by the gate: with no manifest entry it must not enforce at all.
+        assert refused.status_code != 403
     finally:
         registry.CURRENT_TERMS_VERSION = original
 
@@ -342,8 +351,10 @@ def test_the_gate_fails_open_if_it_raises(blocked, db_session, monkeypatch):
 
     monkeypatch.setattr(gate_module, "has_consent", _boom)
 
-    response = blocked.get("/index", follow_redirects=False)
-    assert "/legal/accept" not in response.headers.get("Location", "")
+    # NOT refused by the gate. Asked as a JSON caller, because an HTML 302 to /entity is
+    # ambiguous - /index redirects there by itself - while the gate's JSON refusal is not.
+    refused = blocked.get("/index", headers={"Accept": "application/json"})
+    assert refused.status_code != 403
 
 
 def test_moving_the_version_re_gates_an_already_agreed_user(
@@ -365,8 +376,8 @@ def test_moving_the_version_re_gates_an_already_agreed_user(
     blocked.get("/index", follow_redirects=False)
 
     original = registry.CURRENT_TERMS_VERSION
-    beta_1 = registry.get_document(registry.TERMS, "beta-1")
-    registry._DOCUMENTS[(registry.TERMS, "beta-2")] = replace(
+    beta_1 = registry.get_version(registry.TERMS, "beta-1")
+    registry.MANIFEST[(registry.TERMS, "beta-2")] = replace(
         beta_1, version="beta-2", sha256="b" * 64
     )
     registry.CURRENT_TERMS_VERSION = "beta-2"
@@ -376,33 +387,21 @@ def test_moving_the_version_re_gates_an_already_agreed_user(
         assert "/entity" in response.headers["Location"]
     finally:
         registry.CURRENT_TERMS_VERSION = original
-        registry._DOCUMENTS.pop((registry.TERMS, "beta-2"), None)
+        registry.MANIFEST.pop((registry.TERMS, "beta-2"), None)
 
 
-def test_the_document_body_is_available_as_json(client):
-    """The onboarding app shows the Terms inline so it can gate its tick box on
-    reaching the end. It is a separate origin, so it cannot read the scroll
-    position of an iframe — it needs the markup itself.
+def test_this_app_serves_no_document_any_more(client):
+    """`/legal/content/<kind>` served the markup to a client that had to show the Terms
+    inline. minty-web holds the documents since 2026-10-12 and serves its own
+    (`/api/legal/terms/current`), so this app answers for no wording at all - and the gate's
+    allow-list shrank with it (tests/test_legal_manifest.py asserts the 404s)."""
+    from blueprints.legal.routes import gate as gate_module
 
-    No login: the person reading this has no account yet.
-    """
-    response = client.get("/legal/content/terms")
-    assert response.status_code == 200
-
-    body = response.get_json()
-    assert body["version"] == registry.CURRENT_TERMS_VERSION
-    assert body["sha256"] == registry.get_current(registry.TERMS).sha256
-    assert "<p>" in body["html"]
-
-
-def test_an_unknown_document_kind_is_not_served(client):
-    assert client.get("/legal/content/nonsense").status_code == 404
-
-
-def test_a_blocked_user_can_read_the_document_json(blocked, db_session):
-    """Allow-listed like the other legal routes — otherwise the gate blocks the
-    very text it is asking people to agree to."""
-    assert blocked.get("/legal/content/terms").status_code == 200
+    assert client.get("/legal/content/terms").status_code == 404
+    assert not any(
+        e in gate_module.ALLOWED_ENDPOINTS
+        for e in ("legal.content", "legal.terms", "legal.privacy", "legal.accept_page")
+    )
 
 
 # --------------------------------------------------------------------------
@@ -482,3 +481,60 @@ def test_invite_terms_status_is_false_once_that_user_has_agreed(
         assert client.post(
             "/legal/invite-terms-status", json={"invite": token}
         ).get_json()["terms_required"] is False
+
+
+# --------------------------------------------------------------------------
+# The session cache
+#
+# Moved here from tests/test_terms_accept_screen.py when /legal/accept was
+# deleted (2026-10-12): the gate is the only reader of this cache now.
+# --------------------------------------------------------------------------
+
+def test_an_acceptance_caches_the_version_not_a_flag(app, db_session, user_id):
+    """Storing the version is what makes a Terms revamp self-clearing.
+
+    A boolean would leave every existing session believing it had agreed to
+    whatever came next.
+    """
+    from blueprints.legal.services.gate import (TERMS_OK_SESSION_KEY,
+                                                mark_session_agreed)
+
+    with app.test_request_context("/"):
+        from flask import session
+
+        mark_session_agreed()
+        assert session[TERMS_OK_SESSION_KEY] == registry.CURRENT_TERMS_VERSION
+
+
+def test_session_cache_stops_matching_when_the_version_moves(app, db_session):
+    from blueprints.legal.services.gate import (mark_session_agreed,
+                                                session_agreed_to_current)
+
+    with app.test_request_context("/"):
+        mark_session_agreed("beta-1")
+        live = registry.CURRENT_TERMS_VERSION
+        registry.CURRENT_TERMS_VERSION = "beta-1"
+        try:
+            assert session_agreed_to_current() is True
+            registry.CURRENT_TERMS_VERSION = "beta-2"
+            assert session_agreed_to_current() is False
+        finally:
+            registry.CURRENT_TERMS_VERSION = live
+
+
+def test_logging_in_clears_a_previous_users_cached_agreement(app, db_session, user_id):
+    """The session cookie outlives logout.
+
+    Without this reset, a second person signing in on the same browser would
+    inherit the first person's cached agreement and never see the gate.
+    """
+    from flask import session as flask_session
+    from flask_login import user_logged_in
+
+    from blueprints.legal.services.gate import TERMS_OK_SESSION_KEY
+    from models.db import User
+
+    with app.test_request_context("/"):
+        flask_session[TERMS_OK_SESSION_KEY] = "beta-1"
+        user_logged_in.send(app, user=User.query.get(user_id))
+        assert TERMS_OK_SESSION_KEY not in flask_session

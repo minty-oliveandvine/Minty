@@ -156,39 +156,34 @@ class Report(db.Model):
 
     @hybrid_property
     def actual_cash_total(self):
-        """What the cash count added up to: the sum of the counted denominations.
+        """What the cash count added up to, read from the ``report_cash_summary`` view.
 
         ``None`` means "never counted" - which the old column also said with NULL. A
-        denomination counted as zero stores no row, so an all-zero count has no rows;
-        the wizard marking ``cash_count`` complete is what tells it apart from no count.
+        denomination counted as zero stores no row, so an all-zero count has no rows; the view
+        reads 0 when the wizard has marked ``cash_count`` complete (the rule lives in the view
+        now, so the model, the Ending page and the export all read one number).
         """
-        from blueprints.report.models.report_cash_count import ReportCashCount
+        from blueprints.shared.views import ReportCashSummary
 
         total = (
-            db.session.query(db.func.sum(ReportCashCount.quantity * ReportCashCount.cash_value))
-            .filter(ReportCashCount.report_id == self.id)
+            db.session.query(ReportCashSummary.actual_cash_total)
+            .filter(ReportCashSummary.report_id == self.id)
             .scalar()
         )
-        if total is not None:
-            return float(total)
-        if "cash_count" in (self.completed_sections or []):
-            return 0.0
-        return None
+        return float(total) if total is not None else None
 
     @actual_cash_total.inplace.expression
     @classmethod
     def _actual_cash_total_expression(cls):
-        from blueprints.report.models.report_cash_count import ReportCashCount
+        from blueprints.shared.views import ReportCashSummary
 
-        counted = (
-            db.select(db.func.sum(ReportCashCount.quantity * ReportCashCount.cash_value))
-            .where(ReportCashCount.report_id == cls.id)
+        return (
+            db.select(ReportCashSummary.actual_cash_total)
+            .where(ReportCashSummary.report_id == cls.id)
             .correlate(cls)
             .scalar_subquery()
+            .label("actual_cash_total")
         )
-        # completed_sections is JSON; its text form is the same on both databases
-        marked = db.cast(cls.completed_sections, db.Text).like('%"cash_count"%')
-        return db.func.coalesce(counted, db.case((marked, 0.0), else_=None)).label("actual_cash_total")
 
     @property
     def sales_by_method(self):

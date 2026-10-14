@@ -1,7 +1,7 @@
 # Known gaps: in-scope routes no test reaches with a real request yet (tests/test_zz_route_coverage.py).
 # The gate fails on a route missing from this list AND on a listed route that a test now reaches.
 # Rewrite only on a complete run: MINTY_ROUTE_BASELINE=update (drop covered) or =add (also add misses).
-# 28 of 102 in-scope routes
+# 26 of 102 in-scope routes
 
 entity.billing_relogin                                  GET       /entity/<entity:entity_id>/billing-relogin         company
 entity.billing_sync_chart_accounts                      POST      /api/entities/<string:entity_id>/billing/sync-chart-accounts via ensure_valid_token
@@ -9,7 +9,6 @@ entity.billing_sync_chart_if_changed                    POST      /api/entities/
 entity.entity_contact_create                            POST      /entity/contact/create                             access_token
 entity.onboarding_account_codes                         GET POST  /api/onboarding/account-codes                      via get_account_code_options, save_account_codes
 entity.onboarding_contacts_create                       POST      /api/onboarding/contacts/create                    via create_contact
-entity.onboarding_opening_balance                       POST      /api/onboarding/opening-balance                    cash_addition, date, opening_balance
 entity.onboarding_server_time                           GET       /api/onboarding/server-time                        date
 entity.onboarding_xero_disconnect                       POST      /api/onboarding/xero/disconnect                    via disconnect_entity_xero
 report.create_report                                    GET POST  /create                                            ShopExpense, actual_cash_total, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, delivery_sales, expenses, opening_balance, shop_sales, total_sales, uploaded_by
@@ -18,7 +17,6 @@ report.download_statements                              GET POST  /admin/downloa
 report.edit_report                                      GET POST  /report/edit/<string:id>                           ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, delivery_sales, expenses, opening_balance, shop_sales, value_name
 report.expense_upload_files                             POST      /report/expense/upload_files                       ShopExpense, company, expenses
 report.expense_validate_drafts                          GET       /report/expense/validate_drafts                    ShopExpense
-report.generate_pdf_report                              GET       /report/<string:id>/export                         ReportSaleDetail, ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, delivery_sales, expenses, legacy_column, opening_balance, sale_name, shop_sales, uploaded_by, value_name
 report.report_edit_withdrawal                           POST      /report/<string:id>/edit/withdrawal                cash_addition, company, date, withdrawal_bank_account, withdrawal_type, xero_integrated_yes
 report.report_expense_create_contact                    POST      /report/expense/create_contact                     access_token
 report.report_expense_edit_submitted                    POST      /report/expense/edit/<string:expense_id>           ShopExpense, xero_integrated_yes

@@ -6,8 +6,13 @@ label, the message in grey and a `×`, stacked at the top-right. **No per-type c
 icon**: the label (Success / Error / Warning / Information) carries the type. This replaced
 the old coloured pill (5px border, rounded-full, a PNG icon per tone) in every app.
 
-The reference is minty-web's `components/ui/Toast.tsx`. Change all four together (minty-web,
-minty-payment-request-web, minty-onboarding-web, here).
+The reference is minty-web's `components/ui/Toast.tsx`. Change all three together (minty-web,
+minty-onboarding-web, here).
+
+**minty-payment-request-web left this rule on 2026-10-13** (the owner: Part 14 wins there): its
+toast is Part 14's - bottom-left on a computer, bottom-centre on a phone, for success only; an
+error is an inline alert, never a toast. Its row below still gives its file and API; the look is
+Part 14's until minty-web migrates to Parts 13–15 (`docs/design/`).
 
 ## The look, value for value
 

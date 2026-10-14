@@ -586,6 +586,16 @@
    "in_scope": false
   },
   {
+   "endpoint": "entity.onboarding_invite_resend",
+   "rule": "/api/onboarding/invite/resend",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {},
+   "in_scope": false
+  },
+  {
    "endpoint": "entity.onboarding_invite_cancel",
    "rule": "/api/onboarding/invite/cancel",
    "methods": [
@@ -603,9 +613,6 @@
    ],
    "touches": [],
    "touches_via_service": {
-    "outstanding_terms_context": [
-     "date"
-    ],
     "get_trial_modules_for_entities": [
      "company"
     ],
@@ -2673,72 +2680,8 @@
    "in_scope": false
   },
   {
-   "endpoint": "legal.accept_page",
-   "rule": "/legal/accept",
-   "methods": [
-    "GET"
-   ],
-   "touches": [
-    "date"
-   ],
-   "touches_via_service": {},
-   "in_scope": true
-  },
-  {
-   "endpoint": "legal.accept_submit",
-   "rule": "/legal/accept",
-   "methods": [
-    "POST"
-   ],
-   "touches": [
-    "system_role"
-   ],
-   "touches_via_service": {},
-   "in_scope": true
-  },
-  {
    "endpoint": "legal.user_consents",
    "rule": "/minty/api/users/<user_id>/consents",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.terms",
-   "rule": "/legal/terms",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.terms_version",
-   "rule": "/legal/terms/<version>",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.privacy",
-   "rule": "/legal/privacy",
-   "methods": [
-    "GET"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.privacy_version",
-   "rule": "/legal/privacy/<version>",
    "methods": [
     "GET"
    ],
@@ -2751,16 +2694,6 @@
    "rule": "/legal/invite-terms-status",
    "methods": [
     "POST"
-   ],
-   "touches": [],
-   "touches_via_service": {},
-   "in_scope": false
-  },
-  {
-   "endpoint": "legal.content",
-   "rule": "/legal/content/<kind>",
-   "methods": [
-    "GET"
    ],
    "touches": [],
    "touches_via_service": {},
@@ -3006,19 +2939,6 @@
   {
    "endpoint": "entity.handoff_minty_web",
    "rule": "/handoff/minty-web",
-   "methods": [
-    "GET"
-   ],
-   "touches": [
-    "entities",
-    "user_entity"
-   ],
-   "touches_via_service": {},
-   "in_scope": true
-  },
-  {
-   "endpoint": "entity.handoff_petty_cash_web",
-   "rule": "/handoff/petty-cash-web",
    "methods": [
     "GET"
    ],
@@ -3330,6 +3250,19 @@
    "in_scope": false
   },
   {
+   "endpoint": "entity.handoff_petty_cash_web",
+   "rule": "/handoff/petty-cash-web",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "user_entity"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
    "endpoint": "petty_cash_api.company_context",
    "rule": "/api/petty-cash/v1/companies/<entity_id>",
    "methods": [
@@ -3373,7 +3306,7 @@
   }
  ],
  "summary": {
-  "routes": 182,
-  "in_scope": 115
+  "routes": 176,
+  "in_scope": 113
  }
 }

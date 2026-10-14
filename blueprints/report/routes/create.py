@@ -8,7 +8,8 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.s3_storage import upload_file_to_s3
-from blueprints.report.services.shared import (future_date_error,
+from blueprints.report.services.shared import (first_report_defaults,
+                                               future_date_error,
                                                parse_nested_keys, safe_float,
                                                write_sales_detail_rows)
 from models.db import Entity, Report, ShopExpense, db, tz
@@ -114,26 +115,11 @@ def create_report():
             else:
                 logger.info(
                     "No previous reports found; this is the first report.")
-                # The floor for the first report is the onboarding date — the
-                # transaction_date of the opening draft seeded during onboarding
-                # (Step 4). The future-date guard above already rejected any date
-                # after today; the onboarding date is the lower bound when one
-                # exists.
-                # Draft-only, same reasoning as _onboarding_floor_date in
-                # opening.py: unfiltered, this resolves to the oldest SUBMITTED
-                # report and moves the floor date. The status filter is now
-                # load-bearing rather than implied by the table (Step 4a-6).
-                opening_draft = (
-                    Report.query.filter(
-                        Report.company == entity_id,
-                        Report.status == "draft",
-                    )
-                    .order_by(Report.transaction_date.asc())
-                    .first()
-                )
-                onboarding_date = (
-                    opening_draft.transaction_date if opening_draft else None
-                )
+                # The floor for the first report is the onboarding start date
+                # (entity_pettycash_settings.start_date). The future-date guard
+                # above already rejected any date after today; the onboarding
+                # date is the lower bound when one exists.
+                onboarding_opening, onboarding_date = first_report_defaults(entity_id)
                 if onboarding_date and transaction_date < onboarding_date:
                     logger.warning(
                         f"Transaction date {transaction_date} is before onboarding date {onboarding_date}"
@@ -144,6 +130,10 @@ def create_report():
                 next_transaction_date = transaction_date + timedelta(days=1)
 
             opening_balance = safe_float(request.form["opening_balance"])
+            if not last_report and onboarding_date:
+                # The first report opens at the onboarding balance - from the
+                # server, never the form.
+                opening_balance = onboarding_opening
             cash_addition = safe_float(request.form.get("cash_addition", 0))
             bank_deposit = safe_float(request.form.get("bank_deposit", 0))
             total_shop_sales = sum(shop_sales_data.values())
@@ -317,11 +307,12 @@ def create_report():
                     f"No closing balance or cash count data found, defaulting opening balance to 0 (from report {last_report.id})"
                 )
     else:
-        opening_balance = 0
+        # No report yet: the first one opens at the onboarding balance and date.
+        opening_balance, onboarding_date = first_report_defaults(entity_id)
     next_transaction_date = (
         (last_report.transaction_date +
          timedelta(
-             days=1)) if last_report else None)
+             days=1)) if last_report else onboarding_date)
     is_first_report = last_report is None
     entity = Entity.query.get(entity_id)
 
