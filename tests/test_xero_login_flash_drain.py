@@ -2,8 +2,8 @@
 
 Regression: a flash queued by a pre-login request (e.g. a stale deep link that
 flashed "Hmm, I looked everywhere but couldn't find that one." then redirected) survives redirects because Flask
-keeps flashes in the session until a rendered page consumes them. The dashboard
-template (entity_dashboard_v2.html) is the one page that renders the ``danger``
+keeps flashes in the session until a rendered page consumes them. The Petty Cash
+launch page (petty_cash/launch.html, through the shared toast) is the one page that renders the ``danger``
 category, so without draining, that old error toast pops up next to the
 "Logged in successfully" toast after a fresh Xero login.
 

@@ -168,6 +168,8 @@ def init_app(app, db):
 
     @app.context_processor
     def inject_globals():
+        from blueprints.report.services.daily_closing import report_status, stage_hrefs, stage_of, stage_progress
+        from blueprints.report.services.report_page import report_facts
         from blueprints.shared.sidebar import sidebar_context
 
         def bills_app_handoff_url(entity_id):
@@ -308,6 +310,13 @@ def init_app(app, db):
             "is_readonly_for": is_readonly_for,
             # the sidebar's menu and links (components/minty_sidebar.html)
             "sidebar_context": sidebar_context,
+            # the redesigned Daily Closing's stages (templates/petty_cash/closing_base.html)
+            "stage_progress": stage_progress,
+            "stage_of_section": stage_of,
+            "stage_hrefs": stage_hrefs,
+            "report_status": report_status,
+            # the Daily Report's lines, receipts and audit facts (report/ending.html, report/close.html)
+            "report_facts": report_facts,
             "currency_symbol": _entity_currency_symbol(),
         }
 

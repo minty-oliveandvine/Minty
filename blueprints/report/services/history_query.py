@@ -13,6 +13,15 @@ from models.db import Entity, Report, User
 from utils.entity import ensure_hk_timezone
 
 
+#: The history page's filter chips -> the Status pill labels each one keeps.
+STATUS_FILTERS = {
+    "draft": ("Draft",),
+    "submitted": ("Submitted",),
+    "published": ("Published to Xero",),
+    "failed": ("Publish failed", "Publishing to Xero"),
+}
+
+
 def _to_report_history_item(data):
     if not isinstance(data, dict):
         raise TypeError("Report history row must be a dict")
@@ -35,7 +44,10 @@ def get_entity_report_history(
     report_id=None,
     per_page=10,
     uploaded_by=None,
+    status=None,
 ):
+    """``status`` narrows the list to one Status pill (the history page's filter chips):
+    ``draft``, ``submitted``, ``published`` or ``failed`` - the tones report_status() gives."""
     if start_date and end_date and start_date > end_date:
         raise ValueError("Start date cannot be after end date.")
 
@@ -166,6 +178,15 @@ def get_entity_report_history(
     logger.info(
         f"After merge - Total reports: {len(report_list)}, November 5 reports: {len(nov5_in_merged)}"
     )
+
+    if status:
+        from blueprints.report.services.daily_closing import report_status
+
+        wanted = STATUS_FILTERS[status]
+        report_list = [
+            r for r in report_list
+            if report_status(r["status"], r["publishing_status"], r["xero_integrated_yes"])[0] in wanted
+        ]
 
     total_count = len(report_list)
     total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1

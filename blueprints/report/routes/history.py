@@ -5,10 +5,13 @@ from flask_login import current_user, login_required
 
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.report import report_bp
-from blueprints.report.services.history_query import get_entity_report_history
+from blueprints.report.services.history_query import STATUS_FILTERS, get_entity_report_history
 from models.db import Entity
 from services.authz import require_entity_access
 from services.permission_policy import Permission, has_permission
+
+
+PER_PAGE = (10, 25, 50, 100)
 
 
 @report_bp.route("/entity/<entity:entity_id>/petty-cash/reports", methods=["GET"])
@@ -36,9 +39,15 @@ def entity_report_history(entity_id):
 
     start_date = request.args.get("start_date") or ""
     end_date = request.args.get("end_date") or ""
-    page = request.args.get("page", 1, type=int)
+    page = max(request.args.get("page", 1, type=int) or 1, 1)
     report_id = request.args.get("report_id")
-    per_page = 10
+    # Rows per page (Part 14 Pagination: 10/25/50/100) and the status chip, both in the URL.
+    per_page = request.args.get("per_page", 10, type=int)
+    if per_page not in PER_PAGE:
+        per_page = 10
+    status = request.args.get("status") or None
+    if status not in STATUS_FILTERS:
+        status = None
 
     try:
         report_data = get_entity_report_history(
@@ -49,6 +58,7 @@ def entity_report_history(entity_id):
             report_id=report_id,
             per_page=per_page,
             uploaded_by=None if can_view_entity_history else current_user.username,
+            status=status,
         )
     except ValueError:
         # The detail belongs in the log, not in the body the client renders.
@@ -78,4 +88,7 @@ def entity_report_history(entity_id):
         can_edit_entity_reports=can_edit_entity_reports,
         can_delete_entity_reports=can_delete_entity_reports,
         can_publish=can_publish,
+        per_page=per_page,
+        per_page_choices=PER_PAGE,
+        status=status,
     )

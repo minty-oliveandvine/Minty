@@ -1,7 +1,8 @@
 """Tests for report deletion cleanup and stale expense prevention.
 
 Verifies the three fixes:
-1. sessionStorage snapshot includes draft_id and restore logic validates it.
+1. no stale expenses come back: the Expenses stage keeps no browser copy (was: the snapshot
+   carried draft_id and the restore checked it - the copy is gone since the Part 15 redesign).
 2. delete_report cleans up ReportSaleDetail before the report row.
 3. delete_report cleans up sibling drafts for the same (entity, date).
 """
@@ -23,66 +24,30 @@ def _read(path: Path) -> str:
 # 1. Expense template sessionStorage snapshot includes draft_id
 # ---------------------------------------------------------------------------
 
-class TestExpenseSnapshotIncludesDraftId:
-    """The expense page must store draft_id in the sessionStorage/history.state
-    snapshot and validate it before restoring cached expenses."""
+class TestExpenseStageKeepsNoBrowserCopy:
+    """The redesigned Expenses stage (Part 15.15c) saves each entry the moment it is added, edited
+    or deleted, and draws the list from the server. So there is no pending-expense snapshot to
+    restore - and so nothing stale from another day's draft can come back: a page restored from
+    the back/forward cache reloads instead (static/js/pc_closing.js). Replaces the old snapshot
+    checks (draft_id in the snapshot, the restore guards), which guarded a copy that is gone."""
 
-    def _get_expense_html(self) -> str:
-        return _read(TEMPLATES / "report" / "expense.html")
+    def _sources(self) -> str:
+        return _read(TEMPLATES / "report" / "expense.html") + _read(ROOT / "static" / "js" / "pc_expenses.js")
 
-    def test_snapshot_contains_draft_id_field(self):
-        """Both snapshot creation sites must include draft_id in the object."""
-        content = self._get_expense_html()
-        snapshot_pattern = re.compile(
-            r"const\s+snapshot\s*=\s*\{[^}]*draft_id\s*:", re.DOTALL
-        )
-        matches = snapshot_pattern.findall(content)
-        assert len(matches) >= 2, (
-            f"Expected at least 2 snapshot definitions with draft_id, found {len(matches)}. "
-            "Both submitAllExpenses() and the form-submit path must include draft_id."
-        )
+    def test_no_snapshot_of_expenses_is_written_or_restored(self):
+        content = self._sources()
+        for gone in ("pending_expenses", "refresh_expense_on_back", "pendingExpenses", "history.replaceState"):
+            assert gone not in content, gone
 
-    def test_snapshot_reads_draft_id_from_template(self):
-        """The draft_id value must come from the Jinja2 template variable."""
-        content = self._get_expense_html()
-        assert "draft_id or" in content or 'draft_id' in content, (
-            "Snapshot must read draft_id from Jinja2 template context"
-        )
-        assert re.search(r"draftIdValue\s*=\s*'", content), (
-            "Expected draftIdValue variable to be set from Jinja2 {{ draft_id }}"
-        )
+    def test_a_restored_page_reloads_from_the_server(self):
+        closing = _read(ROOT / "static" / "js" / "pc_closing.js")
+        assert re.search(r"event\.persisted\)\s*window\.location\.reload\(\)", closing)
+        assert "pc_closing.js" in _read(TEMPLATES / "petty_cash" / "closing_base.html")
+        assert "{% extends 'petty_cash/closing_base.html' %}" in _read(TEMPLATES / "report" / "expense.html")
 
-    def test_restore_validates_draft_id_from_history_state(self):
-        """The pageshow handler must check draft_id when restoring from history.state."""
-        content = self._get_expense_html()
-        assert re.search(
-            r"hs\.draft_id\s*===\s*currentDraftId", content
-        ), (
-            "Restore from history.state must validate hs.draft_id === currentDraftId"
-        )
-
-    def test_restore_validates_draft_id_from_session_storage(self):
-        """The pageshow handler must check draft_id when restoring from sessionStorage."""
-        content = self._get_expense_html()
-        assert re.search(
-            r"parsed\.draft_id\s*===\s*currentDraftId", content
-        ), (
-            "Restore from sessionStorage must validate parsed.draft_id === currentDraftId"
-        )
-
-    def test_stale_cleanup_checks_draft_id_mismatch(self):
-        """The normal-page-load cleanup must detect draft_id mismatch and clear stale data."""
-        content = self._get_expense_html()
-        assert "draftMismatch" in content, (
-            "Stale snapshot cleanup must check for draft_id mismatch"
-        )
-
-    def test_current_draft_id_declared_in_restore_block(self):
-        """The pageshow restore block must declare currentDraftId from the template."""
-        content = self._get_expense_html()
-        assert re.search(r"const\s+currentDraftId\s*=", content), (
-            "Restore block must declare currentDraftId for validation"
-        )
+    def test_every_save_reloads_the_list_from_the_server(self):
+        script = _read(ROOT / "static" / "js" / "pc_expenses.js")
+        assert script.count("reloadWith(") >= 4  # add, edit, report edit, delete
 
 
 # ---------------------------------------------------------------------------

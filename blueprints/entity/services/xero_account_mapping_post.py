@@ -199,8 +199,12 @@ def process_xero_account_mapping_post(
     *,
     return_view: str,
     defer_success_redirect: bool = False,
+    with_country: bool = True,
 ) -> Any:
     """Apply mapping from ``request.form``.
+
+    ``with_country=False`` leaves the company's country and currency alone - Petty Cash
+    Settings' mapping card saves only the mapping (its country card saves those).
 
     Returns ``None`` when no ``main_bank`` field was submitted (caller may continue).
     With ``defer_success_redirect`` a successful save also returns ``None``: the caller
@@ -247,7 +251,8 @@ def process_xero_account_mapping_post(
 
         entity = Entity.query.get_or_404(entity_id)
 
-        apply_country_currency_selection(entity, request.form)
+        if with_country:
+            apply_country_currency_selection(entity, request.form)
 
         has_existing_settings = (
             EntityPettycashSettings.query.filter_by(entity_id=entity_id).first()

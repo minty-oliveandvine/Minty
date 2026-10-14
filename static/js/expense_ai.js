@@ -1,5 +1,6 @@
 /*
- * AI-assisted expense capture — the Add New Expense card (plan §7.4, §9.3).
+ * AI-assisted expense capture — the expense Drawer of the Expenses stage
+ * (templates/report/expense.html, static/js/pc_expenses.js; plan §7.4, §9.3, Part 15.14).
  *
  * Loaded ONLY when EXPENSE_AI_ENABLED is on. With the flag off the page never
  * receives this file and behaves exactly as it did before the feature existed.
@@ -57,17 +58,13 @@
     // is happening — otherwise the page looks broken.
     var indicator = document.createElement('div');
     indicator.id = 'aiReadingIndicator';
-    indicator.className =
-      'hidden mt-3 mb-1 flex items-center gap-3 rounded-xl border ' +
-      'border-[#54D3DA] bg-[#54D3DA]/10 px-4 py-3';
+    // Part 14 Inline alert, Info tone; the wording is Part 15.14's ("Minty is reading ...").
+    indicator.className = 'hidden pc-alert pc-alert--info';
     indicator.innerHTML =
-      '<svg class="animate-spin h-5 w-5 text-[#31B6BD] shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>' +
-      '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>' +
-      '</svg>' +
-      '<div class="min-w-0">' +
-      '<p class="text-sm font-medium text-[#31B6BD]">Reading the receipt&hellip;</p>' +
-      '<p class="text-xs text-gray-500">This can take a few seconds. ' +
+      '<span class="pc-spinner" aria-hidden="true"></span>' +
+      '<div class="pc-alert__body">' +
+      '<p class="pc-alert__title">Minty is reading the receipt&hellip;</p>' +
+      '<p class="pc-alert__text">This can take a few seconds. ' +
       'You can start typing now if you prefer.</p>' +
       '</div>';
     uploadArea.parentNode.insertBefore(indicator, uploadArea.nextSibling);
@@ -113,22 +110,18 @@
 
     unmarkField(inputId);
     input.dataset.aiSuggested = 'true';
-    input.classList.add('ring-2', 'ring-[#54D3DA]', 'ring-offset-1');
+    input.classList.add('pc-ai-suggested');
 
     // The original inline style, sized up: 14px text and a 16px icon instead
     // of 12px and 12px. Deliberately light-touch — the ring on the field is
     // the main signal and this is the label that explains it.
     var badge = document.createElement('div');
     badge.id = 'aiBadge_' + inputId;
-    badge.className =
-      'mt-1.5 flex items-center gap-1.5 text-sm text-[#31B6BD]';
+    badge.className = 'pc-ai-badge';
     badge.innerHTML =
-      '<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" ' +
-      'aria-hidden="true">' +
-      '<path d="M12 2l2.4 6.2L21 10l-6.6 1.8L12 18l-2.4-6.2L3 10l6.6-1.8L12 2z"/>' +
-      '</svg>' +
+      '<span class="pc-icon pc-icon--16" aria-hidden="true">auto_awesome</span>' +
       '<span>' + label + '</span>' +
-      '<button type="button" class="underline hover:no-underline font-medium" ' +
+      '<button type="button" ' +
       'aria-label="Clear the suggested value for this field">Clear</button>';
 
     badge.querySelector('button').addEventListener('click', function () {
@@ -152,8 +145,7 @@
     var input = document.getElementById(inputId);
     if (input) {
       delete input.dataset.aiSuggested;
-      input.classList.remove('ring-2', 'ring-offset-1',
-                             'ring-[#54D3DA]', 'ring-amber-400');
+      input.classList.remove('pc-ai-suggested');
       input.removeEventListener('input', onUserEdit);
       input.removeEventListener('change', onUserEdit);
     }
@@ -209,11 +201,9 @@
     // panel, same underlined link.
     var prompt = document.createElement('div');
     prompt.id = 'aiDetectedSupplier';
-    prompt.className =
-      'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm';
+    prompt.className = 'pc-ai-note';
 
     var line = document.createElement('p');
-    line.className = 'text-gray-600';
     // textContent, not innerHTML: this string came off a receipt image and is
     // untrusted. It is never parsed as markup.
     line.textContent = 'Receipt says "' + name + '", which is not in your '
@@ -221,8 +211,6 @@
 
     var button = document.createElement('button');
     button.type = 'button';
-    button.className =
-      'mt-1 font-medium text-[#31B6BD] underline hover:no-underline text-left';
     button.textContent = 'Add "' + name + '" as a new supplier';
     button.addEventListener('click', function () {
       if (typeof window.showNewContactSection === 'function') {
@@ -276,18 +264,14 @@
 
     var note = document.createElement('div');
     note.id = 'aiMismatch_' + inputId;
-    note.className =
-      'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm';
+    note.className = 'pc-ai-note';
 
     var line = document.createElement('p');
-    line.className = 'text-gray-600';
     // textContent: this came off a receipt image and is not trusted markup.
     line.textContent = wording;
 
     var button = document.createElement('button');
     button.type = 'button';
-    button.className =
-      'mt-1 font-medium text-[#31B6BD] underline hover:no-underline text-left';
     button.textContent = 'Use the value from the receipt';
     button.addEventListener('click', function () {
       apply();
@@ -473,8 +457,9 @@
   }
 
   function formIsOpen() {
+    // The entry form lives in a Drawer, shown by removing its [hidden] (pc_overlay.js).
     var form = document.getElementById('addExpenseForm');
-    return !!form && !form.classList.contains('hidden');
+    return !!form && !form.closest('[hidden]');
   }
 
   // ------------------------------------------------------- shrink to upload

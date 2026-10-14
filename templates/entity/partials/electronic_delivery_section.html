@@ -2,7 +2,7 @@
   The Electronic and Delivery cards of Petty Cash Settings (templates/entity/settings_entity.html),
   in Payment Settings' card look. static/js/petty_cash_settings.js loads the company's methods
   into the lists, draws each row (rename by clicking the name; Move up, Move down and Delete under
-  the ⋮), and keeps every change pending until Save Changes.
+  the ⋮), and keeps every change pending until that card's Save (Part 15.20b).
 
   "Add New Method" opens the catalogue picker: a method another company already uses ("VISA") is
   picked from the list rather than retyped ("Viza" would mint a second catalogue row); "+ Other"
@@ -26,7 +26,7 @@
     <h2 class="pcs-card-heading">
       <button type="button" class="pcs-card-toggle" data-card-toggle aria-expanded="true" aria-controls="{{ kind.type }}Content">
         <span class="pcs-card-title">{{ kind.title }}</span>
-        <span class="material-symbols-outlined pcs-chevron" aria-hidden="true">expand_more</span>
+        <span class="material-symbols-rounded pcs-chevron" aria-hidden="true">expand_more</span>
       </button>
     </h2>
     <p class="pcs-card-sub">{{ kind.sub }}</p>
@@ -36,7 +36,7 @@
     <ul id="{{ kind.list }}" class="pcs-methods" aria-label="{{ kind.title }} methods"></ul>
 
     <button type="button" id="{{ kind.add }}" class="pcs-btn pcs-btn-outline pcs-btn-wide" disabled>
-      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+      <span class="material-symbols-rounded" aria-hidden="true">add</span>
       Add New Method
     </button>
 
@@ -45,7 +45,7 @@
       <div class="pcs-combo">
         <input type="text" id="{{ kind.catalog }}Input" class="pcs-combo-input" placeholder="{{ kind.pick }}" autocomplete="off"
                role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="{{ kind.catalog }}Suggestions">
-        <span class="pcs-combo-chevron" aria-hidden="true"><span id="{{ kind.catalog }}DropdownIcon" class="material-symbols-outlined">expand_more</span></span>
+        <span class="pcs-combo-chevron" aria-hidden="true"><span id="{{ kind.catalog }}DropdownIcon" class="material-symbols-rounded">expand_more</span></span>
         <div id="{{ kind.catalog }}Suggestions" class="pcs-suggest hidden" role="listbox"></div>
       </div>
       <div id="{{ kind.name_wrap }}" class="pcs-add-form hidden">
@@ -58,5 +58,6 @@
       </div>
     </div>
   </div>
+  {{ card_save(kind.type, sales_view_only) }}
 </section>
 {% endfor %}

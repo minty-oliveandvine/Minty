@@ -1,0 +1,87 @@
+{#
+  The page shell of the redesigned Petty Cash pages (Parts 13-15; docs/features/petty-cash-design.md).
+
+  A child sets, at its top level:
+    pc_title         the <title> (the page's name - never the module or company alone)
+    pc_entity        the company (an Entity) the page is about
+    pc_back_url      where the App bar's back goes (optional; none = no back)
+    pc_back_label    "Back to ..." for screen readers, and the label beside it from 640px
+    pc_header_back   true when the page header has its own back link (a Record page): the App
+                     bar's back then shows on phones only
+    pc_bare          true for a page read without signing in (a shared Daily Report): the App
+                     bar keeps the mark and the company only - no profile, menu or sidebar (15.7)
+  and fills {% block content %} (inside <main>), {% block overlays %} and {% block scripts %}.
+
+  No Tailwind, no jQuery: minty_tokens.css (Part 13) + pc_ui.css (Part 14). The sidebar and the
+  toast are Flask's shared ones (components/minty_sidebar.html, components/flash_messages.html),
+  included here ONCE so every page has them (tests/test_sidebar.py, test_flash_messages_drain.py).
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ pc_title }}{% if pc_entity %} - {{ pc_entity.name }}{% endif %}</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,400,0..1,0&display=block">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/minty_tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pc_ui.css') }}">
+  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
+  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+  {% block head %}{% endblock %}
+</head>
+<body class="pc">
+  {% include 'components/flash_messages.html' %}
+
+  <header class="pc-appbar">
+    <div class="pc-appbar__inner">
+      {% if pc_back_url %}
+      {% set _back = (pc_back_label or 'Back')|replace('Back to ', '') %}
+      <a class="pc-appbar__back{% if pc_header_back %} pc-appbar__back--phone{% endif %}" href="{{ pc_back_url }}" id="reportBackLink" aria-label="{{ pc_back_label or 'Back' }}">
+        <span class="pc-icon pc-icon--24" aria-hidden="true">chevron_left</span>
+        <span class="pc-appbar__back-label pc-t-body-m" aria-hidden="true">{{ _back[:1]|upper ~ _back[1:] }}</span>
+      </a>
+      {% endif %}
+      <img class="pc-appbar__mark" src="{{ url_for('static', filename='img/minty-mark.png') }}" alt="Minty" width="40" height="40">
+      <span class="sr-only">Petty Cash</span>
+      <div class="pc-appbar__end">
+        {% if pc_entity %}
+        <span class="pc-appbar__entity">
+          <span class="pc-icon" aria-hidden="true">corporate_fare</span>
+          <span class="pc-appbar__entity-name pc-t-body-m">{{ pc_entity.name }}</span>
+        </span>
+        {% endif %}
+        {% if not pc_bare %}
+        {% set _fn = (current_user.first_name or '')[:1] %}
+        {% set _ln = (current_user.last_name or '')[:1] %}
+        <a class="pc-appbar__avatar" href="{{ bills_app_profile_url(pc_entity.id if pc_entity else None) }}"
+           data-sidebar-open="profile" aria-label="My Profile"
+           title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}"><span aria-hidden="true">{{ ((_fn ~ _ln)|upper) if (_fn or _ln) else '?' }}</span></a>
+        <button type="button" class="pc-appbar__menu" data-sidebar-open="menu" aria-label="Open navigation menu">
+          <span class="pc-icon pc-icon--24" aria-hidden="true">menu</span>
+        </button>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  {% if not pc_bare %}
+  {% set org = pc_entity %}
+  {% include 'components/minty_sidebar.html' %}
+  {% endif %}
+
+  <main class="pc-main" id="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block overlays %}{% endblock %}
+
+  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/pc_overlay.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/pc_validate.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

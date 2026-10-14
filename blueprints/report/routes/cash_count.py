@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
+from blueprints.report.services.bank_deposit import NegativeCashBeforeDeposit, apply_bank_deposit
 from blueprints.report.services.cash_denominations import (
     build_denomination_rows, form_field_for,
     refresh_cash_stock, resolve_denominations_for_entity, save_cash_count_details)
@@ -225,6 +226,27 @@ def report_cash_count(id=None, entity_id=None):
             )
             return redirect(url_for("report.report_opening"))
 
+        action_type = request.form.get("action_type", "save_next")
+        # Bank Deposit is the first block of this stage since the Part 15 redesign (D15-05): the
+        # page sends it with the count and both are saved in one commit. A client that does not
+        # send it (the old deposit step already saved it) leaves the deposit as it is.
+        deposit_sent = "bank_deposit" in request.form
+        if deposit_sent:
+            try:
+                apply_bank_deposit(
+                    current_draft, safe_float(request.form.get("bank_deposit", 0)), current_user.username
+                )
+            except NegativeCashBeforeDeposit:
+                db.session.rollback()
+                flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "danger")
+                return redirect(
+                    url_for(
+                        "report.report_cash_count",
+                        entity_id=entity_id,
+                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
+                    )
+                )
+
         expected_balance = (
             (current_draft.opening_balance or 0)
             + (current_draft.cash_addition or 0)
@@ -338,6 +360,14 @@ def report_cash_count(id=None, entity_id=None):
             # Track last editor
             current_draft.uploaded_by = current_user.username
 
+            # Part 15.15d: any difference needs a reason before the day moves on. Save & Next
+            # without one still saves what was counted (nothing typed is lost) but stays here.
+            reason_needed = (
+                action_type == "save_next"
+                and discrepancy_type != "none"
+                and not (discrepancy_reason or "").strip()
+            )
+
             # STEP 3.5: the create/update branches on ReportCashCountDraft and
             # the paired ReportDetail upsert are gone. Everything they wrote now
             # has exactly one home:
@@ -415,9 +445,40 @@ def report_cash_count(id=None, entity_id=None):
                 new_value=f"Cash Count: ${actual_cash_total + safe_box_balance}",
             )
 
+            if deposit_sent:
+                log_history(
+                    report_id=current_draft.id,
+                    company=entity_id,
+                    user_id=current_draft.uploaded_by,
+                    action="updated",
+                    field_changed="bank_deposit",
+                    old_value="previous_deposit",
+                    new_value=f"Bank Deposit: ${current_draft.bank_deposit}",
+                )
+
             # Update progress tracking
-            action_type = request.form.get("action_type", "save_next")
+            if reason_needed:
+                current_draft.current_section = "cash_count"
+                db.session.commit()
+                amount = abs(discrepancy_amount)
+                message = (
+                    f"The count is {amount:,.2f} {'short' if discrepancy_type == 'short' else 'over'}. "
+                    "Add a reason for the difference to continue."
+                )
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return jsonify({"status": "error", "message": message, "field": "discrepancy_reason"}), 422
+                flash(message, "warning")
+                return redirect(
+                    url_for(
+                        "report.report_cash_count",
+                        entity_id=entity_id,
+                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
+                        reason="needed",
+                    )
+                )
             if action_type == "save_next":
+                if deposit_sent:
+                    update_draft_progress(current_draft, action_type, "deposit", "cash_count")
                 update_draft_progress(
                     current_draft, action_type, "cash_count", "ending"
                 )
@@ -430,7 +491,6 @@ def report_cash_count(id=None, entity_id=None):
             db.session.commit()
 
             # Check action type and redirect accordingly
-            action_type = request.form.get("action_type", "save_next")
             if action_type == "save_next":
                 return redirect(
                     url_for(

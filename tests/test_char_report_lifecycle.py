@@ -313,8 +313,10 @@ def test_deposit_closes_the_balance(shop, client):
     totals = draft_totals(client, entity, REPORT_DATE)
     assert money(totals["bank_deposit"]) == money("500.00"), totals
     assert money(totals["closing_balance"]) == money("825.00"), totals
+    # Bank Deposit is the first block of the Cash Count stage since the Part 15 redesign: the old
+    # step's page goes on there (tests/test_petty_cash_cash_count_stage.py)
     page = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/deposit?transaction_date={F.iso(REPORT_DATE)}")
-    assert page.status_code == 200
+    assert page.status_code == 302 and "/cash-count" in page.headers["Location"]
 
 
 # ---- through to posted ----------------------------------------------------------------
@@ -349,9 +351,9 @@ def history_rows(client, entity):
 
 
 def history_badges(client, entity) -> list[str]:
-    """The status word each row's badge shows (the JS on the page also says "Published")."""
+    """The Status pill each row shows (Part 14 Status pill: the words carry the meaning)."""
     html = history_rows(client, entity)
-    return re.findall(r'inline-flex items-center [^"]*">(Published|Publish failed|Submitted|Draft)', html)
+    return re.findall(r'class="pc-pill pc-pill--\w+" data-tone="\w+">([^<]+)<', html)
 
 
 def test_exact_cash_count_has_no_discrepancy(shop, client):
@@ -598,7 +600,7 @@ def test_an_edit_after_a_xero_publish_drops_the_report_back_to_submitted(shop, c
         report.xero_integrated = True
         report.publishing_status = "completed"
         db.session.commit()
-    assert history_badges(client, entity) == ["Published"]
+    assert history_badges(client, entity) == ["Published to Xero"]
 
     resp = client.post(f"/report/{report_id}/edit/discrepancy-reason", data={"discrepancy_reason": "recounted"})
 
@@ -837,7 +839,8 @@ def test_an_all_zero_count_reads_as_counted_zero(shop, client, app):
     owner, entity = shop
     F.login(client, owner)
     walk_to_cash_count(client, entity)
-    post_cash_count(client, entity, REPORT_DATE, {}, discrepancy="0")
+    # an empty drawer against 775.00 expected is a difference, which needs a reason to be done
+    post_cash_count(client, entity, REPORT_DATE, {}, discrepancy="0", reason="drawer emptied")
 
     with app.app_context():
         report = Report.query.filter_by(entity_id=entity.id, transaction_date=REPORT_DATE).one()

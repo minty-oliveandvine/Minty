@@ -56,9 +56,12 @@ test.describe('login and terms', () => {
     await page.goto(`/entity/${creds.entityId}`);
     // the full id moves to the company's own address, /entity/<shortid>/<name>/petty-cash (2026-10-05)
     await expect(page).toHaveURL(new RegExp(`/entity/${creds.entityId.slice(0, 8)}/[^/?]+/petty-cash$`));
-    // the dashboard: initials in the header, the wizard entry point, the quick actions
-    await expect(page.getByRole('button', { name: /start new report/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /view history/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /entity settings/i })).toBeVisible();
+    // the launch page (Part 15.6a): "Petty Cash", the work card's one Primary (the seed wipes the
+    // shop's reports, so it is a first use), and the recent reports; the calendar and Quick
+    // Actions are gone - history and settings are in the sidebar
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Petty Cash');
+    await expect(page.getByRole('link', { name: /start today's daily closing/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Recent reports' })).toBeVisible();
+    await expect(page.locator('[data-sidebar-open="menu"]')).toBeVisible();
   });
 });
