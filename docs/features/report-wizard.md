@@ -34,6 +34,14 @@ its first choice. The page's script also threw at load on a removed "Opening Cas
 skipping the rest of its start-up (scroll-to-centre on focus, as the other steps have); both
 are gone, and e2e `02` fails on any page error there.
 
+**Opening and Sales save through services** (`services/opening.py`, `services/sales.py`) that the
+Petty Cash API shares ([petty-cash-api.md](petty-cash-api.md)). Sales writes a `report_sale` row
+for every method the page shows (an emptied field is zero) and recomputes the closing balance
+after the rows. Two bugs went with the extraction (2026-10-14): a re-save closed on the cash
+typed the time before, and a method the page has no field for (an `other` one that is not Cash)
+was zeroed by every save. A Sales save still makes the saver the report's creator
+(`uploaded_by`, "track last editor"), on purpose.
+
 The next report's date is the day after the last submitted one (`next_transaction_date`);
 a company cannot skip or duplicate a day. `POST /report/<id>/convert-to-draft` reopens a
 submitted report as the draft again (only the most recent one).

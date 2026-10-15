@@ -3328,10 +3328,37 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.sales_page",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/sales",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "report_sale_detail"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_sales_step",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/sales",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "report",
+    "report_sale_detail",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 178,
-  "in_scope": 115
+  "routes": 180,
+  "in_scope": 117
  }
 }

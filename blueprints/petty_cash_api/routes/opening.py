@@ -59,9 +59,24 @@ def _currency_code(entity_id) -> str | None:
     return currency.currency_code.strip() if currency is not None and currency.currency_code else None
 
 
+def draft_payload(draft) -> dict | None:
+    """The day's report as every wizard step's page needs it (its badge and its stepper)."""
+    from blueprints.report.services.shared import header_publishing_status_for
+
+    if draft is None:
+        return None
+    return {
+        "id": str(draft.id),
+        "status": _text(draft.status),
+        "current_section": draft.current_section,
+        "completed_sections": list(draft.completed_sections or []),
+        "xero_integrated": bool(draft.xero_integrated),
+        "publishing_status": _text(header_publishing_status_for(report_id=draft.id)),
+    }
+
+
 def opening_payload(entity_id, selected: date | None) -> dict:
     from blueprints.report.services.opening import opening_state, starting_cash_balance
-    from blueprints.report.services.shared import header_publishing_status_for
 
     state = opening_state(entity_id, selected)
     draft = state["draft"]
@@ -71,18 +86,7 @@ def opening_payload(entity_id, selected: date | None) -> dict:
     return {
         "transaction_date": day.isoformat(),
         "currency_code": _currency_code(entity_id),
-        "draft": (
-            {
-                "id": str(draft.id),
-                "status": _text(draft.status),
-                "current_section": draft.current_section,
-                "completed_sections": list(draft.completed_sections or []),
-                "xero_integrated": bool(draft.xero_integrated),
-                "publishing_status": _text(header_publishing_status_for(report_id=draft.id)),
-            }
-            if draft
-            else None
-        ),
+        "draft": draft_payload(draft),
         "starting_cash_balance": _money(starting_cash_balance(state)),
         "yesterday_closing_balance": _money(state["yesterday_closing_balance"]),
         "safebox_balance": _money(state["safebox_balance"]),

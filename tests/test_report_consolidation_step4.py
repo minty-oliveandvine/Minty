@@ -111,22 +111,26 @@ class TestPublishReportLookupIsTenantScoped:
 
 class TestLoadBearingStatusFilters:
 
-    def test_sales_recovery_path_is_scoped_to_drafts(self):
-        """sales.py's recovery lookup must be draft-scoped.
+    def test_sales_save_lookup_is_scoped_to_drafts(self):
+        """sales.py's save must only ever find a DRAFT.
 
-        It was deliberately status-AGNOSTIC and forces status="draft" on
-        whatever it finds. That was survivable while report_draft was its own
-        table. Post-collapse an unfiltered match can return a genuinely
-        submitted report — and the forced flip would UN-SUBMIT it.
+        Its old recovery lookup was status-AGNOSTIC and forced status="draft" on
+        whatever it found - post-collapse that could UN-SUBMIT a posted report.
+        Since the service extraction (2026-10-14) the save has one lookup, and
+        nothing on the path sets a status (tests/test_report_sales_state.py pins
+        that a submitted day is not saved over).
         """
         src = _source("blueprints/report/routes/sales.py")
-        idx = src.find("any_draft = Report.query.filter(")
-        assert idx != -1, "sales.py recovery lookup (any_draft) not found"
+        idx = src.find("report_draft = Report.query.filter_by(")
+        assert idx != -1, "sales.py save lookup (report_draft) not found"
         block = src[idx:idx + 400]
-        assert 'Report.status == "draft"' in block, (
-            "the sales.py recovery lookup must be constrained to drafts; "
-            "without it, forcing status='draft' can un-submit a posted report"
+        assert 'status="draft"' in block, (
+            "the sales.py save lookup must be constrained to drafts"
         )
+        for path in ("blueprints/report/routes/sales.py", "blueprints/report/services/sales.py"):
+            assert '.status = "draft"' not in _source(path), (
+                f"{path} must not force a status: that is how a posted report gets un-submitted"
+            )
 
     def test_sibling_delete_is_scoped_to_drafts(self):
         """delete_report's sibling sweep must be draft-scoped.

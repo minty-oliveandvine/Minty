@@ -8,14 +8,12 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
-from blueprints.report.services.history import log_history
+from blueprints.report.services.sales import sales_methods as get_unique_sale_info_for_entity
 from blueprints.report.services.shared import (
-    check_user_has_entities, get_cash_sales_from_detail,
-    header_publishing_status_for, parse_nested_keys, resolve_report_entity_id,
-    safe_float, update_draft_progress,
-    update_report_draft_sales_from_detail)
+    check_user_has_entities, header_publishing_status_for, parse_nested_keys,
+    resolve_report_entity_id, safe_float)
 from blueprints.shared.entity_display import entity_badge_data
-from models.db import Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, db
+from models.db import Entity, Report, ReportSaleDetail, SaleInfo, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -45,22 +43,6 @@ def resolve_posted_sale_amount(field, shop_sales_data, delivery_sales_data):
     return 0.0
 
 
-def get_unique_sale_info_for_entity(entity_id):
-    """The company's enabled sales methods, in Settings-page order.
-
-    Returns the ``EntitySaleSetting`` links (each with its catalogue row joined, so
-    ``.sale_name`` / ``.value_name`` / ``.type`` read through). One link per catalogue row is
-    the table's key since C3, so there is nothing to de-duplicate any more.
-    """
-    return (
-        EntitySaleSetting.query.join(SaleInfo, SaleInfo.id == EntitySaleSetting.sale_id)
-        .filter(
-            EntitySaleSetting.entity_id == entity_id,
-            EntitySaleSetting.is_active.is_(True),
-        )
-        .order_by(EntitySaleSetting.display_order.asc(), SaleInfo.sale_name.asc())
-        .all()
-    )
 
 
 @report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/sale", methods=["GET", "POST"])
@@ -191,564 +173,50 @@ def report_sale(id=None, entity_id=None):
     # it was deleted rather than migrated off the ReportDraft join.
 
     if request.method == "POST":
+        from blueprints.report.services.sales import save_sales
+
         try:
-            # Get action type from form
             action_type = request.form.get("action_type", "save_next")
-
-            # Get transaction date from form
             transaction_date_str = request.form.get("transaction_date")
-
             if transaction_date_str:
-                transaction_date = datetime.strptime(
-                    transaction_date_str, "%Y-%m-%d"
-                ).date()
+                transaction_date = datetime.strptime(transaction_date_str, "%Y-%m-%d").date()
             else:
                 transaction_date = datetime.now().date()
 
-            # If edit mode is enabled, check for any existing report for this
-            # date
-            if is_edit_mode:
-                # Edit mode targets a SUBMITTED report. Drafts live in
-                # `report` since Stage 4a, so without the status filter this
-                # picks up an in-progress draft and "edits" that instead.
-                existing_report = Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date == transaction_date,
-                    db.or_(Report.status.is_(None), Report.status != "draft"),
-                ).first()
-                if existing_report:
-                    # Update existing report sales data
-                    logger.info(
-                        f"Edit mode - updating sales for report {existing_report.id}"
-                    )
-                    # The sales update logic will handle updating the report
-                    # One row covers both draft and submitted
-
-            # Check for existing draft: by id when in URL, else by (entity,
-            # transaction_date)
-            logger.info("Sales form - Looking for existing draft:")
-            logger.info(f"  Company: {entity_id}")
-            logger.info(f"  Transaction date: {transaction_date}")
-            if id:
-                existing_draft = Report.query.filter_by(
-                    id=id,
-                    company=entity_id,
-                    status="draft",
-                ).first()
-            else:
-                existing_draft = Report.query.filter_by(
-                    company=entity_id,
-                    transaction_date=transaction_date,
-                    status="draft",
-                ).first()
-
-            logger.info(
-                f"Sales form - Found existing draft: {existing_draft.id if existing_draft else 'None'}"
-            )
-
-            # Debug logging only — deliberately unfiltered so the log shows
-            # every row and its status. Nothing branches on this result.
-            # Now spans submitted reports too, since they share the table.
-            # Still debug-only; nothing branches on it.
-            all_user_drafts = Report.query.filter(
-                Report.company == entity_id,
-                Report.uploaded_by == current_user.username,
-            ).all()
-            logger.info(
-                f"Sales form - All drafts for user {current_user.username}: {[(d.id, d.transaction_date, d.status) for d in all_user_drafts]}"
-            )
-
-            report_draft: Report | None = existing_draft
-
-            if existing_draft:
-                # Update existing draft - preserve all existing data, only update sales fields; track last editor
-                # Keep a tracked reference with a narrow type for downstream
-                # typing.
-                report_draft = existing_draft
-                assert report_draft is not None
-                report_draft.uploaded_by = current_user.username
-                logger.info(f"Updating existing draft {report_draft.id} for sales data")
-                # Parse nested sales data (same structure as main form)
-                shop_sales_data = parse_nested_keys(request.form, "sales[shop_sales]")
-                delivery_sales_data = parse_nested_keys(
-                    request.form, "sales[delivery_sales]"
-                )
-
-                # Extract cash sales from shop sales. Resolved the same way as
-                # the cash detail row written below, so the column and the row
-                # cannot disagree — the deposit step totals the rows while cash
-                # count reads this column.
-                cash_sales = resolve_posted_sale_amount(
-                    "cash_sales", shop_sales_data, delivery_sales_data
-                )
-
-                # Update draft fields from parsed data
-                # cash_sales stays a column; per-method amounts are written as
-                # report_sale_detail rows below, so a method added to the
-                # sales_method catalog needs no change here.
-                report_draft.cash_sales = cash_sales
-
-                # Calculate aggregates from form data (will be recalculated
-                # from report_sale_detail after records are created)
-                total_shop_sales = sum(
-                    safe_float(v) for k, v in shop_sales_data.items()
-                )
-                total_delivery_sales = sum(
-                    safe_float(v) for k, v in delivery_sales_data.items()
-                )
-                total_sales = total_shop_sales + total_delivery_sales
-
-                # stored aggregates: cash, everything-but-cash, their sum
-                report_draft.nocashsale_total = total_sales - safe_float(cash_sales)
-                report_draft.total_sales = total_sales
-
-                # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
-                # Get cash sales from ReportSaleDetail with fallback to
-                # report_draft.cash_sales
-                cash_sales = get_cash_sales_from_detail(
-                    report_draft.id, fallback_value=report_draft.cash_sales or 0.0
-                )
-                report_draft.closing_balance = (
-                    report_draft.opening_balance
-                    + (report_draft.cash_addition or 0)
-                    + cash_sales
-                    - (report_draft.expenses or 0)
-                    - (report_draft.bank_deposit or 0)
-                )
-
-                logger.info(f"Closing balance calculation for draft {report_draft.id}:")
-                logger.info(f"  Opening Balance: {report_draft.opening_balance}")
-                logger.info(f"  Cash Addition: {report_draft.cash_addition}")
-                logger.info(
-                    f"  Adjusted Opening: {report_draft.adjusted_opening_balance}"
-                )
-                logger.info(f"  Total Sales: {report_draft.total_sales}")
-                logger.info(f"  Expenses: {report_draft.expenses}")
-                logger.info(f"  Bank Deposit: {report_draft.bank_deposit}")
-                logger.info(f"  Closing Balance: {report_draft.closing_balance}")
-
-                # If edit mode is enabled, also update the Report table
-                if is_edit_mode:
-                    existing_report = Report.query.filter(
-                        Report.id == report_draft.id
-                    ).first()
-                    if existing_report:
-                        logger.info(
-                            f"Edit mode - updating Report {existing_report.id} with sales data"
-                        )
-                        # Per-method amounts are NOT copied: the draft and the
-                        # report share an id (ending.py creates the revert draft
-                        # with id=full_report.id), so both already resolve the
-                        # same report_sale_detail rows. Only cash and the
-                        # aggregate caches are stored per-row.
-                        existing_report.cashsale_total = report_draft.cashsale_total
-                        existing_report.nocashsale_total = report_draft.nocashsale_total
-                        existing_report.total_sales = report_draft.total_sales
-                        # Recalculate closing balance
-                        cash_sales_for_report = get_cash_sales_from_detail(
-                            existing_report.id,
-                            fallback_value=existing_report.cash_sales or 0.0,
-                        )
-                        existing_report.closing_balance = (
-                            existing_report.opening_balance
-                            + (existing_report.cash_addition or 0)
-                            + cash_sales_for_report
-                            - (existing_report.expenses or 0)
-                            - (existing_report.bank_deposit or 0)
-                        )
-
-                # Save the draft
-                db.session.commit()
-                logger.info(f"Updated existing draft {report_draft.id} with sales data")
-
-                # Update ReportSaleDetail for drafts so amounts are preserved.
-                # The ReportV2 row that used to be manufactured here existed
-                # only to satisfy report_sale_detail's FK, dropped in r2a02.
-
-                # Get all sale_info for this entity (only enabled ones, no duplicates, proper order)
-                sale_info = get_unique_sale_info_for_entity(entity_id)
-                default_saletypes = {
-                    "cash": "cash_sales",
-                    "visa": "visa_sales",
-                    "master": "master_sales",
-                    "alipay": "alipay_sales",
-                    "wechat": "wechat_sales",
-                    "unionpay": "unionpay_sales",
-                    "amex": "amex_sales",
-                    "octopus": "octopus_sales",
-                    "foodpanda": "foodpanda_sales",
-                    "keeta": "keeta_sales",
-                    "openrice": "openrice_sales",
-                }
-
-                # Update or create ReportSaleDetail for each sale type
-                for sale in sale_info:
-                    field = sale.value_name
-                    if not field or field == "deliveroo_sales":
-                        continue
-
-                    amount = resolve_posted_sale_amount(
-                        field, shop_sales_data, delivery_sales_data
-                    )
-
-                    # Check if ReportSaleDetail exists
-                    report_sale_detail = ReportSaleDetail.query.filter_by(
-                        sale_id=sale.sale_id, report_id=report_draft.id
-                    ).first()
-
-                    if report_sale_detail:
-                        # Update existing record
-                        report_sale_detail.amount = amount
-                        logger.info(
-                            f"Updated ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
-                        )
-                    else:
-                        # Create new record
-                        report_sale_detail = ReportSaleDetail(
-                            sale_id=sale.sale_id,
-                            report_id=report_draft.id,
-                            amount=amount,
-                        )
-                        db.session.add(report_sale_detail)
-                        logger.info(
-                            f"Created ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
-                        )
-
-                db.session.commit()
-
-            else:
-                # No existing draft found - this should not happen if user came
-                # from opening form.
-                #
-                # STEP 4a-6 — THE LANDMINE. This was deliberately
-                # status-AGNOSTIC so the recovery could pick up a row the
-                # "draft" filter excluded, then force status="draft" below.
-                # That was survivable while report_draft was a separate table.
-                # It is NOT now: an unfiltered match can return a genuinely
-                # SUBMITTED report and the forced flip would UN-SUBMIT it.
-                #
-                # Constrained to drafts. The cost is that the recovery can no
-                # longer resurrect a posted row — which is the point: silently
-                # un-submitting a real report is far worse than failing to
-                # recover. In the no-id branch this makes the lookup redundant
-                # with `existing_draft` above (same filter), so the recovery is
-                # now only meaningful when an `id` was supplied and the row is
-                # found by date instead.
-                any_draft = Report.query.filter(
-                    Report.company == entity_id,
-                    Report.transaction_date == transaction_date,
-                    Report.status == "draft",
-                ).first()
-
-                if any_draft:
-                    logger.info(
-                        f"Found existing draft {any_draft.id} for date {transaction_date}, updating it"
-                    )
-                    # Update the existing draft
-                    report_draft = any_draft
-                    assert report_draft is not None
-                    report_draft.status = "draft"  # Ensure it's marked as draft
-
-                    # Validate the draft record integrity
-                    if not report_draft.id:
-                        logger.error(
-                            f"Draft record {report_draft.id} has no valid ID, creating new draft"
-                        )
-                        flash(
-                            "Something's off with this draft - could you reopen it from the opening step?", "danger",
-                        )
-                        return redirect(url_for("report.report_opening"))
-
-                    # Process sales data for the found draft
-                    # Parse nested sales data (same structure as main form)
-                    shop_sales_data = parse_nested_keys(
-                        request.form, "sales[shop_sales]"
-                    )
-                    delivery_sales_data = parse_nested_keys(
-                        request.form, "sales[delivery_sales]"
-                    )
-
-                    # Extract cash sales from shop sales. Same resolution as the
-                    # cash detail row written below, so the two agree.
-                    cash_sales = resolve_posted_sale_amount(
-                        "cash_sales", shop_sales_data, delivery_sales_data
-                    )
-
-                    # Update draft fields from parsed data
-                    # cash_sales stays a column; per-method amounts become
-                    # report_sale_detail rows below.
-                    report_draft.cash_sales = cash_sales
-
-                    # Calculate aggregates from form data (will be recalculated
-                    # from report_sale_detail after records are created)
-                    total_shop_sales = sum(
-                        safe_float(v) for k, v in shop_sales_data.items()
-                    )
-                    total_delivery_sales = sum(
-                        safe_float(v) for k, v in delivery_sales_data.items()
-                    )
-                    total_sales = total_shop_sales + total_delivery_sales
-
-                    report_draft.nocashsale_total = total_sales - safe_float(cash_sales)
-                    report_draft.total_sales = total_sales
-
-                    # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
-                    # Get cash sales from ReportSaleDetail with fallback to
-                    # report_draft.cash_sales
-                    cash_sales = get_cash_sales_from_detail(
-                        report_draft.id, fallback_value=report_draft.cash_sales or 0.0
-                    )
-                    report_draft.closing_balance = (
-                        report_draft.opening_balance
-                        + (report_draft.cash_addition or 0)
-                        + cash_sales
-                        - (report_draft.expenses or 0)
-                        - (report_draft.bank_deposit or 0)
-                    )
-
-                    logger.info(
-                        f"Updated existing draft {report_draft.id} with sales data"
-                    )
-
-                    # Update ReportSaleDetail for drafts so amounts are
-                    # preserved. See the note above: the ReportV2 row formerly
-                    # created here was FK scaffolding only (r2a02).
-
-                    # Get all sale_info for this entity (only enabled ones, no duplicates, proper order)
-                    sale_info = get_unique_sale_info_for_entity(entity_id)
-                    default_saletypes = {
-                        "cash": "cash_sales",
-                        "visa": "visa_sales",
-                        "master": "master_sales",
-                        "alipay": "alipay_sales",
-                        "wechat": "wechat_sales",
-                        "unionpay": "unionpay_sales",
-                        "amex": "amex_sales",
-                        "octopus": "octopus_sales",
-                        "foodpanda": "foodpanda_sales",
-                        "keeta": "keeta_sales",
-                        "openrice": "openrice_sales",
-                    }
-
-                    # Update or create ReportSaleDetail for each sale type
-                    for sale in sale_info:
-                        field = sale.value_name
-                        if not field or field == "deliveroo_sales":
-                            continue
-
-                        amount = resolve_posted_sale_amount(
-                            field, shop_sales_data, delivery_sales_data
-                        )
-
-                        # Check if ReportSaleDetail exists
-                        report_sale_detail = ReportSaleDetail.query.filter_by(
-                            sale_id=sale.sale_id, report_id=report_draft.id
-                        ).first()
-
-                        if report_sale_detail:
-                            # Update existing record
-                            report_sale_detail.amount = amount
-                            logger.info(
-                                f"Updated ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
-                            )
-                        else:
-                            # Create new record
-                            report_sale_detail = ReportSaleDetail(
-                                sale_id=sale.sale_id,
-                                report_id=report_draft.id,
-                                amount=amount,
-                            )
-                            db.session.add(report_sale_detail)
-                            logger.info(
-                                f"Created ReportSaleDetail for draft: sale_id={sale.sale_id}, field={field}, amount={amount}"
-                            )
-
-                    db.session.commit()
-                else:
-                    logger.error(
-                        f"Sales form - No draft found for user {current_user.username} on date {transaction_date}"
-                    )
-                    logger.error(
-                        "Sales form - This should not happen if user came from opening form"
-                    )
-                    flash(
-                        "I don't see a draft yet - let's start with the opening entry.", "danger",
-                    )
-                    return redirect(url_for("report.report_opening"))
-
-            assert report_draft is not None
-
-            # The non-cash total computed here fed report_v2.nocashsale_total
-            # and nothing else; both went with the ReportV2 write (r2a02).
-
-            # Update progress tracking
-            try:
-                update_draft_progress(report_draft, action_type, "sales", "expenses")
-
-                # Commit progress updates
-                db.session.commit()
-                logger.info(
-                    f"Successfully committed sales data and progress for draft {report_draft.id}"
-                )
-            except Exception as progress_error:
-                logger.error(f"Error updating draft progress: {progress_error}")
-                db.session.rollback()
-                # Don't fail the entire operation for progress tracking issues
-                flash(
-                    "Your sales data is saved! I lost track of where you were in the report, though - please pick the next step yourself.",
-                    "warning",
-                )
-
-            # Debug: Check what was actually saved to database
-            db.session.refresh(report_draft)
-            print(
-                f"DEBUG SALES: After commit - current_section: {report_draft.current_section}"
-            )
-            print(
-                f"DEBUG SALES: After commit - completed_sections: {report_draft.completed_sections}"
-            )
-            print(
-                f"DEBUG SALES: After commit - completed_sections type: {type(report_draft.completed_sections)}"
-            )
-            print(
-                f"DEBUG SALES: After commit - completed_sections length: {len(report_draft.completed_sections) if report_draft.completed_sections else 0}"
-            )
-
-            # Log the sales entry to draft history
-            log_history(
-                report_id=report_draft.id,
+            # The day's draft (Opening makes it). POST has no id in its URL, so (entity, date).
+            report_draft = Report.query.filter_by(
                 company=entity_id,
-                user_id=current_user.id,
-                action="created" if not existing_draft else "updated",
-                field_changed="sales_entry",
-                old_value="None" if not existing_draft else "previous_sales_state",
-                new_value=f"Sales: Shop={total_shop_sales}, Delivery={total_delivery_sales}, Total={total_sales}, Closing Balance={report_draft.closing_balance}",
-            )
+                transaction_date=transaction_date,
+                status="draft",
+            ).first()
+            if report_draft is None:
+                logger.error(f"Sales form - No draft for entity {entity_id} on {transaction_date}")
+                flash("I don't see a draft yet - let's start with the opening entry.", "danger")
+                return redirect(url_for("report.report_opening"))
 
-            # report_v2 used to be created/updated here, keyed on the draft id,
-            # purely so report_sale_detail's FK resolved. r2a02 dropped that FK
-            # and nothing ever read the columns back, so the whole block went.
-            db.session.commit()
-
-            # Insert to report_sale_detail (only enabled sale types, no duplicates, proper order)
-            sale_info = get_unique_sale_info_for_entity(entity_id)
-            # Map sale_name to report field
-            default_saletypes = {
-                "cash": "cash_sales",
-                "visa": "visa_sales",
-                "master": "master_sales",
-                "alipay": "alipay_sales",
-                "wechat": "wechat_sales",
-                "unionpay": "unionpay_sales",
-                "amex": "amex_sales",
-                "octopus": "octopus_sales",
-                "foodpanda": "foodpanda_sales",
-                "keeta": "keeta_sales",
-                "openrice": "openrice_sales",
+            shop_sales_data = parse_nested_keys(request.form, "sales[shop_sales]")
+            delivery_sales_data = parse_nested_keys(request.form, "sales[delivery_sales]")
+            amounts = {
+                m.value_name: resolve_posted_sale_amount(m.value_name, shop_sales_data, delivery_sales_data)
+                for m in get_unique_sale_info_for_entity(entity_id)
+                if m.value_name
             }
+            amounts["cash_sales"] = resolve_posted_sale_amount("cash_sales", shop_sales_data, delivery_sales_data)
+            save_sales(entity_id, current_user, report_draft, amounts, action_type)
 
-            # Insert or update ReportSaleDetail for each sale type for this
-            # report
-            for sale in sale_info:
-                # Use value_name directly as the field name
-                field = sale.value_name
-
-                if field:
-                    # Skip deliveroo_sales
-                    if field == "deliveroo_sales":
-                        continue
-                    logger.info(f"Shop sales data: {shop_sales_data}")
-                    logger.info(f"Delivery sales data: {delivery_sales_data}")
-                    if field not in default_saletypes.values():
-                        logger.warning(f"Unknown sale field: {field}, adding to query")
-                    amount = resolve_posted_sale_amount(
-                        field, shop_sales_data, delivery_sales_data
-                    )
-
-                    # Check if a detail already exists for this sale_id and
-                    # report_id
-                    report_sale_detail = ReportSaleDetail.query.filter_by(
-                        sale_id=sale.sale_id, report_id=report_draft.id
-                    ).first()
-                    if report_sale_detail:
-                        # Update the amount and update timestamp
-                        report_sale_detail.amount = amount
-                    else:
-                        # Insert new detail
-                        report_sale_detail = ReportSaleDetail(
-                            sale_id=sale.sale_id,
-                            report_id=report_draft.id,
-                            amount=amount,
-                        )
-                        db.session.add(report_sale_detail)
-                        logger.info(
-                            f"New sale detail record created: sale_id={sale.sale_id}, report_id={report_draft.id}, type={sale.type}, amount={amount}"
-                        )
-
-            logger.info(f"Committing {len(sale_info)} sale detail records to database")
-            db.session.commit()
-
-            # Recalculate sales from report_sale_detail now that records are
-            # created/updated
-            update_report_draft_sales_from_detail(report_draft)
-            db.session.commit()
-
-            # Update totals for logging
-            total_shop_sales = report_draft.shop_sales or 0.0
-            total_delivery_sales = report_draft.delivery_sales or 0.0
-            total_sales = report_draft.total_sales or 0.0
-
-            # Check action type and redirect accordingly
-            logger.info(
-                f"Sales form - Processing redirect for action_type: {action_type}"
-            )
-            if action_type == "save_next":
-                logger.info(
-                    f"Sales form - Redirecting to expenses form with transaction_date: {transaction_date}"
-                )
-                return redirect(
-                    url_for(
-                        "report.report_expense",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
-            elif action_type == "save_exit":
-                logger.info("Sales form - Redirecting to dashboard")
+            if action_type == "save_exit":
                 return redirect(url_for("entity.report_dashboard", id=entity_id))
-            else:
-                # Default to save_next
-                logger.info(
-                    f"Sales form - Default redirect to expenses form with transaction_date: {transaction_date}"
+            return redirect(
+                url_for(
+                    "report.report_expense",
+                    entity_id=entity_id,
+                    transaction_date=transaction_date.strftime("%Y-%m-%d"),
                 )
-                return redirect(
-                    url_for(
-                        "report.report_expense",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
+            )
 
-        except Exception as e:
+        except Exception:
             db.session.rollback()
-            logger.error(f"Error updating sales draft data: {str(e)}")
-
-            # Try to preserve the draft record even after error
-            try:
-                # Check if the draft still exists after rollback
-                draft_obj = locals().get("report_draft")
-                if isinstance(draft_obj, Report):
-                    draft_id = draft_obj.id
-                    draft_check = Report.query.filter_by(id=draft_id).first()
-                    if draft_id is not None and not draft_check:
-                        logger.warning(
-                            f"Draft record {draft_id} may have been lost due to rollback"
-                        )
-            except Exception as check_error:
-                logger.error(
-                    f"Error checking draft status after rollback: {check_error}"
-                )
-
+            logger.exception("Error updating sales draft data")
             flash("Oops, that didn't go as planned. Please try refreshing or saving your sales data again.", "danger")
             return redirect(url_for("report.report_sale"))
 
