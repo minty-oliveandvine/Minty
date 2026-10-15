@@ -3355,10 +3355,95 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.expenses_page",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/expenses",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "report_expense",
+    "xero_contact_sync",
+    "account_info",
+    "entity_account_xero"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_expenses_step_route",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/expenses",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "report"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.add_expense_line",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/expenses/lines",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "report",
+    "report_expense",
+    "attachment",
+    "report_expense_attachment",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.delete_expense_line",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/expense-lines/<line_id>",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [
+    "report",
+    "report_expense",
+    "attachment",
+    "report_expense_attachment",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.expense_receipt",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/expense-lines/<line_id>/receipts/<attachment_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report_expense",
+    "attachment"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.add_supplier",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/suppliers",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "xero_contact_sync"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 180,
-  "in_scope": 117
+  "routes": 186,
+  "in_scope": 123
  }
 }

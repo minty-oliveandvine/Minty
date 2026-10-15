@@ -2433,7 +2433,7 @@
         // Create FormData instead of JSON (like other successful requests)
         const formData = new FormData();
         formData.append('name', newContactInput.value);
-        formData.append('entity_id', "{{ request.args.get('entity_id', '') }}");
+        formData.append('entity_id', "{{ org.id }}");
         
         // Add CSRF token
         const csrfToken = document.querySelector('input[name="csrf_token"]');

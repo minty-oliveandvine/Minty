@@ -10,14 +10,14 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.expense_ai import is_enabled as expense_ai_is_enabled
+from blueprints.report.services.expenses import save_expenses_step
 from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
                                                get_cash_sales_from_detail,
                                                header_publishing_status_for,
                                                normalize_expense_files,
                                                resolve_report_entity_id,
-                                               safe_float,
-                                               update_draft_progress)
+                                               safe_float)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import (AccountInfo, Entity, EntityAccountXero, Report, ShopExpense, XeroContactSync, db)
 from services.authz import permission_denied
@@ -448,9 +448,7 @@ def report_expense(id=None, entity_id=None):
                 # Update draft progress to mark expenses section as complete
                 # (even with no expenses, only for save_next)
                 if action_type == "save_next":
-                    update_draft_progress(
-                        current_draft, action_type, "expenses", "deposit"
-                    )
+                    save_expenses_step(current_draft, action_type)
 
                 if request.headers.get("X-Requested-With") == "XMLHttpRequest":
                     logger.info("AJAX request - returning JSON response")
@@ -546,9 +544,7 @@ def report_expense(id=None, entity_id=None):
                 # Update draft progress to mark expenses section as complete
                 # (only for save_next)
                 if action_type == "save_next":
-                    update_draft_progress(
-                        current_draft, action_type, "expenses", "deposit"
-                    )
+                    save_expenses_step(current_draft, action_type)
 
                 if request.headers.get("X-Requested-With") == "XMLHttpRequest":
                     return jsonify(

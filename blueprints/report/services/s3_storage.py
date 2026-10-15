@@ -85,6 +85,14 @@ def upload_file_to_s3(
         logger.info(
             f"Downsized {file.filename}: {len(raw)} -> {len(downsized)} bytes"
         )
+    # The name is built from the day, the item and the ROUNDED amount, so two lines can mint the
+    # same one - and the second upload would overwrite the first line's receipt (both lines then
+    # point at one file). A name already in use gets a short unique suffix.
+    from blueprints.report.models.shop_expense import Attachment
+
+    if Attachment.query.filter_by(file_path=s3_key).first() is not None:
+        stem, extension = os.path.splitext(s3_key)
+        s3_key = f"{stem}_{uuid.uuid4().hex[:6].upper()}{extension}"
 
     last_error = None
     for attempt in range(max_retries + 1):

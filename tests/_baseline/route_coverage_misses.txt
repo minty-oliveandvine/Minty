@@ -6,7 +6,6 @@
 entity.billing_relogin                                  GET       /entity/<entity:entity_id>/billing-relogin         company
 entity.billing_sync_chart_accounts                      POST      /api/entities/<string:entity_id>/billing/sync-chart-accounts via ensure_valid_token
 entity.billing_sync_chart_if_changed                    POST      /api/entities/<string:entity_id>/billing/sync-chart-if-changed access_token
-entity.entity_contact_create                            POST      /entity/contact/create                             access_token
 entity.onboarding_account_codes                         GET POST  /api/onboarding/account-codes                      via get_account_code_options, save_account_codes
 entity.onboarding_contacts_create                       POST      /api/onboarding/contacts/create                    via create_contact
 entity.onboarding_server_time                           GET       /api/onboarding/server-time                        date

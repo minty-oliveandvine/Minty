@@ -42,6 +42,19 @@ typed the time before, and a method the page has no field for (an `other` one th
 was zeroed by every save. A Sales save still makes the saver the report's creator
 (`uploaded_by`, "track last editor"), on purpose.
 
+**Expenses saves through `services/expenses.py`** (adding and deleting a line, the totals, the
+step's save) and a new supplier through `entity/services/suppliers.py`, both shared with the Petty
+Cash API. Fixed with the extraction (2026-10-14):
+- a line of a report that is no longer a draft can no longer be deleted;
+- the step's Save & Next commits its own progress (it relied on a later request hook's commit);
+- two lines alike (same day, account and ROUNDED amount) no longer share one stored receipt - the
+  second upload used to overwrite the first;
+- a supplier added from the page is kept as a synced contact, so the line it was added for keeps it
+  (it was stored with no supplier), and the page sends its own company with it (on the company
+  address it sent none, and the add was refused);
+- the add route no longer asks Xero for the account list on every line (the answer was ignored).
+The Jinja routes still leave the line's own checks to the browser; the API makes them.
+
 The next report's date is the day after the last submitted one (`next_transaction_date`);
 a company cannot skip or duplicate a day. `POST /report/<id>/convert-to-draft` reopens a
 submitted report as the draft again (only the most recent one).
@@ -51,12 +64,14 @@ submitted report as the draft again (only the most recent one).
 - `POST /report/expense/add` persists **one line immediately** (multipart, files under
   `files[0][n]`) — that is why the page can keep adding without one huge upload at the end;
   `submit_all` is the legacy all-at-once path. `update/<id>`, `delete/<id>`,
-  `draft/<id>` (GET/PATCH) edit a line; `validate_drafts` checks every line of the day
-  carries a receipt (**every expense must have one**).
+  `draft/<id>` (GET/PATCH) edit a line; `validate_drafts` checks every line of the day has an
+  amount, a supplier and an account (not its receipt: `/add` is what insists on one -
+  **every expense must have one**).
 - The supplier and account pickers are searchable inputs over the company's synced
   contacts and active expense accounts (`xero_contact_sync`, `entity_account_xero` ⨝
   `account_info`); a new supplier can be created in Xero from the form
-  (`/report/expense/create_contact`).
+  (`POST /entity/contact/create`; `/report/expense/create_contact` exists but the page never
+  calls it).
 - The line links to the synced rows by their **row ids**; `contact_id`, `contact_name`,
   `account_id`, `account_code` on the model are properties that read through them (see
   [receipts-and-attachments.md](receipts-and-attachments.md) for the file side, and the

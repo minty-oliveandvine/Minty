@@ -556,12 +556,10 @@ def report_expense_add():
     (item, contactId, accountId, amount, remarks, account_code, item_code)
     with files under files[0][n].
     """
-    from blueprints.report.services.s3_storage import upload_file_to_s3
+    from blueprints.report.services.expenses import ExpenseRefused, add_expense
     from blueprints.report.services.shared import (normalize_expense_files,
                                                    safe_float)
-    from models.db import db
-    from services.helpers.xero_bridge import (get_xero_data_dynamic,
-                                              resolve_contact_name)
+    from services.helpers.xero_bridge import resolve_contact_name
 
     try:
         entity_id = request.args.get(
@@ -625,7 +623,6 @@ def report_expense_add():
         amount = safe_float(request.form.get("amount", 0))
         remarks = request.form.get("remarks", "")
         account_code = request.form.get("account_code")
-        item_code = request.form.get("item_code")
 
         # Collect this expense's files (files[0][n]).
         files = []
@@ -650,106 +647,22 @@ def report_expense_add():
                 400,
             )
 
-        description = item if item else (remarks if remarks else "EXPENSE")
-
-        # Upload files to S3.
-        file_paths = []
-        for file_idx, f in enumerate(files):
-            file_path = upload_file_to_s3(
-                f,
-                str(current_draft.id),
-                transaction_date=current_draft.transaction_date,
-                description=description,
-                amount=amount,
-                file_index=file_idx if len(files) > 1 else None,
-            )
-            file_paths.append(file_path)
-
-        # Backfill account_code / item_code from Xero when not provided.
-        if (not account_code or not item_code) and account_id:
-            try:
-                xero_accounts = get_xero_data_dynamic(
-                    "Accounts",
-                    params={"where": 'Type="EXPENSE"||Type="DIRECTCOSTS"'},
-                    entity_id=current_draft.company,
-                )
-                if isinstance(xero_accounts, dict) and "Accounts" in xero_accounts:
-                    for acc in xero_accounts["Accounts"]:
-                        if acc.get("AccountID") == account_id:
-                            if not account_code:
-                                account_code = acc.get("Code")
-                            if not item_code:
-                                item_code = acc.get("ItemCode")
-                            break
-            except Exception as xero_error:
-                logger.warning(
-                    f"Add expense - Failed to fetch account/item code from Xero: {str(xero_error)}"
-                )
-                # Continue without them - they're optional.
-
-        # WRITE FLIP (Step 3).
-        expense = ShopExpense(
-            report_id=current_draft.id,
-            item=item,
-            amount=amount,
-            remarks=remarks,
-            contact_id=contact_id,
-            contact_name=contact_name,
-            account_id=account_id,
-            account_code=account_code,
-            item_code=item_code,
-        )
-        for uploaded, file_path in zip(files, file_paths):
-            expense.add_receipt(
-                file_path, original_name=uploaded.filename, mime_type=uploaded.mimetype,
-                uploaded_by=current_user.id,
-            )
-        db.session.add(expense)
-        # Pair with a shop_expense row (Stage 4b) — see the note above.
-        db.session.flush()  # Generate expense.id
-
-        # Recompute the draft expense total from all DB rows (idempotent).
-        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
-        # exists from draft creation via ensure_shop_expense_for_draft, and
-        # report_id holds the same value report_draft_id did.
-        all_expenses = ShopExpense.query.filter_by(
-            report_id=current_draft.id
-        ).all()
-        total_expenses = sum(exp.amount for exp in all_expenses)
-        current_draft.expenses = total_expenses
-
-        cash_sales = get_cash_sales_from_detail(
-            current_draft.id, fallback_value=current_draft.cash_sales or 0.0
-        )
-        current_draft.closing_balance = (
-            current_draft.opening_balance
-            + (current_draft.cash_addition or 0)
-            + cash_sales
-            - current_draft.expenses
-            - (current_draft.bank_deposit or 0)
-        )
-
-        # ReportV2 mirroring removed with its FK (r2a02) — see the note on the
-        # bulk expense path above, including the lookup/insert key mismatch.
-
-        # report_expense_detail row removed in Step 3.5 — it duplicated the
-        # ShopExpense created above.
-
-        db.session.commit()
-
-        # Log to draft history (non-blocking).
         try:
-            log_history(
-                report_id=current_draft.id,
-                company=entity_id,
-                user_id=current_user.id,
-                action="added",
-                field_changed="expense",
-                old_value="previous_expenses",
-                new_value=f"Added expense: {item} (${amount})",
+            expense = add_expense(
+                current_draft,
+                current_user,
+                item=item,
+                amount=amount,
+                remarks=remarks,
+                contact_id=contact_id,
+                contact_name=contact_name,
+                account_id=account_id,
+                account_code=account_code,
+                files=files,
             )
-        except Exception as history_error:
-            logger.warning(f"Failed to log history: {str(history_error)}")
+        except ExpenseRefused as refused:
+            return jsonify({"status": "error", "message": refused.message}), 400
+        total_expenses = current_draft.expenses
 
         return jsonify(
             {
@@ -1288,51 +1201,12 @@ def report_expense_delete(expense_id):
                 403,
             )
 
-        deleted_amount = expense.amount
-        from blueprints.report.services.s3_storage import delete_expense_with_receipts
-        from models.db import db
+        from blueprints.report.services.expenses import ExpenseRefused, delete_expense
 
-        # the receipt goes with the line (F2)
-        delete_expense_with_receipts(expense)
-
-        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
-        # exists from draft creation via ensure_shop_expense_for_draft, and
-        # report_id holds the same value report_draft_id did.
-        remaining_expenses = ShopExpense.query.filter_by(
-            report_id=draft.id
-        ).all()
-        new_total = sum(exp.amount for exp in remaining_expenses)
-        logger.info(
-            "Deleted expense amount: %s, remaining: %s, new_total: %s",
-            deleted_amount,
-            len(remaining_expenses),
-            new_total,
-        )
-
-        draft.expenses = new_total
-        cash_sales = get_cash_sales_from_detail(
-            draft.id,
-            fallback_value=draft.cash_sales or 0.0,
-        )
-        draft.closing_balance = (
-            draft.opening_balance
-            + (draft.cash_addition or 0)
-            + cash_sales
-            - draft.expenses
-            - (draft.bank_deposit or 0)
-        )
-        logger.info("New closing balance: %s", draft.closing_balance)
-        db.session.commit()
-
-        log_history(
-            report_id=draft.id,
-            company=draft.company,
-            user_id=current_user.id,
-            action="deleted",
-            field_changed="expense",
-            old_value=f"expense_{expense_id}",
-            new_value="deleted",
-        )
+        try:
+            delete_expense(draft, expense, current_user)
+        except ExpenseRefused as refused:
+            return jsonify({"status": "error", "message": refused.message}), 400
 
         return jsonify(
             {"status": "success", "message": "Expense deleted successfully."}

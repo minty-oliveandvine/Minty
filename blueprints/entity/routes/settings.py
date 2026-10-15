@@ -4,7 +4,6 @@ import html
 from typing import Protocol
 from urllib.parse import urlencode
 
-import requests
 from flask import (current_app, flash, get_flashed_messages, jsonify, redirect,
                    render_template, request, url_for)
 from flask_login import current_user, login_required
@@ -27,8 +26,7 @@ from models.db import (AccountInfo, Entity,
                        EntityAccountXero, EntityPettycashSettings, db)
 from services.app_runtime.legacy.xero_service import (
     account_info_to_xero_format)
-from services.auth.token_service import (auto_refresh_token,
-                                         ensure_valid_token,
+from services.auth.token_service import (ensure_valid_token,
                                          get_xero_token_user_for_entity,
                                          resolve_xero_token)
 from services.authz import (permission_denied, require_entity_access,
@@ -520,118 +518,13 @@ def entity_contact_create():
                 400,
             )
 
-        entity = Entity.query.get(entity_id)
-        if not entity or not entity.xero_org_id:
-            logger.error("No Xero org ID found for entity %s", entity_id)
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "This entity isn't connected to Xero yet. Could you ask an admin to connect it?",
-                    }),
-                400,
-            )
+        from blueprints.entity.services.suppliers import SupplierRefused, create_supplier
 
-        xero_user = get_xero_token_user_for_entity(entity_id)
-        if not xero_user or not xero_user.access_token:
-            logger.error("No Xero access token found for entity")
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "This entity isn't connected to Xero yet. Could you ask an admin to connect it?",
-                    }),
-                400,
-            )
-
-        if not ensure_valid_token(xero_user):
-            logger.error("Failed to ensure valid token for entity xero user")
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Xero wouldn't let me in. Could you ask an admin to reconnect it?",
-                    }),
-                400,
-            )
-
-        endpoint = "https://api.xero.com/api.xro/2.0/Contacts"
-        contact_data = {"Contacts": [
-            {"Name": name, "IsCustomer": True, "IsSupplier": False}]}
-
-        logger.info(f"Creating contact in Xero: {contact_data}")
-
-        def _make_xero_request():
-            return requests.post(endpoint, headers={
-                "Authorization": "Bearer " + xero_user.access_token,
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "Xero-Tenant-Id": str(entity.xero_org_id),
-            }, json=contact_data)
-
-        xero_response = _make_xero_request()
-
-        logger.info(f"Xero response status: {xero_response.status_code}")
-        logger.info(f"Xero response: {xero_response.text}")
-
-        if xero_response.status_code in (401, 403):
-            logger.warning("Xero returned %s, forcing token refresh and retrying", xero_response.status_code)
-            if auto_refresh_token(xero_user):
-                xero_response = _make_xero_request()
-                logger.info(f"Retry Xero response status: {xero_response.status_code}")
-                logger.info(f"Retry Xero response: {xero_response.text}")
-
-        if xero_response.status_code not in (200, 201):
-            # Log Xero's raw body; show the user plain language. This message is
-            # rendered directly into a toast.
-            logger.error(
-                "Failed to create contact in Xero. Status: %s, Response: %s",
-                xero_response.status_code,
-                xero_response.text,
-            )
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "I couldn't add that contact to Xero. Mind trying again?",
-                    }
-                ),
-                400,
-            )
-
-        xero_contact_data = xero_response.json()
-        contacts = xero_contact_data.get("Contacts", [])
-
-        if not contacts:
-            logger.error("No contacts returned from Xero")
-            return (
-                jsonify(
-                    {"status": "error", "message": "I couldn't add that contact to Xero. Mind trying again?"}
-                ),
-                400,
-            )
-
-        created_contact = contacts[0]
-        xero_contact_id = created_contact.get("ContactID")
-        contact_name = created_contact.get("Name")
-
-        if not xero_contact_id:
-            logger.error("No ContactID returned from Xero")
-            return (
-                jsonify(
-                    {"status": "error", "message": "Xero didn't tell me which contact it created. Mind trying again?"}
-                ),
-                400,
-            )
-
-        # The contact is created in Xero and its name is returned to the
-        # frontend below. The name is persisted on the expense itself
-        # (shop_expense_draft.contact_name) when the expense is saved, so we do
-        # NOT store a XeroContactSync record here.
-
-        logger.info(
-            f"Successfully created contact: {contact_name} with ID: {xero_contact_id}"
-        )
+        try:
+            row = create_supplier(entity_id, name)
+        except SupplierRefused as refused:
+            return jsonify({"status": "error", "message": refused.message}), refused.status
+        xero_contact_id, contact_name = row.xero_contact_id, row.name
 
         return (jsonify({"status": "success",
                          "message": f"Contact '{contact_name}' created successfully.",
