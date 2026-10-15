@@ -28,6 +28,8 @@ REGEX = r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request
 SET_MY = "https://pr-feat-x-my.dailyminty.com"
 #: What a browser sends on a navigation from one of our front ends (another dailyminty.com host).
 SAME_SITE = {"Sec-Fetch-Site": "same-site"}
+#: A hop that starts on a Flask page - the only kind (with Xero's return) that reads a stored set.
+SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 
 
 @pytest.fixture
@@ -127,7 +129,7 @@ def test_only_a_same_site_navigation_names_a_set(client, on, fetch_site):
 def test_a_set_lapses_after_thirty_minutes(app, on):
     from blueprints.auth.services.hub_login import hub_login_url
 
-    with app.test_request_context("/"):
+    with app.test_request_context("/", headers=SAME_ORIGIN):
         session["preview_set"] = _set(age=29 * 60)
         assert hub_login_url(carry_flashes=False) == "https://pr-feat-x-my.dailyminty.com/login"
         session["preview_set"] = _set(age=31 * 60)
@@ -173,12 +175,78 @@ def test_without_a_set_the_handoff_keeps_the_configured_hub(client, on, owner):
     assert urlsplit(resp.headers["Location"]).netloc == "my.minty.test"
 
 
+# --- side by side: each trip names its own target ---------------------------------------------
+
+
+def _with_stored_set(client, slug="feat-x"):
+    with client.session_transaction() as sess:
+        sess["preview_set"] = _set(slug)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate"},  # from production's hub
+        {"Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate"},  # typed or bookmarked
+        {},  # a browser that sends no fetch metadata
+    ],
+)
+def test_a_trip_from_a_normal_host_goes_to_the_configured_hub(client, on, owner, headers):
+    """Production's front ends name no set, so a set stored by a preview tab in the SAME
+    session must not pull a production tab into the preview - and that trip leaves the set."""
+    F.login(client, owner)
+    _with_stored_set(client)
+    resp = client.get("/handoff/minty-web?next=/subscription", headers=headers)
+    assert urlsplit(resp.headers["Location"]).netloc == "my.minty.test"
+    assert _stored(client) is None
+
+
+def test_the_trip_s_own_set_beats_the_stored_one(client, on, owner):
+    F.login(client, owner)
+    _with_stored_set(client, "other")
+    resp = client.get(f"/handoff/minty-web?next=/subscription&return_origin={SET_MY}", headers=SAME_SITE)
+    assert urlsplit(resp.headers["Location"]).netloc == "pr-feat-x-my.dailyminty.com"
+
+
+def test_naming_a_configured_origin_needs_no_same_site_trip(client, on, owner):
+    """Leaving a set is never risky, so a typed visit to a normal host leaves it at once."""
+    F.login(client, owner)
+    _with_stored_set(client)
+    resp = client.get(
+        "/handoff/minty-web?next=/subscription&return_origin=https://my.minty.test",
+        headers={"Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate"},
+    )
+    assert urlsplit(resp.headers["Location"]).netloc == "my.minty.test"
+    assert _stored(client) is None
+
+
+@pytest.mark.parametrize("fetch_site", ["same-origin", "cross-site"])
+def test_a_flask_page_or_xero_return_keeps_the_stored_set(client, on, owner, fetch_site):
+    """A link on a Flask page (``same-origin``) and Xero's OAuth return (``cross-site``) can't
+    name a set, so they follow the one stored by the front end the person came from."""
+    F.login(client, owner)
+    _with_stored_set(client)
+    resp = client.get(
+        "/handoff/minty-web?next=/subscription",
+        headers={"Sec-Fetch-Site": fetch_site, "Sec-Fetch-Mode": "navigate"},
+    )
+    assert urlsplit(resp.headers["Location"]).netloc == "pr-feat-x-my.dailyminty.com"
+    assert _stored(client) == "feat-x"
+
+
+def test_an_api_call_leaves_the_stored_set_alone(client, on):
+    """A preview hub's own fetches to Flask carry no ``return_origin``; they must not wipe its set."""
+    _with_stored_set(client)
+    client.get("/", headers={"Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "cors"})
+    assert _stored(client) == "feat-x"
+
+
 def test_every_app_is_reached_in_the_same_set(app, on):
     from blueprints.auth.services.hub_login import hub_login_url
     from blueprints.entity.routes import create, modules
     from blueprints.xero.routes import routes as xero
 
-    with app.test_request_context("/"):
+    with app.test_request_context("/", headers=SAME_ORIGIN):
         session["preview_set"] = _set()
         assert hub_login_url(carry_flashes=False) == "https://pr-feat-x-my.dailyminty.com/login"
         assert modules._frontend_origin() == "https://pr-feat-x-payment-request.dailyminty.com"
@@ -191,7 +259,7 @@ def test_an_app_the_regex_leaves_out_keeps_its_configured_origin(app, hosts, mon
     from blueprints.shared import preview_origin
 
     monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", r"^https://pr-[a-z0-9-]+-my\.dailyminty\.com$")
-    with app.test_request_context("/"):
+    with app.test_request_context("/", headers=SAME_ORIGIN):
         session["preview_set"] = _set()
         assert preview_origin.handoff_origin("my", "https://my.minty.test") == SET_MY
         assert create._onboarding_base_url() == "https://onboarding.minty.test"
@@ -201,7 +269,7 @@ def test_a_stored_set_is_dropped_once_the_regex_is_gone(app, hosts, monkeypatch)
     from blueprints.auth.services.hub_login import hub_login_url
 
     monkeypatch.delenv("PREVIEW_ORIGIN_REGEX", raising=False)
-    with app.test_request_context("/"):
+    with app.test_request_context("/", headers=SAME_ORIGIN):
         session["preview_set"] = _set()
         assert hub_login_url(carry_flashes=False) == "https://my.minty.test/login"
 

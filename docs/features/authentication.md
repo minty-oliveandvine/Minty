@@ -327,20 +327,33 @@ A branch's previews are one SET of hosts, `https://pr-<branch>-<app>.dailyminty.
 set, Flask hands a person back into the set they came from instead of the configured front ends
 (`blueprints/shared/preview_origin.py`):
 
-- Every trip a front end makes to Flask carries `?return_origin=<its origin>` (minty-web
-  `lib/handoff.ts`, minty-payment-request-web `withReturnOrigin` from `@minty/shared`). A
-  `before_request` hook registered FIRST - before the expired-session redirect, the Terms gate and
-  `login_required` - keeps the set's slug in `session["preview_set"]`; a configured origin (the
-  person went back to a normal host) and logging out leave it.
-- **Only a same-site navigation names a set, and a set lapses after 30 minutes** (security review,
-  2026-10-13). The browser's `Sec-Fetch-Site` is `same-site` for a trip from another
+- A set's front ends name themselves with `?return_origin=<its origin>` on every trip to Flask
+  (minty-web `lib/handoff.ts`, minty-payment-request-web `withReturnOrigin` from `@minty/shared` -
+  on the `preview-sets` branches). A `before_request` hook registered FIRST - before the
+  expired-session redirect, the Terms gate and `login_required` - keeps the set's slug in
+  `session["preview_set"]`.
+- **Each trip decides its own hand-off, so production and a preview work side by side
+  (2026-10-15).** Previews call production's Flask, so a preview tab and a production tab share
+  one Flask session; a set stored by the preview used to pull every production hand-off into it
+  until logout. Now (`preview_origin._named`):
+  - `return_origin` naming a set (same-site, below) - that set; naming a configured origin - the
+    configured front end, from any trip, and the stored set is left;
+  - a navigation from another of our hosts with no `return_origin` (`same-site`: production's
+    front ends), from the address bar or a bookmark (`none`), or with no fetch metadata - the
+    configured front end, and the stored set is left;
+  - only a hop that can't name one reads the stored set: a link on a Flask page (`same-origin`)
+    and Xero's OAuth return (`cross-site`). So a Flask Petty Cash page hands back to the side the
+    person last came from - with two tabs interleaved, that can be the other tab's side;
+  - fetches (`Sec-Fetch-Mode` other than `navigate`: the hubs' API calls) neither read nor leave it.
+- **Only a same-site navigation names a set, and a stored set lapses after 30 minutes** (security
+  review, 2026-10-13). The browser's `Sec-Fetch-Site` is `same-site` for a trip from another
   dailyminty.com host - our front ends - and `none`/`cross-site` for a link in an email or on
-  another site, which is ignored; so a crafted link cannot park a signed-in person's session in a
-  set and route the tokens of later Flask-started hand-offs into a preview. Each same-site trip
-  from a set host renews it.
-- Every hand-off then goes to that set's host for the target app: `hub_login_url`, the minty-web
-  and payments `/landing`, the onboarding launch and the Xero return (`bearer_api`'s origins
-  through `preview_origin.handoff_origin`). Outside a request (mail, jobs) there is no set.
+  another site, which cannot name one; so a crafted link cannot park a signed-in person's session
+  in a set and route the tokens of later Flask-started hand-offs into a preview. Each same-site
+  trip from a set host renews it. Logging out leaves it.
+- The hand-offs that follow this rule: `hub_login_url`, the minty-web and payments `/landing`,
+  the onboarding launch and the Xero return (`bearer_api`'s origins through
+  `preview_origin.handoff_origin`). Outside a request (mail, jobs) there is no set.
 - CORS never reads the session: the hub routes echo a set origin for `my`/`payment-request`, the
   onboarding routes for `onboarding`, and refuse every other.
 - The stored set is re-checked against the regex on every read, so unsetting the variable turns
