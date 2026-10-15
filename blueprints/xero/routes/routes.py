@@ -1495,8 +1495,9 @@ def xero_callback():
 _INTERNAL_TOKEN_SCOPE = "xero-access-token"
 
 
-def _authenticate_internal_caller():
-    """Verify the caller's service JWT. Returns (claims, error_message)."""
+def _authenticate_internal_caller(scope=_INTERNAL_TOKEN_SCOPE, extra_claims=()):
+    """Verify the caller's service JWT for ``scope`` (each internal route has its own, so a token
+    minted for one cannot be replayed against another). Returns (claims, error_message)."""
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         return None, "missing bearer token"
@@ -1510,14 +1511,14 @@ def _authenticate_internal_caller():
             header[7:].strip(),
             secret,
             algorithms=["HS256"],
-            options={"require": ["exp", "scope", "entity_id"]},
+            options={"require": ["exp", "scope", "entity_id", *extra_claims]},
         )
     except pyjwt.ExpiredSignatureError:
         return None, "token expired"
     except pyjwt.InvalidTokenError as exc:
         return None, f"invalid token: {exc}"
 
-    if claims.get("scope") != _INTERNAL_TOKEN_SCOPE:
+    if claims.get("scope") != scope:
         return None, "wrong scope"
     return claims, None
 
@@ -1561,6 +1562,39 @@ def internal_xero_access_token() -> ResponseReturnValue:
     access_token, xero_org_id = result
     logger.info(f"internal xero token: issued for entity {entity_id}")
     return jsonify({"access_token": access_token, "xero_org_id": xero_org_id}), 200
+
+
+#: minty-petty-cash-api's scope for ``internal_deposit_correction``.
+_DEPOSIT_CORRECTION_SCOPE = "petty-cash-deposit-correction"
+
+
+@xero_bp.route("/api/internal/xero/deposit-correction", methods=["POST"])
+def internal_deposit_correction() -> ResponseReturnValue:
+    """The dashboard's "Before You Start" deposit correction for minty-petty-cash-api, which holds
+    no Xero credentials: a correction can reverse and re-post the day's deposit in Xero
+    (``report/routes/legacy.py::correct_previous_deposit``), so the Django service forwards it here.
+
+    The caller presents a 60-second HS256 assertion (the shared SECRET_KEY) whose claims name the
+    company (``entity_id``) and the person (``user_id``); neither is read from the body. The person
+    is checked again here (approved, ``REPORT_EDIT_ENTITY`` on the company) and the answer is the
+    Petty Cash API's own (``petty_cash_api/routes/home.py::correct_deposit``), which the Django
+    service hands on unchanged.
+
+    SECURITY: like ``/api/internal/xero/token``, not meant to be reachable from the internet.
+    """
+    from blueprints.petty_cash_api.routes.home import correct_deposit
+
+    claims, error = _authenticate_internal_caller(_DEPOSIT_CORRECTION_SCOPE, ("user_id",))
+    if error:
+        logger.warning(f"internal deposit correction: rejected caller ({error})")
+        return jsonify({"error": "unauthorized"}), 401
+    person = db.session.get(User, str(claims["user_id"]))
+    if person is None or not person.approved:
+        logger.warning(f"internal deposit correction: unknown or unapproved user {claims['user_id']}")
+        return jsonify({"error": "unauthorized"}), 401
+    body, status = correct_deposit(str(claims["entity_id"]), person, request.get_json(silent=True))
+    logger.info(f"internal deposit correction: entity {claims['entity_id']} by {person.id} -> {status}")
+    return jsonify(body), status
 
 
 @xero_bp.route("/api/xero/bank-transactions/latest/<entity_id>",

@@ -105,7 +105,10 @@ current user's as a logged fallback (`resolve_xero_token`). **Only Flask refresh
 serialises refreshes per bearer with a Postgres advisory lock held across the HTTP call;
 minty-payment-request-api obtains live tokens from `POST /api/internal/xero/token` (a 60-second
 assertion JWT over the shared `SECRET_KEY`, scope `xero-access-token`, the entity in the
-claims). Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
+claims). minty-petty-cash-api, which holds no Xero code at all, forwards the dashboard's deposit
+correction to `POST /api/internal/xero/deposit-correction` (scope `petty-cash-deposit-correction`,
+the company and the person in the claims; Flask re-checks `REPORT_EDIT_ENTITY` and answers as its
+Petty Cash API would). Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
 normal traffic. Details and the reasons in [authentication.md](authentication.md) §7.
 
 ## 3. The petty-cash mapping

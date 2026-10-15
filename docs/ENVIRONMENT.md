@@ -27,6 +27,7 @@ Each domain has a slot `N`: its web app listens on `30N0`, its API on `80N0`. Ho
 | Subscription API | `minty-subscription-api` | Django | 8000 | `subscription-api` |
 | Petty Cash | `Minty` | Flask | 8010 | `minty` |
 | Petty Cash web | `minty-petty-cash-web` | Next.js | 3010 | — (not in the Docker stack yet) |
+| Petty Cash API | `minty-petty-cash-api` | Django | 8010 (clashes with Flask's row until the accounts-api move puts Flask on 8000 - decided 2026-10-14, not done) | — (not in the Docker stack yet) |
 | Payment Request web | `minty-payment-request-web` | Next.js | 3020 | `payment-request-web` |
 | Payment Request API | `minty-payment-request-api` | Django | 8020 | `payment-request-api` |
 | Onboarding web | `minty-onboarding-web` | Next.js | 3030 | `onboarding-web` |
@@ -60,6 +61,8 @@ web 3000, payment-request API 8000, onboarding web 3001, onboarding API 8001.
 | `MINTY_WEB_URL` | `http://localhost:3000` | the hub |
 | `SUBSCRIPTION_API_URL` | `http://localhost:8000` | subscription API |
 | `PETTY_CASH_URL` | `http://localhost:8010` | Petty Cash (Flask) |
+| `ACCOUNTS_API_URL` | `http://localhost:8000` | Flask, as minty-petty-cash-api and minty-petty-cash-web name it (the hand-off, Xero tokens, the deposit correction); required outside development |
+| `PETTY_CASH_API_URL` | `http://localhost:8010` | the Petty Cash API, as minty-petty-cash-web reads it (Flask's blueprint until it points at minty-petty-cash-api) |
 | `PETTY_CASH_WEB_URL` | `http://localhost:3010` | Petty Cash web (Flask's hand-off target and the CORS origin of its Petty Cash API) |
 | `PAYMENT_REQUEST_WEB_URL` | `http://localhost:3020` | payment-request web |
 | `PAYMENT_REQUEST_API_URL` | `http://localhost:8020` | payment-request API |

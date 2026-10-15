@@ -2591,6 +2591,20 @@
    "in_scope": true
   },
   {
+   "endpoint": "xero.internal_deposit_correction",
+   "rule": "/api/internal/xero/deposit-correction",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "correct_previous_deposit": [
+     "report"
+    ]
+   },
+   "in_scope": true
+  },
+  {
    "endpoint": "xero.get_latest_xero_bank_transactions",
    "rule": "/api/xero/bank-transactions/latest/<entity_id>",
    "methods": [

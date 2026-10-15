@@ -393,6 +393,11 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
   xero-access-token`, `entity_id` in the **signed claims**, never the body) and gets a live
   access token back; 409 means "reconnect required". Its `PETTY_CASH_URL` must point at the
   Minty host (the token URL is derived from it: `PETTY_CASH_URL/api/internal/xero/token`).
+- minty-petty-cash-api asks for tokens the same way (it never reads `user_token`), and forwards
+  the dashboard's deposit correction to `POST /api/internal/xero/deposit-correction`: the same
+  60-second assertion with its own scope (`petty-cash-deposit-correction`), the company AND the
+  person (`user_id`) in the signed claims. Flask refuses an unknown or unapproved person (401) and
+  re-checks `REPORT_EDIT_ENTITY` (403). Each internal route accepts only its own scope.
 - Tokens are never logged: `tests/test_zz_no_token_logging.py` fails any logger f-string
   that formats a value named like a token.
 

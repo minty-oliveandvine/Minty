@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from flask import request
 
 from blueprints.petty_cash_api import petty_cash_api_bp
-from blueprints.petty_cash_api.api import company, refuse, respond, user
+from blueprints.petty_cash_api.api import company, respond, user
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NOT_ALLOWED = "You don't have permission to change this company's reports."
@@ -117,24 +117,32 @@ def _valid_correction(body) -> tuple[dict | None, str | None]:
     return {"kind": kind, "date": day, "amount": float(amount)}, None
 
 
-@petty_cash_api_bp.post("/deposit-correction")
-def deposit_correction():
+def correct_deposit(entity_id, person, body) -> tuple[dict, int]:
+    """The API's answer to a correction ``body`` from ``person``: ``(json, status)``, a refusal as
+    ``{"error": ...}``. Shared by ``POST /deposit-correction`` and the internal route
+    minty-petty-cash-api forwards it to (``xero/routes/routes.py::internal_deposit_correction``),
+    so the two cannot answer differently."""
     from blueprints.report.routes import legacy
     from services.permission_policy import Permission, has_permission
 
-    entity_id = company()["id"]
-    if not has_permission(user(), Permission.REPORT_EDIT_ENTITY, entity_id):
-        return refuse(NOT_ALLOWED, 403)
-    correction, problem = _valid_correction(request.get_json(silent=True))
+    if not has_permission(person, Permission.REPORT_EDIT_ENTITY, entity_id):
+        return {"error": NOT_ALLOWED}, 403
+    correction, problem = _valid_correction(body)
     if problem:
-        return refuse(problem, 422)
+        return {"error": problem}, 422
 
     payload, status = legacy.correct_previous_deposit(entity_id, correction)
     if status >= 400:
-        return refuse(payload.get("message") or "That deposit didn't save. Try again.", status)
+        return {"error": payload.get("message") or "That deposit didn't save. Try again."}, status
     # The Jinja page's next stop is a Flask URL; this app opens the next day's report itself.
     payload.pop("redirect_url", None)
     payload["next_transaction_date"] = (date.fromisoformat(correction["date"]) + timedelta(days=1)).isoformat()
     if "id" in payload:
         payload["id"] = str(payload["id"])
-    return respond(payload, status)
+    return payload, status
+
+
+@petty_cash_api_bp.post("/deposit-correction")
+def deposit_correction():
+    body, status = correct_deposit(company()["id"], user(), request.get_json(silent=True))
+    return respond(body, status)
