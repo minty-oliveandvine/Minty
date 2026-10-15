@@ -1,6 +1,5 @@
 # Entity list and report dashboard routes.
 
-
 from datetime import datetime
 
 from flask import (current_app, flash, get_flashed_messages, redirect,
@@ -10,18 +9,18 @@ from loguru import logger
 
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import minty_web_module_page_handoff
-from blueprints.entity.services.dashboard import dashboard_state
 from blueprints.entity.services.entity_list import sign_notices
+from blueprints.entity.services.launch import greeting, launch_state
 from blueprints.entity.services.modules import claim_subscription_notice
-from blueprints.entity.services.shared import (check_user_has_entities,
-                                               get_main_bank_account)
-from blueprints.shared.entity_display import build_entity_acronym
-from blueprints.xero.services.integration import get_accounts_from_xero
-from models.db import Entity, Report, UserEntity
-from services.auth.token_service import (ensure_valid_token,
-                                         get_xero_token_user_for_entity)
+from blueprints.entity.services.shared import check_user_has_entities
+from blueprints.report.services.daily_closing import stage_hrefs
+from blueprints.xero.services.settings import (
+    check_entity_xero_settings_complete, get_entity_account_settings,
+    get_missing_xero_settings_fields)
+from models.db import Entity, UserEntity, tz
 from services.authz import (permission_denied, require_module)
-from services.permission_policy import Permission, has_permission, is_superuser
+from services.permission_policy import (Permission, has_permission, is_superuser,
+                                        is_superuser_readonly)
 from services.subscription_api import fetch_notice
 
 
@@ -98,72 +97,48 @@ def report_dashboard(id):
             )
         )
 
-    # Everything the page computes about the company's reports - shared with the Petty Cash
-    # API's GET /home (blueprints/entity/services/dashboard.py), copied onto ``org`` as before.
-    state = dashboard_state(id)
-    latest, draft = state["latest"], state["draft"]
-    org.transaction_date = latest["date"]
-    org.closing_balance = latest["closing_balance"]
-    org.latest_deposit = latest["deposit"]
-    org.latest_date = latest["date"]
-    org.latest_deposit_bank_name = latest["deposit_bank_name"]
-    org.latest_deposit_bank_number = latest["deposit_bank_number"]
-    org.deposit_correction_missing_settings = latest["deposit_correction_missing_settings"]
-    org.can_correct_latest_deposit = latest["can_correct_deposit"]
-    org.has_existing_draft = draft is not None
-    org.draft_id = draft["id"] if draft else None
-    org.draft_current_section = draft["current_section"] if draft else None
-    org.draft_completed_sections = draft["completed_sections"] if draft else []
-    org.draft_progress_completed = len(draft["completed_sections"]) if draft else 0
-    org.draft_date = state["draft_date"]
-    org.draft_last_edit_seconds = draft["last_edit_seconds"] if draft else 0
-    org.is_new_user = state["is_new_user"]
-    latest_report_submitter_first_name = state["latest_submitter_first_name"]
-    published_reports_dict = state["published"]
-    published_dates = list(published_reports_dict)
-    today_has_report = state["today_has_report"]
-    today_is_latest_report = state["today_is_latest_report"]
-    today_report_id = state["today_report_id"]
+    # The launch page (Part 15.6a): the open draft, the next day and its gate, the latest reports
+    # - decided in blueprints/entity/services/launch.py, not in the browser.
+    launch = launch_state(id)
 
-    try:
-        token_user = get_xero_token_user_for_entity(id)
-        if ensure_valid_token(token_user):
-            bank_accounts = get_accounts_from_xero(
-                token_user.access_token,
-                org.xero_org_id,
-                where='Type="BANK"',
-                order="Code ASC, Name ASC",
-                token_validated=True,
+    # "Before You Start" and "Correct deposit" rewrite the latest submitted report's deposit
+    # (POST /api/check-dept-bank-yest), which needs the entity's deposit-bank and petty-cash
+    # mappings when there was a deposit to reverse. Same rule the endpoint enforces (409).
+    deposit_bank = None
+    deposit_missing_settings = []
+    if launch.latest and launch.latest.bank_deposit > 0:
+        deposit_bank = get_entity_account_settings(str(id), "bank")
+        deposit_missing_settings = [
+            label
+            for label, present in (
+                ("Deposit Bank Account", bool(deposit_bank)),
+                ("Petty Cash Account", bool(get_entity_account_settings(str(id), "pettycash"))),
             )
-        else:
-            bank_accounts = []
-    except Exception as e:
-        logger.error(f"Error fetching bank accounts: {str(e)}")
-        bank_accounts = []
-
-    has_complete_xero_settings = state["has_complete_xero_settings"]
-    missing_settings_fields = state["missing_settings_fields"]
-    main_bank_account = get_main_bank_account(id)
-    # Includes drafts on purpose: a deposit entered on a draft is a real
-    # deposit for the "has this entity ever deposited" question.
-    has_deposit = (
-        Report.query.filter(Report.company == str(id), Report.bank_deposit > 0)
-        .order_by(Report.transaction_date.desc())
-        .first()
+            if not present
+        ]
+    readonly = is_superuser_readonly(current_user, id)
+    can_correct_deposit = (
+        not readonly
+        and launch.state in ("not_started", "done")
+        and launch.latest is not None
+        and launch.latest.bank_deposit > 0
+        and has_permission(current_user, Permission.REPORT_EDIT_ENTITY, id)
     )
-    entity_acronym = build_entity_acronym(org.name) if org else ""
-    display_date = None
-    if org and org.created_at:
-        display_date = (
-            org.created_at.date()
-            if isinstance(org.created_at, datetime)
-            else org.created_at
-        )
 
-    # Hong Kong "today" for the calendar's create-time validation; amounts render with the
-    # company's ISO currency code ("$" when it has none).
-    server_today_hk = state["server_today_hk"]
-    currency_symbol = state["currency_code"] or "$"
+    has_complete_xero_settings = check_entity_xero_settings_complete(id)
+    missing_settings_fields = []
+    if not has_complete_xero_settings:
+        missing_settings_fields = get_missing_xero_settings_fields(id)
+
+    # Money amounts on the dashboard render with the ISO code of the entity's
+    # selected currency (entities.currency_id -> currency_info.currency_code).
+    from models.db import CurrencyInfo
+
+    currency_symbol = "$"
+    if org and org.currency_id:
+        _currency = CurrencyInfo.query.get(org.currency_id)
+        if _currency and _currency.currency_code:
+            currency_symbol = _currency.currency_code
 
     # Subscription notice — once per entity per login. claim_* is checked FIRST so the
     # subscription API is only asked on a page view that would show the modal; the
@@ -189,26 +164,27 @@ def report_dashboard(id):
     )
 
     return render_template(
-        "entity/entity_dashboard_v2.html",
+        "petty_cash/launch.html",
         org=org,
+        launch=launch,
+        greeting=greeting(datetime.now(tz)),
+        # done and current stages open their page (Part 14 Step progress)
+        stage_hrefs=(
+            stage_hrefs(id, launch.work_date)
+            if launch.state == "in_progress"
+            else None
+        ),
+        readonly=readonly,
+        can_correct_deposit=can_correct_deposit,
+        deposit_bank=deposit_bank,
+        deposit_missing_settings=deposit_missing_settings,
         subscription_notice=subscription_notice,
         # minty-web's Module page, through this app's hand-over at the click
         subscription_settings_url=minty_web_module_page_handoff(id),
         currency_symbol=currency_symbol,
-        server_today_hk=server_today_hk,
-        main_bank_account=main_bank_account,
-        bank_accounts=bank_accounts,
-        published_dates=published_dates,
-        published_reports_dict=published_reports_dict,
-        today_has_report=today_has_report,
-        today_report_id=today_report_id,
-        today_is_latest_report=today_is_latest_report,
         has_complete_xero_settings=has_complete_xero_settings,
         missing_settings_fields=missing_settings_fields,
-        has_deposit=has_deposit,
-        entity_acronym=entity_acronym,
-        display_date=display_date,
-        latest_report_submitter_first_name=latest_report_submitter_first_name,
+        xero_connected=request.args.get("success") == "true",
     )
 
 

@@ -170,10 +170,30 @@ def test_inside_a_preview_set_it_lands_on_the_sets_petty_cash_host(client, shop,
         r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|petty-cash)\.dailyminty\.com$",
     )
     F.login(client, shop["owner"])
+    # The trip names its set (preview_origin: only a same-site navigation may, with return_origin).
+    resp = client.get(
+        "/handoff/petty-cash-web",
+        query_string={"entity_id": shop["entity"].id,
+                      "return_origin": "https://pr-development-petty-cash.dailyminty.com"},
+        headers={"Sec-Fetch-Site": "same-site"},
+    )
+    parts, _ = _landing(resp)
+
+    assert parts.netloc == "pr-development-petty-cash.dailyminty.com"
+
+
+def test_a_link_on_a_flask_page_follows_the_set_the_person_came_from(client, shop, monkeypatch):
+    monkeypatch.setenv(
+        "PREVIEW_ORIGIN_REGEX",
+        r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|petty-cash)\.dailyminty\.com$",
+    )
+    F.login(client, shop["owner"])
     with client.session_transaction() as sess:
         sess["preview_set"] = {"slug": "development", "at": int(time.time())}
 
-    parts, _ = _landing(client.get("/handoff/petty-cash-web", query_string={"entity_id": shop["entity"].id}))
+    resp = client.get("/handoff/petty-cash-web", query_string={"entity_id": shop["entity"].id},
+                      headers={"Sec-Fetch-Site": "same-origin"})
+    parts, _ = _landing(resp)
 
     assert parts.netloc == "pr-development-petty-cash.dailyminty.com"
 

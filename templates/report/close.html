@@ -1,0 +1,89 @@
+{#
+  Daily Closing stage 5 - Close (Part 15.15e: Replace; "Close (Work Verification)", R-02..R-04).
+  A read-only summary of every stage with Edit links, the recalculated totals and the difference,
+  then one action: Submit Daily Report. No KPIs, trends or charts inside the workflow (D15-03 -
+  those are the Daily Report's). Rendered by blueprints/report/services/ending.py for a DRAFT; its
+  POST (action_type=submit) is unchanged and lands on the outcome page.
+#}
+{% extends 'petty_cash/closing_base.html' %}
+{% set pc_section = 'ending' %}
+{% set d = current_draft %}
+{% set facts = report_facts(d.id) %}
+{% set expected = (expected_cash_count_balance or 0)|float %}
+{% set off = discrepancy_amount and ((discrepancy_amount|float)|abs) >= 0.005 %}{# any cent counts (owner, 2026-10-15) #}
+{% set electronic = sale_info | selectattr('type', 'equalto', 'electronic') | list %}
+{% set delivery = sale_info | selectattr('type', 'equalto', 'delivery') | rejectattr('value_name', 'equalto', 'deliveroo_sales') | list %}
+
+{% macro edit_link(stage, label) -%}
+<a class="pc-btn pc-btn--link" href="{{ pc_hrefs[stage] }}" aria-label="Edit {{ label }}">Edit</a>
+{%- endmacro %}
+
+{% block guidance %}<p class="pc-page-header__purpose">Check the day, then submit the Daily Report.</p>{% endblock %}
+
+{% block stage %}
+<form id="endingForm" data-pc-stage-form novalidate method="post"
+      action="{{ url_for('report.report_ending', entity_id=org.id, transaction_date=(transaction_date.strftime('%Y-%m-%d') if transaction_date else None)) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="entity_id" value="{{ org.id }}">
+  <input type="hidden" name="transaction_date" value="{{ transaction_date.strftime('%Y-%m-%d') if transaction_date else '' }}">
+  <input type="hidden" name="action_type" value="submit">
+
+  <div class="pc-stack" style="display: flex; flex-direction: column">
+    {% if expected < 0 %}
+      {% call ui.alert('danger', title='The drawer is below zero', text='Expected in drawer comes to ' ~ (expected|money(code)) ~ '. Lower the deposit or check the earlier stages before you submit.') %}
+        <a href="{{ pc_hrefs['cash_count'] }}">Go to Cash Count</a>
+      {% endcall %}
+    {% endif %}
+    {% if off %}
+      {{ ui.alert('warning', title='The count is ' ~ (((discrepancy_amount|float)|abs)|money(code)) ~ (' short' if discrepancy_type == 'short' else ' over'), text=('Reason: ' ~ discrepancy_reason) if discrepancy_reason else 'No reason was given yet.') }}
+    {% endif %}
+
+    <section aria-labelledby="drawer-title">
+      <div class="pc-section-header"><h2 class="pc-t-title-m" id="drawer-title">Addition to Drawer</h2>{{ edit_link('drawer', 'Addition to Drawer') }}</div>
+      {{ ui.rows([
+        ('Starting cash balance', (d.opening_balance or 0)|money(code), True),
+        ('Added to the drawer', (d.cash_addition or 0)|money(code), True),
+      ], amounts=True) }}
+    </section>
+
+    <section aria-labelledby="sales-title">
+      <div class="pc-section-header"><h2 class="pc-t-title-m" id="sales-title">Sales</h2>{{ edit_link('sales', 'Sales') }}</div>
+      {% set sales_rows = [] %}
+      {% for sale in electronic + delivery %}{% set _ = sales_rows.append((ui.method_name(sale), (sales_amounts.get(sale.value_name, 0) or 0)|money(code), True)) %}{% endfor %}
+      {% set _ = sales_rows.append(('Cash', (cash_sales or 0)|money(code), True)) %}
+      {% set _ = sales_rows.append(('Total sales', (total_sales or 0)|money(code), True, True)) %}
+      {{ ui.rows(sales_rows, amounts=True) }}
+    </section>
+
+    <section aria-labelledby="expenses-title">
+      <div class="pc-section-header"><h2 class="pc-t-title-m" id="expenses-title">Expenses ({{ facts.expenses|length }})</h2>{{ edit_link('expenses', 'Expenses') }}</div>
+      {% set expense_rows = [] %}
+      {% for e in facts.expenses %}{% set _ = expense_rows.append(((e.item or 'Expense') ~ ((' · ' ~ e.contact_name) if e.contact_name else ''), e.amount|money(code), True)) %}{% endfor %}
+      {% set _ = expense_rows.append(('Receipts', facts.receipts|length ~ ' of ' ~ facts.expenses|length ~ ' expenses', False)) %}
+      {% set _ = expense_rows.append(('Total expenses', (cash_expense or 0)|money(code), True, True)) %}
+      {{ ui.rows(expense_rows, amounts=True) }}
+    </section>
+
+    <section aria-labelledby="count-title">
+      <div class="pc-section-header"><h2 class="pc-t-title-m" id="count-title">Cash Count</h2>{{ edit_link('cash_count', 'Cash Count') }}</div>
+      {{ ui.rows([
+        ('Cash taken for bank deposit', (bank_deposit or 0)|money(code), True),
+        ('Expected in drawer', expected|money(code), True),
+        ('Counted in the drawer', (total_actual_cash or 0)|money(code), True),
+        ('In the safe box', (safe_box_balance or 0)|money(code), True),
+        ('Difference', ((((discrepancy_amount|float)|abs)|money(code)) ~ (' short' if discrepancy_type == 'short' else ' over')) if off else 'None', True, True),
+      ], amounts=True) }}
+    </section>
+
+    <dl class="pc-dl pc-dl--amounts pc-dl--sunk">
+      <div class="pc-dl__total"><dt>Closing balance</dt><dd class="pc-num" translate="no" id="closingBalance">{{ (closing_balance or 0)|money(code) }}</dd></div>
+    </dl>
+  </div>
+
+  <div class="pc-stage-actions">
+    <button type="submit" class="pc-btn pc-btn--primary" id="finishReportBtn" data-pc-save="submit" data-pc-busy="Submitting…"{% if expected < 0 %} disabled aria-describedby="nextReason"{% endif %}>Submit Daily Report</button>
+    {% if expected < 0 %}<p class="pc-reason" id="nextReason">Fix the cash count before you submit.</p>{% endif %}
+    <a class="pc-btn pc-btn--link" href="{{ url_for('entity.report_dashboard', id=org.id) }}">Save &amp; Exit</a>
+  </div>
+</form>
+{% endblock %}

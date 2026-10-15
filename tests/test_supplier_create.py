@@ -4,6 +4,7 @@ and the Xero mapping pages) and the Petty Cash API's ``POST /suppliers`` - both 
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -166,8 +167,9 @@ def test_a_company_without_xero_cannot_add_one(app, client, db, shop, xero):
 
 
 def test_the_expenses_page_sends_its_own_company(app, client, db, shop):
-    """Fixed 2026-10-14: the page posted ``request.args['entity_id']``, empty on the company
-    address, so "+ Add as a new contact" was refused before reaching Xero."""
+    """The old page posted ``request.args['entity_id']``, empty on the company address, so
+    "+ Add as a new contact" was refused before reaching Xero (fixed 2026-10-14). The Part 15 page
+    (static/js/pc_expenses.js) posts ``CFG.entityId``, the company the page was drawn for."""
     from models.db import Report
 
     owner, entity = shop
@@ -182,7 +184,7 @@ def test_the_expenses_page_sends_its_own_company(app, client, db, shop):
     html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/expense",
                       query_string={"transaction_date": F.iso(day)}).get_data(as_text=True)
 
-    assert f"formData.append('entity_id', \"{entity.id}\");" in html
+    assert re.search(r"entityId:\s*\"" + re.escape(str(entity.id)) + "\"", html), "the page's company"
 
 
 # --- the Petty Cash API ------------------------------------------------------------------------------

@@ -1,0 +1,75 @@
+{#
+  The Daily Closing's stage frame (Part 15.9 / 15.15): one 720 column, the same on every width.
+
+  Workflow header: Step progress across the column -> the stage title with the report's pill ->
+  the day -> one sentence of guidance. Then the stage ({% block stage %}), which ends with
+  stage_actions(): Save & Next (Primary) with Save & Exit (Link) beneath, never sticky.
+
+  A stage template sets, at its top level:
+    pc_section   the wizard section it is ('opening', 'sales', 'expenses', 'cash_count', 'ending')
+  and passes the usual wizard context (org, current_draft, completed_sections, the day's date).
+
+  The five stages are drawn over the wizard's six sections (blueprints/report/services/
+  daily_closing.py); the routes, their URLs and the action_type POST contract are unchanged.
+#}
+{% extends 'petty_cash/base.html' %}
+{% import 'petty_cash/_ui.html' as ui %}
+{% set pc_entity = org %}
+{% set pc_stage = stage_of_section(pc_section) %}
+{% set pc_title = pc_stage.label %}
+{% set pc_back_url = url_for('entity.report_dashboard', id=org.id) %}
+{% set pc_back_label = 'Back to Petty Cash' %}
+{# A report read by id without its status column (the cash-count route's view query) is a submitted
+   one: the old pages treated the missing attribute the same way (read-only). #}
+{% set pc_is_submitted = current_draft and (current_draft.status is not defined or current_draft.status != 'draft') %}
+{% set pc_edit = (is_edit_mode is defined and is_edit_mode) or request.args.get('edit') == 'true' %}
+{% set pc_report_edit = request.args.get('report_edit') == 'true' %}
+{% set pc_day = selected_date or transaction_date or next_transaction_date or datenow %}
+{% set pc_hrefs = stage_hrefs(org.id, pc_day, report_id=(current_draft.id if pc_is_submitted else None), edit=pc_edit, report_edit=pc_report_edit) %}
+{% set pc_status = report_status(current_draft.status if current_draft.status is defined else 'submitted', current_draft.publishing_status if current_draft.publishing_status is defined else None, current_draft.xero_integrated_yes if current_draft.xero_integrated_yes is defined else False) if current_draft else ('Draft', 'neutral') %}
+{% set code = currency_symbol %}
+
+{% block head %}<meta name="pc-section" content="{{ pc_section }}">{% endblock %}
+
+{# gate = the sentence shown beside Save & Next while a stage holds it (15.2: a disabled button
+   shows its reason); the stage's script shows and hides #nextReason. #}
+{% macro stage_actions(next_label='Save & Next', show_exit=True, gate=None) -%}
+<div class="pc-stage-actions">
+  {% if not pc_is_submitted %}
+  <button type="submit" class="pc-btn pc-btn--primary" data-pc-save="save_next"{% if gate %} aria-describedby="nextReason"{% endif %}>{{ next_label }}</button>
+  {% if gate %}<p class="pc-reason" id="nextReason" hidden>{{ gate }}</p>{% endif %}
+  {% if show_exit %}<button type="button" class="pc-btn pc-btn--link" data-pc-save="save_exit">Save &amp; Exit</button>{% endif %}
+  {% else %}
+  <a class="pc-btn pc-btn--secondary" href="{{ url_for('report.entity_ending_with_report', entity_id=org.id, report_id=current_draft.id) }}">Back to the Daily Report</a>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="pc-wrap pc-wrap--720">
+  <header class="pc-workflow-header">
+    {{ ui.step_progress(stage_progress(pc_section, completed_sections), pc_hrefs) }}
+    <div>
+      <div class="pc-page-header__title-row">
+        <h1 class="pc-t-display-m">{{ pc_stage.label }}</h1>
+        {{ ui.pill(pc_status[0], pc_status[1]) }}
+      </div>
+      <p class="pc-workflow-header__date">Daily Closing · {{ pc_day|day }}</p>
+      {% block guidance %}{% endblock %}
+    </div>
+    {% if pc_is_submitted and (pc_edit or pc_report_edit) %}
+      {{ ui.alert('info', title='Editing a submitted report', text='Your changes update the Daily Report when you save them.' ~ (' It is already in Xero, so publish it again afterwards.' if pc_status[1] == 'success' else ''), banner=True) }}
+    {% elif pc_is_submitted %}
+      {{ ui.alert('info', title='This report is submitted', text='Open it from the Daily Report to make changes.', banner=True) }}
+    {% endif %}
+  </header>
+  <div class="pc-error-summary" data-pc-summary tabindex="-1" role="alert" hidden></div>
+  {% block stage %}{% endblock %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/report_back_nav.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pc_closing.js') }}"></script>
+{% block stage_scripts %}{% endblock %}
+{% endblock %}

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from loguru import logger
 
@@ -220,13 +220,18 @@ def report_cash_count(id=None, entity_id=None):
             )
             return redirect(url_for("report.report_opening"))
 
-        from blueprints.report.services.cash import CashRefused, save_cash_count
+        from blueprints.report.services.cash import (CashRefused, save_cash_count,
+                                                     save_deposit_and_count)
 
-        here = url_for("report.report_cash_count", entity_id=entity_id,
-                       transaction_date=transaction_date.strftime("%Y-%m-%d"))
+        day = transaction_date.strftime("%Y-%m-%d")
+        here = url_for("report.report_cash_count", entity_id=entity_id, transaction_date=day)
         action_type = request.form.get("action_type", "save_next")
-        # One count per denomination the company logs (the form's actual_cash[<field>]); the
-        # discrepancy the page posts is the browser's - the service works it out again.
+        # Bank Deposit is the first block of this stage since the Part 15 redesign (D15-05): the
+        # page sends it with the count and both are saved in one commit. A client that does not
+        # send it (the old deposit step already saved it) leaves the deposit as it is.
+        deposit_sent = "bank_deposit" in request.form
+        # One count per denomination the company logs (actual_cash[<field>]); the difference the
+        # page posts is the browser's - the service works it out again.
         counts = {}
         for denomination in denominations:
             raw = (request.form.get(f"actual_cash[{form_field_for(denomination)}]") or "").replace(",", "").strip()
@@ -235,16 +240,33 @@ def report_cash_count(id=None, entity_id=None):
             except ValueError:
                 quantity = -1.0
             counts[denomination.cash_id] = int(quantity) if quantity.is_integer() else -1
+        safe_box = safe_float(request.form.get("safe_box_balance", 0))
+        reason = request.form.get("discrepancy_reason", "")
+
+        def save(action):
+            if deposit_sent:
+                return save_deposit_and_count(current_draft, current_user,
+                                              safe_float(request.form.get("bank_deposit", 0)),
+                                              counts, safe_box, reason, action)
+            return save_cash_count(current_draft, current_user, counts, safe_box, reason, action)
+
         try:
-            save_cash_count(
-                current_draft,
-                current_user,
-                counts,
-                safe_float(request.form.get("safe_box_balance", 0)),
-                request.form.get("discrepancy_reason", ""),
-                action_type,
-            )
+            save(action_type)
         except CashRefused as refused:
+            if refused.field == "discrepancy_reason" and action_type == "save_next":
+                # Part 15.15d: a difference needs a reason before the day moves on. What was
+                # counted is still saved (nothing typed is lost) and the stage stays here.
+                try:
+                    save("save_exit")
+                except CashRefused as other:
+                    refused = other
+                else:
+                    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                        return jsonify({"status": "error", "message": refused.message,
+                                        "field": "discrepancy_reason"}), 422
+                    flash(refused.message, "warning")
+                    return redirect(url_for("report.report_cash_count", entity_id=entity_id,
+                                            transaction_date=day, reason="needed"))
             flash(refused.message, "danger")
             return redirect(here)
         except Exception:
@@ -255,13 +277,7 @@ def report_cash_count(id=None, entity_id=None):
 
         if action_type == "save_exit":
             return redirect(url_for("entity.report_dashboard", id=entity_id))
-        return redirect(
-            url_for(
-                "report.report_ending",
-                entity_id=entity_id,
-                transaction_date=transaction_date.strftime("%Y-%m-%d"),
-            )
-        )
+        return redirect(url_for("report.report_ending", entity_id=entity_id, transaction_date=day))
 
     # Handle case where no draft exists
     if not current_draft:

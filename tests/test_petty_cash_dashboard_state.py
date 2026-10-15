@@ -1,18 +1,18 @@
-"""What the Petty Cash dashboard (``entity/routes/list.py::report_dashboard``) computes - pinned
-before it is extracted into a service that the HTML page and the Petty Cash API's ``/home`` both
-read (minty-petty-cash-web's port of this page, 2026-10-14).
+"""What the Petty Cash dashboard's figures are (``entity/services/dashboard.py::dashboard_state``) -
+what the Petty Cash API's ``GET /home`` hands minty-petty-cash-web's two ported dashboards.
 
-Characterisation: these assert what the page is handed TODAY, quirks included, read off the
-template context - so the extraction can be proved to change nothing.
+Pinned 2026-10-14 off the old Jinja dashboard's template context, before the figures were
+extracted into this service. The Part 15 redesign (development, 2026-10-15) replaced that page
+with the launch page, which reads its own facts; these now read the service directly, so the API's
+figures stay pinned. The old page's two page-only facts (the Xero bank-account list and whether
+the company ever deposited) went with it.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import date, timedelta
 
 import char_factories as F
 import pytest
-from flask import template_rendered
 
 pytestmark = pytest.mark.char
 
@@ -59,51 +59,30 @@ def _report(app, db, shop, day, *, status="submitted", **fields):
         return row.id
 
 
-@contextmanager
-def _captured(app):
-    seen = []
+def _state(app, shop) -> dict:
+    from blueprints.entity.services.dashboard import dashboard_state
 
-    def record(_sender, template, context, **_extra):
-        seen.append((template.name, context))
-
-    template_rendered.connect(record, app)
-    try:
-        yield seen
-    finally:
-        template_rendered.disconnect(record, app)
-
-
-def _dashboard(app, client, shop) -> dict:
-    F.login(client, shop["owner"])
-    with _captured(app) as seen:
-        resp = client.get(f"{F.co(client, shop['entity'].id)}/petty-cash")
-    assert resp.status_code == 200, resp.data[:300]
-    pages = [ctx for name, ctx in seen if name == "entity/entity_dashboard_v2.html"]
-    assert len(pages) == 1
-    return pages[0]
+    with app.app_context():
+        return dashboard_state(shop["entity"].id)
 
 
 def test_a_new_company(app, client, shop):
-    ctx = _dashboard(app, client, shop)
-    org = ctx["org"]
+    state = _state(app, shop)
+    latest = state["latest"]
 
-    assert org.is_new_user is True
-    assert org.has_existing_draft is False and org.draft_id is None
-    assert org.draft_current_section is None and org.draft_completed_sections == []
-    assert org.draft_progress_completed == 0 and org.draft_date is None
-    assert org.transaction_date is None and org.closing_balance == 0 and org.latest_deposit == 0
-    assert org.latest_deposit_bank_name == "No deposit" and org.latest_deposit_bank_number == ""
-    assert org.can_correct_latest_deposit is True and org.deposit_correction_missing_settings == []
-    assert ctx["published_dates"] == [] and ctx["published_reports_dict"] == {}
-    assert ctx["today_has_report"] is False and ctx["today_report_id"] is None
-    assert ctx["today_is_latest_report"] is False
-    assert ctx["currency_symbol"] == "HKD"
-    assert ctx["server_today_hk"] == ctx["server_today_hk"][:10] and len(ctx["server_today_hk"]) == 10
-    assert ctx["has_deposit"] is None
-    assert ctx["latest_report_submitter_first_name"] is None
-    assert ctx["bank_accounts"] == []  # no Xero connection
-    assert ctx["has_complete_xero_settings"] is False
-    assert ctx["missing_settings_fields"]  # names what is missing
+    assert state["is_new_user"] is True
+    assert state["draft"] is None and state["draft_date"] is None
+    assert latest["date"] is None and latest["closing_balance"] == 0 and latest["deposit"] == 0
+    assert latest["deposit_bank_name"] == "No deposit" and latest["deposit_bank_number"] == ""
+    assert latest["can_correct_deposit"] is True and latest["deposit_correction_missing_settings"] == []
+    assert state["published"] == {}
+    assert state["today_has_report"] is False and state["today_report_id"] is None
+    assert state["today_is_latest_report"] is False
+    assert state["currency_code"] == "HKD"
+    assert len(state["server_today_hk"]) == 10
+    assert state["latest_submitter_first_name"] is None
+    assert state["has_complete_xero_settings"] is False
+    assert state["missing_settings_fields"]  # names what is missing
 
 
 def test_a_draft_in_progress_after_two_submitted_days(app, client, db, shop):
@@ -113,59 +92,57 @@ def test_a_draft_in_progress_after_two_submitted_days(app, client, db, shop):
     draft = _report(app, db, shop, TODAY, status="draft", closing_balance=150,
                     current_section="sales", completed_sections=["opening"])
 
-    ctx = _dashboard(app, client, shop)
-    org = ctx["org"]
+    state = _state(app, shop)
+    latest, current = state["latest"], state["draft"]
 
     # the latest report INCLUDES the draft
-    assert org.is_new_user is False
-    assert org.transaction_date == TODAY and org.closing_balance == 150
-    assert org.has_existing_draft is True and str(org.draft_id) == str(draft)
-    assert org.draft_current_section == "sales"
-    assert org.draft_completed_sections == ["opening"] and org.draft_progress_completed == 1
-    assert org.draft_date == TODAY
-    assert 0 <= org.draft_last_edit_seconds < 600
+    assert state["is_new_user"] is False
+    assert latest["date"] == TODAY and latest["closing_balance"] == 150
+    assert str(current["id"]) == str(draft)
+    assert current["current_section"] == "sales" and current["completed_sections"] == ["opening"]
+    assert state["draft_date"] == TODAY
+    assert 0 <= current["last_edit_seconds"] < 600
     # published = everything but drafts
-    assert sorted(ctx["published_dates"]) == [before.isoformat(), yesterday.isoformat()]
-    assert ctx["published_reports_dict"][yesterday.isoformat()] == {
+    assert sorted(state["published"]) == [before.isoformat(), yesterday.isoformat()]
+    assert state["published"][yesterday.isoformat()] == {
         "id": second,
         "closing_balance": 120,
         "bank_deposit": 50,
         "xero_integrated_yes": True,
         "submitter_first_name": "Olive",
     }
-    assert ctx["published_reports_dict"][before.isoformat()]["id"] == first
-    assert ctx["today_has_report"] is False
-    assert ctx["today_is_latest_report"] is True  # the draft is today's
-    assert ctx["latest_report_submitter_first_name"] == "Olive"
-    assert ctx["has_deposit"] is not None
+    assert state["published"][before.isoformat()]["id"] == first
+    assert state["today_has_report"] is False
+    assert state["today_is_latest_report"] is True  # the draft is today's
+    assert state["latest_submitter_first_name"] == "Olive"
 
 
 def test_the_earliest_draft_is_the_calendar_floor(app, client, db, shop):
     _report(app, db, shop, TODAY, status="draft")
     _report(app, db, shop, TODAY - timedelta(days=3), status="draft")
 
-    org = _dashboard(app, client, shop)["org"]
+    state = _state(app, shop)
 
-    assert org.draft_date == TODAY - timedelta(days=3)
-    assert org.transaction_date == TODAY  # the newest draft drives the card
+    assert state["draft_date"] == TODAY - timedelta(days=3)
+    assert state["latest"]["date"] == TODAY  # the newest draft drives the card
 
 
 def test_today_submitted(app, client, db, shop):
     today_id = _report(app, db, shop, TODAY, closing_balance=10)
 
-    ctx = _dashboard(app, client, shop)
+    state = _state(app, shop)
 
-    assert ctx["today_has_report"] is True and str(ctx["today_report_id"]) == str(today_id)
-    assert ctx["today_is_latest_report"] is True
-    assert ctx["org"].has_existing_draft is False
+    assert state["today_has_report"] is True and str(state["today_report_id"]) == str(today_id)
+    assert state["today_is_latest_report"] is True
+    assert state["draft"] is None
 
 
 def test_a_deposit_without_the_accounts_to_correct_it(app, client, db, shop):
     _report(app, db, shop, TODAY - timedelta(days=1), closing_balance=10, bank_deposit=25)
 
-    org = _dashboard(app, client, shop)["org"]
+    latest = _state(app, shop)["latest"]
 
-    assert org.latest_deposit == 25
-    assert org.latest_deposit_bank_name == "Unknown Bank" and org.latest_deposit_bank_number == "****"
-    assert org.deposit_correction_missing_settings == ["Deposit Bank Account", "Petty Cash Account"]
-    assert org.can_correct_latest_deposit is False
+    assert latest["deposit"] == 25
+    assert latest["deposit_bank_name"] == "Unknown Bank" and latest["deposit_bank_number"] == "****"
+    assert latest["deposit_correction_missing_settings"] == ["Deposit Bank Account", "Petty Cash Account"]
+    assert latest["can_correct_deposit"] is False

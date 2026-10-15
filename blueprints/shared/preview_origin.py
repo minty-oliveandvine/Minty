@@ -3,21 +3,35 @@
 A branch's previews live on ``https://pr-<slug>-<app>.dailyminty.com`` - one host per front end
 (``my``, ``payment-request``, ``onboarding``, ``petty-cash``), kept complete by the ``.github`` repo's
 ``vercel-preview-set.yml``. Where ``PREVIEW_ORIGIN_REGEX`` is set (minty-infra writes it onto
-ONE environment's services; ``services.app_runtime.env.preview_origin_regex``), a front end
-names itself with ``?return_origin=`` on any navigation to Flask, and Flask keeps the SET - the
-slug - in the session. Every hand-off built after that, to any of the four apps, goes to the
-same set's host for that app, so crossing apps never leaves the change being previewed.
+ONE environment's services; ``services.app_runtime.env.preview_origin_regex``), a set's front
+ends name themselves with ``?return_origin=`` on every navigation to Flask, and the hand-off
+that trip starts goes to the same set's host for the target app, so crossing apps never leaves
+the change being previewed.
+
+Previews call PRODUCTION's Flask until the November launch, so a preview tab and a production
+tab share one Flask session - and each TRIP decides where its own hand-off goes (:func:`_named`),
+so both can be used side by side:
+
+- ``return_origin`` names a set (same-site only, below) - that set; a configured origin - the
+  configured front end, from any trip (leaving a set is never risky).
+- A navigation from another of our hosts (``same-site``: production's front ends send no
+  ``return_origin``), from the address bar or a bookmark (``none``), or with no fetch metadata -
+  the configured front end.
+- Only a hop that CAN'T name a set reads the one stored in the session (``SESSION_KEY``, written
+  by the last trip that named one, cleared by a trip that named the configured hosts): a link on
+  a Flask page (``same-origin``) and Xero's OAuth return (``cross-site``). So a Flask Petty Cash
+  page hands back to the side the person last came from - with two tabs interleaved, that can
+  be the other tab's side. Fetches (the hubs' API calls) name nothing and change nothing.
 
 Unset, nothing here does anything. A stored set is re-checked against the regex on every read,
-so removing the variable turns it off at once; a configured origin in ``return_origin`` (the
-person went back to a normal host) and logging out both leave the set.
+so removing the variable turns it off at once; logging out also leaves the set.
 
 Only a SAME-SITE navigation may name a set: the browser's ``Sec-Fetch-Site`` says ``same-site``
 when the trip comes from another dailyminty.com host - one of our front ends - and ``none`` or
-``cross-site`` for a link in an email or on another site. And a set lapses ``SET_TTL_SECONDS``
-after it was last named. Without both, a crafted link could park a signed-in person's session in
-a set and route the tokens of every later Flask-started hand-off into a preview (security
-review, 2026-10-13). A browser that sends no fetch metadata never names a set.
+``cross-site`` for a link in an email or on another site. And a stored set lapses
+``SET_TTL_SECONDS`` after it was last named. Without both, a crafted link could park a signed-in
+person's session in a set and route the tokens of later Flask-started hand-offs into a preview
+(security review, 2026-10-13). A browser that sends no fetch metadata never names a set.
 
 CORS never reads the session: it answers the request's own ``Origin`` (:func:`cors_origin`).
 """
@@ -62,25 +76,43 @@ def _configured_origins() -> set[str]:
             bearer_api.petty_cash_web_origin()}
 
 
-def capture() -> None:
-    """``before_request``: remember (or leave) the set named by ``?return_origin=``."""
+def _named() -> str | None:
+    """What THIS request names: a set's slug, ``""`` for the configured front ends, or None for
+    a hop that can't name one - a link on a Flask page, Xero's OAuth return, or a fetch."""
+    fetch_site = request.headers.get("Sec-Fetch-Site")
     raw = request.args.get("return_origin")
-    if raw is None or request.headers.get("Sec-Fetch-Site") not in ("same-site", "same-origin"):
-        return
-    origin = raw.strip().rstrip("/")
-    parsed = parse(origin)
-    if parsed:
-        session[SESSION_KEY] = {"slug": parsed[0], "at": int(time.time())}
-    elif origin in _configured_origins():
+    if raw is not None:
+        origin = raw.strip().rstrip("/")
+        if origin in _configured_origins():
+            return ""
+        parsed = parse(origin)
+        if parsed and fetch_site in ("same-site", "same-origin"):
+            return parsed[0]
+    if request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate":
+        return None
+    return None if fetch_site in ("same-origin", "cross-site") else ""
+
+
+def capture() -> None:
+    """``before_request``: remember the set this trip names, or leave it for a configured host."""
+    named = _named()
+    if named:
+        session[SESSION_KEY] = {"slug": named, "at": int(time.time())}
+    elif named == "":
         session.pop(SESSION_KEY, None)
 
 
 def handoff_origin(app: str, configured: str) -> str:
-    """Where a hand-off to ``app`` goes: the stored set's host when the regex still allows it.
-    Outside a request (a mail, a job) there is no person and so no set: ``configured``."""
-    stored = session.get(SESSION_KEY) if has_request_context() else None
-    fresh = isinstance(stored, dict) and time.time() - stored.get("at", 0) < SET_TTL_SECONDS
-    slug = stored.get("slug") if fresh else None
+    """Where a hand-off to ``app`` goes: the set this trip names, else - for a hop that can't
+    name one - the stored set, in each case only while the regex still allows it. Outside a
+    request (a mail, a job) there is no person and so no set: ``configured``."""
+    if not has_request_context():
+        return configured
+    slug = _named()
+    if slug is None:
+        stored = session.get(SESSION_KEY)
+        fresh = isinstance(stored, dict) and time.time() - stored.get("at", 0) < SET_TTL_SECONDS
+        slug = stored.get("slug") if fresh else None
     if slug:
         candidate = set_origin(slug, app)
         if parse(candidate) == (slug, app):

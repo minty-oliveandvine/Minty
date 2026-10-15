@@ -1,5 +1,6 @@
 // Entity settings in the browser: the petty-cash account mapping, the sales methods editor and
-// Save, then the Users / Entity & Integration / Module tabs' hand-over to minty-web. These pages
+// each card's own Save (Part 15.20b, 2026-10-14), then the Users / Entity & Integration / Module
+// tabs' hand-over to minty-web. These pages
 // read the tables the redesign reshapes most (sale_info / entity_sale_setting,
 // entity_pettycash_settings, entities).
 import { expect, test } from '@playwright/test';
@@ -50,25 +51,28 @@ test.describe('entity settings', () => {
     // the cards that need no Xero stay
     await expect(page.locator('#ci_country_display')).toBeVisible();
     await expect(page.locator('#paymentMethodsList')).toContainText('Visa');
-    // Save waits for nothing from Xero: off with nothing changed
-    await expect(page.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    // each card's Save waits for nothing from Xero: off with nothing changed
+    await expect(page.locator('[data-section-save="country"]')).toBeDisabled();
+    await expect(page.locator('[data-section-save="electronic"]')).toBeDisabled();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
   });
 
-  test('save stays off until something changed, and off again when it is put back (phone)', async ({ page }) => {
+  test("a card's Save stays off until that card changed, and off again when it is put back (phone)", async ({ page }) => {
     test.skip(!xeroLive(), NEEDS_XERO);
     await page.setViewportSize({ width: 360, height: 780 });
     await page.goto(`/entity/settings/entity/${entityId}`);
     await page.waitForFunction(() => (window as unknown as { xeroDataReady?: boolean }).xeroDataReady === true);
     await expect(page.locator('#paymentMethodsList')).toContainText('Visa');
-    const save = page.getByRole('button', { name: /save changes/i });
+    const save = page.locator('[data-section-save="codes"]');
     await expect(save).toBeDisabled();
-    // a tick
+    // a tick turns the codes card's Save on - and only that card's
     const code = page.getByRole('checkbox', { name: '429' });
     await code.uncheck();
     await expect(save).toBeEnabled();
+    await expect(page.locator('[data-section-save="mapping"]')).toBeDisabled();
     await code.check();
     await expect(save).toBeDisabled();
+    const mappingSave = page.locator('[data-section-save="mapping"]');
     // a mapping picker, which writes its hidden <select> from script (no input event)
     const contact = page.locator('#cashsale_contact_input');
     const saved = await contact.inputValue();
@@ -76,7 +80,7 @@ test.describe('entity settings', () => {
     for (const [name, enabled] of [[other, true], [saved, false]] as const) {
       await contact.click();
       await page.locator('#cashsaleContactSuggestions').getByText(name, { exact: true }).first().dispatchEvent('mousedown');
-      await expect(save)[enabled ? 'toBeEnabled' : 'toBeDisabled']();
+      await expect(mappingSave)[enabled ? 'toBeEnabled' : 'toBeDisabled']();
     }
   });
 
@@ -94,8 +98,9 @@ test.describe('entity settings', () => {
     await page.locator('#methodName').fill('Octopus');
     await page.locator('#saveMethodBtn').click();
     await expect(page.locator('body')).toContainText('Octopus');
-    await page.getByRole('button', { name: /save changes/i }).click();
-    await page.waitForLoadState('networkidle');
+    // the Electronic card saves its own methods, through the methods API; the page stays
+    await page.locator('[data-section-save="electronic"]').click();
+    await expect(page.locator('[data-section-save="electronic"]')).toBeDisabled();
     // read back through the JSON the page itself uses
     await expect.poll(async () => {
       const res = await page.request.get(`/api/entities/${entityId}/payment-methods`);

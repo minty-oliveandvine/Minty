@@ -18,30 +18,22 @@ test.describe('publish to Xero', () => {
     const creds = requireCredentials();
     await login(page, creds);
     const entityId = creds.entityId;
-    // the report the wizard spec posted: "View Report" on the history page opens its ending
-    // summary, whose URL carries the report id
-    await page.goto(`/entity/${entityId}/petty-cash/reports`);
-    await page.getByRole('link', { name: /view report/i }).first().click();
+    // the report the wizard spec posted: its history row opens the Daily Report,
+    // whose URL carries the report id
+    await page.goto(`/entity/${entityId}/petty-cash/reports?status=submitted`);
+    await page.locator('.pc-row__link').first().click();
     await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/);
     const reportId = page.url().match(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/)![1];
 
     // the submitted page carries the Publish button
     await page.goto(`/entity/${entityId}/petty-cash/reports/${reportId}/submitted`);
-    // the button's accessible name starts with its logo's alt text; Republish is a different button
-    const publish = page.getByRole('button', { name: /(^|\s)publish to xero$/i });
+    // a report that has never been to Xero gets the first Publish (Republish is a different button)
+    const publish = page.locator('#publishButton');
     await expect(publish).toBeVisible();
     await publish.click();
-    // A report that has never been to Xero publishes straight away. Until the 2026-09-18 fix
-    // of report_submitted() is deployed the page reads the NOT NULL 'unpublished' default as
-    // "previously published" and asks for the duplicate-transactions confirmation first:
-    // confirm it, and record that the deployment still shows it.
-    const republishModal = page.locator('#republishReportModal');
-    if (await republishModal.isVisible()) {
-      test.info().annotations.push({
-        type: 'defect', description: 'a never-published report got the republish warning (submitted.py fix not deployed yet)',
-      });
-      await page.locator('#confirmRepublishButton').click();
-    }
+    // publishing is external, so it asks first (Part 15.9h); a first publish is no warning
+    await expect(page.locator('#publishReportModal')).toBeVisible();
+    await page.locator('#confirmPublishButton').click();
 
     // the page polls /api/report/<id>/publishing_status until Xero has answered; do the same
     await expect

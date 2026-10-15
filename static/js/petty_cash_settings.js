@@ -1,15 +1,17 @@
 /**
  * Petty Cash Settings (templates/entity/settings_entity.html): everything the page does but the
- * Xero mapping pickers (partials/xero_mapping_classic_script_fragment.html). One Save Changes
- * saves every card:
+ * Xero mapping pickers (partials/xero_mapping_classic_script_fragment.html). Every card saves on
+ * its own (Part 15.20b; the user, 2026-10-14) - its Save comes on when that card changed:
  *
- *   1. the mapping check (validateMappingBeforeSave, the fragment's) and the account-code rule
- *      below - both before anything is written;
- *   2. the pending sales-method changes, each through its own API call - any that fails stops
- *      the save and says which, and nothing else is posted;
- *   3. the form: country and currency, the mapping, and the ticked account codes - which a
- *      `formdata` listener adds (sorted, never blank) from the page's own set, so a search that
- *      hides a ticked row, an Enter in a text box or a row never drawn cannot drop one.
+ *   - Country & currency, Xero account mapping, Petty Cash Account Code: the form is posted with
+ *     `section` naming the card, and the server writes only that part (entity_settings_entity).
+ *     The page reloads, so when another card holds unsaved changes it asks first. The mapping
+ *     card runs the mapping check (validateMappingBeforeSave, the fragment's) first; the codes
+ *     card the account-code rule below. The ticks are added by a `formdata` listener (sorted,
+ *     never blank) from the page's own set, so a search that hides a ticked row, an Enter in a
+ *     text box or a row never drawn cannot drop one;
+ *   - Electronic, Delivery: that card's pending method changes, each through its own API call -
+ *     any that fails says which; the page stays.
  *
  * At least one account code must stay ticked when the company has any: a save with none would
  * switch every code off, and a petty cash expense can only use the codes ticked here. Save is
@@ -26,8 +28,18 @@
   var config = readConfig();
   if (!form || !config) return;
 
-  var saveButton = document.getElementById("saveChangesBtn");
-  var viewOnly = !saveButton || saveButton.hasAttribute("data-view-only");
+  var saveButtons = Array.prototype.slice.call(document.querySelectorAll("#pc-settings [data-section-save]"));
+  // Every card view-only (a cashier): nothing on the page saves.
+  var viewOnly = saveButtons.every(function (button) { return button.hasAttribute("data-view-only"); });
+  var sectionInput = document.getElementById("settingsSection");
+  // What each card is called when the page has to name it.
+  var CARD_NAMES = {
+    country: "Country & currency",
+    mapping: "Xero account mapping",
+    codes: "Petty Cash Account Code",
+    electronic: "Electronic",
+    delivery: "Delivery",
+  };
   var methodsUrl = "/api/entities/" + encodeURIComponent(config.entityId) + "/payment-methods";
   var saving = false;
   // Without a live Xero connection the mapping and account-code cards show only a notice, and the
@@ -366,13 +378,20 @@
   // --- Save: one gate ---------------------------------------------------------------------------
 
   /**
-   * Whether Save may be pressed - the only place that turns it on or off. Off with nothing to
-   * save: the page's changes are measured the way "Leave without saving?" measures them (isDirty).
+   * Whether each card's Save may be pressed - the only place that turns them on or off. Off with
+   * nothing to save in that card: its changes are measured the way "Leave without saving?"
+   * measures the page's (sectionDirty / isDirty).
    */
   function updatePettyCashSave() {
-    if (!saveButton || viewOnly) return; // the view-only button never comes on
+    if (viewOnly) return; // the view-only buttons never come on
     var loading = xeroLive && window.xeroDataReady !== true;
-    saveButton.disabled = saving || loading || noCodesTicked() || !isDirty();
+    saveButtons.forEach(function (button) {
+      if (button.hasAttribute("data-view-only")) return; // a card this person may not change
+      var section = button.getAttribute("data-section-save");
+      var waitsForXero = section !== "electronic" && section !== "delivery";
+      button.disabled =
+        saving || (waitsForXero && loading) || !sectionDirty(section) || (section === "codes" && noCodesTicked());
+    });
   }
   // The mapping script calls this when its Xero lists start and finish loading.
   window.updatePettyCashSave = updatePettyCashSave;
@@ -389,11 +408,17 @@
     }
   }
 
-  function showSaving(on) {
-    var text = document.getElementById("saveBtnText");
-    var spinner = document.getElementById("saveBtnSpinner");
-    if (text) text.hidden = on;
-    if (spinner) spinner.hidden = !on;
+  // Part 14 Button processing state: the label says what is happening, the button is off.
+  function showSaving(button, on) {
+    if (!button) return;
+    if (on) {
+      button.dataset.label = button.textContent;
+      button.textContent = "Saving…";
+      button.setAttribute("aria-busy", "true");
+    } else if (button.dataset.label) {
+      button.textContent = button.dataset.label;
+      button.removeAttribute("aria-busy");
+    }
   }
 
   // An Enter in a text box no longer submits the whole page. keypress, not keydown: the boxes'
@@ -831,8 +856,10 @@
    * Write the pending sales-method changes. Resolves null when all went through, else the
    * sentence to show. What did go through is remembered, so the next Save redoes only the rest.
    */
-  function saveSalesMethods() {
+  // `only` = "electronic" | "delivery": that card's changes alone (its own Save).
+  function saveSalesMethods(only) {
     if (!salesEditable || methodsState !== "ready") return Promise.resolve(null);
+    var types = only ? [only] : TYPES;
     var failures = [];
     var touched = { electronic: false, delivery: false };
 
@@ -841,7 +868,7 @@
       failures.push({ what: what, reason: result.network ? "" : result.reason });
     }
 
-    var deleting = deletions.slice();
+    var deleting = deletions.filter(function (gone) { return types.indexOf(gone.type) !== -1; });
     return Promise.all(
       deleting.map(function (gone) {
         return send("DELETE", methodsUrl + "/" + encodeURIComponent(gone.id)).then(function (result) {
@@ -852,7 +879,7 @@
     )
       .then(function () {
         var adding = [];
-        TYPES.forEach(function (type) {
+        types.forEach(function (type) {
           methods[type].forEach(function (m) {
             if (m.isNew) adding.push(m);
           });
@@ -875,7 +902,7 @@
       })
       .then(function () {
         var renaming = [];
-        TYPES.forEach(function (type) {
+        types.forEach(function (type) {
           methods[type].forEach(function (m) {
             if (!m.isNew && m.savedName !== m.name) renaming.push(m);
           });
@@ -891,7 +918,7 @@
       })
       .then(function () {
         return Promise.all(
-          TYPES.map(function (type) {
+          types.map(function (type) {
             var ids = methods[type].map(function (m) { return m.id; });
             var unsaved = methods[type].some(function (m) { return m.isNew; });
             var same = ids.join("\n") === savedOrder[type].join("\n");
@@ -920,61 +947,111 @@
   }
   var methodsLoaded = loadMethods();
 
-  // --- 2 + the save ----------------------------------------------------------------------------
+  // --- the saves: one per card ------------------------------------------------------------------
 
+  // Nothing submits the whole page any more: each card's Save says what it saves.
   form.addEventListener("submit", function (event) {
     event.preventDefault();
-    if (saving || viewOnly) return;
+  });
 
-    // The mapping check: every mapping field, once any is set (the fragment's rule).
-    if (xeroLive && typeof window.validateMappingBeforeSave !== "function") {
-      console.error("[petty cash settings] the mapping check is missing; nothing was saved");
-      toast("Something went wrong on my end. Mind trying again?", "error");
-      return;
-    }
-    if (xeroLive && !window.validateMappingBeforeSave()) {
-      var missing = document.querySelector("#pc-settings .pcs-combo-input.border-red-500");
-      if (missing) {
-        revealCardOf(missing);
-        missing.scrollIntoView({ behavior: "smooth", block: "center" });
+  function otherDirtyCards(section) {
+    return Object.keys(CARD_NAMES).filter(function (other) {
+      return other !== section && sectionDirty(other);
+    }).map(function (other) { return CARD_NAMES[other]; });
+  }
+
+  function saveMethodsCard(type, button) {
+    saving = true;
+    updatePettyCashSave();
+    showSaving(button, true);
+    saveSalesMethods(type).then(
+      function (problem) {
+        saving = false;
+        showSaving(button, false);
+        if (problem) {
+          toast(problem, "error");
+        } else {
+          baseline.methods[type] = methodsPart(type);
+          toast(CARD_NAMES[type] + " methods saved.", "success");
+        }
+        updatePettyCashSave();
+      },
+      function (err) {
+        console.error("[petty cash settings] the save stopped", err);
+        saving = false;
+        showSaving(button, false);
+        updatePettyCashSave();
+        toast("Something went wrong on my end. Mind trying again?", "error");
       }
-      return;
-    }
+    );
+  }
 
-    // The account-code rule, before any sales method is written.
-    if (noCodesTicked()) {
+  function postCard(section, button) {
+    function go() {
+      if (!sectionInput) {
+        console.error("[petty cash settings] the section field is missing; nothing was saved");
+        toast("Something went wrong on my end. Mind trying again?", "error");
+        return;
+      }
+      sectionInput.value = section;
+      saving = true;
+      updatePettyCashSave();
+      showSaving(button, true);
+      busy("Saving changes…");
+      if (window.MintyLeaveGuard) window.MintyLeaveGuard.saving();
+      form.submit();
+    }
+    var others = otherDirtyCards(section);
+    if (!others.length || !window.MintyDialog) return go();
+    window.MintyDialog.confirm({
+      title: "Save this card only?",
+      body: [
+        "Your changes to " + others.join(" and ") + " are not saved yet.",
+        "Saving " + CARD_NAMES[section] + " reloads the page, and those changes would be lost.",
+      ],
+      confirmLabel: "Save this card",
+      backLabel: "Keep editing",
+      backTone: "teal",
+      safe: "back",
+      name: "save-one-card",
+    }).then(function (choice) {
+      if (choice === "confirm") go();
+    });
+  }
+
+  function saveCard(section, button) {
+    if (saving || viewOnly) return;
+    if (section === "electronic" || section === "delivery") return saveMethodsCard(section, button);
+
+    if (section === "mapping") {
+      // The mapping check: every mapping field, once any is set (the fragment's rule).
+      if (xeroLive && typeof window.validateMappingBeforeSave !== "function") {
+        console.error("[petty cash settings] the mapping check is missing; nothing was saved");
+        toast("Something went wrong on my end. Mind trying again?", "error");
+        return;
+      }
+      if (xeroLive && !window.validateMappingBeforeSave()) {
+        var missing = document.querySelector("#pc-settings .pcs-combo-input.border-red-500");
+        if (missing) {
+          revealCardOf(missing);
+          missing.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        return;
+      }
+    }
+    if (section === "codes" && noCodesTicked()) {
       codesChanged();
       revealCardOf(codeList);
       if (codeList) codeList.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    postCard(section, button);
+  }
 
-    saving = true;
-    updatePettyCashSave();
-    showSaving(true);
-    busy("Saving changes…");
-    saveSalesMethods().then(
-      function (problem) {
-        if (problem) {
-          saving = false;
-          showSaving(false);
-          busy(null);
-          updatePettyCashSave();
-          toast(problem, "error");
-          return;
-        }
-        if (window.MintyLeaveGuard) window.MintyLeaveGuard.saving();
-        form.submit();
-      },
-      function (err) {
-        console.error("[petty cash settings] the save stopped", err);
-        saving = false;
-        showSaving(false);
-        busy(null);
-        updatePettyCashSave();
-        toast("Something went wrong on my end. Mind trying again?", "error");
-      }
-    );
+  saveButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      saveCard(button.getAttribute("data-section-save"), button);
+    });
   });
 
   // --- "Leave without saving?" -------------------------------------------------------------------
@@ -982,10 +1059,14 @@
   // What the page holds, in three parts measured against what it loaded: the form's own fields
   // (the mapping, country and currency - known once the Xero lists have loaded), the ticks
   // (known now) and the sales methods (once loaded). A part not yet loaded is not "changed".
-  function formPart() {
+  var COUNTRY_FIELDS = ["country_code", "currency_id"];
+
+  // "country": the two country fields; "mapping": every other field the form posts.
+  function formPart(which) {
     var pairs = [];
     new FormData(form).forEach(function (value, key) {
-      if (key === "csrf_token" || key === "account_codes[]") return;
+      if (key === "csrf_token" || key === "account_codes[]" || key === "section") return;
+      if ((COUNTRY_FIELDS.indexOf(key) !== -1) !== (which === "country")) return;
       pairs.push(key + "=" + (typeof value === "string" ? value : ""));
     });
     return pairs.join("\n");
@@ -995,32 +1076,38 @@
     return tickedCodes().join("\n");
   }
 
-  function methodsPart() {
+  function methodsPart(type) {
     return JSON.stringify([
-      TYPES.map(function (type) {
-        return methods[type].map(function (m) { return [m.id, m.name]; });
-      }),
-      deletions.map(function (gone) { return gone.id; }),
+      methods[type].map(function (m) { return [m.id, m.name]; }),
+      deletions.filter(function (gone) { return gone.type === type; }).map(function (gone) { return gone.id; }),
     ]);
   }
 
-  var baseline = { form: null, codes: codesPart(), methods: null };
+  var baseline = { country: null, mapping: null, codes: codesPart(), methods: { electronic: null, delivery: null } };
+
+  // A card not yet loaded is not "changed".
+  function sectionDirty(section) {
+    if (!baseline) return false; // asked before this script reached its own measure
+    if (section === "codes") return codesPart() !== baseline.codes;
+    if (section === "electronic" || section === "delivery") {
+      return baseline.methods[section] !== null && methodsPart(section) !== baseline.methods[section];
+    }
+    return baseline[section] !== null && formPart(section) !== baseline[section];
+  }
 
   function isDirty() {
-    if (!baseline) return false; // asked before this script reached its own measure
-    if (baseline.form !== null && formPart() !== baseline.form) return true;
-    if (codesPart() !== baseline.codes) return true;
-    return baseline.methods !== null && methodsPart() !== baseline.methods;
+    return Object.keys(CARD_NAMES).some(sectionDirty);
   }
 
   document.addEventListener("DOMContentLoaded", function () {
     // The mapping script has started its Xero load by now (its DOMContentLoaded ran first).
     Promise.allSettled([window.xeroDataLoad || Promise.resolve()]).then(function () {
-      baseline.form = formPart();
+      baseline.country = formPart("country");
+      baseline.mapping = formPart("mapping");
       updatePettyCashSave();
     });
     Promise.allSettled([methodsLoaded]).then(function () {
-      baseline.methods = methodsPart();
+      TYPES.forEach(function (type) { baseline.methods[type] = methodsPart(type); });
       updatePettyCashSave();
     });
     // Save follows every edit. The mapping pickers write their hidden <select>s from script,

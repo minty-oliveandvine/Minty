@@ -1,19 +1,20 @@
-# Report deposit routes; delegates to app implementation.
-# Deposit step: report_deposit transferred from app.py (single function,
-# no new functions).
+# Report deposit step. Since the Part 15 redesign Bank Deposit is not a stage of its own: it is
+# the first block of the Cash Count stage (D15-05), which saves the deposit with the count
+# (cash_count.py). So a GET here goes on to the Cash Count page - the wizard's resume, the
+# expenses step and old links still name this route - and the POST stays for any client that
+# still sends the deposit on its own. The deposit rule and arithmetic live in
+# blueprints/report/services/cash.py (shared with the Petty Cash API).
 from datetime import datetime
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import flash, redirect, request, url_for
 from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import (check_user_has_entities,
-                                               header_publishing_status_for,
                                                resolve_report_entity_id,
                                                safe_float)
-from blueprints.shared.entity_display import entity_badge_data
-from models.db import Entity, Report, UserEntity, db
+from models.db import Report, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
 
@@ -36,228 +37,56 @@ def report_deposit(id=None, entity_id=None):
             entity_id=entity_id,
         )
     if id:
-        # The ReportDraft fallback that used to sit here is gone: since Stage 4a
-        # every draft has a paired `report` row with the same id, so the first
-        # lookup already covers drafts. Kept as one query, not two.
         report_for_access = Report.query.filter_by(id=id).first()
         if not report_for_access or str(report_for_access.company) != str(entity_id):
             flash("Hmm, I couldn't find that report.", "danger")
             return redirect(url_for("entity.report_dashboard", id=entity_id))
-    # Check if user has any entities before allowing access to reports
     if not check_user_has_entities(current_user.id):
         flash(
             "You'll need to create an entity before I can show you any reports.",
             "warning")
         return redirect(url_for("entity.entity_list"))
 
-    # Check if edit mode is enabled
-    is_edit_mode = (request.args.get("edit") ==
-                    "true" or request.form.get("edit") == "true")
+    if request.method == "GET":
+        # The deposit is drawn on the Cash Count page now; carry the day and the edit flags on.
+        carried = {k: v for k, v in request.args.items() if k not in ("entity_id", "id")}
+        return redirect(url_for("report.report_cash_count", entity_id=entity_id, id=id, **carried))
 
-    entity_acronym = ""
-    display_date = None
-
-    if id:
-        report = (
-            # Was a full outer join to ReportDraft filtering BOTH ids to `id`,
-            # which collapsed it back to an inner join — `report` was None
-            # whenever either side was missing. The draft columns it supplied
-            # live on `report` since r1a01.
-            Report.query
-            .filter(Report.id == id)
-            .with_entities(
-                Report.id,
-                Report.transaction_date,
-                Report.next_transaction_date,
-                Report.date,
-                Report.opening_balance,
-                Report.cash_addition,
-                Report.adjusted_opening_balance,
-                Report.cash_sales,
-                Report.shop_sales,
-                Report.delivery_sales,
-                Report.total_sales,
-                Report.expenses,
-                Report.bank_deposit,
-                Report.closing_balance,
-                Report.uploaded_by,
-                Report.company,
-                Report.xero_integrated_yes,
-                Report.completed_sections,
-                Report.current_section,
-                # The 13 ReportCashCountDraft columns that used to be selected
-                # here are gone (Step 3.5). Nothing read them — not this route,
-                # not deposit.html — and after Step 2 removed the join they had
-                # become an implicit CARTESIAN PRODUCT: selecting columns from
-                # an unjoined table cross-joins it, so the values returned came
-                # from an arbitrary other report's cash count.
-            ) .first())
-        entity = (
-            Entity.query.join(UserEntity, UserEntity.entity_id == Entity.id)
-            .filter(UserEntity.entity_id == report.company)
-            .first()
+    selected_date = request.args.get("transaction_date") or request.form.get("transaction_date")
+    try:
+        transaction_date = (
+            datetime.strptime(selected_date, "%Y-%m-%d").date() if selected_date else datetime.now().date()
         )
-        entity_acronym, display_date = entity_badge_data(entity)
-        completed_sections = (
-            report.completed_sections if report.completed_sections else []
-        )
-        current_draft = report
-
-        # Determine if this is the latest report (most recent transaction_date)
-        # or old report
-        # Step 4a-6: was max(coalesce(Report.transaction_date,
-        # ReportDraft.transaction_date)) over a full outer join. Drafts live in
-        # `report` since Stage 4a, so one table answers it. No status filter —
-        # balance chaining and "is this the latest" both mean ANY status; a
-        # draft's date is still the latest date.
-        latest_report_date = (
-            db.session.query(db.func.max(Report.transaction_date))
-            .filter(Report.company == entity_id)
-            .scalar())
-
-        is_latest_report = report.transaction_date == latest_report_date
-
-        return render_template(
-            "report/deposit.html",
-            org=entity,
-            current_draft=current_draft,
-            header_publishing_status=header_publishing_status_for(report_id=(current_draft.id if current_draft else None)),
-            current_section="deposit",  # Always set to current page
-            completed_sections=completed_sections,
-            draft_id=current_draft.id if current_draft else None,
-            datenow=datetime.now(),
-            transaction_date=report.transaction_date,
-            is_latest_report=is_latest_report,
-            entity_acronym=entity_acronym,
-            display_date=display_date,
-            is_edit_mode=is_edit_mode,
-        )
-
-    # Get transaction date from URL parameter or form data if provided,
-    # otherwise use today
-    selected_date = request.args.get("transaction_date") or request.form.get(
-        "transaction_date"
-    )
-    if selected_date:
-        try:
-            transaction_date = datetime.strptime(
-                selected_date, "%Y-%m-%d").date()
-            logger.info(
-                f"Deposit form - Using selected date from URL/form: {transaction_date}"
-            )
-        except ValueError:
-            logger.warning(
-                f"Deposit form - Invalid date format: {selected_date}, using today"
-            )
-            transaction_date = datetime.now().date()
-    else:
+    except ValueError:
+        logger.warning(f"Deposit form - Invalid date format: {selected_date}, using today")
         transaction_date = datetime.now().date()
-        logger.info(
-            f"Deposit form - No date provided, using today: {transaction_date}")
+    day = transaction_date.strftime("%Y-%m-%d")
 
-    # If edit mode is enabled and no id provided, try to load any existing
-    # report for this date
-    if is_edit_mode and not id:
-        # Edit mode targets a SUBMITTED report — see the note in sales.py.
-        existing_report = Report.query.filter(
-            Report.company == entity_id,
-            Report.transaction_date == transaction_date,
-            db.or_(Report.status.is_(None), Report.status != "draft"),
-        ).first()
-        if existing_report:
-            # Redirect to deposit page with report id
-            return redirect(
-                url_for(
-                    "report.report_deposit",
-                    id=existing_report.id,
-                    entity_id=entity_id,
-                    edit="true",
-                )
-            )
-
-    # Check for existing draft: by id when in URL, else by (entity,
-    # transaction_date)
-    if id:
-        # WRITE FLIP (Step 2): current_draft is mutated below, so it must
-        # read the table the writes land on.
-        current_draft = Report.query.filter(
-            Report.id == id,
-            Report.company == entity_id,
-            Report.status == "draft",
-        ).first()
-    else:
-        current_draft = Report.query.filter(
-            Report.company == entity_id,
-            Report.transaction_date == transaction_date,
-            Report.status == "draft",
-        ).first()
-
-    logger.info("Deposit form - Looking for existing draft:")
-    logger.info(f"  Company: {entity_id}")
-    logger.info(f"  Transaction date: {transaction_date}")
-    logger.info(f"  Username: {current_user.username}")
-    logger.info(
-        f"  Found existing draft: {current_draft.id if current_draft else 'None'}"
-    )
-
-    if not current_draft and not is_edit_mode:
+    current_draft = Report.query.filter(
+        Report.company == entity_id,
+        Report.transaction_date == transaction_date,
+        Report.status == "draft",
+    ).first()
+    if not current_draft:
         flash("I don't see a draft yet - let's start with the opening entry.", "danger")
         return redirect(url_for("report.report_opening"))
 
-    if request.method == "POST":
-        from blueprints.report.services.cash import CashRefused, save_deposit
+    from blueprints.report.services.cash import CashRefused, save_deposit
 
-        here = url_for("report.report_deposit", entity_id=entity_id,
-                       transaction_date=transaction_date.strftime("%Y-%m-%d"))
-        action_type = request.form.get("action_type", "save_next")
-        try:
-            save_deposit(current_draft, current_user, safe_float(request.form.get("bank_deposit", 0)), action_type)
-        except CashRefused as refused:
-            flash(refused.message, "danger")
-            return redirect(here)
-        except Exception:
-            db.session.rollback()
-            logger.exception(f"Error saving the deposit for entity {entity_id} on {transaction_date}")
-            flash("Something went wrong saving your deposit. Mind trying again?", "danger")
-            return redirect(here)
+    here = url_for("report.report_cash_count", entity_id=entity_id, transaction_date=day)
+    action_type = request.form.get("action_type", "save_next")
+    try:
+        save_deposit(current_draft, current_user, safe_float(request.form.get("bank_deposit", 0)), action_type)
+    except CashRefused as refused:
+        # the rule's own sentence: a negative drawer, or a deposit above the cash on hand
+        flash(refused.message, "danger")
+        return redirect(here)
+    except Exception:
+        db.session.rollback()
+        logger.exception(f"Deposit save failed for draft {current_draft.id}")
+        flash("Something went wrong saving your deposit. Mind trying again?", "danger")
+        return redirect(here)
 
-        if action_type == "save_exit":
-            return redirect(url_for("entity.report_dashboard", id=entity_id))
-        return redirect(
-            url_for(
-                "report.report_cash_count",
-                entity_id=entity_id,
-                transaction_date=transaction_date.strftime("%Y-%m-%d"),
-            )
-        )
-
-    entity = Entity.query.filter(Entity.id == entity_id).first()
-    entity_acronym, display_date = entity_badge_data(entity)
-
-    # Ensure completed_sections is a list
-    completed_sections = (
-        current_draft.completed_sections if current_draft.completed_sections else [])
-
-    # Don't reset current_section when viewing - it should only update when progressing forward
-    # The stepper should always show the latest step reached, not the current
-    # page
-
-    # For new reports (no id parameter), always consider them as
-    # latest/editable
-    is_latest_report = True
-
-    return render_template(
-        "report/deposit.html",
-        org=entity,
-        current_draft=current_draft,
-        header_publishing_status=header_publishing_status_for(report_id=(current_draft.id if current_draft else None)),
-        transaction_date=transaction_date,
-        current_section="deposit",  # Always set to current page
-        completed_sections=completed_sections,
-        draft_id=current_draft.id if current_draft else None,
-        datenow=datetime.now(),
-        is_latest_report=is_latest_report,
-        entity_acronym=entity_acronym,
-        display_date=display_date,
-        is_edit_mode=is_edit_mode,
-    )
+    if action_type == "save_exit":
+        return redirect(url_for("entity.report_dashboard", id=entity_id))
+    return redirect(here)

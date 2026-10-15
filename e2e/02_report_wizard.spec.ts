@@ -1,13 +1,13 @@
-// The petty-cash report wizard in a real browser: opening -> sales -> expenses -> deposit ->
-// cash count -> ending -> submitted, then the posted day in history and its movements CSV.
-// This is the JavaScript the schema redesign can break silently (field names, JSON keys), so
-// every step asserts what the page SHOWS, not what the database holds. Amounts are chosen so
-// each total is a distinct number.
+// The Daily Closing in a real browser (Part 15.9 / 15.15, redesigned 2026-10-14): Addition to
+// Drawer -> Sales -> Expenses -> Cash Count (Bank Deposit folded in) -> Close -> the outcome page,
+// then the posted day in history, its Daily Report and its movements CSV. This is the JavaScript
+// the schema redesign can break silently (field names, JSON keys), so every step asserts what the
+// page SHOWS, not what the database holds. Amounts are chosen so each total is a distinct number.
+// The phone project runs the same journey at 360px (playwright.config.ts).
 import { expect, test, type Page } from '@playwright/test';
 import { RECEIPT_PDF, RECEIPT_PNG, brokenImages, fixtures, login, moneyRegex, reportDate, requireCredentials, requireStack } from './helpers';
 
-// A first report opens at 0 (the page carries yesterday's closing in a hidden field); the
-// user types the cash added to the float.
+// A first report opens at 0; the user types the cash added to the drawer.
 const OPENING = 0;
 const ADDITION = 1050;
 const CASH = 300.1;
@@ -18,7 +18,7 @@ const EXPENSE = 25.1; // cash paths sum to whole dollars: HKD's catalogue has no
 const DEPOSIT = 500;
 const CLOSING = OPENING + ADDITION + CASH - EXPENSE - DEPOSIT; // 825.00
 
-test.describe.serial('report wizard', () => {
+test.describe.serial('daily closing', () => {
   const day = reportDate(-1);
   let entityId = '';
 
@@ -31,93 +31,112 @@ test.describe.serial('report wizard', () => {
 
   // The company's own address since 2026-10-05: the full id 308s to /entity/<shortid>/<name>/...
   const stepUrl = (step: string) => `/entity/${entityId}/petty-cash/reports/new/${step}?transaction_date=${day}`;
-  /** A wizard step under the company's address, before (`new`) or after the report has an id. */
+  /** A wizard page under the company's address, before (`new`) or after the report has an id. */
   const atStep = (step: string) => new RegExp(`/entity/[0-9a-f]{8}/[^/]+/petty-cash/reports/(new|[0-9a-f-]{36})/${step}(\\?|$)`);
-  const next = (page: Page) => page.getByRole('button', { name: /save.*next|next|continue/i }).first();
+  const saveAndNext = (page: Page) => page.getByRole('button', { name: 'Save & Next' });
 
-  test('opening: cash addition is accepted and the opening balance updates live', async ({ page }) => {
-    // the page's own script runs to the end (until 2026-10-05 it threw on a removed field)
+  test('addition to drawer: the opening balance updates live', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(stepUrl('opening'));
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Addition to Drawer');
+    // Step progress: five stages, this one current (Part 14)
+    await expect(page.locator('.pc-steps li')).toHaveCount(5);
+    await expect(page.locator('.pc-steps li[aria-current="step"]')).toContainText('Drawer');
     await expect(page.locator('input[name="transaction_date"]')).toHaveValue(day);
     await expect(page.locator('#startingCashBalance')).toHaveText(moneyRegex(OPENING));
     await page.locator('input[name="cash_addition"]').fill(String(ADDITION));
     await page.locator('input[name="cash_addition"]').blur();
     await expect(page.locator('#openingCashBalance')).toHaveText(moneyRegex(OPENING + ADDITION));
-    await next(page).click();
+    await saveAndNext(page).click();
     await expect(page).toHaveURL(atStep('sale'));
     expect(errors).toEqual([]);
   });
 
-  test('sales: per-method amounts and a live total', async ({ page }) => {
+  test('sales: per-method amounts and live sub-totals', async ({ page }) => {
     await page.goto(stepUrl('sale'));
     await page.locator('#shop_sales_cash').fill(String(CASH));
     await page.locator('#shop_sales_visa').fill(String(VISA));
     await page.locator('#shop_sales_alipay').fill(String(ALIPAY));
     await page.locator('#delivery_sales_foodpanda').fill(String(FOODPANDA));
     await page.locator('#delivery_sales_foodpanda').blur();
-    // the page's own JavaScript computes the three sub-totals before anything is saved
     await expect(page.locator('#totalElectronicSales')).toHaveText(moneyRegex(VISA + ALIPAY));
     await expect(page.locator('#totalDeliverySales')).toHaveText(moneyRegex(FOODPANDA));
     await expect(page.locator('#totalCashSales')).toHaveText(moneyRegex(CASH));
-    await next(page).click();
+    await expect(page.locator('#totalSales')).toHaveText(moneyRegex(CASH + VISA + ALIPAY + FOODPANDA));
+    await saveAndNext(page).click();
     await expect(page).toHaveURL(atStep('expense'));
   });
 
-  test('expenses: one line with a receipt is added and totalled', async ({ page }) => {
+  test('expenses: an empty entry is refused with every problem named', async ({ page }) => {
     await page.goto(stepUrl('expense'));
-    await page.getByRole('button', { name: /add new expense/i }).click();
+    await page.getByRole('button', { name: /add expense/i }).first().click();
+    const drawer = page.locator('#expenseDrawer');
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole('button', { name: 'Add expense' }).click();
+    // two or more problems: the error summary takes focus and names each (CLAUDE.md validation)
+    const summary = drawer.locator('[data-pc-summary]');
+    await expect(summary).toBeVisible();
+    await expect(summary).toBeFocused();
+    await expect(summary).toContainText('The amount is still empty');
+    await expect(summary).toContainText('The receipt is still missing');
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+  });
+
+  test('expenses: one entry with a receipt is added and totalled', async ({ page }) => {
+    await page.goto(stepUrl('expense'));
+    await page.getByRole('button', { name: /add expense/i }).first().click();
+    const drawer = page.locator('#expenseDrawer');
     await page.locator('#expense_files').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: RECEIPT_PNG });
+    await expect(drawer.locator('#newReceipts')).toContainText('receipt.png');
     await page.locator('#expense_amount').fill(String(EXPENSE));
     await page.locator('#expense_remarks').fill('Tape');
-    // supplier and account are searchable inputs fed by the entity's synced contacts/accounts
+    // supplier and account: comboboxes over the entity's synced contacts and accounts
     const fx = fixtures();
     await page.locator('#expense_contact').fill(fx.supplierQuery);
-    await page.locator('#expenseContactSuggestions').getByText(fx.supplierName, { exact: true }).first().click();
+    await page.locator('#expenseContactSuggestions [role="option"]').filter({ hasText: fx.supplierName }).first().dispatchEvent('mousedown');
     await page.locator('#expense_account_code').fill(fx.accountQuery);
-    await page.locator('#expenseAccountSuggestions').getByText(fx.accountName, { exact: true }).first().click();
-    await page.locator('#addExpenseForm button[onclick="addExpense()"]').click();
-    // the new line appears in the list with its description and amount, and the total moves
-    await expect(page.getByText('Tape').first()).toBeVisible();
-    await expect(page.getByText(moneyRegex(EXPENSE)).first()).toBeVisible();
-    await next(page).click();
-    await expect(page).toHaveURL(atStep('deposit'));
+    await page.locator('#expenseAccountSuggestions [role="option"]').filter({ hasText: fx.accountName }).first().dispatchEvent('mousedown');
+    await drawer.getByRole('button', { name: 'Add expense' }).click();
+    // saved at once; the list and the total come back from the server
+    await expect(page.locator('#jinjaExpenses')).toContainText(fx.accountName);
+    await expect(page.locator('#grossTotal')).toHaveText(moneyRegex(EXPENSE));
+    await saveAndNext(page).click();
+    // the old deposit step goes on to Cash Count, where the deposit is now the first block
+    await expect(page).toHaveURL(atStep('cash-count'));
   });
 
-  test('expenses: the stored receipt renders when the line is reopened', async ({ page }) => {
-    // the line comes back from the database now (its receipt key minted from the account
-    // name, commas included); opening it shows the receipt through /download/<key>, and the
-    // image must actually load - a key the bucket lacks is a broken image
+  test('expenses: the stored receipt opens full screen from the entry, never a new tab', async ({ page }) => {
     await page.goto(stepUrl('expense'));
-    await page.locator('[data-expense-id][onclick^="viewExistingExpense"]').first().click();
-    const modal = page.locator('#viewExpenseModal');
-    await expect(modal).toBeVisible();
-    await expect(modal).toContainText(fixtures().accountName);
-    const receipt = modal.locator('#viewExpenseContent img');
-    await expect(receipt).toHaveCount(1);
-    expect(await brokenImages(page, '#viewExpenseContent')).toEqual([]);
+    await page.locator('[data-pc-open-expense]').first().click();
+    const drawer = page.locator('#expenseDrawer');
+    await expect(drawer).toBeVisible();
+    await expect(page.locator('#expense_account_code')).toHaveValue(new RegExp(fixtures().accountName));
+    const popups: string[] = [];
+    page.context().on('page', (p) => popups.push(p.url()));
+    await drawer.locator('#existingReceipts [data-receipt-key]').first().click();
+    await expect(page.locator('#receiptViewerModal')).toBeVisible();
+    expect(await brokenImages(page, '#receiptViewerModal')).toEqual([]);
+    // Escape closes the viewer only; the drawer under it stays
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#receiptViewerModal')).toBeHidden();
+    await expect(drawer).toBeVisible();
+    expect(popups).toEqual([]);
   });
 
-  test('expenses: a PDF receipt is drawn on the page, and larger in a modal, never a new tab', async ({ page }) => {
-    // static/js/receipt_preview.js (2026-10-05): a PDF used to leave the upload box empty and
-    // open in a new tab. Picked, not added, so the day's totals stay as the next steps expect.
+  test('expenses: a picked PDF receipt opens in the viewer, never a new tab or a download', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(stepUrl('expense'));
-    await page.getByRole('button', { name: /add new expense/i }).click();
+    await page.getByRole('button', { name: /add expense/i }).first().click();
     await page.locator('#expense_files').setInputFiles({ name: 'receipt.pdf', mimeType: 'application/pdf', buffer: RECEIPT_PDF });
-    await expect(page.locator('#uploadedPdfPreview canvas')).toHaveCount(1, { timeout: 20_000 });
     const popups: string[] = [];
     page.context().on('page', (p) => popups.push(p.url()));
-    // and nothing may save itself to disk either (2026-10-09: no new tab, no download)
     const downloads: string[] = [];
     page.on('download', (d) => downloads.push(d.suggestedFilename()));
-    await page.locator('#previewIconContainer').click();
-    // in the receipt modal (the Expense Details look), not a black overlay or a new tab
+    await page.locator('#newReceipts').getByRole('button', { name: 'View' }).click();
     await expect(page.locator('#receiptViewerModal canvas')).toHaveCount(1, { timeout: 20_000 });
-    // the viewer now comes from the shared partial, on every page that shows a receipt
-    await expect(page.locator('#receiptViewerModal')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#receiptViewerModal')).toBeHidden();
     expect(popups).toEqual([]);
@@ -125,96 +144,83 @@ test.describe.serial('report wizard', () => {
     expect(errors).toEqual([]);
   });
 
-  test('deposit: the page shows the cash on hand before the deposit', async ({ page }) => {
-    await page.goto(stepUrl('deposit'));
-    // opening + addition + cash sales - expenses, i.e. what is in the till to deposit from
+  test('cash count: the deposit, then a count that matches, and no reason needed', async ({ page }) => {
+    await page.goto(stepUrl('cash-count'));
+    // opening + addition + cash sales - expenses, i.e. what is in the drawer before the deposit
     await expect(page.locator('#currentBalanceDisplay')).toContainText(moneyRegex(OPENING + ADDITION + CASH - EXPENSE));
     await page.locator('#bank_deposit').fill(String(DEPOSIT));
     await page.locator('#bank_deposit').blur();
-    await next(page).click();
-    await expect(page).toHaveURL(atStep('cash-count'));
-  });
-
-  test('cash count: denominations entered in the calculator add up to the closing balance', async ({ page }) => {
-    await page.goto(stepUrl('cash-count'));
-    // 825 = 500 + 100x3 + 20 + 5  (the counts live in a calculator modal; applying it writes
-    // the hidden actual_cash[...] fields the form posts)
+    await expect(page.locator('#expected_cash_count_balance')).toHaveText(moneyRegex(CLOSING));
+    // 825 = 500 + 100x3 + 20 + 5, counted on the page itself (labelled rows, a live total)
     const counts: Record<string, string> = { '500': '1', '100': '3', '20': '1', '5': '1' };
-    await page.locator('#calculatorBtn').click();
-    const inputs = page.locator('#calculatorModal input[data-denomination]');
+    const inputs = page.locator('input[data-denomination]');
     const n = await inputs.count();
     expect(n).toBeGreaterThan(5);
     for (let i = 0; i < n; i++) {
       const el = inputs.nth(i);
       const face = Number(await el.getAttribute('data-denomination'));
       const hit = Object.entries(counts).find(([f]) => Number(f) === face);
-      await el.fill(hit ? hit[1] : '0');
+      await el.fill(hit ? hit[1] : '');
     }
-    await expect(page.locator('#cash_count_balance')).toContainText(moneyRegex(CLOSING));
-    await page.locator('#applyCalculatorTotal').click();
-    // applying writes each count to the hidden field the form posts, and the page compares the
-    // total against the expected balance: no variance when the count is exact
-    await expect(page.locator('#hidden_note500')).toHaveValue('1');
-    await expect(page.locator('#hidden_note100')).toHaveValue('3');
-    await expect(page.getByText(moneyRegex(CLOSING)).first()).toBeVisible(); // "Expected Cash Count Balance"
-    await expect(page.locator('#discrepancyAmount')).toHaveValue(/^-?0(\.0+)?$/);
-    await expect(page.locator('#discrepancyDescription')).toHaveAttribute('placeholder', /no discrepancy/i);
     await page.locator('#safeBoxBalance').fill('0');
-    await next(page).click();
+    await page.locator('#safeBoxBalance').blur();
+    await expect(page.locator('#cash_count_balance')).toHaveText(moneyRegex(CLOSING));
+    await expect(page.locator('#variance')).toHaveText('None');
+    await expect(page.locator('#reasonField')).toBeHidden();
+    await saveAndNext(page).click();
     await expect(page).toHaveURL(atStep('ending'));
   });
 
-  test('cash count: the Actual Cash Balance field shows the applied total', async ({ page }) => {
-    test.fail(true,
-      'FINDING F4 (templates/report/cash_count.html applyCalculatorTotal): the calculator total is parsed after '
-      + 'stripping only "$", but the page renders the currency CODE ("HKD"), so parseFloat gets NaN and the '
-      + 'field shows HKD0.00. Display only - the posted counts and discrepancy come from the hidden fields. '
-      + 'Fix in phase C4 (the page is rewritten for report_cash_count anyway); this test then starts passing.');
+  test('cash count: a difference holds Save & Next until it has a reason', async ({ page }) => {
     await page.goto(stepUrl('cash-count'));
-    // a reload shows the SAVED total correctly (rendered server-side); the defect is the value the
-    // page writes right after Apply, so apply the calculator again and read the field before any reload
-    await page.locator('#calculatorBtn').click();
-    await page.locator('#applyCalculatorTotal').click();
-    await expect(page.locator('#actualCashBalance')).toHaveValue(moneyRegex(CLOSING));
+    // the HKD 5 coin: take it out of the count and the drawer is 5 short
+    const five = page.locator('input[data-denomination="5.0"], input[data-denomination="5"]');
+    await five.first().fill('');
+    await five.first().blur();
+    await expect(page.locator('#variance')).toHaveText(/short$/);
+    await expect(saveAndNext(page)).toBeDisabled();
+    await expect(page.locator('#nextReason')).toHaveText('Add a reason for the difference to continue.');
+    await page.locator('#discrepancyDescription').fill('Float swap');
+    await expect(saveAndNext(page)).toBeEnabled();
+    // put the count back: the journey's report is exact
+    await five.first().fill('1');
+    await five.first().blur();
+    await expect(page.locator('#variance')).toHaveText('None');
   });
 
-  test('ending: the summary shows every figure and finishing lands on submitted', async ({ page }) => {
+  test('close: every stage on one page, then the outcome page', async ({ page }) => {
     await page.goto(stepUrl('ending'));
-    const summary = page.locator('body');
-    // total sales and its three-way split, total expenses, and the closing cash balance
-    await expect(summary).toContainText(moneyRegex(CASH + VISA + ALIPAY + FOODPANDA));
-    await expect(summary).toContainText(moneyRegex(VISA + ALIPAY));
-    await expect(summary).toContainText(moneyRegex(FOODPANDA));
-    await expect(summary).toContainText(moneyRegex(CASH));
-    await expect(summary).toContainText(moneyRegex(EXPENSE));
-    await expect(summary).toContainText(moneyRegex(CLOSING));
-    await page.locator('#finishReportBtn').click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Close');
+    const summary = page.locator('main');
+    for (const amount of [CASH + VISA + ALIPAY + FOODPANDA, VISA, FOODPANDA, CASH, EXPENSE, DEPOSIT, CLOSING]) {
+      await expect(summary).toContainText(moneyRegex(amount));
+    }
+    await expect(summary.getByRole('link', { name: /^Edit / })).toHaveCount(4);
+    await page.getByRole('button', { name: 'Submit Daily Report' }).click();
     await expect(page).toHaveURL(atStep('submitted'));
+    await expect(page.locator('#outcome-title')).toBeFocused();
+    await expect(page.locator('main')).toContainText(moneyRegex(CLOSING)); // Cash counted
   });
 
-  test('history and detail show the posted report with the same figures', async ({ page }) => {
+  test('history and the Daily Report show the posted day with the same figures', async ({ page }) => {
     await page.goto(`/entity/${entityId}/petty-cash/reports`);
     const [y, m, d] = day.split('-').map(Number);
-    const monthName = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][m - 1];
-    const results = page.locator('body');
-    // "15 SEP 2026 TUE  Sales HKD600.59  Expenses HKD25.10  Submitted ... by Tess" (the
-    // journeys' account, e2e-terms@minty.test)
-    await expect(results).toContainText(new RegExp([d, monthName, y].join('[ ]+'), 'i'));
+    const monthName = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
+    const results = page.locator('main');
+    // "Tue 15 Sep 2026 · Expenses HKD 25.10 · Submitted by Tess · HKD 600.59 Sales · Submitted"
+    await expect(results).toContainText(new RegExp(`${d} ${monthName} ${y}`));
     await expect(results).toContainText(moneyRegex(CASH + VISA + ALIPAY + FOODPANDA));
     await expect(results).toContainText(moneyRegex(EXPENSE));
-    await expect(results).toContainText(/by Tess/);
-    // "View Report" opens the ending summary of the posted report
-    await page.getByRole('link', { name: /view report/i }).first().click();
+    await expect(results).toContainText(/Submitted by Tess/);
+    await page.locator('.pc-row__link').first().click();
     await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/);
-    const detail = page.locator('body');
-    // the summary: total sales, the three-way split, total expenses, closing cash balance
-    for (const amount of [CASH + VISA + ALIPAY + FOODPANDA, VISA + ALIPAY, FOODPANDA, CASH, EXPENSE, CLOSING]) {
-      await expect(detail).toContainText(moneyRegex(amount));
-    }
-    // the expense lines sit behind "Show more"; a line is named by its ACCOUNT (the remark
-    // "Tape" is the description and is not shown here)
-    await page.locator('#expensesShowMore').click();
-    await expect(detail).toContainText(fixtures().accountName);
+    const report = page.locator('main');
+    await expect(report.locator('.pc-kpi__label')).toHaveText(['Total sales', 'Total expenses', 'Cash position']);
+    await expect(report).toContainText(moneyRegex(CASH + VISA + ALIPAY + FOODPANDA));
+    await expect(report).toContainText(moneyRegex(EXPENSE));
+    // the expense lines sit in the collapsed Expenses section, named by their ACCOUNT
+    await report.getByText(/^Expenses \(\d+\)$/).click();
+    await expect(report).toContainText(fixtures().accountName);
   });
 
   test('the movements CSV lists the posted day, one line per movement', async ({ page }) => {
@@ -225,9 +231,6 @@ test.describe.serial('report wizard', () => {
     expect(rows[0]).toMatch(/^Date,Account Code,Amount/);
     // Python writes the amounts: a whole number keeps its ".0" (500.0), any other as typed
     const amount = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n));
-    // the float added at the start (director account 835), the expense by its account code and
-    // remark, the cash sale (200) and the deposit, booked against the petty cash account (090 on
-    // the seed's mapping, 091 on the Demo Company's)
     expect(text).toContain('Cash Addition');
     expect(text).toContain(`,${fixtures().expenseCode},${amount(-EXPENSE)},Tape`);
     expect(text).toContain(`,200,${amount(CASH)},Cash Sale`);

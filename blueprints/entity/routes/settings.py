@@ -157,6 +157,15 @@ def entity_settings_users(org_id):
     return _to_hub_tab(org_id, "users")
 
 
+#: The Petty Cash Settings cards that save on their own -> what a save says (None = all of them).
+SETTINGS_SECTIONS = {
+    None: "Entity settings saved!",
+    "country": "Country and currency saved.",
+    "mapping": "Xero account mapping saved.",
+    "codes": "Account codes saved.",
+}
+
+
 @entity_bp.route("/entity/<entity:org_id>/settings/petty-cash",
                  methods=["GET", "POST"])
 @login_required
@@ -207,7 +216,22 @@ def entity_settings_entity(org_id):
             # codes ticked here. Refused
             # BEFORE anything is written - the mapping save commits on its own. A company with
             # no codes at all saves as before; the page greys Save in the same case.
-            saveable = saveable_account_codes(org_id) if xero_live else set()
+            #
+            # One Save per card (Part 15.20b; the user, 2026-10-14): the card names itself in
+            # ``section`` and only that part is written - every card's fields ride along in the
+            # post. No ``section`` (an older client) saves everything, as before. Sales methods
+            # save through their own JSON API, never here.
+            section = request.form.get("section") or None
+            if section not in SETTINGS_SECTIONS:
+                # returned, not abort(): the page's catch-all below would turn an HTTPException
+                # into a "something got tangled" redirect
+                logger.warning("entity_settings_entity POST: unknown section %r entity=%s", section, org_id)
+                return "That part of the settings can't be saved here.", 400
+
+            def saving(part):
+                return section is None or section == part
+
+            saveable = saveable_account_codes(org_id) if (xero_live and saving("codes")) else set()
             if saveable:
                 posted = {
                     str(c).strip()
@@ -224,23 +248,25 @@ def entity_settings_entity(org_id):
                 EntityPettycashSettings.query.filter_by(entity_id=org_id).first() is None
             )
             try:
-                if xero_live and request.form.get("main_bank") and has_permission(
+                if saving("mapping") and xero_live and request.form.get("main_bank") and has_permission(
                     current_user, Permission.COA_UPDATE, org_id
                 ):
                     _xr = process_xero_account_mapping_post(
                         org_id,
                         return_view="entity_settings_entity",
                         defer_success_redirect=True,
+                        with_country=saving("country"),
                     )
                     if _xr is not None:
                         return _xr
 
-                apply_country_currency_selection(org, request.form)
+                if saving("country"):
+                    apply_country_currency_selection(org, request.form)
 
                 db.session.commit()
                 # The ticks live on entity_account_xero.is_active only; account_info.status is
                 # Xero's own "still active" and is never touched by a tick (2026-10-01).
-                if xero_live:
+                if xero_live and saving("codes"):
                     selected_account_codes = request.form.getlist("account_codes[]")
                     logger.info(
                         f"Saving selected account codes for entity {org_id}: {selected_account_codes}"
@@ -262,8 +288,8 @@ def entity_settings_entity(org_id):
                         return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                         )
 
-                flash("Entity settings saved!", "success")
-                if first_save and EntityPettycashSettings.query.filter_by(
+                flash(SETTINGS_SECTIONS[section], "success")
+                if saving("mapping") and first_save and EntityPettycashSettings.query.filter_by(
                     entity_id=org_id
                 ).first() is not None:
                     return redirect(

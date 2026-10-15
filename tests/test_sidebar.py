@@ -175,7 +175,7 @@ def test_a_company_without_petty_cash_gets_the_general_settings(app, people):
 def test_the_dashboards_setup_links_open_the_petty_cash_settings():
     # "Setup Required" lists the Petty Cash Settings tab's accounts and contacts; its button and
     # the "Settings -> Petty Cash" hint used to open Entity & Integration instead
-    source = (TEMPLATES / "entity" / "entity_dashboard_v2.html").read_text(encoding="utf-8")
+    source = (TEMPLATES / "petty_cash" / "launch.html").read_text(encoding="utf-8")
     button = re.search(r'<a href="([^"]*)"[^>]*>\s*Set Up Settings', source)
     hint = re.search(r'<a href="([^"]*)"[^>]*>Settings → Petty Cash</a>', source)
 
@@ -255,16 +255,9 @@ def test_the_hub_names_the_caller_it_allows(app, client, people, origins, origin
 
 PAGES = [
     "entity/entity_create.html",
-    "entity/entity_dashboard_v2.html",
+    "petty_cash/base.html",  # every redesigned Petty Cash page extends it
     "entity/entity_no_permission.html",
     "entity/settings_entity.html",
-    "report/cash_count.html",
-    "report/deposit.html",
-    "report/ending.html",
-    "report/expense.html",
-    "report/opening.html",
-    "report/sales.html",
-    "report_history/report_history.html",
     "report_list.html",
 ]
 
@@ -278,6 +271,25 @@ def test_every_header_opens_the_sidebar(page):
     assert source.count('data-sidebar-open="profile"') == 1
     assert 'onclick="toggleMenu()"' not in source
     assert "from_bills" not in source
+
+
+#: The redesigned Daily Closing stages: they carry the sidebar through petty_cash/base.html.
+REDESIGNED = ["report/opening.html", "report/sales.html", "report/expense.html", "report/cash_count.html"]
+
+
+#: The redesigned report pages around the stages: the Daily Report and the outcome page.
+REDESIGNED_PAGES = ["petty_cash/launch.html", "report/ending.html", "report/submitted.html",
+                    "report_history/report_history.html"]
+
+
+@pytest.mark.parametrize("page", REDESIGNED + ["report/close.html"] + REDESIGNED_PAGES)
+def test_every_redesigned_stage_takes_the_shell_with_the_sidebar(page):
+    source = (TEMPLATES / page).read_text(encoding="utf-8")
+
+    assert source.startswith("{#")
+    assert ("{% extends 'petty_cash/closing_base.html' %}" in source
+            or "{% extends 'petty_cash/base.html' %}" in source)
+    assert "minty_sidebar.html" not in source and "data-sidebar-open" not in source
 
 
 def test_the_old_drawers_are_gone_everywhere():

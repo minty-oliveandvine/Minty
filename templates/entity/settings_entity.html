@@ -9,8 +9,14 @@
     plain CSS in static/css/settings_page.css;
   * "‹ Back" returns to the page the person came from, whichever app (static/js/back_link.js;
     the ?from=bills flag that used to pick "Payments" or "Reports" went 2026-10-05);
-  * one Save Changes saves every card; static/js/petty_cash_settings.js runs the page, and the
-    Xero mapping pickers are partials/xero_mapping_classic_script_fragment.html's;
+  * every card saves on its own (Part 15.20b; the user, 2026-10-14): its Save posts the form with
+    `section` naming it and the server writes only that part - sales methods through their API;
+    static/js/petty_cash_settings.js runs the page, and the Xero mapping pickers are
+    partials/xero_mapping_classic_script_fragment.html's;
+  * Parts 13-14 since 2026-10-14: the colours are the token sheet's roles (minty_tokens.css), the
+    icons Material Symbols Rounded, buttons and inputs 44px at radius 12. The Tailwind CDN stays
+    for the mapping fragment's utility classes (3,900 lines written against it) - this page is the
+    one redesigned Petty Cash page that keeps it;
   * minty-web's modal design (components/minty_dialog.html) asks before unsaved changes are left
     behind and before a method is deleted.
 #}
@@ -19,9 +25,23 @@
 {% set viewer_name = ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or '')) | trim %}
 {# Without a live Xero connection (never connected, disconnected, or a dead token) the Xero-fed
    cards keep their heading and show only this - their lists would be empty or stale. #}
+{# One card's Save (Part 15.20b). A view-only member gets it off with the reason beside it. #}
+{% macro card_save(section, view_only, hint=None) %}
+<div class="pcs-card-save">
+  {% if hint %}<p class="pcs-hint" id="saveHint" hidden>{{ hint }}</p>{% endif %}
+  {% if view_only %}
+  <p class="pcs-hint" id="{{ section }}SaveReason">Only Accountants and Admins can change these.</p>
+  <button type="button" class="pcs-save-btn" data-section-save="{{ section }}" disabled data-view-only aria-describedby="{{ section }}SaveReason">Save</button>
+  {% else %}
+  {# Off until the page has loaded what it saves (the Xero lists) and something in this card
+     changed - static/js/petty_cash_settings.js turns it on. #}
+  <button type="button" class="pcs-save-btn" data-section-save="{{ section }}" disabled>Save</button>
+  {% endif %}
+</div>
+{% endmacro %}
 {% macro xero_not_connected() %}
 <div class="pcs-notice pcs-notice-alert" role="status">
-  <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
+  <span class="material-symbols-rounded" aria-hidden="true">link_off</span>
   <span>Xero isn't connected. Connect it in
     <a href="{{ url_for('entity_settings', entity_id=org.id) }}">Entity &amp; Integration</a>
     to set these up.</span>
@@ -36,10 +56,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,400,0..1,0&display=block">
   {# For the shared flash toast and view-only notice, and the utility classes the Xero mapping
      script toggles; the page's own look is settings_page.css. #}
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/minty_tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/settings_page.css') }}">
   {% include 'components/minty_dialog.html' %}
 </head>
@@ -50,12 +71,12 @@
     <div class="pcs-header-row">
       <div class="pcs-header-lead">
         <a href="{{ company_home_url(org.id) }}" class="pcs-back" data-back-link>
-          <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Back
+          <span class="material-symbols-rounded" aria-hidden="true">chevron_left</span>Back
         </a>
         <h1 class="pcs-title">Settings</h1>
       </div>
       <div class="pcs-header-end">
-        <span class="material-symbols-outlined pcs-company-icon" aria-hidden="true">corporate_fare</span>
+        <span class="material-symbols-rounded pcs-company-icon" aria-hidden="true">corporate_fare</span>
         <span class="pcs-company">{{ org.name or '' }}</span>
         <div class="pcs-doors">
           <a href="{{ bills_app_profile_url(org.id) }}" class="pcs-avatar"
@@ -89,6 +110,8 @@
 
         <form method="POST" action="{{ url_for('entity_settings_entity', org_id=org.id) }}" id="entitySettingsForm" novalidate>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {# set by the card whose Save was pressed; the server writes only that part #}
+          <input type="hidden" name="section" id="settingsSection" value="">
           <input type="hidden" id="ci_country_code_hidden" name="country_code" value="{{ selected_country.country_code if selected_country else '' }}">
           <input type="hidden" id="ci_currency_id_hidden" name="currency_id" value="{{ selected_currency.currency_id if selected_currency else '' }}">
 
@@ -101,7 +124,7 @@
                 <h2 class="pcs-card-heading">
                   <button type="button" class="pcs-card-toggle" data-card-toggle aria-expanded="true" aria-controls="countryContent">
                     <span class="pcs-card-title">Country &amp; currency</span>
-                    <span class="material-symbols-outlined pcs-chevron" aria-hidden="true">expand_more</span>
+                    <span class="material-symbols-rounded pcs-chevron" aria-hidden="true">expand_more</span>
                   </button>
                 </h2>
                 <p class="pcs-card-sub">Where this entity reports from, and the currency its petty cash is counted in.</p>
@@ -113,7 +136,7 @@
                     <input type="text" id="ci_country_display" class="pcs-combo-input" placeholder="Select a country" autocomplete="off"
                            role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ci_country_suggestions"
                            value="{{ selected_country.country_name if selected_country else '' }}"{% if is_view_only %} disabled{% endif %}>
-                    <span class="pcs-combo-chevron" aria-hidden="true"><span class="material-symbols-outlined">expand_more</span></span>
+                    <span class="pcs-combo-chevron" aria-hidden="true"><span class="material-symbols-rounded">expand_more</span></span>
                     <div id="ci_country_suggestions" class="pcs-suggest" role="listbox" hidden></div>
                   </div>
                 </div>
@@ -123,11 +146,12 @@
                     <input type="text" id="ci_currency_display" class="pcs-combo-input" placeholder="Select a currency" autocomplete="off"
                            role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ci_currency_suggestions"
                            value="{{ selected_currency.currency_name if selected_currency else '' }}"{% if is_view_only %} disabled{% endif %}>
-                    <span class="pcs-combo-chevron" aria-hidden="true"><span class="material-symbols-outlined">expand_more</span></span>
+                    <span class="pcs-combo-chevron" aria-hidden="true"><span class="material-symbols-rounded">expand_more</span></span>
                     <div id="ci_currency_suggestions" class="pcs-suggest" role="listbox" hidden></div>
                   </div>
                 </div>
               </div>
+              {{ card_save('country', is_view_only) }}
             </section>
 
             {# 2. Xero account mapping #}
@@ -137,7 +161,7 @@
                 <h2 class="pcs-card-heading">
                   <button type="button" class="pcs-card-toggle" data-card-toggle aria-expanded="true" aria-controls="mappingContent">
                     <span class="pcs-card-title">Xero account mapping</span>
-                    <span class="material-symbols-outlined pcs-chevron" aria-hidden="true">expand_more</span>
+                    <span class="material-symbols-rounded pcs-chevron" aria-hidden="true">expand_more</span>
                   </button>
                 </h2>
                 <p class="pcs-card-sub">The Xero accounts and contacts a petty cash report posts to.</p>
@@ -146,11 +170,12 @@
               <div class="pcs-card-body{% if not can_map %} pcs-readonly{% endif %}" id="mappingContent">
                 {# Shown by the mapping script when its refresh from Xero fails. #}
                 <div class="pcs-notice" id="xeroRefreshNote" role="status" hidden>
-                  <span class="material-symbols-outlined" aria-hidden="true">info</span>
+                  <span class="material-symbols-rounded" aria-hidden="true">info</span>
                   <span>I couldn't refresh these lists from Xero just now, so they show what was last synced.</span>
                 </div>
                 {% include 'entity/partials/xero_account_mapping_cards_classic.html' %}
               </div>
+              {{ card_save('mapping', not can_map) }}
               {% else %}
               <div class="pcs-card-body" id="mappingContent">{{ xero_not_connected() }}</div>
               {% endif %}
@@ -167,7 +192,7 @@
                 <h2 class="pcs-card-heading">
                   <button type="button" class="pcs-card-toggle" data-card-toggle aria-expanded="true" aria-controls="accountCodeContent">
                     <span class="pcs-card-title">Petty Cash Account Code</span>
-                    <span class="material-symbols-outlined pcs-chevron" aria-hidden="true">expand_more</span>
+                    <span class="material-symbols-rounded pcs-chevron" aria-hidden="true">expand_more</span>
                   </button>
                 </h2>
                 <p class="pcs-card-sub">Only selected account code will appear when adding an expense in Petty Cash.</p>
@@ -179,7 +204,7 @@
                 <div class="pcs-search">
                   <label for="accountCodeInput" class="sr-only">Search account code</label>
                   <input type="search" id="accountCodeInput" class="pcs-search-input" placeholder="Search account code" autocomplete="off">
-                  <span class="material-symbols-outlined pcs-search-icon" aria-hidden="true">search</span>
+                  <span class="material-symbols-rounded pcs-search-icon" aria-hidden="true">search</span>
                 </div>
                 <div id="accountCodeList">
                   <div class="pcs-skeleton" aria-hidden="true">
@@ -187,36 +212,21 @@
                   </div>
                 </div>
               </div>
+              {{ card_save('codes', is_view_only, hint='Pick at least one account code.') }}
               {% endif %}
             </section>
 
           </div>
 
-          <div class="pcs-save">
-            <p class="pcs-hint" id="saveHint" hidden>Pick at least one account code.</p>
-            {% if is_view_only %}
-            <button type="button" id="saveChangesBtn" class="pcs-save-btn" disabled data-view-only
-                    title="That task is reserved for our Accountants and Admins.">
-              <span id="saveBtnText">Save Changes</span>
-            </button>
-            {% else %}
-            {# Off until the page has loaded what it saves (the Xero lists), while no account code is
-               ticked, and while nothing has changed - static/js/petty_cash_settings.js turns it on. #}
-            <button type="submit" id="saveChangesBtn" class="pcs-save-btn" disabled>
-              <span id="saveBtnText">Save Changes</span>
-              <span id="saveBtnSpinner" hidden>Saving…</span>
-            </button>
-            {% endif %}
-          </div>
         </form>
       </div>
     </div>
   </main>
 
-  {# Busy: the Xero lists loading (the mapping script), a contact being created, the save. #}
+  {# Busy: the Xero lists loading (the mapping script), a contact being created, a card's save. #}
   <div id="xeroLoadingOverlay" class="pcs-overlay hidden" role="status" aria-live="polite">
     <div class="pcs-overlay-card">
-      <span class="material-symbols-outlined pcs-spin" aria-hidden="true">progress_activity</span>
+      <span class="material-symbols-rounded pcs-spin" aria-hidden="true">progress_activity</span>
       <span id="xeroLoadingText">Loading…</span>
     </div>
   </div>
