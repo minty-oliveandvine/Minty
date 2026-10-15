@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.shared.enums import SaleType
-from models.db import (Report, ReportSale, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, db, tz)
+from models.db import (Report, ReportSale, ReportSaleDetail, EntitySaleSetting, SaleInfo, db, tz)
 from utils.report import parse_nested_keys as _parse_nested_keys
 from utils.report import safe_float as _safe_float
 from blueprints.report.services.receipt_keys import split_receipt_keys  # noqa: F401 - re-exported
@@ -338,38 +338,6 @@ def first_report_defaults(entity_id):
         return 0.0, None
     opening = float(row.opening_balance) if row.opening_balance is not None else 0.0
     return opening, row.start_date
-
-
-def cleanup_partial_submission_data(draft_id, logger=None):
-    """Remove partial Report and ShopExpense records for a draft. Returns True on success."""
-    try:
-        partial_reports = Report.query.filter(Report.id == draft_id).all()
-        for report in partial_reports:
-            db.session.delete(report)
-        if logger:
-            logger.info(f"Cleaned up partial Report record: {draft_id}")
-
-        partial_expenses = ShopExpense.query.filter(
-            ShopExpense.report_id == draft_id
-        ).all()
-        for expense in partial_expenses:
-            db.session.delete(expense)
-        if logger:
-            logger.info(
-                f"Cleaned up partial ShopExpense records for draft {draft_id}")
-
-        db.session.commit()
-        if logger:
-            logger.info(
-                f"Successfully cleaned up partial data for draft {draft_id}")
-        return True
-    except Exception as e:
-        if logger:
-            logger.error(
-                f"Error cleaning up partial data for draft {draft_id}: {str(e)}"
-            )
-        db.session.rollback()
-        return False
 
 
 def resolve_report_entity_id(report_id: str | None) -> str | None:

@@ -3,7 +3,7 @@
 # Report ending routes; delegates to app implementation.
 # Ending step: report_ending transferred from app.py (single function, no
 # new functions).
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
@@ -13,15 +13,11 @@ from sqlalchemy.orm.attributes import flag_modified
 from blueprints.report.services.cash_denominations import (
     cash_summary, get_cash_count_details, refresh_cash_stock)
 from blueprints.report.services.shared import (check_user_has_entities,
-                                               cleanup_partial_submission_data,
-                                               future_date_error,
-                                               get_cash_sales_from_detail,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
 from blueprints.shared.enums import SaleType
 from blueprints.shared.enums import ReportStatus
-from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, UserEntity, db, tz)
-from services.helpers.xero_bridge import resolve_contact_name
+from models.db import (Entity, Report, ReportSaleDetail, EntitySaleSetting, SaleInfo, ShopExpense, UserEntity, db)
 from services.permission_policy import (Permission, can_view_report,
                                         has_permission, is_superuser)
 
@@ -247,6 +243,17 @@ def entity_ending(entity_id):
             "warning",
         )
         return redirect(url_for("entity.entity_list"))
+
+
+def _submit_step_url(step, entity_id, day, report_id):
+    """Where a refused submit sends the person: the step that fixes it, for the same day."""
+    if step == "submitted":
+        return url_for("report.report_submitted", entity_id=entity_id, id=report_id)
+    if step == "dashboard":
+        return url_for("entity.report_dashboard", id=entity_id)
+    endpoint = {"opening": "report.report_opening", "sales": "report.report_sale",
+                "expenses": "report.report_expense"}.get(step, "report.report_cash_count")
+    return url_for(endpoint, entity_id=entity_id, transaction_date=day)
 
 
 def report_ending(id=None, entity_id=None, skip_auth=False):
@@ -1117,494 +1124,21 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
     discrepancy_type = current_draft.discrepancy_type or "none"
     discrepancy_reason = current_draft.discrepancy_reason or ""
     if request.method == "POST":
-        expected_balance = (
-            (current_draft.opening_balance or 0)
-            + (current_draft.cash_addition or 0)
-            + (current_draft.cash_sales or 0)
-            - (current_draft.expenses or 0)
-            - (current_draft.bank_deposit or 0)
-        )
-        if expected_balance < 0:
-            flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "warning")
-            return redirect(
-                url_for(
-                    "report.report_deposit",
-                    entity_id=entity_id,
-                    transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                )
-            )
+        # The submit's rules and writes: services/submit.py, shared with the Petty Cash API.
+        from blueprints.report.services.submit import SubmitRefused, submit_report
 
+        day = transaction_date.strftime("%Y-%m-%d")
         try:
-            logger.info("=== STARTING REPORT ENDING SUBMISSION ===")
-            logger.info(
-                f"Draft ID: {current_draft.id if current_draft else 'None'}"
-            )
-            logger.info(f"Entity ID: {entity_id}")
-            logger.info(
-                f"User: {current_user.username if current_user else 'None'}"
-            )
-            logger.info(
-                f"Company: {entity_id if entity_id else 'None'}"
-            )
-            logger.info(
-                f"Transaction Date: {current_draft.transaction_date if current_draft else 'None'}"
-            )
-            logger.info(f"Completed Sections: {completed_sections}")
-            logger.info(
-                f"Current Section: {current_draft.current_section if current_draft else 'None'}"
-            )
-            logger.info(
-                f"Xero Integrated: {current_draft.xero_integrated_yes if current_draft else 'None'}"
-            )
-
-            # Comprehensive validation checks before processing
-            validation_errors = []
-
-            # 1. Validate draft exists and is valid
-            if not current_draft:
-                validation_errors.append("No draft found for submission")
-            else:
-                # 2. Validate required sections are completed
-                required_sections = [
-                    "opening",
-                    "sales",
-                    "expenses",
-                    "deposit",
-                    "cash_count",
-                ]
-                missing_sections = [
-                    section
-                    for section in required_sections
-                    if section not in completed_sections
-                ]
-                if missing_sections:
-                    validation_errors.append(
-                        f"Missing required sections: {', '.join(missing_sections)}"
-                    )
-
-                # 3. Validate essential data fields
-                if not current_draft.transaction_date:
-                    validation_errors.append("Transaction date is required")
-                else:
-                    # No report may be posted for a date after today. This is the
-                    # definitive guard: the wizard bypasses create.py, so this is
-                    # the last gate before a Report row is written.
-                    future_err = future_date_error(current_draft.transaction_date)
-                    if future_err:
-                        validation_errors.append(future_err)
-
-                if current_draft.opening_balance is None:
-                    validation_errors.append("Opening balance is required")
-
-                if current_draft.closing_balance is None:
-                    validation_errors.append("Closing balance is required")
-
-                # 4. Validate cash count data if cash count section is completed
-                if "cash_count" in completed_sections:
-                    # Presence is decided by the count ROWS, with the legacy row
-                    # answering for reports predating the backfill. Keying on
-                    # cashcount_draft alone would block submit outright once
-                    # Step 3.5 stops writing that table.
-                    if cash_summary(current_draft.id)[0] is None:
-                        validation_errors.append("Cash count data is missing")
-                    # Otherwise no validation: a zero cash count is allowed, and
-                    # cash balance (count + safe box) may be <= 0. The
-                    # discrepancy validation below ensures a description is
-                    # provided when one is needed.
-
-                # 5. Validate sales data
-                if "sales" in completed_sections:
-                    if (
-                        current_draft.total_sales is None
-                        or current_draft.total_sales < 0
-                    ):
-                        validation_errors.append(
-                            "Total sales must be a valid positive number"
-                        )
-
-                # 6. Validate expenses
-                if "expenses" in completed_sections:
-                    if current_draft.expenses is None or current_draft.expenses < 0:
-                        validation_errors.append(
-                            "Total expenses must be a valid positive number"
-                        )
-
-                # 7. Validate deposit data
-                if "deposit" in completed_sections:
-                    if (
-                        current_draft.bank_deposit is None
-                        or current_draft.bank_deposit < 0
-                    ):
-                        validation_errors.append(
-                            "Bank deposit must be a valid positive number"
-                        )
-
-                # 8. Validate Xero integration requirements if applicable
-                if current_draft.xero_integrated_yes:
-                    if not current_draft.withdrawal_type:
-                        validation_errors.append(
-                            "Withdrawal type is required for Xero integration"
-                        )
-                    # the bank account is the settings' main bank account (schema item 13)
-
-            # If validation errors exist, return error response
-            if validation_errors:
-                logger.error("=== VALIDATION FAILED ===")
-                logger.error(
-                    f"Draft ID: {current_draft.id if current_draft else 'unknown'}"
-                )
-                logger.error(f"Validation Errors: {validation_errors}")
-                logger.error("=== END VALIDATION FAILURE ===")
-                flash(f"Hmm, a few things need fixing before I can submit: {'; '.join(validation_errors)}", "danger")
-                return redirect(url_for("report.report_ending", entity_id=entity_id))
-
-            logger.info("=== VALIDATION PASSED ===")
-            logger.info(
-                f"All validation checks passed for draft {current_draft.id}"
-            )
-            logger.info("=== PROCEEDING TO SUBMISSION ===")
-
-            if "submitted" not in completed_sections:
-                # Check if report already exists
-                # WRITE FLIP (Step 2): current_draft IS the report row, so the
-                # 21-field draft->report copy that used to live here was
-                # self-assignment. Submitting is a status change; only the three
-                # values below genuinely differ once the row is posted.
-                posted_report = current_draft
-                
-                cash_sales = get_cash_sales_from_detail(
-                    current_draft.id, fallback_value=current_draft.cash_sales or 0.0
-                )
-                base_closing_balance = (
-                    (current_draft.opening_balance or 0)
-                    + (current_draft.cash_addition or 0)
-                    + cash_sales
-                    - (current_draft.expenses or 0)
-                    - (current_draft.bank_deposit or 0)
-                )
-                posted_report.closing_balance = base_closing_balance + (
-                    current_draft.discrepancy_amount or 0
-                )
-                posted_report.date = datetime.now(tz)
-                posted_report.uploaded_by = current_user.username
-                logger.info(f"Submitting report {current_draft.id}")
-                
-                # Process expense drafts with rollback protection
-                try:
-                    logger.info("=== EXPENSE PROCESSING PHASE ===")
-                    logger.info(
-                        f"Processing expense drafts for draft {current_draft.id}"
-                    )
-                    # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
-                    # exists from draft creation via ensure_shop_expense_for_draft, and
-                    # report_id holds the same value report_draft_id did.
-                    shop_expense_drafts = ShopExpense.query.filter(
-                        ShopExpense.report_id == current_draft.id
-                    ).all()
-                    logger.info(f"Found {len(shop_expense_drafts)} expense drafts")
-
-                    # Log each expense draft
-                    for i, expense_draft in enumerate(shop_expense_drafts):
-                        logger.info(
-                            f"Expense {i+1}: {expense_draft.item} - ${expense_draft.amount}"
-                        )
-                        if expense_draft.remarks:
-                            logger.info(f"  Remarks: {expense_draft.remarks}")
-                        if expense_draft.contact_id:
-                            logger.info(f"  Contact ID: {expense_draft.contact_id}")
-                        if expense_draft.account_id:
-                            logger.info(f"  Account ID: {expense_draft.account_id}")
-
-                    # Validate expense drafts data
-                    for expense_draft in shop_expense_drafts:
-                        if not expense_draft.item or expense_draft.item.strip() == "":
-                            logger.error(
-                                f"Expense draft {expense_draft.id} has empty item name"
-                            )
-                            raise ValueError("Expense item cannot be empty")
-                        if not expense_draft.amount or expense_draft.amount <= 0:
-                            logger.error(
-                                f"Expense draft {expense_draft.id} has invalid amount: {expense_draft.amount}"
-                            )
-                            raise ValueError(
-                                "Expense amount must be greater than zero"
-                            )
-
-                    # Drafts and reports are one row, so the expense lines already ARE the
-                    # report's (the draft-to-report copy that sat here went with C4). What
-                    # is left of it: a line whose contact has no name yet gets one from Xero.
-                    entity_id = current_draft.company
-                    contact_name_cache = {}
-                    for expense_line in shop_expense_drafts:
-                        if expense_line.contact_name or not expense_line.contact_id:
-                            continue
-                        if expense_line.contact_id not in contact_name_cache:
-                            contact_name_cache[expense_line.contact_id] = resolve_contact_name(
-                                entity_id, expense_line.contact_id
-                            )
-                        expense_line.contact_name = contact_name_cache[expense_line.contact_id]
-
-                    db.session.commit()
-                    logger.info("Database session flushed successfully")
-
-                except Exception as expense_error:
-                    logger.error(
-                        f"Error processing expense drafts: {str(expense_error)}"
-                    )
-                    db.session.rollback()
-                    raise expense_error
-
-                # Final commit and status update with rollback protection
-                if "submitted" not in completed_sections:
-                    try:
-                        logger.info("=== FINAL COMMIT PHASE ===")
-                        # Final validation before commit
-                        logger.info(
-                            f"Performing final validation before commit for {current_draft.id}"
-                        )
-                        logger.info(
-                            f"Current completed sections: {completed_sections}"
-                        )
-                        logger.info(f"Current draft status: {current_draft.status}")
-                        logger.info(
-                            f"Current draft section: {current_draft.current_section}"
-                        )
-
-                        # Validate that all required data is present
-                        if not posted_report:
-                            raise ValueError("Report record not created properly")
-
-                        # Validate that expense drafts were processed correctly
-                        final_expenses = ShopExpense.query.filter(
-                            ShopExpense.report_id == current_draft.id
-                        ).all()
-                        if (
-                            "expenses" in completed_sections
-                            and len(final_expenses) == 0
-                        ):
-                            logger.warning(
-                                f"No expenses found for report {current_draft.id} despite expenses section being completed"
-                            )
-
-                        # Validate cash count data if applicable. Reads
-                        # actual_cash_total off `report`, which cash_count.py
-                        # now writes (Step 3.5, Unit 0a).
-                        if "cash_count" in completed_sections:
-                            counted_total = cash_summary(current_draft.id)[0]
-                            if not counted_total or counted_total <= 0:
-                                logger.warning(
-                                    f"Cash count total is zero or negative for report {current_draft.id}"
-                                )
-
-                        logger.info(
-                            f"Final validation passed for {current_draft.id}"
-                        )
-
-                        logger.info(
-                            f"Updating draft status to submitted for {current_draft.id}"
-                        )
-                        logger.info("Adding 'submitted' to completed sections")
-                        completed_sections.append("submitted")
-                        current_draft.completed_sections = completed_sections
-                        current_draft.current_section = "submitted"
-                        current_draft.status = ReportStatus.SUBMITTED
-                        current_draft.submitted_at = datetime.now(timezone.utc)
-                        # The company's cash in stock is this report's count now.
-                        db.session.flush()
-                        refresh_cash_stock(current_draft.company)
-
-                        logger.info("Committing database changes...")
-                        db.session.commit()
-
-                        logger.info("=== SUBMISSION SUCCESSFUL ===")
-                        logger.info(
-                            f"Report {current_draft.id} submitted successfully"
-                        )
-                        logger.info(
-                            f"Final completed sections: {completed_sections}"
-                        )
-                        logger.info(f"Final draft status: {current_draft.status}")
-                        logger.info(
-                            f"Final draft section: {current_draft.current_section}"
-                        )
-                        logger.info(f"Posted report ID: {posted_report.id}")
-                        logger.info("=== END SUBMISSION SUCCESS ===")
-
-                        return redirect(
-                            url_for(
-                                "report.report_submitted",
-                                entity_id=entity_id,
-                                id=posted_report.id,
-                            )
-                        )
-                    except Exception as commit_error:
-                        logger.error("=== FINAL COMMIT ERROR ===")
-                        logger.error(
-                            f"Error during final commit for draft {current_draft.id}: {str(commit_error)}"
-                        )
-                        logger.error(f"Error type: {type(commit_error).__name__}")
-                        logger.error("Rolling back database session...")
-                        db.session.rollback()
-                        logger.error("=== END FINAL COMMIT ERROR ===")
-                        raise commit_error
-                else:
-                    logger.warning(f"Report {current_draft.id} already submitted")
-                    flash("This one's already been submitted!", "warning")
-                    return redirect(
-                        url_for("entity.report_dashboard", id=entity_id)
-                    )
-            else:
-                # Report already submitted, redirect to dashboard
-                logger.warning(
-                    f"Report {current_draft.id} already submitted, redirecting to dashboard"
-                )
-                flash("This one's already been submitted!", "warning")
-                return redirect(
-                    url_for("entity.report_dashboard", id=entity_id)
-                )
-
-        except Exception as e:
-            # Comprehensive rollback on error
-            logger.error("=== SUBMISSION FAILURE ===")
-            logger.error(
-                f"Unexpected error during report ending submission for draft {current_draft.id if current_draft else 'unknown'}"
-            )
-            logger.error(f"Error: {str(e)}")
-            logger.error(f"Error type: {type(e).__name__}")
-            if entity_id:
-                logger.error(f"Entity ID: {entity_id}")
-            logger.error(
-                f"User: {current_user.username if current_user else 'None'}"
-            )
-            logger.error(
-                f"Company: {entity_id if entity_id else 'None'}"
-            )
-            logger.error(
-                f"Transaction Date: {current_draft.transaction_date if current_draft else 'None'}"
-            )
-            logger.error(
-                f"Completed Sections: {completed_sections if 'completed_sections' in locals() else 'Unknown'}"
-            )
-            logger.error("=== ROLLING BACK DATABASE ===")
-
-            # Perform comprehensive rollback
-            try:
-                db.session.rollback()
-                logger.info(
-                    f"Database rollback completed for draft {current_draft.id}"
-                )
-            except Exception as rollback_error:
-                logger.error(f"Error during database rollback: {rollback_error}")
-                logger.error(
-                    f"Rollback error type: {type(rollback_error).__name__}"
-                )
-
-            # Check and restore draft state after rollback
-            try:
-                logger.info("Checking draft state after rollback...")
-                # Step 4a-6: was a check that the separate DRAFT row survived
-                # the rollback. One row now, so this reads back the report
-                # itself — still meaningful (the rollback could have removed a
-                # row created in this request).
-                draft_check = Report.query.filter_by(id=current_draft.id).first()
-                if not draft_check:
-                    logger.error(
-                        f"Draft record {current_draft.id} was lost due to rollback - this is a critical error"
-                    )
-                    flash(
-                        "I'm so sorry - your draft was lost and I couldn't recover it. You'll need to start this report over.",
-                        "danger",
-                    )
-                    return redirect(
-                        url_for("report.report_opening", entity_id=entity_id)
-                    )
-                else:
-                    logger.info(
-                        f"Draft record {current_draft.id} preserved after rollback"
-                    )
-
-                    # Check if any partial data was created and needs cleanup
-                    existing_report = Report.query.filter(
-                        Report.id == current_draft.id
-                    ).first()
-                    existing_expenses = ShopExpense.query.filter(
-                        ShopExpense.report_id == current_draft.id
-                    ).all()
-
-                    if existing_report or existing_expenses:
-                        logger.warning("=== PARTIAL DATA CLEANUP ===")
-                        logger.warning(
-                            f"Partial data exists for {current_draft.id} - attempting cleanup"
-                        )
-                        logger.warning(
-                            f"Existing report: {existing_report is not None}"
-                        )
-                        logger.warning(
-                            f"Existing expenses count: {len(existing_expenses)}"
-                        )
-                        cleanup_success = cleanup_partial_submission_data(
-                            current_draft.id
-                        )
-                        if cleanup_success:
-                            logger.info(
-                                f"Successfully cleaned up partial data for {current_draft.id}"
-                            )
-                        else:
-                            logger.error(
-                                f"Failed to clean up partial data for {current_draft.id} - manual cleanup may be required"
-                            )
-                        logger.warning("=== END PARTIAL DATA CLEANUP ===")
-
-            except Exception as check_error:
-                logger.error(
-                    f"Error checking draft status after rollback: {check_error}"
-                )
-
-            # Determine error type and provide appropriate user message
-            logger.info("=== ERROR TYPE DETERMINATION ===")
-            error_type = "database"
-            if "connection" in str(e).lower() or "timeout" in str(e).lower():
-                error_type = "connection"
-                logger.info("Error classified as connection issue")
-            elif "constraint" in str(e).lower() or "foreign key" in str(e).lower():
-                error_type = "constraint"
-                logger.info("Error classified as constraint violation")
-            elif "permission" in str(e).lower() or "access" in str(e).lower():
-                error_type = "permission"
-                logger.info("Error classified as permission issue")
-            else:
-                logger.info("Error classified as general database issue")
-            logger.info("=== END ERROR TYPE DETERMINATION ===")
-
-            if error_type == "connection":
-                logger.info("Showing connection error message to user")
-                flash(
-                    "Something went wrong reaching the server. Could you check your connection and try again?",
-                    "warning",
-                )
-            elif error_type == "constraint":
-                logger.info("Showing constraint error message to user")
-                flash(
-                    "Something in the report data doesn't look right to me. Could you check your entries and try again?",
-                    "warning",
-                )
-            elif error_type == "permission":
-                logger.info("Showing permission error message to user")
-                flash(
-                    "I couldn't save your report - something on our end blocked it. Nothing was submitted, so please contact your administrator before trying again.",
-                    "danger",
-                )
-            else:
-                logger.info("Showing general error message to user")
-                flash(
-                    "Something went wrong on my end while submitting your report. Mind trying again?",
-                    "danger",
-                )
-
-            logger.info("=== REDIRECTING TO REPORT ENDING ===")
-            logger.info(f"Redirecting to report_ending with entity_id: {entity_id}")
-            logger.error("=== END SUBMISSION FAILURE ===")
-            return redirect(url_for("report.report_ending", entity_id=entity_id))
+            posted = submit_report(current_draft, current_user)
+        except SubmitRefused as refused:
+            flash(refused.message, "warning")
+            return redirect(_submit_step_url(refused.to, entity_id, day, current_draft.id))
+        except Exception:
+            logger.exception(f"Submitting report {current_draft.id} failed; the draft is left as it was")
+            flash("Something went wrong on my end while submitting your report. Nothing was submitted - "
+                  "mind trying again?", "danger")
+            return redirect(url_for("report.report_ending", entity_id=entity_id, transaction_date=day))
+        return redirect(url_for("report.report_submitted", entity_id=entity_id, id=posted.id))
 
     bank_deposit = current_draft.bank_deposit if current_draft.bank_deposit else 0
     cash_expense = total_expense  # Total of all individual expenses added

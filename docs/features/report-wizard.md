@@ -153,6 +153,17 @@ slots still counts.
 reverting to draft and deleting the latest report each rebuild it (`refresh_cash_stock`); a
 draft never touches it, and the Cash Count step only ever saves a draft's count.
 
+**Submitting saves through `services/submit.py`** (2026-10-15), shared with the Petty Cash API's
+`POST /reports/submit`; the Close page's POST calls it. Flask's rules are kept (every step done,
+not a future day, the drawer not below zero, the closing = opening + addition + cash sales -
+expenses - deposit + the difference, the submitter becomes the creator, the stock follows the
+count). Changed: a failure rolls back and **never deletes the draft** - Flask's "clean-up" deleted
+a day with no expense lines, and with lines only failed silently; a difference that no longer
+matches the count (Deposit, Sales or Expenses changed after it) or has no reason is refused back to
+Cash Count (the owner, 2026-10-15); an expense line with no item or amount is refused back to
+Expenses; a refusal keeps the day in the address (it used to drop it); one commit under a row lock;
+"submitted" is stored in `completed_sections` (it was appended in place and lost).
+
 **Deposit and Cash Count save through `services/cash.py`**, shared with the Petty Cash API
 (which can also save the two together, in one transaction, for Part 15's Cash Count stage). The
 formulas are Flask's: cash on hand = opening + addition + cash sales - expenses; expected cash =
