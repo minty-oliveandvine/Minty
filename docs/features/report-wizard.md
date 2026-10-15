@@ -40,6 +40,12 @@ submitted report as the draft again (only the most recent one).
 
 ## Expenses in detail
 
+- **Names are escaped before they become markup.** The page builds its Suppliers / Account Code
+  dropdowns, "+ Add '<q>' as a new contact", Expense Details and the report-edit selects as
+  JavaScript template literals; every name, description, file name and the search text goes
+  through `escapeHtml` there. Until 2026-10-15 they went in raw, so a Xero contact named
+  `<img onerror=...>` ran script for every cashier who opened the page (stored XSS).
+  `tests/test_expense_page_escaping.py` fails on any new raw interpolation.
 - `POST /report/expense/add` persists **one line immediately** (multipart, files under
   `files[0][n]`) — that is why the page can keep adding without one huge upload at the end;
   `submit_all` is the legacy all-at-once path. `update/<id>`, `delete/<id>`,
