@@ -1680,8 +1680,10 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
         posted_report_row.publishing_status if posted_report_row else None
     )
 
+    # The draft's Close stage (Part 15.15e, the work verification); a saved report by id renders
+    # the Daily Report (report/ending.html) above.
     return render_template(
-        "report/ending.html",
+        "report/close.html",
         org=user_entity,
         completed_sections=completed_sections,
         current_section="ending",

@@ -1,1656 +1,219 @@
+{#
+  Daily Closing stage 4 - Cash Count, with Bank Deposit folded in (Part 15.15d, D15-05).
+  Route: report.report_cash_count (blueprints/report/routes/cash_count.py), which saves the deposit
+  and the count in one commit.
+
+  Order: the optional "Cash taken for bank deposit" -> the count by notes and coins (labelled rows,
+  a polite live total) -> the safe box -> the Check block (Expected in drawer, Counted, Difference
+  as "HKD 20.00 short") -> the reason, which any difference needs before Save & Next (the user's
+  decision, 2026-10-14; the server refuses it too and keeps what was counted).
+
+  The expected-cash formula is the code's, unchanged: opening + addition + cash sales - expenses -
+  deposit, against the count plus the safe box (Part 15's A15-01 differs; that is the owner's call).
+#}
+{% extends 'petty_cash/closing_base.html' %}
+{% set pc_section = 'cash_count' %}
 {% set is_report_edit_mode = request.args.get('report_edit') == 'true' and current_draft and current_draft.status != 'draft' %}
-{# A discrepancy reason only means something when the saved count is actually out.
-   Rendering the box locked here keeps the initial paint consistent with the state
-   applyDiscrepancyEditability() settles on once the JS totals have run. #}
-{% set has_saved_discrepancy = current_draft and current_draft.discrepancy_amount and (current_draft.discrepancy_amount | abs) > 0.01 %}
-{% set discrepancy_reason_locked = (current_draft and current_draft.status != 'draft' and not is_report_edit_mode) or not has_saved_discrepancy %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cash Count - {{ org.name }}</title>
-  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img/favicon.ico') }}" />
+{% set locked = current_draft and current_draft.status != 'draft' %}
+{% set d = current_draft %}
+{% set before_deposit = (d.opening_balance or 0)|float + (d.cash_addition or 0)|float + (d.cash_sales or 0)|float - (d.expenses or 0)|float %}
+{% set deposit = (d.bank_deposit or 0)|float %}
+{% set reason_needed = request.args.get('reason') == 'needed' %}
 
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
-  <script>window.DD_CLIENT_TOKEN = '{{ DD_CLIENT_TOKEN }}';</script>
-  <script src="{{ url_for('static', filename='js/datadog-logs.js') }}"></script>
+{% macro face(value) -%}{{ code }} {{ (value|int) if value == (value|int) else ('%.2f'|format(value)) }}{%- endmacro %}
 
-  <!-- Shared currency formatting -->
-  <script src="{{ url_for('static', filename='js/currency.js') }}"></script>
+{% block guidance %}<p class="pc-page-header__purpose">Count the cash in the drawer. Any cash taken to the bank comes first.</p>{% endblock %}
 
-  <!-- Hover Effects Component -->
-  {% include 'components/hover_effects.html' %}
+{% block stage %}
+<form id="cash-count-form" data-pc-stage-form novalidate method="post"
+      action="{{ url_for('report.report_cash_count', entity_id=org.id, transaction_date=request.args.get('transaction_date')) }}"
+      data-before-deposit="{{ before_deposit }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="entity_id" value="{{ org.id }}">
+  <input type="hidden" name="action_type" value="save_next">
+  {% if transaction_date %}<input type="hidden" name="transaction_date" value="{{ transaction_date.strftime('%Y-%m-%d') }}">{% endif %}
+  {% if draft_id %}<input type="hidden" name="draft_id" value="{{ draft_id }}">{% endif %}
+  <input type="hidden" name="discrepancy_amount" id="discrepancyAmount" value="0">
+  <input type="hidden" name="discrepancy_type" id="discrepancyType" value="none">
 
-  <!-- Page Transitions Component -->
-  {% include 'components/page_transitions.html' %}
+  <div class="pc-stack" style="display: flex; flex-direction: column">
+    {% if before_deposit < 0 %}
+      {% call ui.alert('danger', title='The drawer is below zero before the count', text='It comes to ' ~ (before_deposit|money(code)) ~ ' from the earlier stages. Check the addition, the cash sales and the expenses, then come back.') %}
+        <a href="{{ pc_hrefs['expenses'] }}">Check the expenses</a>
+      {% endcall %}
+    {% endif %}
 
-  <!-- Inter font -->
-<link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
-  <style>
-    /* Base styles */
-    .main-container {
-      width: 100%;
-      min-height: 100vh;
-    }
-    
-    /* Responsive container styles */
-    @media (min-width: 640px) and (max-width: 1024px) {
-      .main-container {
-        width: 640px;
-        margin: 0 auto;
-      }
-    }
-    
-    @media (min-width: 1024px) and (max-width: 1200px) {
-      .main-container {
-        width: 768px;
-        margin: 0 auto;
-      }
-    }
-    
-    @media (min-width: 1200px) {
-      .main-container {
-        width: 1024px;
-        margin: 0 auto;
-      }
-    }
-
-    /* Simple sticky bottom section */
-    .sticky-bottom-section {
-      flex-shrink: 0;
-    }
-
-    /* Simple content area */
-    .content-scroll-area {
-      flex: 1;
-      overflow-y: auto;
-    }
-    
-    .image-skeleton {
-      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-    }
-    
-    @keyframes shimmer {
-      0% {
-        background-position: -200% 0;
-      }
-      100% {
-        background-position: 200% 0;
-      }
-    }
-  </style>
-  <script>
-    tailwind.config = {
-      theme: { 
-        extend: { 
-          fontFamily: { 
-            inter: ['Inter','ui-sans-serif','system-ui'] 
-          } 
-        } 
-      }
-    }
-  </script>
-  <script>
-    // Symbol of the entity's selected currency (entities.currency_id ->
-    // currency_info.currency_code); all money amounts render with it.
-    window.CURRENCY_SYMBOL = {{ currency_symbol | tojson }};
-  </script>
-</head>
-<!-- BFCache helpers: save UI & form snapshot before navigation and restore on pageshow -->
-<script src="{{ url_for('static', filename='js/bfcache_helpers.js') }}"></script>
-<script src="{{ url_for('static', filename='js/report_back_nav.js') }}"></script>
-<script>
-document.addEventListener('submit', function(e){
-  try{
-    const form = e.target;
-    const path = window.location.pathname;
-    let key = 'pending_generic';
-    if(path.includes('/sale')) key='pending_sales';
-    else if(path.includes('/expense')) key='pending_expenses';
-    else if(path.includes('/deposit')) key='pending_deposit';
-    else if(path.includes('/opening')) key='pending_opening';
-    else if(path.includes('/cash-count')) key='pending_cash_count';
-    else if(path.includes('/ending')) key='pending_ending';
-
-    const btn = e.submitter || form.querySelector('button[type="submit"]');
-    if(btn) BFCache.saveButtonState(btn);
-
-    //Strip commas from safe box balance before submmiting to the db
-    if (path.includes('/cash-count')) {
-      const safeBoxInput = e.target.querySelector('#safeBoxBalance');
-      if (safeBoxInput && safeBoxInput.value) {
-        safeBoxInput.value = safeBoxInput.value.replace(/,/g, '');
-      }
-    }
-
-    const data = {};
-    try{ new FormData(form).forEach((v,k)=>{ if(data[k]){ if(Array.isArray(data[k])) data[k].push(v); else data[k]=[data[k],v]; } else data[k]=v }); }catch(e){}
-    BFCache.saveSnapshot(key, data);
-  }catch(e){}
-});
-</script>
-<body class="min-h-screen  font-inter antialiased">
-  {# Canonical toast: server flashes + client showFlashMessages(). #}
-  {% include 'components/flash_messages.html' %}
-  <div class="flex min-h-screen items-center justify-center main-container relative">
-    <!-- Phone card -->
-     <div class="relative h-screen bg-gray-50 shadow-xl flex flex-col w-full overflow-hidden">
-      <!-- Header -->
-      <div class="bg-gray-50 px-4 py-3 flex items-center justify-between flex-shrink-0 relative">
-        <div class="flex-1 flex justify-start min-w-0">
-          <a id="reportBackLink" class="text-[#474747] transition-colors hover-slide-left" href="{{ url_for('entity.report_dashboard', id=org.id) }}" onclick="PageTransition.navigateWithFade(this.href); return false;">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7" />
-            </svg>
-          </a>
-        </div>
-        <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
-          {% if display_date %}
-          <span class="px-3 py-1 rounded-full text-xs font-medium text-[#31B6BD] bg-[#CAF1F4]/50">
-            {{ (transaction_date or datenow).strftime('%d %b').upper() }}
-          </span>
-          {% endif %}
-          <h1 class="text-[#474747] text-lg font-medium">{{ entity_acronym }}</h1>
-          {% include 'components/report_draft_header_badge.html' %}
-        </div>
-        <div class="flex-1 flex justify-end">
-          <div class="flex items-center gap-2">
-            {% set fn = (current_user.first_name or '')[:1] %}
-            {% set ln = (current_user.last_name or '')[:1] %}
-            {% set user_abbrev = ((fn ~ ln)|upper) if (fn or ln) else '?' %}
-            <a href="{{ bills_app_profile_url(org.id) }}" rel="noopener noreferrer"
-              class="relative inline-flex shrink-0 cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#54D3DA]/50"
-              data-sidebar-open="profile" aria-label="My Profile"
-              title="{{ current_user.first_name or '' }} {{ current_user.last_name or '' }}">
-              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-[12px] font-semibold" style="background-color:#FFE6B1; color:#6B3A12">{{ user_abbrev }}</span>
-            </a>
-            <button type="button" data-sidebar-open="menu" aria-label="Open navigation menu" class="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-[#656565] transition-colors hover:bg-[#656565]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#656565]">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" class="size-6" aria-hidden="true">
-                <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
+    {# ---- 1. the deposit (optional) ---- #}
+    <section class="pc-stack--16" style="display: flex; flex-direction: column" aria-labelledby="deposit-title">
+      <div>
+        <h2 class="pc-t-title-m" id="deposit-title">Cash taken for bank deposit</h2>
+        <p class="pc-t-body-s pc-c-secondary">In the drawer before any deposit: <span class="pc-num" translate="no" id="currentBalanceDisplay">{{ before_deposit|money(code) }}</span></p>
       </div>
-      <!-- Progress Steps -->
-       <div class="bg-gray-50 px-4 sm:px-6 py-2 sm:py-2 flex-shrink-0 relative">
-          
-          <!-- Include the reusable stepper component -->
-          {% include 'components/stepper.html' %}
+      {% call ui.field('bank_deposit', 'Deposit amount', note='Leave it empty when no cash went to the bank.') %}
+        {{ ui.amount_input('bank_deposit', 'bank_deposit', value=(('%.2f'|format(deposit)) if deposit > 0 else ''), code=code, readonly=locked,
+             extra='placeholder="0.00" data-pc-empty-zero data-pc-amount="Enter the deposit in numbers, with up to 2 decimals." data-pc-max="' ~ ([before_deposit, 0]|max) ~ '" data-pc-max-msg="The deposit can be at most ' ~ (([before_deposit, 0]|max)|money(code)) ~ ', the cash in the drawer. Lower it to continue."') }}
+      {% endcall %}
+    </section>
+
+    {# ---- 2. the count, by notes and coins ---- #}
+    <section class="pc-stack--16" style="display: flex; flex-direction: column" aria-labelledby="count-title">
+      <div>
+        <h2 class="pc-t-title-m" id="count-title">Count the drawer</h2>
+        <p class="pc-t-body-s pc-c-secondary">How many of each note and coin. Leave a row empty for none.</p>
       </div>
-       
-      <!-- Main Content Area -->
-      <div class="main-content relative px-6 py-6 pb-40 overflow-y-auto bg-gray-50 flex-1 overflow-hidden">
-        <!-- Title -->
-        <div class="text-left mb-2">
-          <h2 class="text-lg sm:text-xl font-bold text-gray-700">Cash Count</h2>
-           <!-- Expected Cash Count Balance -->
-          <div class="inline-flex items-center mt-2 bg-[#E5E7EB] rounded-2xl px-4 py-2 gap-4">
-            <span class="text-sm font-medium text-gray-500 flex-shrink-0">Expected Cash Count Balance</span>
-            <span id="expected_cash_count_balance" class="text-sm font-medium text-gray-500 whitespace-nowrap flex-shrink-0 flex-grow-0 w-fit">{{ currency_symbol }}0.00</span>
-          </div>
-        </div>
-        <!-- Form Content -->
-        <form id="cash-count-form" action="{{ url_for('report.report_cash_count', entity_id=org.id) }}?transaction_date={{request.args.get('transaction_date')}}" method="post">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="entity_id" value="{{ org.id }}">
-          <input type="hidden" name="action_type" value="save_next">
-          {% if transaction_date %}
-            <input type="hidden" name="transaction_date" value="{{ transaction_date.strftime('%Y-%m-%d') }}">
-          {% endif %}
-          {% if draft_id %}
-          <input type="hidden" name="draft_id" value="{{ draft_id }}">
-          {% endif %}
-          <!-- Quantity per denomination, driven by the entity's cash_info
-               catalog rather than a fixed list of nine. `field` is the form
-               name (note1000, 5coins, or cash<id> for anything new) and
-               `count` is the saved quantity from report_cash_count. -->
-          <script>
-            window.DENOMINATION_FIELDS = [{% for row in denomination_rows %}'{{ row.field }}'{% if not loop.last %}, {% endif %}{% endfor %}];
-            window.DENOMINATION_VALUES = { {% for row in denomination_rows %}'{{ row.field }}': {{ row.value }}{% if not loop.last %}, {% endif %}{% endfor %} };
-          </script>
-          {% for row in denomination_rows %}
-          <input type="hidden" name="actual_cash[{{ row.field }}]" id="hidden_{{ row.field }}" value="{{ row.count or 0 }}">
-          {% endfor %}
-
-          <!-- Single Form Container -->
-          <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
-            <!-- Notes Section -->
-            <div>
-              <div class="mb-6 w-[180px] mx-auto block relative" style="min-height: 150px;">
-                <div class="image-skeleton w-[160px] h-[160px] rounded-full bg-gray-200 absolute top-0 left-1/2 transform -translate-x-1/2"></div>
-                <img src="{{ url_for('static', filename='img/cash_reg.webp') }}" alt="Cash Count" class="w-[180px] h-auto mx-auto block relative opacity-0 transition-opacity duration-300" onload="this.classList.remove('opacity-0'); this.classList.add('opacity-100'); this.previousElementSibling.style.display='none'; this.parentElement.style.minHeight='auto';" onerror="this.previousElementSibling.style.display='none';">
-              </div>
-              <div class="mb-4">
-                <h3 class="text-sm mb-2 font-semibold text-gray-700">Cash Box Balance</h3>
-                <div class="flex items-center gap-2">
-                  <input type="text" id="actualCashBalance" readonly placeholder="Actual Cash Balance" class="flex-1 px-3 py-3 border border-gray-300 rounded-xl bg-[#E5E7EB] text-gray-500 focus:outline-none focus:ring-0 focus:border-gray-300">
-                  <button type="button" id="calculatorBtn" class="rounded-xl p-2 border bg-[#54D3DA] hover:bg-[#54D3DA]/80 focus:outline-none focus:ring-0" title="Calculator">
-                    <img src="{{ url_for('static', filename='img/btn_calculator.webp') }}" alt="Calculator" class="w-8 h-8">
-                  </button>
-                </div>
-              </div>
-              <div class="mb-6 w-[180px] mx-auto block relative" style="min-height: 162px;">
-                <div class="image-skeleton w-[160px] h-[160px] rounded-full bg-gray-200 absolute top-0 left-1/2 transform -translate-x-1/2"></div>
-                <img src="{{ url_for('static', filename='img/safebox.webp') }}" alt="Safe Box" class="w-[180px] h-auto mx-auto block relative opacity-0 transition-opacity duration-300" onload="this.classList.remove('opacity-0'); this.classList.add('opacity-100'); this.previousElementSibling.style.display='none'; this.parentElement.style.minHeight='auto';" onerror="this.previousElementSibling.style.display='none';">
-              </div>
-              <!-- Safe Box Balance -->
-              <div class="mb-4">
-                <h3 class="text-sm mb-2 font-semibold text-gray-700">Safebox Cash Balance</h3>
-                <div class="flex items-center gap-2">
-                  <input type="text" inputmode="decimal" name="safe_box_balance" id="safeBoxBalance" value="{{ current_draft.safe_box_balance if current_draft and current_draft.safe_box_balance is not none else '' }}" placeholder="Please enter Balance of the safebox" class="flex-1 px-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500{% else %}bg-white text-black{% endif %} border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent cursor-pointer" {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %} oninput="formatCurrency(this); calculateTotals();" onblur="formatWithCommas(this); calculateTotals();">
-
-                </div>
-              </div>
-          <div class="flex items-center justify-between mt-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
-            <span class="text-sm font-medium text-[#33969C]">Total Cash Count</span>
-            <span id="totalCashCount" class="text-sm font-medium text-[#33969C]">{{ currency_symbol }}0.00</span>
-          </div>
-          <!-- <div class="flex items-center justify-between mt-2 bg-[#CAF1F4]/50 rounded-2xl p-3">
-           <span class="text-sm font-medium text-[#33969C]">Variance</span>
-           <span id="variance" class="text-sm font-medium text-[#33969C]">{{ currency_symbol }}0.00</span>
-          </div> -->
-        </div>
-      </div>
-         <!-- Discrepancy Details Container -->
-         <div class="bg-white rounded-lg p-6 shadow-sm mb-6">
-          <div class="flex items-center gap-3 mb-2">
-            <h3 class="text-sm mb-2 font-semibold text-gray-700">Discrepancy Details</h3>
-          </div>
-       
-          <!-- Alert Message -->
-          <div id="discrepancyAlert" class="bg-red-50 rounded-lg p-4 mb-4" style="display: none;">
-            <div class="flex items-start">
-              <div class="flex-shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6" style="color: #EF4444;">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-                </svg>
-              </div>
-              <input type="hidden" name="discrepancy_amount" id="discrepancyAmount"  />
-              <div class="ml-3 flex-1 min-w-0">
-                <h3 class="text-sm font-medium text-red-800">Cash Shortage: <span id="shortageAmount" class="break-all">{{ currency_symbol }}11.50</span></h3>
-                <p class="text-sm text-gray-600 mt-1">Please review your entries or provide a reason for the discrepancy below.</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Description Input -->
-          <div>
-            <textarea id="discrepancyDescription"  name="discrepancy_reason" class="w-full px-3 py-3 border border-gray-300 rounded-2xl {% if discrepancy_reason_locked %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent resize-none" rows="1" placeholder="{% if has_saved_discrepancy %}Description{% else %}No discrepancy &mdash; description not required{% endif %}" {% if discrepancy_reason_locked %}readonly{% endif %}>{{ (current_draft.discrepancy_reason or '') if current_draft else '' }}</textarea>
-          </div>
-          {% if is_report_edit_mode %}
-          <!-- Submitted report in edit mode: save the discrepancy reason -->
-          <div class="flex justify-end mt-3">
-            <button type="button" id="saveDiscrepancyReasonBtn" onclick="saveDiscrepancyReason()"
-              {% if discrepancy_reason_locked %}disabled{% endif %}
-              class="text-sm font-medium px-4 py-2 rounded-lg transition-colors {% if discrepancy_reason_locked %}bg-gray-100 text-gray-300 cursor-not-allowed{% else %}bg-[#54D3DA] hover:bg-[#54D3DA]/80 text-white{% endif %}">
-              Save changes
-            </button>
-          </div>
-          {% endif %}
-        </div>
-        <!-- Action Buttons -->
-        {% if not current_draft or current_draft.status == 'draft' %}
-          <!-- New Report or Draft Report: Save & Next, Save & Exit -->
-          <button 
-            type="button"
-            class="bg-[#54D3DA] flex font-medium gap-4 hover:bg-[#54D3DA]/80 hover-slide-parent items-center justify-center px-4 py-3 rounded-xl shadow-md text-white transition-colors w-full"
-            onclick="logFormSubmission(event)">
-            <span>Save & Next</span>
-            <svg class="hover-slide" width="14" height="13" viewBox="0 0 14 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10.534 5.66477L6.16282 1.18659L7.31648 -9.53674e-07L13.6377 6.50026L7.31648 13L6.16282 11.8139L10.534 7.33576H0.637695V5.66477H10.534Z" fill="white"/>
-            </svg>
-          </button>
-          <div class="flex justify-center mt-2">
-            <button 
-              type="button"
-              class="flex font-medium hover:text-[#54D3DA]/80 items-center justify-center min-h-[40px] px-4 py-2 text-[#54D3DA] text-sm transition-colors"
-              onclick="saveAndExit()">
-              <span>Save & Exit</span>
-            </button>
-          </div>
-        {% elif not is_report_edit_mode %}
-          <button
-            type="button"
-            class="w-full bg-[#54D3DA] text-white py-3 px-4 rounded-xl font-medium shadow-md flex items-center justify-center gap-2 hover:bg-[#54D3DA]/80 transition-colors hover-scale-parent"
-            onclick="closeReport()">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 hover-scale" style="transition: transform 0.3s ease-in-out;">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-            </svg>
-            <span>Close</span>
-          </button>
-        {% endif %}
-      </form>
-      </div>
-
-       <!-- Loading Overlay -->
-       {% include 'components/loading_overlay.html' %}
-
-       <!-- The sidebar: the menu and My Profile (components/minty_sidebar.html) -->
-       {% include 'components/minty_sidebar.html' %}
-     </div>
-  <!-- Negative Balance Modal -->
-  {% set opening_balance = current_draft.opening_balance or 0 %}
-  {% set cash_addition = current_draft.cash_addition or 0 %}
-  {% set cash_sales = current_draft.cash_sales or 0 %}
-  {% set cash_expenses = current_draft.expenses or 0 %}
-  {% set bank_deposit = current_draft.bank_deposit or 0 %}
-  {% set expected_cash_count_balance = opening_balance + cash_addition + cash_sales - cash_expenses - bank_deposit %}
-  <div id="fixNegativeBalanceModal" class="absolute inset-0 bg-black bg-opacity-50 {% if expected_cash_count_balance < 0 %}flex{% else %}hidden{% endif %} items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
-      <div class="mb-6">
-        <h2 class="text-xl font-bold text-gray-900 mb-2">Fix Negative Balance</h2>
-        <p class="text-sm font-inter text-gray-600 mb-1">Current Balance</p>
-        <p data-fit-balance class="text-3xl font-semibold text-center mb-4 whitespace-nowrap {% if expected_cash_count_balance < 0 %}text-red-600{% else %}text-gray-900{% endif %}">{% if expected_cash_count_balance < 0 %}({{ currency_symbol }}{{ "{:,.2f}".format(-expected_cash_count_balance) }}){% else %}{{ currency_symbol }}{{ "{:,.2f}".format(expected_cash_count_balance) }}{% endif %}</p>
-        <p class="text-sm text-gray-600">Cash balance cannot be negative, let's go back to</p>
-      </div>
-      <div class="space-y-3">
-        <button onclick="navigateToFixStep('opening')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
-          <div class="flex items-center">
-            <span>Opening</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(cash_addition) }})</p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-        <button onclick="navigateToFixStep('sales')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
-          <div class="flex items-center">
-            <span>Sales</span>
-            <p class="ml-2 text-medium font-base text-[#00C896]"> (Cash in: {{ currency_symbol }} {{ "{:,.2f}".format(cash_sales) }})</p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-        <button onclick="navigateToFixStep('expenses')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
-          <div class="flex items-center">
-            <span>Expenses</span>
-            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: {{ currency_symbol }} {{ "{:,.2f}".format(cash_expenses) }})</p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-        <button onclick="navigateToFixStep('deposit')" class="flex w-full items-center justify-between text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl transition-colors text-gray-700 font-base border border-[#CAF1F4] hover-slide-parent">
-          <div class="flex items-center">
-            <span>Deposit</span>
-            <p class="ml-2 text-medium font-base text-[#FF6B6B]"> (Cash out: {{ currency_symbol }} {{ "{:,.2f}".format(bank_deposit) }})</p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-gray-900 hover-slide">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const EXPECTED_CASH_COUNT_BALANCE = {{ expected_cash_count_balance }};
-    // Format number inputs to show .00
-    // formatCurrency / formatWithCommas / formatAllCurrencyFields come from
-    // static/js/currency.js
-
-
-
-
-
-    // Shrink the negative-balance figure to fit on one line when it would
-    // otherwise overflow its popup. Keeps the default (CSS) size when it fits.
-    function fitBalanceText() {
-      document.querySelectorAll('[data-fit-balance]').forEach(function (el) {
-        el.style.fontSize = '';  // reset to the CSS-defined size first
-        const max = el.parentElement ? el.parentElement.clientWidth : el.clientWidth;
-        if (!max) return;
-        let size = parseFloat(window.getComputedStyle(el).fontSize);
-        while (el.scrollWidth > max && size > 12) {
-          size -= 1;
-          el.style.fontSize = size + 'px';
-        }
-      });
-    }
-    window.addEventListener('load', fitBalanceText);
-    window.addEventListener('resize', fitBalanceText);
-
-    // Check if report is submitted (for conditional styling)
-    const isSubmitted = {{ 'true' if current_draft and current_draft.status != 'draft' else 'false' }};
-    // Constrained edit mode for a submitted report (?report_edit=true): the
-    // discrepancy reason becomes editable even though the report is submitted.
-    const isReportEditMode = {{ 'true' if is_report_edit_mode else 'false' }};
-    // The discrepancy reason is editable on drafts, or on submitted reports
-    // opened in edit mode.
-    const canEditDiscrepancy = !isSubmitted || isReportEditMode;
-
-    // The reason box is only usable while the count is actually out. These two
-    // track that: lastHadDiscrepancy spots the moment a discrepancy is resolved
-    // (so a now-meaningless reason can be dropped), and discrepancyStateReady
-    // keeps that clearing from firing during page load -- see
-    // applyDiscrepancyEditability().
-    let lastHadDiscrepancy = null;
-    let discrepancyStateReady = false;
-    const DISCREPANCY_PLACEHOLDER = 'Description';
-    const NO_DISCREPANCY_PLACEHOLDER = 'No discrepancy \u2014 description not required';
-
-    function validatePreDepositBalance() {
-      return EXPECTED_CASH_COUNT_BALANCE >= 0;
-    }
-
-    function showFixNegativeBalanceModal() {
-      const modal = document.getElementById('fixNegativeBalanceModal');
-      if (modal) {
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-        document.body.style.overflow = 'hidden';
-      }
-    }
-
-    function hideFixNegativeBalanceModal() {
-      const modal = document.getElementById('fixNegativeBalanceModal');
-      if (modal) {
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-        document.body.style.overflow = '';
-      }
-    }
-
-    function navigateToFixStep(step) {
-      hideFixNegativeBalanceModal();
-      const loadingOverlay = document.getElementById('loadingOverlay');
-      const loadingText = document.getElementById('loadingText');
-      if (loadingOverlay && loadingText) {
-        loadingText.textContent = 'Redirecting...';
-        loadingOverlay.classList.remove('hidden');
-      }
-      navigateToStep(step);
-    }
-
-    // Function to show continue report message
-    function showContinueReportMessage() {
-      showFlashMessages('This one is still on the way.', 'info');
-    }
-    
-    function showCompleteReportMessage() {
-      showFlashMessages('Finish this report first, then you can move on.', 'error');
-    }
-
-    // Navigation function for stepper
-    // Store initial form values on page load
-    let initialFormValues = {};
-    let formTrackingInitialized = false;
-    
-    // Initialize form tracking on page load (with slight delay to ensure form is fully rendered)
-    function initializeFormTracking() {
-      if (formTrackingInitialized) return;
-      
-      const form = document.getElementById('cash-count-form');
-      if (form) {
-        const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
-        inputs.forEach(input => {
-          if (!input.readOnly && !input.hidden && input.type !== 'hidden') {
-            const inputId = input.name || input.id;
-            if (inputId) {
-              initialFormValues[inputId] = input.value || '';
-            }
-          }
-          // Also track readonly actualCashBalance input for calculator value
-          if (input.readOnly && input.id === 'actualCashBalance') {
-            const inputId = input.id;
-            if (inputId) {
-              initialFormValues[inputId] = input.value || '';
-            }
-          }
-        });
-        formTrackingInitialized = true;
-      }
-    }
-    
-    // Try immediately and also on DOMContentLoaded
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(initializeFormTracking, 100);
-      });
-    } else {
-      setTimeout(initializeFormTracking, 100);
-    }
-
-    // Function to check if form has unsaved changes
-    function hasUnsavedChanges() {
-      const form = document.getElementById('cash-count-form');
-      if (!form) {
-        return false;
-      }
-      
-      // Ensure form tracking is initialized
-      if (!formTrackingInitialized) {
-        initializeFormTracking();
-      }
-      
-      // Check actualCashBalance (readonly input from calculator) first
-      const actualCashBalanceInput = document.getElementById('actualCashBalance');
-      if (actualCashBalanceInput) {
-        const inputId = actualCashBalanceInput.id;
-        const currentValue = actualCashBalanceInput.value.trim().replace(/[^0-9.-]/g, '');
-        const initialValue = (initialFormValues[inputId] || '').trim().replace(/[^0-9.-]/g, '');
-        
-        // Normalize empty values
-        const normalizedCurrent = (currentValue === '' || currentValue === '-') ? '' : currentValue;
-        const normalizedInitial = (initialValue === '' || initialValue === '-') ? '' : initialValue;
-        
-        // Check if value has changed
-        if (normalizedCurrent !== normalizedInitial && normalizedCurrent !== '') {
-          return true;
-        }
-      }
-      
-      const inputs = form.querySelectorAll('input[type="text"], input[type="number"], select, textarea');
-      let hasChanges = false;
-      
-      for (let input of inputs) {
-        if (input.readOnly || input.hidden || input.type === 'hidden') continue;
-        
-        const inputId = input.name || input.id;
-        if (!inputId) continue;
-        
-        const currentValue = input.value.trim().replace(/,/g, '');
-        const initialValue = (initialFormValues[inputId] || '').trim().replace(/,/g, '');
-        
-        // Normalize empty values
-        const normalizedCurrent = (currentValue === '' || currentValue === '-') ? '' : currentValue;
-        const normalizedInitial = (initialValue === '' || initialValue === '-') ? '' : initialValue;
-        
-        // Check if value has changed
-        if (normalizedCurrent !== normalizedInitial) {
-          // If current value is not empty and different from initial, it's a change
-          if (normalizedCurrent !== '') {
-            hasChanges = true;
-            break;
-          }
-        }
-      }
-      
-      return hasChanges;
-    }
-
-    // Function to show unsaved data alert
-    function showUnsavedDataAlert() {
-      showFlashMessages("You have unsaved changes. Please save your changes first.", 'warning');
-    }
-
-    function navigateToStep(step) {
-      // Run the unsaved-changes check for drafts and for submitted reports being
-      // edited (edit mode lets the discrepancy reason change on a submitted report).
-      if (!isSubmitted || isReportEditMode) {
-        // Check if there are unsaved changes
-        const hasChanges = hasUnsavedChanges();
-
-        if (hasChanges) {
-          showUnsavedDataAlert();
-          // Prevent navigation when there are unsaved changes
-          return;
-        }
-      }
-      
-      // Get the current transaction date from the form or URL
-      const transactionDate = '{{ transaction_date.strftime("%Y-%m-%d") if transaction_date else "" }}';
-      const entityId = '{{ org.id }}';
-      
-      {% if current_draft.status == "draft" %}
-       const editParam = {{ 'true' if is_edit_mode else 'false' }} ? '&edit=true' : '';
-       const stepUrls = {
-         'opening': '{{ url_for("report.report_opening", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
-         'sales': '{{ url_for("report.report_sale", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
-         'expenses': '{{ url_for("report.report_expense", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
-         'deposit': '{{ url_for("report.report_deposit", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
-         'cash_count': '{{ url_for("report.report_cash_count", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam,
-         'ending': '{{ url_for("report.report_ending", entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam
-       };
-       {% else %}
-       const editParam = {{ 'true' if is_edit_mode else 'false' }} ? '&edit=true' : '';
-       const reportEditParam = {{ 'true' if is_report_edit_mode else 'false' }} ? '&report_edit=true' : '';
-       const stepUrls = {
-         'opening': '{{ url_for("report.report_opening", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-         'sales': '{{ url_for("report.report_sale", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-         'expenses': '{{ url_for("report.report_expense", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-         'deposit': '{{ url_for("report.report_deposit", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-         'cash_count': '{{ url_for("report.report_cash_count", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam,
-         'ending': '{{ url_for("report.report_ending", id=current_draft.id, entity_id=org.id) }}?' + (transactionDate ? 'transaction_date=' + transactionDate : '') + editParam + reportEditParam
-       };
-       {% endif %}
-      if (stepUrls[step]) {
-        window.location.href = stepUrls[step];
-      }
-    }
-
-    // Function to update cash till balance
-    function updateCashTillBalance() {
-      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
-      
-      // Calculate expected cash total: opening_balance + cash_addition + cash_sales - expenses - deposit
-      const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
-      const cashAddition = {{ current_draft.cash_addition if current_draft and current_draft.cash_addition else 0 }};
-      const cashSales = {{ current_draft.cash_sales if current_draft and current_draft.cash_sales else 0 }};
-      const expenses = {{ current_draft.expenses if current_draft and current_draft.expenses else 0 }};
-      const depositCash = {{ current_draft.bank_deposit if current_draft and current_draft.bank_deposit else 0 }};
-      
-      const expectedCashTotal = openingBalance + cashAddition + cashSales - expenses - depositCash;
-      const cash_till_balance = expectedCashTotal - safeBoxBalance;
-      
-      document.getElementById('cash_till_balance').textContent = `${window.CURRENCY_SYMBOL}${Currency.formatMoney(cash_till_balance)}`;
-    }
-
-    // Calculate totals when inputs change
-    function calculateTotals() {
-      // Helper function to get value from calculator input or hidden input
-      function getValue(calcId, hiddenId) {
-        const calcElement = document.getElementById(calcId);
-        if (calcElement && calcElement.value && calcElement.value.trim() !== '') {
-          return parseFloat(calcElement.value.replace(/,/g, '')) || 0;
-        }
-        // Fallback to hidden input if calculator input is empty or doesn't exist
-        const hiddenElement = document.getElementById(hiddenId);
-        if (hiddenElement) {
-          return parseFloat(hiddenElement.value.replace(/,/g, '')) || 0;
-        }
-        return 0;
-      }
-      
-      // Total every denomination this entity counts. Notes and coins are
-      // handled identically — the entity's cash_info catalog decides which
-      // exist, so there is no fixed list to fall out of sync with.
-      let totalCashCount = 0;
-      (window.DENOMINATION_FIELDS || []).forEach(field => {
-        const value = (window.DENOMINATION_VALUES || {})[field] || 0;
-        const count = getValue(field, 'hidden_' + field);
-        const total = count * value;
-        totalCashCount += total;
-
-        // Update the per-denomination total beside its input
-        const totalElement = document.getElementById(field + 'Total');
-        if (totalElement) {
-          totalElement.value = total.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          });
-        }
-      });
-
-      // Update Cash Count Balance (physical cash count only)
-      const formattedCashCountBalance = totalCashCount.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-      document.getElementById('cash_count_balance').textContent = `${window.CURRENCY_SYMBOL}${formattedCashCountBalance}`;
-
-      // Calculate Expected Cash Count Balance: opening balance + cash addition + cash sales - expense - deposit bank
-      const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
-      const cashAddition = {{ current_draft.cash_addition if current_draft and current_draft.cash_addition else 0 }};
-      const cashSales = {{ current_draft.cash_sales if current_draft and current_draft.cash_sales else 0 }};
-      const expenses = {{ current_draft.expenses if current_draft and current_draft.expenses else 0 }};
-      const depositBank = {{ current_draft.bank_deposit if current_draft and current_draft.bank_deposit else 0 }};
-      console.debug('Cash Count Debug → opening:', {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }}, 'cash_addition:', {{ current_draft.cash_addition if current_draft and current_draft.cash_addition else 0 }}, 'cash_sales:', {{ current_draft.cash_sales if current_draft and current_draft.cash_sales else 0 }}, 'expenses:', {{ current_draft.expenses if current_draft and current_draft.expenses else 0 }}, 'deposit:', {{ current_draft.bank_deposit if current_draft and current_draft.bank_deposit else 0 }});
-      
-      const expectedCashCountBalance = openingBalance + cashAddition + cashSales - expenses - depositBank;
-      const formattedExpectedCashCountBalance = expectedCashCountBalance.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-      const expectedCashCountBalanceEl = document.getElementById('expected_cash_count_balance');
-      if (expectedCashCountBalanceEl) {
-        expectedCashCountBalanceEl.textContent = `${window.CURRENCY_SYMBOL}${formattedExpectedCashCountBalance}`;
-      }
-
-      // Calculate Variance: expected cash count balance - cash count balance
-      const variance = expectedCashCountBalance - totalCashCount;
-      const formattedVariance = variance.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-      const varianceEl = document.getElementById('variance');
-      if (varianceEl) {
-        varianceEl.textContent = `${window.CURRENCY_SYMBOL}${formattedVariance}`;
-      }
-
-      // Calculate Total Cash Count: actualCashBalance + safeBoxBalance
-      const actualCashBalanceInput = document.getElementById('actualCashBalance');
-      const actualCashBalanceValue = actualCashBalanceInput ? parseFloat(actualCashBalanceInput.value.replace(/[^0-9.-]/g, '')) || 0 : 0;
-      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
-      const totalCashCountValue = actualCashBalanceValue + safeBoxBalance;
-      const formattedTotalCashCount = totalCashCountValue.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-      const totalCashCountEl = document.getElementById('totalCashCount');
-      if (totalCashCountEl) {
-        totalCashCountEl.textContent = `${window.CURRENCY_SYMBOL}${formattedTotalCashCount}`;
-      }
-
-      // Calculate discrepancy between counted cash and expected cash total
-      
-      // Reuse the variables already declared above (openingBalance, cashSales, expenses, depositBank)
-      // Calculate discrepancy: expected cash count balance - cash count balance - safe box balance
-      const discrepancy = totalCashCount - expectedCashCountBalance + safeBoxBalance;
-      
-      // Update discrepancy amount in hidden input
-      document.getElementById('discrepancyAmount').value = discrepancy;
-      
-      // Show/hide discrepancy alert and update message
-      if (Math.abs(discrepancy) > 0.01) { // Use small threshold to avoid floating point issues
-        const formattedDiscrepancy = Math.abs(discrepancy).toLocaleString('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        });
-        
-        // Update shortage amount text and styling
-        if (discrepancy < 0) {
-          // Cash Shortage - Red styling
-          document.getElementById('shortageAmount').textContent = `${window.CURRENCY_SYMBOL}${formattedDiscrepancy}`;
-          document.getElementById('discrepancyAmount').value = discrepancy;
-          document.getElementById('shortageAmount').parentElement.innerHTML = `Cash Shortage: <span id="shortageAmount" class="break-all">${window.CURRENCY_SYMBOL}${formattedDiscrepancy}</span>`;
-          document.getElementById('discrepancyAlert').className = 'bg-red-50 rounded-lg p-4 mb-4';
-          document.getElementById('discrepancyAlert').querySelector('h3').className = 'text-sm font-medium text-red-800';
-          document.getElementById('discrepancyAlert').querySelector('p').className = 'text-sm text-gray-600 mt-1';
-          document.getElementById('discrepancyAlert').querySelector('svg').style.color = '#EF4444';
-        } else {
-          // Cash Surplus - Green styling
-          document.getElementById('shortageAmount').textContent = `${window.CURRENCY_SYMBOL}${formattedDiscrepancy}`;
-          document.getElementById('discrepancyAmount').value = discrepancy;
-          document.getElementById('shortageAmount').parentElement.innerHTML = `Cash Surplus: <span id="shortageAmount" class="break-all">${window.CURRENCY_SYMBOL}${formattedDiscrepancy}</span>`;
-          document.getElementById('discrepancyAlert').className = 'bg-green-50 rounded-lg p-4 mb-4';
-          document.getElementById('discrepancyAlert').querySelector('h3').className = 'text-sm font-medium text-green-800';
-          document.getElementById('discrepancyAlert').querySelector('p').className = 'text-sm text-gray-600 mt-1';
-          document.getElementById('discrepancyAlert').querySelector('svg').style.color = '#22C55E';
-        }
-        
-        document.getElementById('discrepancyAlert').style.display = 'block';
-        
-        // Enable description textarea when there is a discrepancy
-        const descriptionTextarea = document.getElementById('discrepancyDescription');
-        applyDiscrepancyEditability(descriptionTextarea, true);
-
-        // Show required asterisk
-        const requiredAsterisk = document.getElementById('descriptionRequired');
-        if (requiredAsterisk) {
-          requiredAsterisk.classList.remove('hidden');
-        }
-      } else {
-        document.getElementById('discrepancyAlert').style.display = 'none';
-
-        // Nothing to explain: lock the description textarea
-        const descriptionTextarea = document.getElementById('discrepancyDescription');
-        applyDiscrepancyEditability(descriptionTextarea, false);
-
-        // Clear error highlighting when there's no discrepancy
-        clearFieldError('discrepancyDescription');
-        
-        // Hide required asterisk
-        const requiredAsterisk = document.getElementById('descriptionRequired');
-        if (requiredAsterisk) {
-          requiredAsterisk.classList.add('hidden');
-        }
-      }
-    }
-
-    //Calculate discrepancy amount
-    function getDiscrepancyAmount() {
-      const totalCashCount = (() => {
-        // Sum all note and coin inputs with their actual values
-        let total = 0;
-        
-        // Multiply each submitted quantity by its denomination value. Reads
-        // the hidden inputs, so this matches what the server totals on POST.
-        (window.DENOMINATION_FIELDS || []).forEach(field => {
-          const value = (window.DENOMINATION_VALUES || {})[field] || 0;
-          const el = document.getElementsByName('actual_cash[' + field + ']')[0];
-          if (el) {
-            const quantity = parseFloat(el.value) || 0;
-            total += quantity * value;
-          }
-        });
-
-        return total;
-      })();
-
-      const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
-      
-      // Calculate expected cash count balance: opening_balance + total_sales - expenses - deposit
-      const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
-      const cashAddition = {{ current_draft.cash_addition if current_draft and current_draft.cash_addition else 0 }};
-      const cashSales = {{ current_draft.cash_sales if current_draft and current_draft.cash_sales else 0 }};
-      const expenses = {{ current_draft.expenses if current_draft and current_draft.expenses else 0 }};
-      const depositBank = {{ current_draft.bank_deposit if current_draft and current_draft.bank_deposit else 0 }};
-      
-      const expectedCashCountBalance = openingBalance + cashAddition + cashSales - expenses - depositBank;
-      
-      // Calculate Discrepancy: expected cash count balance - cash count balance - safe box balance
-      const discrepancy = totalCashCount - expectedCashCountBalance + safeBoxBalance;
-      return discrepancy;
-    }
-
-    // Listen for changes on all note, coin, and safe box inputs to update discrepancy amount
-    function updateDiscrepancyOnInput() {
-      // Add event listeners to every denomination input this entity counts
-      (window.DENOMINATION_FIELDS || []).forEach(field => {
-        const el = document.getElementsByName('actual_cash[' + field + ']')[0];
-        if (el) {
-          el.addEventListener('input', function() {
-            // Recalculate discrepancy and update UI
-            document.getElementById('discrepancyAmount').value = getDiscrepancyAmount();
-            calculateTotals();
-          });
-        }
-      });
-      // Add event listener to safe box balance input
-      const safeBoxInput = document.getElementById('safeBoxBalance');
-      if (safeBoxInput) {
-        safeBoxInput.addEventListener('input', function() {
-          document.getElementById('discrepancyAmount').value = getDiscrepancyAmount();
-          calculateTotals();
-        });
-      }
-    }
-
-    // Apply editable vs. locked styling to the discrepancy reason textarea.
-    // It is usable only when BOTH are true: the report can be edited (draft, or
-    // submitted-in-edit-mode) and there is an actual shortage or surplus to explain.
-    //
-    // Locking uses readOnly, never disabled: a disabled field is dropped from the
-    // POST body, and the server reads discrepancy_reason unconditionally on every
-    // save, so disabling it would silently blank an already-saved reason.
-    function applyDiscrepancyEditability(textarea, hasDiscrepancy) {
-      if (!textarea) return;
-      const unlocked = canEditDiscrepancy && hasDiscrepancy;
-
-      // Drop a reason the user typed for a discrepancy they then resolved, so a
-      // balanced report never carries a stale explanation into the PDF or Xero.
-      // Gated on discrepancyStateReady because calculateTotals() and
-      // getDiscrepancyAmount() read different inputs (the hidden totals vs. the
-      // actual_cash[...] fields) and can briefly disagree while the page loads --
-      // without the gate that flicker would wipe a legitimately saved reason.
-      if (discrepancyStateReady && lastHadDiscrepancy === true && !hasDiscrepancy && canEditDiscrepancy) {
-        textarea.value = '';
-        clearFieldError('discrepancyDescription');
-      }
-      lastHadDiscrepancy = hasDiscrepancy;
-
-      textarea.disabled = false;
-      if (unlocked) {
-        textarea.readOnly = false;
-        textarea.placeholder = DISCREPANCY_PLACEHOLDER;
-        textarea.classList.remove('bg-gray-200', 'text-gray-400', 'text-gray-500', 'cursor-not-allowed');
-        textarea.classList.add('bg-white', 'text-gray-700', 'cursor-pointer');
-      } else {
-        textarea.readOnly = true;
-        // Only say "no discrepancy" when that is the actual reason for the lock;
-        // on a submitted report that is out, the box is locked but the count isn't.
-        textarea.placeholder = hasDiscrepancy ? DISCREPANCY_PLACEHOLDER : NO_DISCREPANCY_PLACEHOLDER;
-        textarea.classList.remove('bg-white', 'text-gray-700', 'text-black', 'cursor-pointer');
-        textarea.classList.add('bg-gray-200', 'text-gray-500', 'cursor-not-allowed');
-      }
-
-      // The submitted-report "Save changes" button is pointless while the box is locked.
-      const saveReasonBtn = document.getElementById('saveDiscrepancyReasonBtn');
-      if (saveReasonBtn) {
-        saveReasonBtn.disabled = !unlocked;
-        if (unlocked) {
-          saveReasonBtn.classList.remove('bg-gray-100', 'text-gray-300', 'cursor-not-allowed');
-          saveReasonBtn.classList.add('bg-[#54D3DA]', 'hover:bg-[#54D3DA]/80', 'text-white');
-        } else {
-          saveReasonBtn.classList.remove('bg-[#54D3DA]', 'hover:bg-[#54D3DA]/80', 'text-white');
-          saveReasonBtn.classList.add('bg-gray-100', 'text-gray-300', 'cursor-not-allowed');
-        }
-      }
-    }
-
-    // Initialize description textarea state based on current discrepancy
-    function initializeDescriptionState() {
-      // Calculate current discrepancy to determine if description should be enabled
-      const discrepancy = getDiscrepancyAmount();
-      const descriptionTextarea = document.getElementById('discrepancyDescription');
-      const requiredAsterisk = document.getElementById('descriptionRequired');
-      
-      if (Math.abs(discrepancy) > 0.01) {
-        // There is a discrepancy, enable the textarea (when editing is allowed)
-        applyDiscrepancyEditability(descriptionTextarea, true);
-
-        // Show required asterisk
-        if (requiredAsterisk) {
-          requiredAsterisk.classList.remove('hidden');
-        }
-      } else {
-        // No discrepancy, so the textarea has nothing to hold: lock it
-        applyDiscrepancyEditability(descriptionTextarea, false);
-
-        // Hide required asterisk
-        if (requiredAsterisk) {
-          requiredAsterisk.classList.add('hidden');
-        }
-      }
-    }
-
-    // Initialize page transition
-    PageTransition.init('.main-content', 'fadeIn', 10);
-
-    // Load saved cash count values on page load
-    function loadSavedCashCountValues() {
-      let totalCashCount = 0;
-
-      // Calculate total from the hidden inputs for every denomination
-      (window.DENOMINATION_FIELDS || []).forEach(field => {
-        const value = (window.DENOMINATION_VALUES || {})[field] || 0;
-        const hiddenInput = document.getElementById('hidden_' + field);
-        if (hiddenInput) {
-          const quantity = parseFloat(hiddenInput.value) || 0;
-          totalCashCount += quantity * value;
-        }
-      });
-      
-      // Update actualCashBalance display if there's a saved total
-      if (totalCashCount > 0) {
-        const actualCashBalanceInput = document.getElementById('actualCashBalance');
-        if (actualCashBalanceInput) {
-          const formattedValue = window.CURRENCY_SYMBOL + totalCashCount.toLocaleString('en-US', { 
-            minimumFractionDigits: 2, 
-            maximumFractionDigits: 2 
-          });
-          actualCashBalanceInput.value = formattedValue;
-        }
-      }
-      
-      // Recalculate totals to update variance and discrepancy
-      calculateTotals();
-      
-      // Update discrepancy amount hidden input
-      const discrepancyAmount = getDiscrepancyAmount();
-      const discrepancyAmountInput = document.getElementById('discrepancyAmount');
-      if (discrepancyAmountInput) {
-        discrepancyAmountInput.value = discrepancyAmount;
-      }
-      
-      // Initialize description textarea state after calculations
-      initializeDescriptionState();
-
-      // Load is done and the discrepancy state is now trustworthy, so from here
-      // on a fall to zero is a real user edit and may clear the stale reason.
-      discrepancyStateReady = true;
-    }
-
-    // Call this function after DOM is loaded
-    document.addEventListener('DOMContentLoaded', function() {
-      // Use setTimeout to ensure all DOM elements and values are fully loaded
-      setTimeout(function() {
-        // Load saved values first (this will also call calculateTotals and initializeDescriptionState)
-        loadSavedCashCountValues();
-        
-        updateDiscrepancyOnInput();
-      }, 100);
-      
-      // Clear error highlighting when user types in discrepancy description
-      const descriptionTextarea = document.getElementById('discrepancyDescription');
-      if (descriptionTextarea) {
-        descriptionTextarea.addEventListener('input', function() {
-          clearFieldError('discrepancyDescription');
-        });
-      }
-    });
-
-    // Add event listeners to all inputs
-    document.addEventListener('DOMContentLoaded', function() {
-      const inputs = document.querySelectorAll('input[type="number"]');
-      inputs.forEach(input => {
-        input.addEventListener('input', calculateTotals);
-        // Clear error highlighting when user inputs a value
-        input.addEventListener('input', function() {
-          clearFieldError(input.id);
-        });
-        
-        // Prevent dots and minus signs only in notes and coins inputs (not safe box)
-        // Safe box (safeBoxBalance) can have decimals for cents
-        if (input.id !== 'safeBoxBalance') {
-          input.addEventListener('keydown', function(e) {
-            // Prevent dot (.), minus (-), 'e', 'E', and '+' characters
-            if (e.key === '.' || e.key === '-' || e.key === 'e' || e.key === 'E' || e.key === '+') {
-              e.preventDefault();
-              return false;
-            }
-          });
-          
-          // Also prevent paste of invalid characters
-          input.addEventListener('paste', function(e) {
-            const paste = (e.clipboardData || window.clipboardData).getData('text');
-            // Check if pasted content contains dots or minus signs
-            if (paste.includes('.') || paste.includes('-')) {
-              e.preventDefault();
-              return false;
-            }
-          });
-        }
-      });
-      const safeBoxInput = document.getElementById('safeBoxBalance');
-      if (safeBoxInput) {
-        safeBoxInput.addEventListener('keydown', function(e) {
-          if (e.key === '-' || e.key === '+') {
-            e.preventDefault();
-            return false;
-          }
-        });
-        safeBoxInput.addEventListener('paste', function(e) {
-          const paste = (e.clipboardData || window.clipboardData).getData('text');
-          if (paste.includes('-') || paste.includes('+')) {
-            e.preventDefault();
-            return false;
-          }
-        });
-      }
-      
-      // Initialize calculations
-      calculateTotals();
-
-      // Smart scroll to center when input is focused
-      function scrollToCenter(element) {
-        const scrollContainer = document.querySelector('.main-content');
-        if (!scrollContainer || !element) return;
-        
-        // Get the element's position relative to the scroll container
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const elementRect = element.getBoundingClientRect();
-        
-        // Calculate element's position relative to the container
-        const elementTopRelativeToContainer = elementRect.top - containerRect.top + scrollContainer.scrollTop;
-        
-        // Calculate the center of the visible area
-        const visibleCenter = scrollContainer.scrollTop + (containerRect.height / 2);
-        
-        // Calculate where the element's center should be
-        const elementCenter = elementTopRelativeToContainer + (elementRect.height / 2);
-        
-        // Calculate how much we need to scroll
-        const scrollOffset = elementCenter - visibleCenter;
-        
-        // Only scroll if the element is not already centered (with a small threshold)
-        if (Math.abs(scrollOffset) > 10) {
-          scrollContainer.scrollTo({
-            top: scrollContainer.scrollTop + scrollOffset,
-            behavior: 'smooth'
-          });
-        }
-      }
-      
-      // Add focus event listeners to all input fields (excluding readonly)
-      const allInputs = document.querySelectorAll('input[type="text"], input[type="number"], input[type="date"], textarea');
-      allInputs.forEach(input => {
-        // Skip readonly inputs
-        if (input.readOnly) return;
-        
-        input.addEventListener('focus', function() {
-          // Small delay to ensure the keyboard has appeared on mobile
-          setTimeout(() => {
-            scrollToCenter(this);
-          }, 300);
-        });
-      });
-    });
-
-
-     // Function to validate safe box balance
-     function validateSafeBoxBalance() {
-       const safeBoxBalanceInput = document.getElementById('safeBoxBalance');
-       const safeBoxBalance = parseFloat(safeBoxBalanceInput.value.replace(/,/g, '')) || 0;
-       
-       // Safe box can be zero or empty - it will automatically default to 0
-       // No validation needed, always return true
-       return true;
-     }
-
-     // Function to validate cash count
-     function validateCashCount() {
-      // Total the counts actually submitted. Reads the hidden inputs (the
-      // calculator writes through to them) and takes each denomination's value
-      // from the catalog rather than parsing it out of an element id, so a
-      // denomination named cash<id> counts the same as note1000.
-       let totalCashCount = 0;
-
-       (window.DENOMINATION_FIELDS || []).forEach(field => {
-         const value = (window.DENOMINATION_VALUES || {})[field] || 0;
-         const input = document.getElementById('hidden_' + field);
-         if (input) {
-           const count = parseFloat(input.value) || 0;
-           totalCashCount += count * value;
-         }
-       });
-
-       // Get safe box balance
-       const safeBoxBalance = parseFloat(document.getElementById('safeBoxBalance').value.replace(/,/g, '')) || 0;
-
-       
-       // Calculate expected cash count balance
-       const openingBalance = {{ current_draft.opening_balance if current_draft and current_draft.opening_balance else 0 }};
-       const cashAddition = {{ current_draft.cash_addition if current_draft and current_draft.cash_addition else 0 }};
-       const cashSales = {{ current_draft.cash_sales if current_draft and current_draft.cash_sales else 0 }};
-       const expenses = {{ current_draft.expenses if current_draft and current_draft.expenses else 0 }};
-       const depositBank = {{ current_draft.bank_deposit if current_draft and current_draft.bank_deposit else 0 }};
-       const expectedCashCountBalance = openingBalance + cashAddition + cashSales - expenses - depositBank;
-       
-       // Calculate discrepancy: totalCashCount - expectedCashCountBalance + safeBoxBalance
-       const discrepancy = totalCashCount - expectedCashCountBalance + safeBoxBalance;
-       
-       // Allow proceeding if expected balance is zero and nothing to count
-       if (Math.abs(expectedCashCountBalance) < 0.01 && totalCashCount === 0 && safeBoxBalance === 0 && Math.abs(discrepancy) < 0.01) {
-         return true;
-       }
-
-       // Allow proceeding if:
-       // 1. Cash count has been entered (totalCashCount > 0 or safeBoxBalance > 0), OR
-       // 2. There's a discrepancy (surplus or shortage) AND description is provided
-       if (totalCashCount > 0 || safeBoxBalance > 0) {
-         return true;
-       }
-       
-       // Check if there's a discrepancy with description
-       if (Math.abs(discrepancy) > 0.01) {
-         const descriptionTextarea = document.getElementById('discrepancyDescription');
-         const description = descriptionTextarea ? descriptionTextarea.value.trim() : '';
-         if (description && description !== '') {
-           return true;
-         }
-       }
-       
-       return false;
-     }
-
-     // Function to validate discrepancy description
-     function validateDiscrepancyDescription() {
-       // Check if there's a discrepancy
-       const discrepancy = getDiscrepancyAmount();
-       
-       // If there's a discrepancy (Cash Surplus or Cash Shortage), description is required
-       if (Math.abs(discrepancy) > 0.01) {
-         const descriptionTextarea = document.getElementById('discrepancyDescription');
-         const description = descriptionTextarea.value.trim();
-         
-         if (!description || description === '') {
-           return false;
-         }
-       }
-       
-      // No discrepancy or description is provided, validation passes
-      return true;
-    }
-
-    function highlightFieldError(fieldId) {
-      const field = document.getElementById(fieldId);
-      if (field) {
-        field.classList.add('border-red-500');
-        field.classList.remove('border-gray-300');
-      }
-    }
-
-    // Function to clear field error highlighting
-    function clearFieldError(fieldId) {
-      const field = document.getElementById(fieldId);
-      if (field) {
-        field.classList.remove('border-red-500');
-        field.classList.add('border-gray-300');
-      }
-    }
-
-    // Function to highlight all cash count fields
-    function highlightCashCountFields() {
-      (window.DENOMINATION_FIELDS || []).forEach(field => {
-        highlightFieldError(field);
-      });
-    }
-
-    // Function to clear highlighting from all cash count fields
-    function clearCashCountFields() {
-      (window.DENOMINATION_FIELDS || []).forEach(field => {
-        clearFieldError(field);
-      });
-    }
-
-          // Function to log form submission data
-      async function logFormSubmission(event) {
-        event.preventDefault();
-
-        if (!validatePreDepositBalance()) {
-          showFixNegativeBalanceModal();
-          return false;
-        }
-        
-        // Validate discrepancy description first if there's a discrepancy
-        // This allows proceeding without cash count if discrepancy with description exists
-        if (!validateDiscrepancyDescription()) {
-          if (window.sendLogToDataDog) {
-            window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Please enter description' });
-          }
-          showFlashMessages('Please enter description', 'error');
-          highlightFieldError('discrepancyDescription');
-          return false;
-        }
-        
-        // Validate cash count - allows proceeding if discrepancy with description exists
-        if (!validateCashCount()) {
-          if (window.sendLogToDataDog) {
-            window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Set cash count or provide description' });
-          }
-          showFlashMessages('Set cash count before proceeding or provide description for discrepancy', 'error');
-          highlightCashCountFields();
-          return false;
-        }
-        clearCashCountFields();
-        
-        // Validate safe box balance
-        if (!validateSafeBoxBalance()) {
-          if (window.sendLogToDataDog) {
-            window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Please enter Safebox Cash Balance' });
-          }
-          showFlashMessages('Please enter Safebox Cash Balance', 'error');
-          return false;
-        }
-        
-        console.log("=== FORM SUBMISSION DATA ===");
-        
-        const form = document.getElementById('cash-count-form');
-        const formData = new FormData(form);
-        
-        // Log all form data
-        for (let [key, value] of formData.entries()) {
-          console.log(`${key}: ${value}`);
-        }
-        
-        console.log("================================");
-        
-        // Get the submit button and show loading state
-        const submitButton = event.target;
-        const originalButtonText = submitButton.innerHTML;
-        
-        // Store original button state for potential reset
-        window.originalCashCountButtonState = {
-          disabled: submitButton.disabled,
-          innerHTML: originalButtonText
-        };
-        
-        // Show loading overlay
-        const loadingOverlay = document.getElementById('loadingOverlay');
-        loadingOverlay.classList.remove('hidden');
-        
-        // Disable button
-        submitButton.disabled = true;
-        
-        // Set up timeout handling (15 seconds for cash count)
-        window.cashCountTimeout = setTimeout(() => {
-          handleCashCountTimeout(submitButton, loadingOverlay);
-        }, 15000);
-        
-        try {
-          // Submit the form
-          form.submit();
-        } catch (error) {
-          console.error('Error submitting form:', error);
-          if (window.sendLogToDataDog) {
-            window.sendLogToDataDog('error', 'Cash count form submit failed', { message: error && error.message });
-          }
-          resetCashCountLoadingState(submitButton, loadingOverlay);
-          showFlashMessages("I couldn't save that. Mind trying again?", 'error');
-        }
-      }
-      
-      // Function to handle cash count timeout
-      function handleCashCountTimeout(submitButton, loadingOverlay) {
-        // Show timeout message
-        const loadingText = loadingOverlay.querySelector('span');
-        if (loadingText) {
-          loadingText.textContent = 'Saving is taking longer than expected...';
-        }
-        
-        // Add retry and cancel buttons
-        const buttonContainer = document.createElement('div');
-        buttonContainer.className = 'flex justify-center space-x-2 mt-3';
-        
-        const retryButton = document.createElement('button');
-        retryButton.className = 'px-4 py-2 bg-[#54D3DA] text-white rounded-lg hover:bg-[#54D3DA]/80 transition-colors';
-        retryButton.textContent = 'Retry';
-        retryButton.onclick = function() {
-          resetCashCountLoadingState(submitButton, loadingOverlay);
-          // Trigger form submission again
-          const form = document.getElementById('cash-count-form');
-          if (form) {
-            form.submit();
-          }
-        };
-        
-        const cancelButton = document.createElement('button');
-        cancelButton.className = 'px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors';
-        cancelButton.textContent = 'Cancel';
-        cancelButton.onclick = function() {
-          resetCashCountLoadingState(submitButton, loadingOverlay);
-        };
-        
-        buttonContainer.appendChild(retryButton);
-        buttonContainer.appendChild(cancelButton);
-        
-        // Add buttons to loading overlay
-        const loadingContent = loadingOverlay.querySelector('.bg-white');
-        if (loadingContent && !loadingContent.querySelector('button')) {
-          loadingContent.appendChild(buttonContainer);
-        }
-      }
-      
-      // Function to reset cash count loading state
-      function resetCashCountLoadingState(submitButton, loadingOverlay) {
-        // Clear timeout
-        if (window.cashCountTimeout) {
-          clearTimeout(window.cashCountTimeout);
-        }
-        
-        // Reset button state
-        if (submitButton && window.originalCashCountButtonState) {
-          submitButton.disabled = window.originalCashCountButtonState.disabled;
-          submitButton.innerHTML = window.originalCashCountButtonState.innerHTML;
-        }
-        
-        // Hide loading overlay
-        loadingOverlay.classList.add('hidden');
-        
-        // Remove any added buttons
-        const buttonContainer = loadingOverlay.querySelector('.flex.justify-center.space-x-2');
-        if (buttonContainer) {
-          buttonContainer.remove();
-        }
-      }
-
-        // Function to handle Save & Exit
-      async function saveAndExit() {
-        if (!validatePreDepositBalance()) {
-          showFixNegativeBalanceModal();
-          return false;
-        }
-
-        // Save & Exit: allow saving draft even with a discrepancy (no description required).
-        // Only validate safe box balance so we have a value to save.
-        if (!validateSafeBoxBalance()) {
-          if (window.sendLogToDataDog) {
-            window.sendLogToDataDog('warn', 'Cash count validation failed', { message: 'Please enter Safebox Cash Balance', context: 'save_exit' });
-          }
-          showFlashMessages('Please enter Safebox Cash Balance', 'error');
-          return false;
-        }
-        
-        // Set the action type to save_exit
-        const actionTypeField = document.querySelector('input[name="action_type"]');
-        if (actionTypeField) {
-          actionTypeField.value = "save_exit";
-        }
-        
-        // Log the action
-        console.log("=== SAVE & EXIT ACTION ===");
-        console.log("Action Type:", actionTypeField ? actionTypeField.value : "Not found");
-        
-        // Get the Save & Exit button and show loading state
-        const saveExitButton = document.querySelector('button[onclick="saveAndExit()"]');
-        const originalButtonText = saveExitButton.innerHTML;
-        
-        // Show loading overlay
-        const loadingOverlay = document.getElementById('loadingOverlay');
-        loadingOverlay.classList.remove('hidden');
-        
-        // Disable button
-        saveExitButton.disabled = true;
-        
-        try {
-          // Submit the form with page transition
-          const form = document.querySelector('form');
-          if (form) {
-            // Add fade out transition before form submission
-            PageTransition.fadeOut(document.querySelector('.main-content'), 0, () => {
-              form.submit();
-            });
-          }
-        } catch (error) {
-          console.error('Error submitting form:', error);
-          if (window.sendLogToDataDog) {
-            window.sendLogToDataDog('error', 'Cash count form submit failed', { context: 'save_exit', message: error && error.message });
-          }
-          // Reset button state and hide loading overlay
-          saveExitButton.disabled = false;
-          saveExitButton.innerHTML = originalButtonText;
-          loadingOverlay.classList.add('hidden');
-          showFlashMessages("I couldn't save that. Mind trying again?", 'error');
-        }
-      }
-
-      // Function to go back (for old reports)
-      function goBack() {
-        // Navigate to deposit page
-        const entityId = '{{ org.id }}';
-        // Get the report ID from the current URL or use the current_draft.id
-        const reportId = '{{ current_draft.id if current_draft else request.args.get('id') }}';
-        const url = `{{ url_for('entity.report_dashboard', id=org.id) }}/reports/${reportId}/deposit`;
-        window.location.href = url;
-      }
-
-      // Function to go to next (for old reports)
-      function goToNext() {
-        // Navigate to ending page
-        const entityId = '{{ org.id }}';
-        // Get the report ID from the current URL or use the current_draft.id
-        const reportId = '{{ current_draft.id if current_draft else request.args.get('id') }}';
-        const url = `{{ url_for('entity.report_dashboard', id=org.id) }}/reports/${reportId}/ending`;
-        window.location.href = url;
-      }
-
-      // Function to close report (for old reports)
-      function closeReport() {
-        // Navigate back to entity dashboard
-        const entityId = '{{ org.id }}';
-        window.location.href = `{{ url_for('entity.report_dashboard', id=org.id) }}`;
-      }
-
-      // Save only the free-text discrepancy reason for a submitted report
-      // (constrained edit mode). The discrepancy amount/type stay locked.
-      function saveDiscrepancyReason() {
-        const textarea = document.getElementById('discrepancyDescription');
-        const reportId = '{{ current_draft.id }}';
-        if (!textarea || !reportId) {
-          showFlashMessages('Unable to save discrepancy reason.', 'error');
-          return;
-        }
-        const csrfToken = document.querySelector('input[name="csrf_token"]');
-        const formData = new FormData();
-        formData.append('discrepancy_reason', textarea.value || '');
-        if (csrfToken) formData.append('csrf_token', csrfToken.value);
-        fetch('/report/' + reportId + '/edit/discrepancy-reason', {
-          method: 'POST',
-          headers: csrfToken ? { 'X-CSRFToken': csrfToken.value } : {},
-          body: formData,
-          credentials: 'include'
-        })
-        .then(r => r.json())
-        .then(data => {
-          if (data && data.status === 'success') {
-            // Reset the baseline so navigating away no longer flags this as unsaved.
-            initialFormValues[textarea.name || textarea.id] = textarea.value || '';
-            showFlashMessages('Your discrepancy reason is saved.', 'success');
-          } else {
-            showFlashMessages((data && data.message) || 'Failed to save discrepancy reason.', 'error');
-          }
-        })
-        .catch(() => showFlashMessages('Failed to save discrepancy reason.', 'error'));
-      }
-
-      // Show flash notification on page load if it exists
-      document.addEventListener('DOMContentLoaded', function() {
-        {# server flashes handled by canonical flash_messages partial #}
-      });
-  </script>
-
-  <!-- Calculator Modal -->
-  <div id="calculatorModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-      <div class="p-6">
-        <!-- Modal Header -->
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-bold text-gray-700">Use Calculator</h2>
-          <button type="button" id="closeCalculatorModal" class="text-gray-500 hover:text-gray-700 focus:outline-none">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <!-- One row per denomination the entity counts. Replaces nine
-             hardcoded blocks, so the HK$200 note (and anything added to
-             cash_info later) appears without a markup change. -->
+      <div class="pc-count">
         {% for row in denomination_rows %}
-        <div class="flex items-center gap-3 mb-4">
-          <label class="text-base font-medium text-gray-500 whitespace-nowrap w-16">{{ currency_symbol }}{{ row.value | int }}</label>
-          <div class="relative flex-1">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 font-normal text-sm">X</div>
-            <input type="number" inputmode="numeric" placeholder="0" min="0" step="1"
-                   id="{{ row.field }}" data-denomination="{{ row.value }}"
-                   value="{{ row.count if row.count else '' }}"
-                   {% if current_draft and current_draft.status != 'draft' %}readonly{% endif %}
-                   class="w-full pl-10 pr-3 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-200 text-gray-500 cursor-not-allowed{% else %}bg-white text-black cursor-pointer{% endif %} border border-gray-300 rounded-2xl text-right focus:outline-none focus:ring-2 focus:ring-[#54D3DA] focus:border-transparent"
-                   onchange="calculateTotals()">
+        <div class="pc-count__row">
+          <label class="pc-count__face pc-num" for="{{ row.field }}" translate="no">{{ face(row.value) }}</label>
+          <div class="pc-field">
+            <input type="text" inputmode="numeric" class="pc-input pc-input--amount" id="{{ row.field }}" name="actual_cash[{{ row.field }}]"
+                   value="{{ row.count if row.count else '' }}" placeholder="0" autocomplete="off" data-denomination="{{ row.value }}"
+                   aria-describedby="{{ row.field }}-note"{% if locked %} readonly{% endif %}>
+            <p class="pc-note" id="{{ row.field }}-note" data-pc-helper="" hidden></p>
           </div>
-          <div class="relative w-24 sm:w-32">
-            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#6B7280]/60 font-medium">{{ currency_symbol }}</div>
-            <input type="text" id="{{ row.field }}Total" readonly
-                   class="w-full pl-6 pr-3 py-3 bg-[#D1D5DB]/20 rounded-2xl text-right text-gray-700 focus:outline-none">
-          </div>
+          <span class="pc-count__total pc-num" id="{{ row.field }}Total" translate="no" aria-hidden="true">{{ 0|money(code) }}</span>
         </div>
         {% endfor %}
+      </div>
+      <dl class="pc-dl pc-dl--amounts pc-dl--sunk" aria-live="polite">
+        <div class="pc-dl__total"><dt>Counted in the drawer</dt><dd class="pc-num" translate="no" id="cash_count_balance">{{ 0|money(code) }}</dd></div>
+      </dl>
+    </section>
 
-        <!-- Total Cash Till Balance Display -->
-        <div class="flex items-center justify-between rounded-2xl mb-4">
-          <span class="text-sm font-medium text-gray-700">Total Cash Till Balance</span>
-          <span id="cash_count_balance" class="text-sm font-medium text-gray-700">{{ currency_symbol }}0.00</span>
-        </div>
+    {# ---- 3. the safe box ---- #}
+    <section aria-labelledby="safe-title">
+      <h2 class="sr-only" id="safe-title">Safe box</h2>
+      {% call ui.field('safeBoxBalance', 'Cash in the safe box', note='Leave it empty when the safe box is empty.') %}
+        {{ ui.amount_input('safeBoxBalance', 'safe_box_balance', value=(d.safe_box_balance if d and d.safe_box_balance is not none and d.safe_box_balance != 0 else ''), code=code, readonly=locked,
+             extra='placeholder="0.00" data-pc-empty-zero data-pc-amount="Enter the amount in numbers, with up to 2 decimals."') }}
+      {% endcall %}
+    </section>
 
-        <!-- Save Button -->
-        <div class="flex justify-center">
-          <button type="button" id="applyCalculatorTotal" {% if current_draft and current_draft.status != 'draft' %}disabled{% endif %} class="w-full px-4 py-3 {% if current_draft and current_draft.status != 'draft' %}bg-gray-100 text-gray-300 cursor-not-allowed{% else %}bg-[#54D3DA] text-white hover:bg-[#54D3DA]/80{% endif %} rounded-xl focus:outline-none focus:ring-2 focus:ring-[#54D3DA]">
-            Save
-          </button>
+    {# ---- 4. the Check block ---- #}
+    <section class="pc-stack--16" style="display: flex; flex-direction: column" aria-labelledby="check-title">
+      <h2 class="pc-t-title-m" id="check-title">Check</h2>
+      <dl class="pc-dl pc-dl--amounts" aria-live="polite">
+        <div><dt>Expected in drawer</dt><dd class="pc-num" translate="no" id="expected_cash_count_balance">{{ (before_deposit - deposit)|money(code) }}</dd></div>
+        <div><dt>Counted</dt><dd class="pc-num" translate="no" id="totalCashCount">{{ 0|money(code) }}</dd></div>
+        <div class="pc-dl__total"><dt>Difference</dt><dd translate="no" id="variance">None</dd></div>
+      </dl>
+      <div class="pc-alert pc-alert--warning" id="discrepancyAlert" role="status" hidden>
+        <span class="pc-icon" aria-hidden="true">warning</span>
+        <div class="pc-alert__body">
+          <p class="pc-alert__title" id="discrepancyTitle"></p>
+          <p class="pc-alert__text">Add a reason so the reviewer knows what happened.</p>
         </div>
       </div>
-    </div>
+
+      <div class="pc-field" id="reasonField" {% if not reason_needed %}hidden{% endif %}>
+        <label class="pc-label" for="discrepancyDescription">Reason for the difference<span class="pc-req" aria-hidden="true"> *</span><span class="sr-only"> (required)</span></label>
+        <textarea class="pc-textarea" id="discrepancyDescription" name="discrepancy_reason" maxlength="300" aria-required="true"
+                  aria-describedby="discrepancyDescription-note"{% if reason_needed %} aria-invalid="true"{% endif %}
+                  {% if locked and not is_report_edit_mode %} readonly{% endif %}
+                  data-pc-maxlength="300" data-pc-maxlength-msg="The reason can be at most 300 characters. Shorten it to continue.">{{ (d.discrepancy_reason or '') if d else '' }}</textarea>
+        <p class="pc-note{% if reason_needed %} pc-note--error{% endif %}" id="discrepancyDescription-note" data-pc-helper="For example, a float swap or a note given as change by mistake."{% if reason_needed %} role="alert"{% endif %}>{% if reason_needed %}Add a reason for the difference to continue.{% else %}For example, a float swap or a note given as change by mistake.{% endif %}</p>
+        {% if is_report_edit_mode %}
+        <div class="pc-actions" style="margin-top: 8px">
+          <button type="button" class="pc-btn pc-btn--secondary" id="saveDiscrepancyReasonBtn">Save the reason</button>
+        </div>
+        {% endif %}
+      </div>
+    </section>
   </div>
 
-  <script>
-    // Calculator Modal Functions
-    function openCalculatorModal() {
-      const modal = document.getElementById('calculatorModal');
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
-      
-      // Load existing values from hidden form inputs into calculator
-      // Built from the entity's denominations, not a fixed list. Notes and
-      // coins share one list; the loops below treat them identically.
-      const mappings = (window.DENOMINATION_FIELDS || []).map(f => ({
-        hiddenId: 'hidden_' + f, calcId: f
-      }));
+  {{ stage_actions(gate='Add a reason for the difference to continue.') }}
+</form>
+{% endblock %}
 
-      // Load saved values (use empty string for 0 to show placeholder)
-      mappings.forEach(mapping => {
-        const hiddenInput = document.getElementById(mapping.hiddenId);
-        const calcInput = document.getElementById(mapping.calcId);
-        if (hiddenInput && calcInput) {
-          const value = parseFloat(hiddenInput.value) || 0;
-          calcInput.value = value > 0 ? value : '';
-        }
-      });
-      
-      calculateTotals();
-    }
+{% block stage_scripts %}
+<script>
+(function () {
+  "use strict";
+  const CODE = {{ code|tojson }};
+  const form = document.getElementById("cash-count-form");
+  const beforeDeposit = parseFloat(form.dataset.beforeDeposit) || 0;
+  const deposit = document.getElementById("bank_deposit");
+  const safeBox = document.getElementById("safeBoxBalance");
+  const reasonField = document.getElementById("reasonField");
+  const reason = document.getElementById("discrepancyDescription");
+  const next = form.querySelector('[data-pc-save="save_next"]');
+  const nextReason = document.getElementById("nextReason");
+  const rows = Array.from(form.querySelectorAll("input[data-denomination]"));
+  const money = (v) => CODE + " " + Currency.formatMoney(v);
+  const cents = (v) => Math.round(v * 100) / 100;
 
-    function closeCalculatorModal() {
-      const modal = document.getElementById('calculatorModal');
-      modal.classList.add('hidden');
-      modal.classList.remove('flex');
-    }
+  // A count is whole notes or coins.
+  rows.forEach((input) =>
+    PcValidate.rule(input, (value) => (/^\d{0,6}$/.test(value.trim()) ? "" : "Count whole notes or coins, like 3."))
+  );
 
-    function applyCalculatorTotal() {
-      // Don't do anything if report is submitted
-      if (isSubmitted) {
-        return;
-      }
-      
-      const totalDisplay = document.getElementById('cash_count_balance');
-      const actualCashBalanceInput = document.getElementById('actualCashBalance');
-      
-      // Save each denomination's counted quantity to its hidden form input.
-      // Built from the entity's denominations, not a fixed list.
-      const mappings = (window.DENOMINATION_FIELDS || []).map(f => ({
-        hiddenId: 'hidden_' + f, calcId: f
-      }));
-
-      mappings.forEach(mapping => {
-        const hiddenInput = document.getElementById(mapping.hiddenId);
-        const calcInput = document.getElementById(mapping.calcId);
-        if (hiddenInput && calcInput) {
-          const value = parseFloat(calcInput.value) || 0;
-          hiddenInput.value = value;
-
-          // Trigger change event on hidden input to mark form as changed
-          const changeEvent = new Event('change', { bubbles: true });
-          hiddenInput.dispatchEvent(changeEvent);
-        }
-      });
-      
-      if (totalDisplay && actualCashBalanceInput) {
-        const totalText = totalDisplay.textContent.replace('$', '').replace(/,/g, '').trim();
-        const totalValue = parseFloat(totalText) || 0;
-        // Format with commas and dollar sign for display
-        const formattedValue = window.CURRENCY_SYMBOL + totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        actualCashBalanceInput.value = formattedValue;
-        
-        // Trigger input event to mark form as changed
-        const inputEvent = new Event('input', { bubbles: true });
-        actualCashBalanceInput.dispatchEvent(inputEvent);
-        
-        // Also trigger change event
-        const changeEvent = new Event('change', { bubbles: true });
-        actualCashBalanceInput.dispatchEvent(changeEvent);
-      }
-      
-      // Recalculate totals to update variance and discrepancy
-      calculateTotals();
-      
-      closeCalculatorModal();
-    }
-
-    // Event Listeners
-    document.addEventListener('DOMContentLoaded', function() {
-      const calculatorBtn = document.getElementById('calculatorBtn');
-      const closeBtn = document.getElementById('closeCalculatorModal');
-      const applyBtn = document.getElementById('applyCalculatorTotal');
-      const modal = document.getElementById('calculatorModal');
-
-      if (calculatorBtn) {
-        calculatorBtn.addEventListener('click', openCalculatorModal);
-      }
-
-      if (closeBtn) {
-        closeBtn.addEventListener('click', closeCalculatorModal);
-      }
-
-      if (applyBtn) {
-        applyBtn.addEventListener('click', applyCalculatorTotal);
-      }
-
-      // Close modal when clicking outside
-      if (modal) {
-        modal.addEventListener('click', function(e) {
-          if (e.target === modal) {
-            closeCalculatorModal();
-          }
-        });
-      }
+  function calculate() {
+    let counted = 0;
+    rows.forEach((input) => {
+      const quantity = /^\d+$/.test(input.value.trim()) ? parseInt(input.value, 10) : 0;
+      const total = quantity * parseFloat(input.dataset.denomination);
+      counted += total;
+      document.getElementById(input.id + "Total").textContent = money(total);
     });
-  </script>
-</body>
-</html>
+    counted = cents(counted);
+    const expected = cents(beforeDeposit - Currency.parseMoney(deposit.value));
+    const withSafe = cents(counted + Currency.parseMoney(safeBox.value));
+    const difference = cents(withSafe - expected); // the server's rule: count + safe box - expected
+    document.getElementById("cash_count_balance").textContent = money(counted);
+    document.getElementById("expected_cash_count_balance").textContent = money(expected);
+    document.getElementById("totalCashCount").textContent = money(withSafe);
+    document.getElementById("discrepancyAmount").value = difference;
+    const off = Math.abs(difference) > 0.01;
+    const word = difference < 0 ? "short" : "over";
+    document.getElementById("discrepancyType").value = off ? (difference < 0 ? "short" : "over") : "none";
+    document.getElementById("variance").textContent = off ? money(Math.abs(difference)) + " " + word : "None";
+    document.getElementById("discrepancyAlert").hidden = !off;
+    document.getElementById("discrepancyTitle").textContent = off ? "The count is " + money(Math.abs(difference)) + " " + word + "." : "";
+    reasonField.hidden = !off;
+    reason.disabled = !off; // no difference, nothing to explain: not sent
+    gate();
+  }
+
+  // Part 15.15d / 15.2: Save & Next waits for the reason, and says so beside it.
+  function gate() {
+    if (!next || !nextReason) return;
+    const blocked = !reasonField.hidden && reason.value.trim() === "";
+    next.disabled = blocked;
+    nextReason.hidden = !blocked;
+  }
+
+  form.addEventListener("input", calculate);
+  form.addEventListener("focusout", calculate);
+  calculate();
+  {% if reason_needed %}reason.focus();{% endif %}
+
+  {% if is_report_edit_mode %}
+  document.getElementById("saveDiscrepancyReasonBtn").addEventListener("click", async function () {
+    const restore = PcOverlay.busy(this, "Saving…");
+    const body = new FormData();
+    body.append("discrepancy_reason", reason.value || "");
+    body.append("csrf_token", form.elements.csrf_token.value);
+    try {
+      const response = await fetch({{ ('/report/' ~ d.id ~ '/edit/discrepancy-reason')|tojson }}, {
+        method: "POST",
+        headers: { "X-CSRFToken": form.elements.csrf_token.value },
+        body: body,
+        credentials: "include",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.status === "success") {
+        PcClosing.resetChanges();
+        showSuccessToast("The reason is saved.");
+      } else {
+        showErrorToast((data && data.message) || "The reason could not be saved. Try again in a moment.");
+      }
+    } catch (error) {
+      showErrorToast("The reason could not be saved. Check your connection and try again.");
+    } finally {
+      restore();
+    }
+  });
+  {% endif %}
+})();
+</script>
+{% endblock %}

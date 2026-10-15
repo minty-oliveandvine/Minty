@@ -79,9 +79,12 @@ def report_submitted(id=None, entity_id=None):
             403,
         )
 
+    # The outcome page (Part 15.12e) draws its facts from the report row; the company for the shell.
     return render_template(
         "report/submitted.html",
         current_user=current_user,
+        org=Entity.query.filter(Entity.id == str(entity_id)).first() if entity_id else None,
+        report=report,
         id=id,
         entity_id=entity_id,
         is_published_to_xero=is_published_to_xero,

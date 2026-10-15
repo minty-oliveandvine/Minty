@@ -11,7 +11,7 @@
 {% macro combo(input_id, icon_id, list_id, placeholder) -%}
 <div class="pcs-combo">
   <input type="text" id="{{ input_id }}" class="pcs-combo-input" placeholder="{{ placeholder }}" autocomplete="off">
-  <span class="pcs-combo-chevron" aria-hidden="true"><span id="{{ icon_id }}" class="material-symbols-outlined">expand_more</span></span>
+  <span class="pcs-combo-chevron" aria-hidden="true"><span id="{{ icon_id }}" class="material-symbols-rounded">expand_more</span></span>
   <div id="{{ list_id }}" class="pcs-suggest hidden"></div>
 </div>
 {%- endmacro %}

@@ -7,8 +7,8 @@ These tests verify:
    BFCache-related sessionStorage keys, not just expense keys.
 3. The ``get_draft_totals`` API response includes ``expenses_count`` so
    the front-end can detect saved expenses even when dollar total is 0.
-4. The ``bfcache_helpers.js`` pageshow handler registers all expected
-   restore keys.
+4. (``bfcache_helpers.js`` and its restore checks went with the Part 15 redesign: no page
+   writes a snapshot any more, and a restored stage reloads - static/js/pc_closing.js.)
 """
 from __future__ import annotations
 
@@ -42,30 +42,16 @@ def _read(path: Path) -> str:
 # 1. Expense template uses correct API field name
 # ---------------------------------------------------------------------------
 
-class TestExpenseTemplateFieldName:
-    """The pageshow handler in expense.html must check ``total_expenses``
-    (or ``expenses_count``) from the API, never the non-existent ``expenses``."""
+class TestExpenseStageReadsNoDraftTotals:
+    """The old expense page re-read ``/api/get_draft_totals`` on a back navigation and checked the
+    wrong field (``data.expenses``). The redesigned stage draws its list and total from the server
+    on every load and reloads a restored page, so it asks that endpoint nothing."""
 
-    def test_no_bare_data_dot_expenses_check(self):
-        content = _read(TEMPLATES / "report" / "expense.html")
-        bad_pattern = re.compile(r"data\s*\.\s*expenses\s*&&\s*data\s*\.\s*expenses\s*>")
-        matches = bad_pattern.findall(content)
-        assert not matches, (
-            "expense.html still references data.expenses (should be "
-            "data.total_expenses or data.expenses_count)"
-        )
-
-    def test_uses_total_expenses_field(self):
-        content = _read(TEMPLATES / "report" / "expense.html")
-        assert "data.total_expenses" in content, (
-            "expense.html should check data.total_expenses from get_draft_totals API"
-        )
-
-    def test_uses_expenses_count_field(self):
-        content = _read(TEMPLATES / "report" / "expense.html")
-        assert "data.expenses_count" in content, (
-            "expense.html should also check data.expenses_count for robustness"
-        )
+    def test_no_draft_totals_poll(self):
+        for path in (TEMPLATES / "report" / "expense.html", ROOT / "static" / "js" / "pc_expenses.js"):
+            content = _read(path)
+            assert "get_draft_totals" not in content, path.name
+            assert not re.search(r"data\s*\.\s*expenses\s*&&", content), path.name
 
 
 # ---------------------------------------------------------------------------
@@ -172,43 +158,6 @@ class TestGetDraftTotalsAPI:
         assert "total_expenses" in keys, (
             "get_draft_totals must return total_expenses in its JSON response"
         )
-
-
-# ---------------------------------------------------------------------------
-# 4. BFCache helpers register all expected keys for cleanup
-# ---------------------------------------------------------------------------
-
-class TestBFCacheHelpers:
-    """The ``bfcache_helpers.js`` pageshow handler must attempt to restore
-    (and subsequently clean up) all known snapshot keys."""
-
-    EXPECTED_RESTORE_KEYS = {
-        "pending_expenses",
-        "pending_sales",
-        "pending_opening",
-        "pending_deposit",
-        "pending_cash_count",
-        "pending_ending",
-    }
-
-    def test_pageshow_registers_all_restore_keys(self):
-        content = _read(STATIC_JS / "bfcache_helpers.js")
-        found_keys: set[str] = set()
-        for m in re.finditer(r"['\"]([a-z_]+)['\"]", content):
-            candidate = m.group(1)
-            if candidate.startswith("pending_"):
-                found_keys.add(candidate)
-        missing = self.EXPECTED_RESTORE_KEYS - found_keys
-        assert not missing, (
-            f"bfcache_helpers.js does not reference these restore keys: {missing}"
-        )
-
-    def test_cleanup_after_restore(self):
-        """After restoring, BFCache must clear the snapshot from
-        sessionStorage and history.state."""
-        content = _read(STATIC_JS / "bfcache_helpers.js")
-        assert "sessionStorage.removeItem" in content
-        assert "mergeHistoryState" in content
 
 
 # ---------------------------------------------------------------------------

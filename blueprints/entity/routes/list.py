@@ -1,7 +1,6 @@
 # Entity list and report dashboard routes.
 
-
-from datetime import datetime, timezone
+from datetime import datetime
 
 from flask import (current_app, flash, get_flashed_messages, redirect,
                    render_template, request, session, url_for)
@@ -11,19 +10,17 @@ from loguru import logger
 from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import minty_web_module_page_handoff
 from blueprints.entity.services.entity_list import sign_notices
+from blueprints.entity.services.launch import greeting, launch_state
 from blueprints.entity.services.modules import claim_subscription_notice
-from blueprints.entity.services.shared import (check_user_has_entities,
-                                               get_main_bank_account)
-from blueprints.shared.entity_display import build_entity_acronym
-from blueprints.xero.services.integration import get_accounts_from_xero
+from blueprints.entity.services.shared import check_user_has_entities
+from blueprints.report.services.daily_closing import stage_hrefs
 from blueprints.xero.services.settings import (
     check_entity_xero_settings_complete, get_entity_account_settings,
     get_missing_xero_settings_fields)
-from models.db import Entity, Report, User, UserEntity, db, tz
-from services.auth.token_service import (ensure_valid_token,
-                                         get_xero_token_user_for_entity)
+from models.db import Entity, UserEntity, tz
 from services.authz import (permission_denied, require_module)
-from services.permission_policy import Permission, has_permission, is_superuser
+from services.permission_policy import (Permission, has_permission, is_superuser,
+                                        is_superuser_readonly)
 from services.subscription_api import fetch_notice
 
 
@@ -100,207 +97,38 @@ def report_dashboard(id):
             )
         )
 
-    # Deliberately INCLUDES drafts: this drives the "latest report" summary
-    # (transaction_date / closing_balance / latest_deposit), and a draft
-    # genuinely is the most recent report for those purposes. Anything that
-    # means "last SUBMITTED report" must filter status separately — see the
-    # date-sequence guards in opening.py and create.py.
-    latest_report = (
-        Report.query.filter(Report.company == str(id))
-        .order_by(Report.transaction_date.desc())
-        .first()
-    )
+    # The launch page (Part 15.6a): the open draft, the next day and its gate, the latest reports
+    # - decided in blueprints/entity/services/launch.py, not in the browser.
+    launch = launch_state(id)
 
-    if latest_report:
-        org.transaction_date = latest_report.transaction_date
-        org.closing_balance = latest_report.closing_balance
-        org.latest_deposit = latest_report.bank_deposit
-        org.latest_date = latest_report.transaction_date
-        if latest_report.bank_deposit > 0:
-            deposit_bank_account = get_entity_account_settings(str(id), "bank")
-            pettycash_account_for_deposit = get_entity_account_settings(
-                str(id), "pettycash"
+    # "Before You Start" and "Correct deposit" rewrite the latest submitted report's deposit
+    # (POST /api/check-dept-bank-yest), which needs the entity's deposit-bank and petty-cash
+    # mappings when there was a deposit to reverse. Same rule the endpoint enforces (409).
+    deposit_bank = None
+    deposit_missing_settings = []
+    if launch.latest and launch.latest.bank_deposit > 0:
+        deposit_bank = get_entity_account_settings(str(id), "bank")
+        deposit_missing_settings = [
+            label
+            for label, present in (
+                ("Deposit Bank Account", bool(deposit_bank)),
+                ("Petty Cash Account", bool(get_entity_account_settings(str(id), "pettycash"))),
             )
-            if deposit_bank_account:
-                org.latest_deposit_bank_name = deposit_bank_account["name"]
-                org.latest_deposit_bank_number = deposit_bank_account.get(
-                    "bank_account_number", "****"
-                )
-            else:
-                org.latest_deposit_bank_name = "Unknown Bank"
-                org.latest_deposit_bank_number = "****"
-            # Used by the Before You Start modal to block "change" / "no" when
-            # the entity is missing the settings needed to reconcile a deposit
-            # correction (locally or in Xero).
-            org.deposit_correction_missing_settings = [
-                label
-                for label, present in (
-                    ("Deposit Bank Account", bool(deposit_bank_account)),
-                    ("Petty Cash Account", bool(pettycash_account_for_deposit)),
-                )
-                if not present
-            ]
-            org.can_correct_latest_deposit = not org.deposit_correction_missing_settings
-        else:
-            org.latest_deposit_bank_name = "No deposit"
-            org.latest_deposit_bank_number = ""
-            org.deposit_correction_missing_settings = []
-            org.can_correct_latest_deposit = True
-    else:
-        org.transaction_date = None
-        org.closing_balance = 0
-        org.latest_deposit = 0
-        org.latest_date = None
-        org.latest_deposit_bank_name = "No deposit"
-        org.latest_deposit_bank_number = ""
-        org.deposit_correction_missing_settings = []
-        org.can_correct_latest_deposit = True
-
-    # Dashboard "Continue Report" card — read-only. Migrated to `report`; the
-    # draft->report mirror keeps current_section/completed_sections current.
-    current_draft = (
-        Report.query.filter(
-            Report.company == str(id),
-            Report.status == "draft",
-        )
-        .order_by(Report.transaction_date.desc())
-        .first()
+            if not present
+        ]
+    readonly = is_superuser_readonly(current_user, id)
+    can_correct_deposit = (
+        not readonly
+        and launch.state in ("not_started", "done")
+        and launch.latest is not None
+        and launch.latest.bank_deposit > 0
+        and has_permission(current_user, Permission.REPORT_EDIT_ENTITY, id)
     )
-    org.has_existing_draft = current_draft is not None
-    org.draft_id = current_draft.id if current_draft else None
-    org.draft_current_section = current_draft.current_section if current_draft else None
-    # NULL on legacy drafts (6 of 25 in production): the template iterates it
-    org.draft_completed_sections = (
-        (current_draft.completed_sections or []) if current_draft else []
-    )
-    org.draft_progress_completed = (
-        len(current_draft.completed_sections)
-        if current_draft and current_draft.completed_sections
-        else 0
-    )
-    # The calendar uses draft_date as its onboarding FLOOR (the earliest date a
-    # first report may use), so it must be the EARLIEST draft — the onboarding
-    # seed — not the newest. With .desc() above, an entity holding drafts for
-    # both 29 and 30 July got a floor of the 30th, which made the 29th
-    # unclickable even though that was its own opening date.
-    earliest_draft_date = (
-        db.session.query(db.func.min(Report.transaction_date))
-        .filter(Report.company == str(id), Report.status == "draft")
-        .scalar()
-    )
-    org.draft_date = earliest_draft_date or (
-        current_draft.transaction_date if current_draft else None
-    )
-    # "last edited" is updated_at (timestamptz since C4; SQLite hands it back naive)
-    last_edit = current_draft.updated_at or current_draft.created_at if current_draft else None
-    if last_edit is not None and last_edit.tzinfo is None:
-        last_edit = last_edit.replace(tzinfo=timezone.utc)
-    org.draft_last_edit_seconds = (
-        int((datetime.now(timezone.utc) - last_edit).total_seconds()) if last_edit is not None else 0
-    )
-    org.is_new_user = latest_report is None
-
-    latest_report_submitter_first_name = None
-    if latest_report and latest_report.uploaded_by:
-        _lr_user = User.query.filter_by(username=latest_report.uploaded_by).first()
-        if _lr_user and _lr_user.first_name:
-            latest_report_submitter_first_name = _lr_user.first_name.strip()
-
-    # PUBLISHED means submitted. Since Stage 4a `report` also holds
-    # draft-shaped rows (status='draft'), so without this filter the dashboard
-    # counts an in-progress draft as a finished report — published_dates below
-    # drives today_has_report and the "already done" state.
-    published_reports = (
-        Report.query.filter(
-            Report.company == str(id),
-            db.or_(Report.status.is_(None), Report.status != "draft"),
-        )
-        .with_entities(
-            Report.transaction_date,
-            Report.id,
-            Report.closing_balance,
-            Report.bank_deposit,
-            Report.xero_integrated_yes,
-            Report.uploaded_by,
-        )
-        .all()
-    )
-    _uploaders = {r.uploaded_by for r in published_reports if r.uploaded_by}
-    _first_by_username = {}
-    if _uploaders:
-        for _u in User.query.filter(User.username.in_(_uploaders)).all():
-            _first_by_username[_u.username] = (
-                (_u.first_name or "").strip() or None
-            )
-    published_dates = [report.transaction_date.strftime(
-        "%Y-%m-%d") for report in published_reports]
-    published_reports_dict = {
-        report.transaction_date.strftime("%Y-%m-%d"): {
-            "id": report.id,
-            "closing_balance": report.closing_balance,
-            "bank_deposit": report.bank_deposit or 0.0,
-            "xero_integrated_yes": report.xero_integrated_yes,
-            "submitter_first_name": _first_by_username.get(report.uploaded_by),
-        }
-        for report in published_reports
-    }
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_has_report = today in published_dates
-    latest_report_date_str = (latest_report.transaction_date.strftime(
-        "%Y-%m-%d") if latest_report else None)
-    today_is_latest_report = today == latest_report_date_str
-    today_report_id = None
-    if today_has_report:
-        # Unfiltered is safe here: today_has_report is derived from
-        # published_dates, which already excludes drafts, so this only runs
-        # when a SUBMITTED report exists for today.
-        today_report = Report.query.filter(
-            Report.company == str(id),
-            Report.transaction_date == datetime.now().date()).first()
-        if today_report:
-            today_report_id = today_report.id
-
-    try:
-        token_user = get_xero_token_user_for_entity(id)
-        if ensure_valid_token(token_user):
-            bank_accounts = get_accounts_from_xero(
-                token_user.access_token,
-                org.xero_org_id,
-                where='Type="BANK"',
-                order="Code ASC, Name ASC",
-                token_validated=True,
-            )
-        else:
-            bank_accounts = []
-    except Exception as e:
-        logger.error(f"Error fetching bank accounts: {str(e)}")
-        bank_accounts = []
 
     has_complete_xero_settings = check_entity_xero_settings_complete(id)
     missing_settings_fields = []
     if not has_complete_xero_settings:
         missing_settings_fields = get_missing_xero_settings_fields(id)
-    main_bank_account = get_main_bank_account(id)
-    # Includes drafts on purpose: a deposit entered on a draft is a real
-    # deposit for the "has this entity ever deposited" question.
-    has_deposit = (
-        Report.query.filter(Report.company == str(id), Report.bank_deposit > 0)
-        .order_by(Report.transaction_date.desc())
-        .first()
-    )
-    entity_acronym = build_entity_acronym(org.name) if org else ""
-    display_date = None
-    if org and org.created_at:
-        display_date = (
-            org.created_at.date()
-            if isinstance(org.created_at, datetime)
-            else org.created_at
-        )
-
-    # Server-authoritative "today" in Hong Kong time. The calendar's create-time
-    # validation uses this (not the browser clock) so the future-date boundary
-    # matches the users' local midnight regardless of the device timezone.
-    server_today_hk = datetime.now(tz).date().isoformat()
 
     # Money amounts on the dashboard render with the ISO code of the entity's
     # selected currency (entities.currency_id -> currency_info.currency_code).
@@ -336,26 +164,27 @@ def report_dashboard(id):
     )
 
     return render_template(
-        "entity/entity_dashboard_v2.html",
+        "petty_cash/launch.html",
         org=org,
+        launch=launch,
+        greeting=greeting(datetime.now(tz)),
+        # done and current stages open their page (Part 14 Step progress)
+        stage_hrefs=(
+            stage_hrefs(id, launch.work_date)
+            if launch.state == "in_progress"
+            else None
+        ),
+        readonly=readonly,
+        can_correct_deposit=can_correct_deposit,
+        deposit_bank=deposit_bank,
+        deposit_missing_settings=deposit_missing_settings,
         subscription_notice=subscription_notice,
         # minty-web's Module page, through this app's hand-over at the click
         subscription_settings_url=minty_web_module_page_handoff(id),
         currency_symbol=currency_symbol,
-        server_today_hk=server_today_hk,
-        main_bank_account=main_bank_account,
-        bank_accounts=bank_accounts,
-        published_dates=published_dates,
-        published_reports_dict=published_reports_dict,
-        today_has_report=today_has_report,
-        today_report_id=today_report_id,
-        today_is_latest_report=today_is_latest_report,
         has_complete_xero_settings=has_complete_xero_settings,
         missing_settings_fields=missing_settings_fields,
-        has_deposit=has_deposit,
-        entity_acronym=entity_acronym,
-        display_date=display_date,
-        latest_report_submitter_first_name=latest_report_submitter_first_name,
+        xero_connected=request.args.get("success") == "true",
     )
 
 

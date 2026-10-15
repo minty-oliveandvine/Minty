@@ -262,8 +262,12 @@ def test_the_codes_reach_the_page_as_data_not_markup(shop, xero_live, app, db, c
         {"code": "404", "name": "Bank Fees", "selected": False},
     ]
     assert config["canEditCodes"] is True
-    # Save starts off: the page script turns it on once the Xero lists have loaded and something changed
-    assert re.search(r'<button type="submit" id="saveChangesBtn" class="pcs-save-btn" disabled>', html)
+    # one Save per card, each off: the page script turns a card's on once the Xero lists have
+    # loaded and something in that card changed (Part 15.20b)
+    for section in ("country", "mapping", "electronic", "delivery", "codes"):
+        assert re.search(rf'<button type="button" class="pcs-save-btn" data-section-save="{section}" disabled>Save</button>', html), section
+    assert 'id="saveChangesBtn"' not in html
+    assert 'name="section" id="settingsSection" value=""' in html
     # the browser tab names the company, as every app's company pages do
     assert f"<title>Petty Cash Settings - {entity.name}</title>" in html
 
@@ -280,7 +284,9 @@ def test_a_view_only_member_gets_no_working_save(shop, app, db, client):
 
     html = client.get(f"{F.co(client, entity.id)}/settings/petty-cash").get_data(as_text=True)
 
-    assert re.search(r'<button type="button" id="saveChangesBtn" class="pcs-save-btn" disabled data-view-only', html)
+    for section in ("country", "electronic", "delivery"):  # no Xero here, so no mapping or codes card
+        assert re.search(rf'data-section-save="{section}" disabled data-view-only', html), section
+    assert "Only Accountants and Admins can change these." in html
     assert "You have view-only access to these settings." in html
     assert re.search(r'id="ci_country_display"[^>]*disabled', html, re.S)
     assert page_config(html)["canEditCodes"] is False
@@ -350,3 +356,126 @@ def test_a_save_without_xero_leaves_the_ticks_and_the_mapping_alone(shop, app, d
     assert ("success", "Entity settings saved!") in flashes(client)
     assert ticks(app, entity.id) == {"400": True, "404": False}
     assert not mapping_saved(app, entity.id)
+
+
+# ---- one Save per section (Part 15.20b; the user's decision, 2026-10-14) --------------------------
+# Each card posts the whole form with ``section`` naming itself, and only that section is written:
+# country & currency, the Xero mapping, or the account-code ticks (sales methods save through their
+# own JSON API). A post without ``section`` saves everything, as before.
+
+
+def seed_singapore(app, db):
+    from models.db import CurrencyInfo
+
+    with app.app_context():
+        currency = CurrencyInfo.query.first()
+        F.seed_country(db, currency, code="SG")
+
+
+def test_saving_country_and_currency_writes_only_them(shop, xero_live, app, db, client):
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    add_account(app, db, entity.id, "404", "Bank Fees")
+    seed_singapore(app, db)
+    F.login(client, owner)
+
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={
+        "section": "country", "country_code": "SG",
+        "main_bank": "acc-bank", "account_codes[]": ["404"],  # other cards' fields ride along
+    })
+
+    assert resp.status_code == 302
+    assert ("success", "Country and currency saved.") in flashes(client)
+    assert company_country(app, entity.id) == "SG"
+    assert ticks(app, entity.id) == {"400": True, "404": True}
+    assert not mapping_saved(app, entity.id)
+
+
+def test_saving_the_account_codes_writes_only_the_ticks(shop, xero_live, app, db, client):
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    add_account(app, db, entity.id, "404", "Bank Fees")
+    seed_singapore(app, db)
+    F.login(client, owner)
+
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={
+        "section": "codes", "account_codes[]": ["404"], "country_code": "SG", "main_bank": "acc-bank",
+    })
+
+    assert resp.status_code == 302
+    assert ("success", "Account codes saved.") in flashes(client)
+    assert ticks(app, entity.id) == {"400": False, "404": True}
+    assert company_country(app, entity.id) == "HK"
+    assert not mapping_saved(app, entity.id)
+
+
+def test_the_account_codes_section_still_needs_one_code(shop, xero_live, app, db, client):
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    F.login(client, owner)
+
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"section": "codes"})
+
+    assert resp.status_code == 302
+    assert ("danger", "Pick at least one account code.") in flashes(client)
+    assert ticks(app, entity.id) == {"400": True}
+
+
+def test_saving_the_country_never_trips_the_account_code_rule(shop, xero_live, app, db, client):
+    # The rule belongs to the codes card: a country save with no ticks in the post writes the country.
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    seed_singapore(app, db)
+    F.login(client, owner)
+
+    client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"section": "country", "country_code": "SG"})
+
+    assert company_country(app, entity.id) == "SG"
+    assert ticks(app, entity.id) == {"400": True}
+
+
+def test_an_unknown_section_is_refused(shop, app, db, client):
+    owner, entity = shop
+    F.login(client, owner)
+
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={"section": "everything"})
+
+    assert resp.status_code == 400
+
+
+MAPPING = {
+    "main_bank": "acc-pc", "deposit_bank": "acc-dep", "discrepancy_bank": "acc-pc",
+    "cashsale_account": "200", "cashsale_contact": "con-1",
+    "owners_account": "800", "owners_contact": "con-1",
+    "discrepancy_account": "400", "discrepancy_contact": "con-1",
+}
+
+
+def test_saving_the_mapping_writes_only_the_mapping(shop, xero_live, app, db, client):
+    from models.db import AccountInfo, XeroContactSync
+
+    owner, entity = shop
+    add_account(app, db, entity.id, "400", "Advertising")
+    add_account(app, db, entity.id, "404", "Bank Fees")
+    seed_singapore(app, db)
+    with app.app_context():
+        for xero_id, kind, code, name in (("acc-pc", "BANK", "", "Petty Cash"),
+                                          ("acc-dep", "BANK", "", "Business Bank"),
+                                          ("acc-sales", "REVENUE", "200", "Sales"),
+                                          ("acc-owner", "CURRLIAB", "800", "Director Loan")):
+            db.session.add(AccountInfo(entity_id=entity.id, type=kind, name=name, xero_code=code,
+                                       xero_account_id=xero_id, status="ACTIVE"))
+        db.session.add(XeroContactSync(entity_id=entity.id, xero_contact_id="con-1", name="Cash Customer"))
+        db.session.commit()
+    F.login(client, owner)
+
+    resp = client.post(f"{F.co(client, entity.id)}/settings/petty-cash", data={
+        "section": "mapping", **MAPPING, "account_codes[]": ["404"], "country_code": "SG",
+    })
+
+    assert resp.status_code == 302
+    assert "success=true" in resp.headers["Location"]  # the first-ever mapping still opens the dashboard
+    assert mapping_saved(app, entity.id)
+    assert ticks(app, entity.id) == {"400": True, "404": True}
+    assert company_country(app, entity.id) == "HK"
+    assert ("success", "Xero account mapping saved.") in flashes(client)

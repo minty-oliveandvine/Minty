@@ -1,0 +1,642 @@
+/**
+ * The Petty Cash pages' components - Part 14 of the owner's design guidelines
+ * (docs/design/part-14-component-library.md), drawn with the Part 13 tokens in minty_tokens.css.
+ *
+ * Flask's copy of what minty-payment-request-web and @minty/shared v0.3 (src/ui/*) draw with
+ * Tailwind: the same sizes, radii, tones and states, as plain classes. The macros that write the
+ * markup are templates/petty_cash/_ui.html; the page shell is templates/petty_cash/base.html.
+ *
+ * Rules this file keeps (Part 13 §13.19):
+ *   - no raw colour: every colour is a var(--color-*) role (tests/test_petty_cash_ui_foundation.py);
+ *   - buttons and inputs are 44 tall, radius 12, never pills; Primary is action-primary;
+ *   - resting cards are flat (a border, no shadow); nothing gets a hover shadow;
+ *   - text is never under 12px; amounts are tabular and never coloured;
+ *   - mobile first: unprefixed = phone, then min-width 640 / 768 / 1024 / 1280 (CLAUDE.md).
+ */
+
+:root {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Page padding: 16 phone, 24 from 640, 32 from 1024 (Part 15.D). */
+  --pc-gutter: 16px;
+  --pc-appbar-h: 56px;
+}
+@media (min-width: 640px) {
+  :root { --pc-gutter: 24px; --pc-appbar-h: 60px; }
+}
+@media (min-width: 1024px) {
+  :root { --pc-gutter: 32px; }
+}
+
+/* ---------------------------------------------------------------- base */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body.pc {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-surface-page);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-body-m);
+  line-height: var(--text-body-m--line-height);
+  -webkit-font-smoothing: antialiased;
+  overflow-wrap: anywhere;
+}
+/* Resets under :where() - zero specificity, so every component class below wins over them. */
+:where(.pc) :where(h1, h2, h3, p, ul, ol, dl, dd, figure) { margin: 0; }
+:where(.pc) :where(ul, ol) { padding: 0; list-style: none; }
+:where(.pc) img { max-width: 100%; height: auto; }
+:where(.pc) :where(button, input, select, textarea) { font: inherit; color: inherit; }
+:where(.pc) a { color: var(--color-text-link); }
+.pc [hidden], .pc .hidden { display: none !important; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* Keyboard focus, everywhere (Part 14: a 2px ring outside the control). */
+:where(.pc) :focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- type (Part 13 §13.5) */
+
+.pc-t-display-m { font-size: var(--text-display-m); line-height: var(--text-display-m--line-height); letter-spacing: var(--text-display-m--letter-spacing); font-weight: var(--text-display-m--font-weight); }
+.pc-t-title-l { font-size: var(--text-title-l); line-height: var(--text-title-l--line-height); letter-spacing: var(--text-title-l--letter-spacing); font-weight: var(--text-title-l--font-weight); }
+.pc-t-title-m { font-size: var(--text-title-m); line-height: var(--text-title-m--line-height); font-weight: var(--text-title-m--font-weight); }
+.pc-t-body-l { font-size: var(--text-body-l); line-height: var(--text-body-l--line-height); }
+.pc-t-body-m { font-size: var(--text-body-m); line-height: var(--text-body-m--line-height); }
+.pc-t-body-s { font-size: var(--text-body-s); line-height: var(--text-body-s--line-height); }
+.pc-t-label { font-size: var(--text-label); line-height: var(--text-label--line-height); letter-spacing: var(--text-label--letter-spacing); font-weight: var(--text-label--font-weight); }
+.pc-t-caption { font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.pc-strong { font-weight: 600; }
+.pc-c-secondary { color: var(--color-text-secondary); }
+.pc-c-muted { color: var(--color-text-muted); }
+/* Amounts: tabular, primary text, never coloured (V-05). */
+.pc-num { font-variant-numeric: tabular-nums; color: var(--color-text-primary); white-space: nowrap; }
+
+/* ---------------------------------------------------------------- icons */
+
+.pc-icon {
+  font-family: "Material Symbols Rounded";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  display: inline-block;
+  flex: none;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  font-feature-settings: "liga";
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+  width: 1em;
+  overflow: hidden;
+}
+.pc-icon--16 { font-size: 16px; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20; }
+.pc-icon--24 { font-size: 24px; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; }
+.pc-icon--fill { font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 20; }
+
+/* ---------------------------------------------------------------- frame */
+
+/* App bar (Part 14): 56 phone / 60 from 640; back, the Minty mark, the company, profile, menu. */
+.pc-appbar {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--color-surface-card);
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-top: env(safe-area-inset-top);
+}
+.pc-appbar__inner {
+  max-width: 1920px; margin: 0 auto;
+  height: var(--pc-appbar-h);
+  padding: 0 var(--pc-gutter);
+  display: flex; align-items: center; gap: 8px;
+}
+.pc-appbar__back {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-width: 44px; min-height: 44px; margin-left: -10px; padding: 0 6px;
+  border-radius: var(--radius-lg);
+  color: var(--color-text-primary); text-decoration: none;
+}
+.pc-appbar__back:hover { background: var(--color-state-hover); }
+/* A Record page header carries its own back link from 768 (Part 14 Page header), so the App bar's goes. */
+@media (min-width: 768px) { .pc-appbar__back--phone { display: none; } }
+.pc-appbar__back-label { display: none; }
+.pc-appbar__mark { width: 36px; height: 36px; flex: none; }
+.pc-appbar__entity {
+  display: none; align-items: center; gap: 6px; min-width: 0;
+  color: var(--color-text-secondary);
+}
+.pc-appbar__entity-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 7rem; }
+.pc-appbar__end { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.pc-appbar__avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px; border-radius: 9999px; text-decoration: none;
+}
+.pc-appbar__avatar span {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 9999px;
+  background: var(--color-accent-avatar-bg); color: var(--color-accent-avatar-ink);
+  font-size: var(--text-label); font-weight: 600;
+}
+.pc-appbar__menu {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border: 0; border-radius: var(--radius-lg);
+  background: transparent; color: var(--color-text-secondary); cursor: pointer;
+}
+.pc-appbar__menu:hover { background: var(--color-state-hover); }
+@media (min-width: 360px) { .pc-appbar__entity { display: inline-flex; } }
+@media (min-width: 640px) {
+  .pc-appbar__inner { gap: 12px; }
+  .pc-appbar__back-label { display: inline; }
+  .pc-appbar__mark { width: 40px; height: 40px; }
+  .pc-appbar__entity-name { max-width: 12rem; }
+}
+@media (min-width: 1024px) { .pc-appbar__entity-name { max-width: 20rem; } }
+
+.pc-main { padding: 0 var(--pc-gutter) 48px; }
+/* Widths (Part 15.D): lists and dashboards up to 1200, forms and reports a 720 column. */
+.pc-wrap { width: 100%; max-width: 1200px; margin: 0 auto; }
+.pc-wrap--720 { max-width: 720px; }
+.pc-wrap--640 { max-width: 640px; }
+@media (min-width: 1024px) { .pc-wrap--launch { max-width: 1200px; } }
+
+.pc-stack { display: flex; flex-direction: column; gap: 24px; }
+.pc-stack--20 { gap: 20px; }
+.pc-stack--16 { gap: 16px; }
+.pc-stack--12 { gap: 12px; }
+.pc-stack--8 { gap: 8px; }
+.pc-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+
+/* ---------------------------------------------------------------- page header (Part 15.1) */
+
+.pc-page-header {
+  display: flex; flex-direction: column; gap: 16px;
+  padding-top: 24px; padding-bottom: 24px;
+}
+@media (min-width: 1024px) { .pc-page-header { padding-top: 32px; padding-bottom: 32px; } }
+.pc-page-header__top { display: flex; flex-direction: column; gap: 16px; }
+.pc-page-header__title-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 8px; min-width: 0; }
+.pc-page-header__title { overflow-wrap: anywhere; }
+.pc-page-header__purpose { color: var(--color-text-secondary); margin-top: 8px; }
+.pc-page-header__meta { color: var(--color-text-muted); font-size: var(--text-body-s); margin-top: 4px; }
+.pc-page-header__back {
+  display: none; align-items: center; gap: 2px; min-height: 44px; align-self: flex-start;
+  color: var(--color-text-link); font-weight: 500; text-decoration: none;
+}
+.pc-page-header__back:hover { text-decoration: underline; text-underline-offset: 2px; }
+@media (min-width: 768px) { .pc-page-header__back { display: inline-flex; } }
+.pc-page-header__actions { display: flex; flex-direction: column; gap: 8px; }
+.pc-page-header__actions > * { width: 100%; }
+@media (min-width: 768px) {
+  .pc-page-header__actions { flex-direction: row; flex-wrap: wrap; gap: 12px; }
+  .pc-page-header__actions > * { width: auto; }
+}
+@media (min-width: 1024px) {
+  .pc-page-header__top { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 24px; }
+  .pc-page-header__actions { flex-wrap: nowrap; justify-content: flex-end; flex: none; }
+}
+
+/* Workflow header (15.1): back in the App bar, Step progress, the stage title, one sentence. */
+.pc-workflow-header { display: flex; flex-direction: column; gap: 16px; padding: 20px 0 24px; }
+.pc-workflow-header__date { color: var(--color-text-secondary); font-size: var(--text-body-s); }
+
+.pc-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+
+/* ---------------------------------------------------------------- buttons (Part 14 Button) */
+
+.pc-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 16px;
+  border: 1px solid transparent; border-radius: var(--radius-lg);
+  font-size: var(--text-button); line-height: var(--text-button--line-height); font-weight: var(--text-button--font-weight);
+  white-space: nowrap; text-decoration: none; cursor: pointer;
+  transition: background-color 100ms var(--ease-standard), border-color 100ms var(--ease-standard), color 100ms var(--ease-standard);
+  -webkit-tap-highlight-color: transparent;
+}
+.pc-btn:disabled, .pc-btn[aria-disabled="true"] { cursor: not-allowed; }
+.pc-btn--primary { background: var(--color-action-primary); color: var(--color-action-on-primary); }
+.pc-btn--primary:hover { background: var(--color-action-primary-hover); }
+.pc-btn--primary:active { background: var(--color-action-primary-pressed); }
+.pc-btn--primary:disabled, .pc-btn--primary[aria-disabled="true"] { background: var(--color-action-disabled); color: var(--color-text-disabled); }
+.pc-btn--secondary { background: var(--color-surface-card); border-color: var(--color-action-secondary-border); color: var(--color-action-secondary-text); }
+.pc-btn--secondary:hover, .pc-btn--secondary:active { background: var(--color-state-selected); }
+.pc-btn--secondary:disabled { border-color: var(--color-border-default); color: var(--color-text-disabled); background: var(--color-surface-card); }
+.pc-btn--ghost { background: transparent; color: var(--color-text-secondary); }
+.pc-btn--ghost:hover { background: var(--color-state-hover); }
+.pc-btn--ghost:active { background: var(--color-state-selected); }
+.pc-btn--ghost:disabled { color: var(--color-text-disabled); background: transparent; }
+.pc-btn--danger { background: var(--color-action-danger); color: var(--color-action-on-danger); }
+.pc-btn--danger:hover { background: var(--color-action-danger-hover); }
+.pc-btn--danger:disabled { background: var(--color-action-disabled); color: var(--color-text-disabled); }
+.pc-btn--link { padding: 0 4px; background: transparent; color: var(--color-text-link); }
+.pc-btn--link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.pc-btn--link:disabled { color: var(--color-text-disabled); text-decoration: none; }
+.pc-btn--full { width: 100%; }
+/* 32px only for Ghost/Link inside desktop tables (Part 14). */
+.pc-btn--compact { min-height: 32px; padding: 0 12px; }
+.pc-btn--icon { width: 44px; padding: 0; }
+.pc-spinner {
+  width: 16px; height: 16px; flex: none;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 9999px;
+  animation: pc-spin 700ms linear infinite;
+}
+@keyframes pc-spin { to { transform: rotate(360deg); } }
+
+/* Action rows (15.2): phone = stacked, Primary first, full width; from 640 a right-aligned row. */
+.pc-actions { display: flex; flex-direction: column-reverse; gap: 8px; }
+.pc-actions > .pc-btn { width: 100%; }
+@media (min-width: 640px) {
+  .pc-actions { flex-direction: row; justify-content: flex-end; gap: 12px; }
+  .pc-actions > .pc-btn { width: auto; }
+}
+/* A workflow stage's footer: Save & Next, with Save & Exit beneath (15.2), never sticky. */
+.pc-stage-actions {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--color-border-subtle);
+}
+@media (min-width: 640px) { .pc-stage-actions { align-items: flex-end; } .pc-stage-actions .pc-btn--primary { min-width: 220px; } }
+.pc-reason { color: var(--color-text-secondary); font-size: var(--text-body-s); }
+
+/* ---------------------------------------------------------------- fields (Part 14 Input) */
+
+.pc-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pc-label { font-size: var(--text-label); line-height: var(--text-label--line-height); letter-spacing: var(--text-label--letter-spacing); font-weight: var(--text-label--font-weight); color: var(--color-text-secondary); }
+.pc-req { color: var(--color-action-danger); }
+.pc-input, .pc-select, .pc-textarea {
+  display: block; width: 100%; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--color-border-input); border-radius: var(--radius-lg);
+  background: var(--color-surface-card); color: var(--color-text-primary);
+  font-size: var(--text-body-m); line-height: var(--text-body-m--line-height);
+  outline: none;
+}
+.pc-textarea { min-height: 96px; max-height: 240px; padding: 12px; resize: vertical; }
+.pc-select { appearance: auto; }
+.pc-input::placeholder, .pc-textarea::placeholder { color: var(--color-text-muted); }
+.pc-input:focus, .pc-select:focus, .pc-textarea:focus { border: 2px solid var(--color-border-focus); padding-left: 11px; padding-right: 11px; }
+.pc-textarea:focus { padding-top: 11px; padding-bottom: 11px; }
+.pc-input[aria-invalid="true"], .pc-select[aria-invalid="true"], .pc-textarea[aria-invalid="true"] { border: 2px solid var(--color-action-danger); padding-left: 11px; padding-right: 11px; }
+.pc-input[readonly] { background: var(--color-surface-sunk); }
+.pc-input:disabled, .pc-select:disabled, .pc-textarea:disabled { background: var(--color-surface-sunk); color: var(--color-text-disabled); }
+.pc-input--amount { text-align: right; font-variant-numeric: tabular-nums; }
+/* Amount input: the currency code as a prefix inside the box (Part 14 Amount input). */
+.pc-amount { position: relative; }
+.pc-amount__code {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--color-text-muted); font-size: var(--text-body-s); pointer-events: none;
+}
+.pc-amount .pc-input { padding-left: 52px; }
+.pc-amount .pc-input:focus, .pc-amount .pc-input[aria-invalid="true"] { padding-left: 51px; }
+.pc-note { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-text-muted); }
+.pc-note--error { color: var(--color-status-danger-ink); }
+.pc-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.pc-fieldset > legend { padding: 0; margin-bottom: 8px; }
+.pc-choice { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-border-default); border-radius: var(--radius-lg); cursor: pointer; }
+.pc-choice:has(input:checked) { border-color: var(--color-border-selected); background: var(--color-state-selected); }
+.pc-choice input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--color-border-selected); flex: none; }
+.pc-grid-2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+/* Amount inputs by method: two to a row even on a phone (short labels, 15.15), more as it widens. */
+.pc-grid-amounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+@media (min-width: 640px) { .pc-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Error summary (two or more problems on a refused submit). */
+.pc-error-summary {
+  padding: 12px; border-radius: var(--radius-md);
+  background: var(--color-status-danger-bg); color: var(--color-status-danger-ink);
+}
+.pc-error-summary ul { list-style: disc; padding-left: 20px; margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
+.pc-error-summary a { color: inherit; }
+
+/* ---------------------------------------------------------------- alerts and banners */
+
+.pc-alert {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px; border-radius: var(--radius-md);
+  font-size: var(--text-body-m); line-height: var(--text-body-m--line-height);
+}
+.pc-alert > .pc-icon { margin-top: 1px; }
+.pc-alert__body { min-width: 0; flex: 1; }
+.pc-alert__title { font-weight: 600; }
+.pc-alert__text { margin-top: 2px; }
+.pc-alert__action { margin-top: 8px; }
+.pc-alert__action a, .pc-alert__action button {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0;
+  border: 0; background: none; color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.pc-alert--info { background: var(--color-status-info-bg); color: var(--color-status-info-ink); }
+.pc-alert--success { background: var(--color-status-success-bg); color: var(--color-status-success-ink); }
+.pc-alert--warning { background: var(--color-status-warning-bg); color: var(--color-status-warning-ink); }
+.pc-alert--danger { background: var(--color-status-danger-bg); color: var(--color-status-danger-ink); }
+
+/* ---------------------------------------------------------------- status pill */
+
+.pc-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 24px; padding: 4px 12px; border-radius: 9999px;
+  font-size: var(--text-label); line-height: var(--text-label--line-height); letter-spacing: var(--text-label--letter-spacing); font-weight: var(--text-label--font-weight);
+  white-space: nowrap;
+}
+.pc-pill--success { background: var(--color-status-success-bg); color: var(--color-status-success-ink); }
+.pc-pill--warning { background: var(--color-status-warning-bg); color: var(--color-status-warning-ink); }
+.pc-pill--danger { background: var(--color-status-danger-bg); color: var(--color-status-danger-ink); }
+.pc-pill--info { background: var(--color-status-info-bg); color: var(--color-status-info-ink); }
+.pc-pill--neutral { background: var(--color-status-neutral-bg); color: var(--color-status-neutral-ink); }
+
+/* ---------------------------------------------------------------- cards and sections */
+
+.pc-card {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 16px;
+}
+@media (min-width: 640px) { .pc-card { padding: 24px; } }
+.pc-card--sunk { background: var(--color-surface-sunk); border-color: transparent; }
+
+/* Saving status (Part 14): "Saved 6:02 pm". */
+.pc-saving { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: var(--text-body-s); }
+
+/* Collapsible breakdown sections (15.7). */
+.pc-details { border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); background: var(--color-surface-card); }
+.pc-details > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 52px; padding: 0 16px; cursor: pointer; list-style: none;
+  font-size: var(--text-title-m); font-weight: var(--text-title-m--font-weight);
+}
+.pc-details > summary::-webkit-details-marker { display: none; }
+.pc-details > summary .pc-icon { transition: transform 200ms var(--ease-standard); }
+.pc-details[open] > summary .pc-icon { transform: rotate(180deg); }
+.pc-details__body { padding: 0 16px 16px; }
+
+/* ---------------------------------------------------------------- step progress (Part 14) */
+
+.pc-steps { display: grid; grid-template-columns: repeat(var(--pc-steps, 5), minmax(0, 1fr)); gap: 4px; }
+@media (min-width: 640px) { .pc-steps { gap: 8px; } }
+.pc-steps li { min-width: 0; }
+.pc-step { display: block; min-height: 44px; border-radius: var(--radius-md); color: inherit; text-decoration: none; }
+a.pc-step:hover { background: var(--color-state-hover); }
+.pc-step__bar {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 28px; border-radius: var(--radius-md);
+}
+.pc-step__label { display: block; margin-top: 4px; text-align: center; font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.pc-step--done .pc-step__bar { background: var(--color-state-selected); color: var(--color-text-link); }
+.pc-step--current .pc-step__bar { background: var(--color-brand-primary); color: var(--color-text-primary); }
+.pc-step--current .pc-step__label { font-weight: 600; color: var(--color-text-primary); }
+.pc-step--upcoming .pc-step__bar { background: var(--color-surface-sunk); border: 1px solid var(--color-border-default); color: var(--color-text-muted); }
+.pc-step__num { font-size: var(--text-label); font-weight: 600; }
+
+/* ---------------------------------------------------------------- record rows (Part 14) */
+
+.pc-rows { display: flex; flex-direction: column; gap: 8px; }
+.pc-row {
+  position: relative;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
+  background: var(--color-surface-card);
+}
+.pc-row:hover { background: var(--color-state-hover); }
+.pc-row:focus-within { border-color: var(--color-border-selected); }
+.pc-row__main { min-width: 0; flex: 1; }
+.pc-row__link { color: var(--color-text-primary); text-decoration: none; font-size: var(--text-title-m); font-weight: 600; }
+/* The whole row opens the record: the link is stretched over it; controls sit above. */
+.pc-row__link::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius-lg); }
+.pc-row__link:focus-visible { outline: none; }
+.pc-row__link:focus-visible::after { outline: 2px solid var(--color-border-focus); outline-offset: 2px; }
+.pc-row__meta { margin-top: 2px; color: var(--color-text-secondary); font-size: var(--text-body-s); }
+.pc-row__amount { font-size: var(--text-title-m); font-weight: 600; }
+.pc-row__amount-note { display: block; color: var(--color-text-muted); font-size: var(--text-caption); font-weight: 400; }
+.pc-row__end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pc-row__end .pc-btn, .pc-row__end a, .pc-row__end button { position: relative; z-index: 1; }
+@media (min-width: 1024px) {
+  .pc-row { flex-direction: row; align-items: center; gap: 16px; }
+  .pc-row__amount { width: 160px; text-align: right; flex: none; }
+  .pc-row__end { width: 360px; justify-content: flex-end; flex: none; }
+  .pc-rows--compact .pc-row__end { width: auto; }
+}
+/* A narrow column (the launch page's recent list) keeps the stacked layout. */
+.pc-rows--stacked .pc-row { flex-direction: column; align-items: stretch; gap: 8px; }
+.pc-rows--stacked .pc-row__amount { width: auto; text-align: left; }
+.pc-rows--stacked .pc-row__end { width: auto; justify-content: flex-start; }
+.pc-row--split { flex-direction: row; align-items: center; justify-content: space-between; }
+
+/* ---------------------------------------------------------------- filter chips + pagination */
+
+.pc-chips { display: flex; gap: 8px; overflow-x: auto; padding: 6px 0; margin: -6px 0; }
+@media (min-width: 640px) { .pc-chips { flex-wrap: wrap; overflow: visible; } }
+.pc-chip {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none;
+  height: 32px; padding: 0 12px; border: 1px solid var(--color-border-default); border-radius: 9999px;
+  background: var(--color-surface-card); color: var(--color-text-secondary);
+  font-size: var(--text-body-s); font-weight: 500; text-decoration: none; cursor: pointer;
+}
+.pc-chip:hover { background: var(--color-state-hover); }
+.pc-chip[aria-pressed="true"], .pc-chip[aria-current="true"] { border-color: var(--color-border-selected); background: var(--color-state-selected); color: var(--color-text-link); }
+@media (pointer: coarse) { .pc-chip::before { content: ""; position: absolute; inset: -6px 0; } }
+
+.pc-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.pc-pagination__pages { display: flex; align-items: center; gap: 4px; }
+.pc-page {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 36px; height: 36px; padding: 0 8px;
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+  background: var(--color-surface-card); color: var(--color-text-primary);
+  font-size: var(--text-body-s); font-weight: 500; text-decoration: none;
+}
+.pc-page:hover { background: var(--color-state-hover); }
+.pc-page[aria-current="page"] { border-color: var(--color-border-selected); background: var(--color-state-selected); color: var(--color-text-link); font-weight: 600; }
+.pc-page[aria-disabled="true"] { color: var(--color-text-disabled); pointer-events: none; }
+.pc-page--num { display: none; }
+@media (min-width: 640px) { .pc-page--num { display: inline-flex; } }
+@media (pointer: coarse) { .pc-page { min-width: 44px; height: 44px; } }
+
+/* ---------------------------------------------------------------- skeleton, empty, outcome */
+
+.pc-skeleton { display: block; border-radius: var(--radius-md); background: var(--color-surface-sunk); animation: pc-pulse 1.5s ease-in-out infinite; }
+@keyframes pc-pulse { 50% { opacity: 0.5; } }
+
+.pc-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 400px; margin: 0 auto; padding: 48px 16px; text-align: center; }
+.pc-empty img { width: 120px; height: auto; }
+.pc-empty p { color: var(--color-text-secondary); }
+
+.pc-outcome { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 440px; margin: 0 auto; padding: 32px 0; text-align: center; }
+.pc-outcome img { width: 120px; height: auto; }
+.pc-outcome__facts { width: 100%; text-align: left; }
+.pc-outcome .pc-actions { width: 100%; }
+@media (min-width: 640px) { .pc-outcome .pc-actions { justify-content: center; } }
+
+/* ---------------------------------------------------------------- KPI + description rows */
+
+.pc-kpis { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 768px) { .pc-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.pc-kpi { padding: 16px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); background: var(--color-surface-card); }
+.pc-kpi__label { color: var(--color-text-secondary); font-size: var(--text-body-s); }
+/* amount/kpi: 32 Bold tabular on a full-width card; 24 where three share the 720 column. */
+.pc-kpi__value { margin-top: 4px; font-size: var(--text-display-l); line-height: var(--text-display-l--line-height); font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (min-width: 768px) { .pc-kpi__value { font-size: var(--text-display-m); line-height: var(--text-display-m--line-height); } }
+.pc-kpi__meta { margin-top: 4px; color: var(--color-text-muted); font-size: var(--text-caption); }
+
+.pc-dl { border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); background: var(--color-surface-card); padding: 0 16px; }
+.pc-dl > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 0; border-bottom: 1px solid var(--color-border-subtle); }
+.pc-dl > div:last-child { border-bottom: 0; }
+.pc-dl dt { color: var(--color-text-secondary); font-size: var(--text-body-s); }
+.pc-dl dd { color: var(--color-text-primary); }
+.pc-dl dd.pc-dl__empty { color: var(--color-text-muted); }
+@media (min-width: 640px) {
+  .pc-dl > div { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: baseline; }
+}
+/* Amount summaries keep the term and the amount on one line at every width; the amount right-aligned. */
+.pc-dl.pc-dl--amounts > div { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 16px; }
+.pc-dl--amounts dd { text-align: right; margin-left: auto; }
+.pc-dl__total dt, .pc-dl__total dd { font-weight: 600; color: var(--color-text-primary); }
+.pc-dl--sunk { background: var(--color-surface-sunk); border-color: transparent; }
+
+/* ---------------------------------------------------------------- file card (Part 14) */
+
+.pc-files { display: flex; flex-direction: column; gap: 8px; }
+.pc-filecard {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 8px 8px 8px 12px; border: 1px solid var(--color-border-default); border-radius: var(--radius-lg);
+  background: var(--color-surface-card);
+}
+.pc-filecard__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-filecard__meta { color: var(--color-text-muted); font-size: var(--text-caption); }
+.pc-filecard--failed { border-color: var(--color-action-danger); }
+.pc-filecard__progress { height: 4px; border-radius: 9999px; background: var(--color-surface-sunk); overflow: hidden; }
+.pc-filecard__progress > span { display: block; height: 100%; background: var(--color-brand-primary); }
+.pc-dropzone {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  min-height: 132px; padding: 16px; text-align: center;
+  border: 2px dashed var(--color-border-input); border-radius: var(--radius-lg); background: var(--color-surface-sunk);
+  color: var(--color-text-secondary);
+}
+.pc-dropzone input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.pc-dropzone:focus-within { border-color: var(--color-border-focus); }
+
+/* ---------------------------------------------------------------- overlays (Part 14) */
+
+.pc-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: flex-end; justify-content: center; }
+.pc-overlay--drawer { z-index: 250; align-items: stretch; justify-content: flex-end; }
+.pc-overlay__scrim { position: absolute; inset: 0; background: var(--color-overlay-scrim); }
+.pc-modal, .pc-drawer {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--color-surface-raised); box-shadow: var(--shadow-modal); outline: none;
+}
+/* Modal: a bottom sheet on a phone, centred 440 from 640. */
+.pc-modal {
+  width: 100%; max-height: 92vh; overflow-y: auto;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 24px; padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+@media (min-width: 640px) {
+  .pc-overlay:not(.pc-overlay--drawer) { align-items: center; padding: 16px; }
+  .pc-modal { max-width: 440px; border-radius: var(--radius-lg); }
+}
+.pc-modal__desc { margin-top: 8px; color: var(--color-text-secondary); }
+.pc-modal__body { margin-top: 16px; }
+.pc-modal__footer { margin-top: 24px; }
+/* Drawer: full screen on a phone, 480 at the right from 640. */
+.pc-drawer { width: 100%; height: 100%; }
+@media (min-width: 640px) { .pc-drawer { max-width: 480px; border-left: 1px solid var(--color-border-default); } }
+.pc-drawer__header { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border-bottom: 1px solid var(--color-border-subtle); }
+.pc-drawer__header > div { flex: 1; min-width: 0; padding-top: 10px; }
+.pc-drawer__desc { margin-top: 4px; color: var(--color-text-secondary); font-size: var(--text-body-s); }
+.pc-drawer__body { flex: 1; overflow-y: auto; padding: 20px 16px; }
+.pc-drawer__footer { padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); border-top: 1px solid var(--color-border-subtle); }
+@media (min-width: 640px) {
+  .pc-drawer__header, .pc-drawer__footer { padding-left: 24px; padding-right: 24px; }
+  .pc-drawer__body { padding: 20px 24px; }
+}
+.pc-close {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; border: 0; border-radius: var(--radius-lg);
+  background: transparent; color: var(--color-text-secondary); cursor: pointer;
+}
+.pc-close:hover { background: var(--color-state-hover); }
+@media (prefers-reduced-motion: no-preference) {
+  .pc-overlay[data-open] .pc-overlay__scrim { animation: pc-fade 300ms var(--ease-standard); }
+  .pc-overlay[data-open] .pc-modal { animation: pc-rise 300ms var(--ease-standard); }
+  .pc-overlay[data-open] .pc-drawer { animation: pc-slide 300ms var(--ease-standard); }
+}
+@keyframes pc-fade { from { opacity: 0; } }
+@keyframes pc-rise { from { transform: translateY(16px); opacity: 0; } }
+@keyframes pc-slide { from { transform: translateX(24px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .pc-skeleton, .pc-spinner { animation: none; }
+}
+
+/* Overflow menu (Part 14 Menu): items 40 tall (44 on touch), Danger last. */
+.pc-menu-wrap { position: relative; display: inline-flex; }
+.pc-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 200;
+  min-width: 220px; max-width: 280px; padding: 4px;
+  background: var(--color-surface-raised); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+.pc-menu [role="menuitem"] {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 12px;
+  border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text-primary);
+  text-align: left; text-decoration: none; cursor: pointer;
+}
+@media (pointer: coarse) { .pc-menu [role="menuitem"] { min-height: 44px; } }
+.pc-menu [role="menuitem"]:hover, .pc-menu [role="menuitem"]:focus { background: var(--color-state-hover); outline: none; }
+.pc-menu [role="menuitem"].pc-menu__danger { color: var(--color-status-danger-ink); }
+.pc-menu hr { border: 0; border-top: 1px solid var(--color-border-subtle); margin: 4px 0; }
+
+/* ---------------------------------------------------------------- combobox (Part 14 Select + search) */
+
+.pc-combobox { position: relative; }
+.pc-combobox .pc-input { padding-right: 40px; }
+.pc-combobox__chevron { position: absolute; right: 12px; top: 12px; color: var(--color-text-muted); pointer-events: none; }
+.pc-listbox {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+  max-height: 264px; overflow-y: auto; padding: 4px; margin: 0; list-style: none;
+  background: var(--color-surface-raised); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+.pc-option { display: flex; flex-direction: column; justify-content: center; min-height: 44px; padding: 6px 12px; border-radius: var(--radius-md); cursor: pointer; }
+.pc-option:hover, .pc-option[aria-selected="true"] { background: var(--color-state-hover); }
+.pc-option__sub { color: var(--color-text-muted); font-size: var(--text-caption); }
+.pc-option--action { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; color: var(--color-text-link); font-weight: 600; }
+.pc-option--empty { color: var(--color-text-muted); cursor: default; }
+
+/* A Drawer whose body and footer are one form. */
+.pc-drawer__form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* Camera capture comes first on a touch device (15.13); a pointer device drops or picks a file. */
+.pc-camera { display: none; }
+@media (pointer: coarse) { .pc-camera { display: inline-flex; } }
+/* The receipt viewer opens over a Drawer or Modal (files open full screen, never a new tab). */
+body.pc #receiptViewerModal { z-index: 340; }
+/* What a receipt suggested (expense_ai.js, 15.14): marked by a ring AND a worded badge, no AI colour. */
+.pc-ai-suggested { box-shadow: 0 0 0 2px var(--color-border-selected); }
+.pc-ai-badge { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--color-text-link); font-size: var(--text-body-s); }
+.pc-ai-badge button { min-height: 32px; padding: 0 4px; border: 0; background: none; color: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.pc-ai-note { margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--color-surface-sunk); font-size: var(--text-body-s); }
+.pc-ai-note p { color: var(--color-text-secondary); }
+.pc-ai-note button { margin-top: 4px; min-height: 32px; padding: 0; border: 0; background: none; color: var(--color-text-link); font-weight: 600; text-align: left; text-decoration: underline; cursor: pointer; }
+
+/* ---------------------------------------------------------------- cash count calculator (15.15d) */
+
+.pc-count { display: flex; flex-direction: column; gap: 8px; }
+.pc-count__row { display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(96px, auto); align-items: start; gap: 12px; }
+.pc-count__face { padding-top: 12px; font-weight: 600; }
+.pc-count__total { padding-top: 12px; text-align: right; color: var(--color-text-secondary); }
+@media (min-width: 640px) { .pc-count__row { grid-template-columns: 96px minmax(0, 220px) minmax(0, 1fr); } }
+
+/* ---------------------------------------------------------------- report history (15.4b) */
+
+.pc-history-filter { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.pc-history-filter__actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (min-width: 768px) {
+  .pc-history-filter { grid-template-columns: 200px 200px minmax(0, 1fr); }
+  .pc-history-filter__actions { grid-column: auto; }
+}
+
+/* ---------------------------------------------------------------- launch page (15.6a) */
+
+.pc-greeting { display: flex; align-items: center; gap: 12px; }
+.pc-greeting img { width: 40px; height: 40px; flex: none; }
+.pc-launch-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+@media (min-width: 1024px) { .pc-launch-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; } }
