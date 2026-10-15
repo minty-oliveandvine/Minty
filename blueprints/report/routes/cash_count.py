@@ -6,19 +6,15 @@ from loguru import logger
 
 from blueprints.report import report_bp
 from blueprints.report.services.cash_denominations import (
-    build_denomination_rows, form_field_for,
-    refresh_cash_stock, resolve_denominations_for_entity, save_cash_count_details)
-from blueprints.report.services.history import log_history
+    build_denomination_rows, form_field_for, resolve_denominations_for_entity)
 from blueprints.report.services.shared import (check_user_has_entities,
                                                header_publishing_status_for,
                                                resolve_report_entity_id,
-                                               safe_float,
-                                               update_draft_progress)
+                                               safe_float)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import Entity, Report, db
 from services.authz import permission_denied
 from services.permission_policy import Permission, has_permission
-from blueprints.shared.column_types import cents
 
 
 @report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/new/cash-count", methods=["GET", "POST"])
@@ -217,7 +213,6 @@ def report_cash_count(id=None, entity_id=None):
     denominations = resolve_denominations_for_entity(entity_id)
 
     if request.method == "POST":
-        # Check if current_draft exists
         if not current_draft:
             flash(
                 "I don't see a draft for today yet - let's start with the opening entry.",
@@ -225,247 +220,48 @@ def report_cash_count(id=None, entity_id=None):
             )
             return redirect(url_for("report.report_opening"))
 
-        expected_balance = (
-            (current_draft.opening_balance or 0)
-            + (current_draft.cash_addition or 0)
-            + (current_draft.cash_sales or 0)
-            - (current_draft.expenses or 0)
-            - (current_draft.bank_deposit or 0)
-        )
-        if expected_balance < 0:
-            flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "danger")
-            return redirect(
-                url_for(
-                    "report.report_cash_count",
-                    entity_id=entity_id,
-                    transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                )
-            )
+        from blueprints.report.services.cash import CashRefused, save_cash_count
 
+        here = url_for("report.report_cash_count", entity_id=entity_id,
+                       transaction_date=transaction_date.strftime("%Y-%m-%d"))
+        action_type = request.form.get("action_type", "save_next")
+        # One count per denomination the company logs (the form's actual_cash[<field>]); the
+        # discrepancy the page posts is the browser's - the service works it out again.
+        counts = {}
+        for denomination in denominations:
+            raw = (request.form.get(f"actual_cash[{form_field_for(denomination)}]") or "").replace(",", "").strip()
+            try:
+                quantity = float(raw) if raw else 0.0
+            except ValueError:
+                quantity = -1.0
+            counts[denomination.cash_id] = int(quantity) if quantity.is_integer() else -1
         try:
-            # Get form data for cash count
-            safe_box_balance = safe_float(
-                request.form.get("safe_box_balance", 0))
-            discrepancy_amount = safe_float(
-                request.form.get("discrepancy_amount", 0))
-            discrepancy_type = request.form.get("discrepancy_type", "none")
-            discrepancy_reason = request.form.get("discrepancy_reason", "")
-
-            # Read one quantity per denomination the entity logs. Face values
-            # come from cash_info, so adding a denomination is an INSERT
-            # there — no change here.
-            if not denominations:
-                logger.error(
-                    f"No cash denominations resolved for entity {entity_id} "
-                    "— cannot record a cash count"
-                )
-                flash(
-                    "I don't have any cash denominations set up for this entity yet. "
-                    "Please check the entity's country settings.",
-                    "danger",
-                )
-                return redirect(
-                    url_for(
-                        "report.report_cash_count",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
-
-            counts_by_cash_id = {}
-            total_cash_count = 0.0
-            for denomination in denominations:
-                quantity = safe_float(
-                    request.form.get(
-                        f"actual_cash[{form_field_for(denomination)}]", 0
-                    )
-                )
-                counts_by_cash_id[denomination.cash_id] = int(quantity or 0)
-                # cash_value is Numeric, so it arrives as Decimal; quantity is
-                # a float. Decimal * float raises TypeError, so coerce here —
-                # the same float() the read path already applies.
-                total_cash_count += float(denomination.cash_value or 0) * quantity
-
-            # Log cash count data for debugging
-            logger.info(f"Cash count data for draft {current_draft.id}:")
-            logger.info(f"  Safe box balance: {safe_box_balance}")
-            logger.info(
-                "  Counted: "
-                + ", ".join(
-                    f"{float(d.cash_value or 0):g}x{counts_by_cash_id[d.cash_id]}"
-                    for d in denominations
-                )
+            save_cash_count(
+                current_draft,
+                current_user,
+                counts,
+                safe_float(request.form.get("safe_box_balance", 0)),
+                request.form.get("discrepancy_reason", ""),
+                action_type,
             )
-
-            # Calculate expected cash count balance: opening_balance +
-            # cash_sales - expenses - deposit
-            opening_balance = current_draft.opening_balance or 0
-            cash_addition = current_draft.cash_addition or 0
-            cash_sales = current_draft.cash_sales or 0
-            expenses = current_draft.expenses or 0
-            deposit_cash = current_draft.bank_deposit or 0
-            expected_cash_count_balance = (
-                opening_balance +
-                cash_addition +
-                cash_sales -
-                expenses -
-                deposit_cash)
-
-            # Calculate discrepancy: expected cash count balance - cash count
-            # balance - safe box balance
-            discrepancy = cents(
-                (total_cash_count - expected_cash_count_balance) + safe_box_balance
-            )
-            actual_cash_total = total_cash_count
-            # Determine discrepancy type and amount
-            if (
-                discrepancy < -0.01 or discrepancy > 0.01
-            ):  # Use small threshold to avoid floating point issues
-                discrepancy_type = "short" if discrepancy < 0 else "over"
-                discrepancy_amount = discrepancy
-            else:
-                discrepancy_type = "none"
-                discrepancy_amount = 0.0
-            logger.info(f"  Calculated actual cash total: {actual_cash_total}")
-            logger.info(
-                f"  Total cash count (actual + safe box): {actual_cash_total + safe_box_balance}"
-            )
-            logger.info(f"  Calculated discrepancy: {discrepancy}")
-            logger.info(f"  Discrepancy type: {discrepancy_type}")
-            logger.info(f"  Discrepancy amount: {discrepancy_amount}")
-            logger.info(f"  Discrepancy reason: {discrepancy_reason}")
-
-            # Track last editor
-            current_draft.uploaded_by = current_user.username
-
-            # STEP 3.5: the create/update branches on ReportCashCountDraft and
-            # the paired ReportDetail upsert are gone. Everything they wrote now
-            # has exactly one home:
-            #
-            #   nine note/coin columns  -> report_cash_count rows, via
-            #                              save_cash_count_details() below
-            #   safe_box_balance        -> report
-            #   discrepancy_*           -> report
-            #   actual_cash_total       -> report (Unit 0a added this writer)
-            #
-            # `report` is `current_draft` since the Step 2 write flip, so these
-            # are direct writes to the one canonical row.
-            current_draft.discrepancy_amount = discrepancy_amount
-            current_draft.discrepancy_reason = discrepancy_reason
-            current_draft.discrepancy_type = discrepancy_type
-            current_draft.safe_box_balance = safe_box_balance
-            # report.actual_cash_total had NO writer before Step 3.5. r1a01
-            # actual_cash_total is derived: the sum of the report_cash_count rows written
-            # below (Report.actual_cash_total). Nothing to store here.
-
-            logger.info(
-                f"  Updated current_draft.discrepancy_amount: {current_draft.discrepancy_amount}"
-            )
-            logger.info(
-                f"  Updated current_draft.discrepancy_reason: {current_draft.discrepancy_reason}"
-            )
-            logger.info(
-                f"  Updated current_draft.discrepancy_type: {current_draft.discrepancy_type}"
-            )
-
-            # Per-denomination counts — the source of truth. Written in the
-            # same transaction as the discrepancy it drives, so the two can
-            # never be committed out of step.
-            save_cash_count_details(current_draft.id, counts_by_cash_id)
-            if current_draft.status != "draft":
-                # Editing a submitted report's count changes the company's stock.
-                db.session.flush()
-                refresh_cash_stock(current_draft.company)
-
-            db.session.commit()
-
-            # Verify the update was saved
-            logger.info(
-                f"  Verifying saved discrepancy data for draft {current_draft.id}"
-            )
-            # Step 4a-6: this verified the separate DRAFT row survived the
-            # commit. There is no separate draft row now, so re-pointing it at
-            # Report would just assert that the row we committed exists —
-            # vacuous. Kept only as a read-back of what was persisted.
-            saved_draft = Report.query.filter(
-                Report.id == current_draft.id
-            ).first()
-            if saved_draft:
-                logger.info(
-                    f"  Saved discrepancy_amount: {saved_draft.discrepancy_amount}"
-                )
-                logger.info(
-                    f"  Saved discrepancy_reason: {saved_draft.discrepancy_reason}"
-                )
-                logger.info(
-                    f"  Saved discrepancy_type: {saved_draft.discrepancy_type}")
-            else:
-                logger.error(
-                    f"  ERROR: Could not retrieve saved draft {current_draft.id}"
-                )
-
-            # Log the cash count addition to draft history
-            log_history(
-                report_id=current_draft.id,
-                company=entity_id,
-                user_id=current_draft.uploaded_by,
-                action="added",
-                field_changed="cash_count",
-                old_value="previous_cash_count",
-                new_value=f"Cash Count: ${actual_cash_total + safe_box_balance}",
-            )
-
-            # Update progress tracking
-            action_type = request.form.get("action_type", "save_next")
-            if action_type == "save_next":
-                update_draft_progress(
-                    current_draft, action_type, "cash_count", "ending"
-                )
-            else:
-                # save_exit: keep current_section at cash_count but do NOT add cash_count to completed_sections,
-                # so user cannot access ending page until they complete cash
-                # count with Save & Next
-                current_draft.current_section = "cash_count"
-
-            db.session.commit()
-
-            # Check action type and redirect accordingly
-            action_type = request.form.get("action_type", "save_next")
-            if action_type == "save_next":
-                return redirect(
-                    url_for(
-                        "report.report_ending",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
-            elif action_type == "save_exit":
-                return redirect(
-                    url_for(
-                        "entity.report_dashboard",
-                        id=entity_id))
-            else:
-                # Default to save_next
-                return redirect(
-                    url_for(
-                        "report.report_ending",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
-        except Exception as e:
+        except CashRefused as refused:
+            flash(refused.message, "danger")
+            return redirect(here)
+        except Exception:
             db.session.rollback()
-            logger.exception(f"Error updating cash count: {e}")
-            flash(
-                "Something went wrong saving your cash count. Mind trying again?",
-                "danger")
-            return redirect(
-                url_for(
-                    "report.report_cash_count",
-                    entity_id=entity_id,
-                    transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                )
+            logger.exception(f"Error saving the cash count for entity {entity_id} on {transaction_date}")
+            flash("Something went wrong saving your cash count. Mind trying again?", "danger")
+            return redirect(here)
+
+        if action_type == "save_exit":
+            return redirect(url_for("entity.report_dashboard", id=entity_id))
+        return redirect(
+            url_for(
+                "report.report_ending",
+                entity_id=entity_id,
+                transaction_date=transaction_date.strftime("%Y-%m-%d"),
             )
+        )
 
     # Handle case where no draft exists
     if not current_draft:

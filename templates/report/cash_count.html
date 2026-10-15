@@ -2,7 +2,7 @@
 {# A discrepancy reason only means something when the saved count is actually out.
    Rendering the box locked here keeps the initial paint consistent with the state
    applyDiscrepancyEditability() settles on once the JS totals have run. #}
-{% set has_saved_discrepancy = current_draft and current_draft.discrepancy_amount and (current_draft.discrepancy_amount | abs) > 0.01 %}
+{% set has_saved_discrepancy = current_draft and current_draft.discrepancy_amount and (current_draft.discrepancy_amount | abs) >= 0.005 %}
 {% set discrepancy_reason_locked = (current_draft and current_draft.status != 'draft' and not is_report_edit_mode) or not has_saved_discrepancy %}
 <!DOCTYPE html>
 <html lang="en">
@@ -738,7 +738,7 @@ document.addEventListener('submit', function(e){
       document.getElementById('discrepancyAmount').value = discrepancy;
       
       // Show/hide discrepancy alert and update message
-      if (Math.abs(discrepancy) > 0.01) { // Use small threshold to avoid floating point issues
+      if (Math.abs(discrepancy) >= 0.005) { // any cent counts (owner, 2026-10-15); the half cent absorbs float noise
         const formattedDiscrepancy = Math.abs(discrepancy).toLocaleString('en-US', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2
@@ -912,7 +912,7 @@ document.addEventListener('submit', function(e){
       const descriptionTextarea = document.getElementById('discrepancyDescription');
       const requiredAsterisk = document.getElementById('descriptionRequired');
       
-      if (Math.abs(discrepancy) > 0.01) {
+      if (Math.abs(discrepancy) >= 0.005) {
         // There is a discrepancy, enable the textarea (when editing is allowed)
         applyDiscrepancyEditability(descriptionTextarea, true);
 
@@ -1138,7 +1138,7 @@ document.addEventListener('submit', function(e){
        const discrepancy = totalCashCount - expectedCashCountBalance + safeBoxBalance;
        
        // Allow proceeding if expected balance is zero and nothing to count
-       if (Math.abs(expectedCashCountBalance) < 0.01 && totalCashCount === 0 && safeBoxBalance === 0 && Math.abs(discrepancy) < 0.01) {
+       if (Math.abs(expectedCashCountBalance) < 0.005 && totalCashCount === 0 && safeBoxBalance === 0 && Math.abs(discrepancy) < 0.005) {
          return true;
        }
 
@@ -1150,7 +1150,7 @@ document.addEventListener('submit', function(e){
        }
        
        // Check if there's a discrepancy with description
-       if (Math.abs(discrepancy) > 0.01) {
+       if (Math.abs(discrepancy) >= 0.005) {
          const descriptionTextarea = document.getElementById('discrepancyDescription');
          const description = descriptionTextarea ? descriptionTextarea.value.trim() : '';
          if (description && description !== '') {
@@ -1167,7 +1167,7 @@ document.addEventListener('submit', function(e){
        const discrepancy = getDiscrepancyAmount();
        
        // If there's a discrepancy (Cash Surplus or Cash Shortage), description is required
-       if (Math.abs(discrepancy) > 0.01) {
+       if (Math.abs(discrepancy) >= 0.005) {
          const descriptionTextarea = document.getElementById('discrepancyDescription');
          const description = descriptionTextarea.value.trim();
          

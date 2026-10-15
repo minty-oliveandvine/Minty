@@ -3440,10 +3440,64 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.deposit_page",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/deposit",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_deposit_step",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/deposit",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "report",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.cash_count_page",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/cash-count",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "report_cash_count",
+    "cash_info",
+    "entity_cash_setting"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_cash_count_step",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/cash-count",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "report",
+    "report_cash_count",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 186,
-  "in_scope": 123
+  "routes": 190,
+  "in_scope": 127
  }
 }

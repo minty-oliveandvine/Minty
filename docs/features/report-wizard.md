@@ -21,8 +21,8 @@ that JavaScript; the pytest suite renders the templates but executes none of it.
 A day starts as a **draft** (`report.status = draft`, `ReportStatus` in
 `blueprints/shared/enums.py`): `GET /create` and `/entity/<co>/petty-cash/reports/resume` open or resume the
 current draft, `GET /report/<id>/<page>` re-opens a page of a specific report, and
-`/api/get_draft_totals?entity_id&transaction_date` is what the pages poll for the running
-figures. The draft is one row that fills in page by page; **there is no separate draft
+`/api/get_draft_totals?entity_id&transaction_date` hands back the running figures (only the
+Expenses page asks for it; Deposit and Cash Count work theirs out in the page). The draft is one row that fills in page by page; **there is no separate draft
 table** any more (the redesign folded `shop_expense_draft` etc. into the live tables — the
 expense line *is* the `report_expense` row from the moment it is added).
 
@@ -105,8 +105,26 @@ drawer total is the same figure, so a denomination outside the template's nine l
 slots still counts.
 
 **Cash in stock** (`entity_cash_detail`) follows the latest submitted report: submitting,
-reverting to draft, deleting the latest report and editing a submitted report's cash count
-each rebuild it (`refresh_cash_stock`); a draft never touches it.
+reverting to draft and deleting the latest report each rebuild it (`refresh_cash_stock`); a
+draft never touches it, and the Cash Count step only ever saves a draft's count.
+
+**Deposit and Cash Count save through `services/cash.py`**, shared with the Petty Cash API
+(which can also save the two together, in one transaction, for Part 15's Cash Count stage). The
+formulas are Flask's: cash on hand = opening + addition + cash sales - expenses; expected cash =
+that less the deposit; difference = (counted - expected) + safebox, negative being short; the
+deposit writes the closing balance without the difference and submit adds it. The owner's rules
+of 2026-10-15, each a change from Flask:
+- a deposit above the cash on hand is refused at Deposit (it used to be taken and only blocked
+  at Cash Count);
+- any difference counts, a single cent included (Flask's check was "more than 0.01", in the
+  server and in the page's script alike);
+- Save & Next needs a reason when there is a difference, checked on the server (the page only
+  asked in the browser). Save & Exit still keeps a count without one.
+Also with the extraction: counts are whole numbers of 0 or more (2.5 was stored as 2), a reason
+is at most 300 characters (a database error before), each save commits once (the count committed
+three times), a refused save sends the person back to the step with their company and day (two
+error paths lost both), and the Deposit page no longer asks Xero for the account list on every
+load (the answer was never used).
 
 ## After a report is posted
 

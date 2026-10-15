@@ -6,3 +6,4 @@ from . import home  # noqa: F401
 from . import opening  # noqa: F401
 from . import sales  # noqa: F401
 from . import expenses  # noqa: F401
+from . import cash  # noqa: F401

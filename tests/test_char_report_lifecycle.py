@@ -837,7 +837,8 @@ def test_an_all_zero_count_reads_as_counted_zero(shop, client, app):
     owner, entity = shop
     F.login(client, owner)
     walk_to_cash_count(client, entity)
-    post_cash_count(client, entity, REPORT_DATE, {}, discrepancy="0")
+    # the whole expected cash is short, and a difference needs a reason (owner, 2026-10-15)
+    post_cash_count(client, entity, REPORT_DATE, {}, discrepancy="0", reason="Nothing in the till")
 
     with app.app_context():
         report = Report.query.filter_by(entity_id=entity.id, transaction_date=REPORT_DATE).one()

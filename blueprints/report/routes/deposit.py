@@ -8,17 +8,13 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
-from blueprints.report.services.history import log_history
 from blueprints.report.services.shared import (check_user_has_entities,
-                                               get_cash_sales_from_detail,
                                                header_publishing_status_for,
                                                resolve_report_entity_id,
-                                               safe_float,
-                                               update_draft_progress)
+                                               safe_float)
 from blueprints.shared.entity_display import entity_badge_data
 from models.db import Entity, Report, UserEntity, db
 from services.authz import permission_denied
-from services.helpers.xero_bridge import get_xero_data_dynamic
 from services.permission_policy import Permission, has_permission
 
 
@@ -61,14 +57,6 @@ def report_deposit(id=None, entity_id=None):
     entity_acronym = ""
     display_date = None
 
-    # For GET request, get the current draft data (use entity owner's token
-    # when entity_id present)
-    all_accounts = get_xero_data_dynamic("Accounts", entity_id=entity_id)
-    xero_bank_accounts = [
-        acc
-        for acc in all_accounts.get("Accounts", [])
-        if acc.get("BankAccountType") == "BANK"
-    ]
     if id:
         report = (
             # Was a full outer join to ReportDraft filtering BOTH ids to `id`,
@@ -137,7 +125,6 @@ def report_deposit(id=None, entity_id=None):
             current_section="deposit",  # Always set to current page
             completed_sections=completed_sections,
             draft_id=current_draft.id if current_draft else None,
-            xero_bank_accounts=xero_bank_accounts,
             datenow=datetime.now(),
             transaction_date=report.transaction_date,
             is_latest_report=is_latest_report,
@@ -218,109 +205,32 @@ def report_deposit(id=None, entity_id=None):
         return redirect(url_for("report.report_opening"))
 
     if request.method == "POST":
-        logger.info("Deposit form - Submission received")
+        from blueprints.report.services.cash import CashRefused, save_deposit
 
-        pre_deposit_balance = (
-            (current_draft.opening_balance or 0)
-            + (current_draft.cash_addition or 0)
-            + (current_draft.cash_sales or 0)
-            - (current_draft.expenses or 0)
-        )
-        if pre_deposit_balance < 0:
-            flash("Hmm, it looks like your cash balance is negative. Could you fix that first?", "danger")
-            return redirect(
-                url_for(
-                    "report.report_deposit",
-                    entity_id=entity_id,
-                    transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                )
-            )
-
+        here = url_for("report.report_deposit", entity_id=entity_id,
+                       transaction_date=transaction_date.strftime("%Y-%m-%d"))
+        action_type = request.form.get("action_type", "save_next")
         try:
-            # Get action type from form
-            action_type = request.form.get("action_type", "save_next")
-
-            # Get form data for deposit
-            bank_deposit = safe_float(request.form.get("bank_deposit", 0))
-
-            # Update draft with deposit amount; track last editor
-            current_draft.uploaded_by = current_user.username
-            current_draft.bank_deposit = bank_deposit
-
-            # Recalculate closing balance using correct formula: opening + cash_addition + cash_sales - expenses - deposit
-            # Get cash sales from ReportSaleDetail with fallback to
-            # current_draft.cash_sales
-            cash_sales = get_cash_sales_from_detail(
-                current_draft.id, fallback_value=current_draft.cash_sales or 0.0)
-            current_draft.closing_balance = (
-                current_draft.opening_balance
-                + (current_draft.cash_addition or 0)
-                + cash_sales
-                - (current_draft.expenses or 0)
-                - current_draft.bank_deposit
-            )
-
-            # ReportV2 mirrored bank_deposit here purely as FK scaffolding for
-            # the detail tables (r2a02 dropped those FKs). The deposit itself
-            # lives on current_draft.bank_deposit, set above, which is what
-            # every reader actually uses.
-            logger.info(
-                f"Draft {current_draft.id} bank_deposit set to {bank_deposit}"
-            )
-
-            # Update progress tracking (only for save_next)
-            if action_type == "save_next":
-                update_draft_progress(
-                    current_draft, action_type, "deposit", "cash_count"
-                )
-
-            # Always commit the deposit data regardless of action type
-            db.session.commit()
-
-            # Log the deposit addition to draft history
-            log_history(
-                report_id=current_draft.id,
-                company=entity_id,
-                user_id=current_draft.uploaded_by,
-                action="updated",
-                field_changed="bank_deposit",
-                old_value="previous_deposit",
-                new_value=f"Bank Deposit: ${bank_deposit}",
-            )
-
-            # Check action type and redirect accordingly
-            if action_type == "save_next":
-                return redirect(
-                    url_for(
-                        "report.report_cash_count",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
-            elif action_type == "save_exit":
-                return redirect(
-                    url_for(
-                        "entity.report_dashboard",
-                        id=entity_id))
-            else:
-                # Default to save_next
-                return redirect(
-                    url_for(
-                        "report.report_cash_count",
-                        entity_id=entity_id,
-                        transaction_date=transaction_date.strftime("%Y-%m-%d"),
-                    )
-                )
-
-        except Exception as e:
+            save_deposit(current_draft, current_user, safe_float(request.form.get("bank_deposit", 0)), action_type)
+        except CashRefused as refused:
+            flash(refused.message, "danger")
+            return redirect(here)
+        except Exception:
             db.session.rollback()
-            print(f"Error updating deposit: {str(e)}")
-            flash(
-                "Something went wrong saving your deposit. Mind trying again?",
-                "danger")
-            return redirect(url_for("report.report_deposit"))
+            logger.exception(f"Error saving the deposit for entity {entity_id} on {transaction_date}")
+            flash("Something went wrong saving your deposit. Mind trying again?", "danger")
+            return redirect(here)
 
-    # Get entity for the template
+        if action_type == "save_exit":
+            return redirect(url_for("entity.report_dashboard", id=entity_id))
+        return redirect(
+            url_for(
+                "report.report_cash_count",
+                entity_id=entity_id,
+                transaction_date=transaction_date.strftime("%Y-%m-%d"),
+            )
+        )
+
     entity = Entity.query.filter(Entity.id == entity_id).first()
     entity_acronym, display_date = entity_badge_data(entity)
 
@@ -345,7 +255,6 @@ def report_deposit(id=None, entity_id=None):
         current_section="deposit",  # Always set to current page
         completed_sections=completed_sections,
         draft_id=current_draft.id if current_draft else None,
-        xero_bank_accounts=xero_bank_accounts,
         datenow=datetime.now(),
         is_latest_report=is_latest_report,
         entity_acronym=entity_acronym,
