@@ -31,7 +31,7 @@ from flask import (current_app, flash, has_request_context, jsonify, make_respon
 from flask_login import current_user, login_required, login_user
 
 from blueprints.entity import entity_bp
-from blueprints.shared import bearer_api
+from blueprints.shared import bearer_api, preview_origin
 from blueprints.shared.safe_redirect import safe_next
 from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY, MODULE_BILL
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
@@ -193,7 +193,7 @@ def minty_web_landing_url(next_path: str, org: Entity | None, user_id) -> str:
         token = _generate_module_token(user_id, "", "", "")
         entity_id, entity_name = "", ""
     return (
-        f"{bearer_api.minty_web_origin()}/landing"
+        f"{preview_origin.handoff_origin('my', bearer_api.minty_web_origin())}/landing"
         f"?next={quote(next_path, safe='')}"
         f"&entity_id={entity_id}&entity_name={quote(entity_name, safe='')}&token={token}"
     )
@@ -553,7 +553,7 @@ def _resolve_user_entity_role(user_id, entity_id) -> str:
 
 
 def _frontend_origin() -> str:
-    return bearer_api.frontend_origin()
+    return preview_origin.handoff_origin("payment-request", bearer_api.frontend_origin())
 
 
 def _billing_app_landing_url(entity_id: str, org: Entity, user_id, page: str) -> str:

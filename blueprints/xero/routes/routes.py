@@ -18,7 +18,7 @@ from sqlalchemy import desc
 from blueprints.entity.services.settings import (
     invalidate_entity_xero_cache, sync_all_accounts_and_contacts_background)
 from blueprints.entity.services.shared import check_user_has_entities
-from blueprints.shared import bearer_api
+from blueprints.shared import bearer_api, preview_origin
 from blueprints.shared.safe_redirect import safe_internal_path, safe_next
 from blueprints.xero import xero_bp
 from blueprints.xero.services.integration import (
@@ -77,7 +77,7 @@ def xero_auth():
 # --- Onboarding Xero handoff helpers --------------------------------------
 
 def _onboarding_app_url() -> str:
-    return bearer_api.onboarding_origin()
+    return preview_origin.handoff_origin("onboarding", bearer_api.onboarding_origin())
 
 
 def _onboarding_xero_return(connected: bool, org_name: str = "",

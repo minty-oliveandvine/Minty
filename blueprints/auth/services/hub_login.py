@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 from flask import get_flashed_messages
 
 from blueprints.entity.services.entity_list import sign_notices
-from blueprints.shared import bearer_api
+from blueprints.shared import bearer_api, preview_origin
 from blueprints.shared.safe_redirect import safe_internal_path
 
 HUB_LOGIN_PATH = "/login"
@@ -59,4 +59,5 @@ def hub_login_url(
         if notices:
             params["flash"] = notices
     query = f"?{urlencode(params)}" if params else ""
-    return f"{bearer_api.minty_web_origin()}{path}{query}"
+    hub = preview_origin.handoff_origin("my", bearer_api.minty_web_origin())
+    return f"{hub}{path}{query}"

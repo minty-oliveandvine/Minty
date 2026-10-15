@@ -60,6 +60,10 @@ The design, and the four corrections the survey of 2026-10-07 forced on it, are 
 | `e2e.yml` | **manual**, plus Sundays 19:00 UTC | calls `stack-e2e.yml`: the whole seven-service stack, then one repo's Playwright specs |
 | `migrate.yml` | **manual** only | `flask db current` / `flask db upgrade` against a chosen environment |
 
+**Branch preview sets** are the frontends' business, not Minty's: each of the four Next.js repos
+has a `preview.yml` calling the `.github` repo's `vercel-preview-set.yml` (minty-infra `CUTOVER.md`
+section 6). Flask's part is only handing back into a set (`authentication.md` 6.1).
+
 `ci.yml` runs no ruff: `ruff check .` reports 96 findings over this repo and there is no
 `[tool.ruff]` section to narrow them, so adopting it is a cleanup task of its own. The three
 Django APIs are clean and do lint in CI.
