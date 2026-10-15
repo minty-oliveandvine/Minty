@@ -132,20 +132,15 @@ class TestLoadBearingStatusFilters:
                 f"{path} must not force a status: that is how a posted report gets un-submitted"
             )
 
-    def test_sibling_delete_is_scoped_to_drafts(self):
-        """delete_report's sibling sweep must be draft-scoped.
-
-        It matches siblings on (company, transaction_date) and duplicates per
-        date do occur. Unscoped, it deletes submitted reports for the same
-        entity and date.
-        """
-        src = _source("blueprints/report/routes/report_detail.py")
-        idx = src.find("other_drafts = (")
-        assert idx != -1, "delete_report sibling query (other_drafts) not found"
-        block = src[idx:idx + 400]
-        assert 'Report.status == "draft"' in block, (
-            "the sibling delete sweep must filter status == 'draft'"
-        )
+    def test_the_delete_sweeps_no_other_row_of_the_day(self):
+        """The old delete also swept "sibling drafts" of the same company and day - it had to be
+        draft-scoped or it deleted SUBMITTED reports. The table holds one row per company and day,
+        so the sweep could never match; it went with the extraction (2026-10-15). Pinned: nothing
+        in the shared delete queries other rows of the day, and the constraint that makes that safe
+        is still there."""
+        src = _source("blueprints/report/services/report_actions.py")
+        assert "other_drafts" not in src and "Report.id != " not in src
+        assert 'UniqueConstraint("entity_id", "transaction_date"' in _source("blueprints/report/models/report.py")
 
     def test_onboarding_floor_date_comes_from_the_settings(self):
         """The onboarding floor date is entity_pettycash_settings.start_date.
@@ -304,7 +299,7 @@ class TestXeroSyncRowsGoWithTheReport:
     """
 
     def test_app_deletes_the_sync_rows_with_the_report(self):
-        src = _source("blueprints/report/routes/report_detail.py")
+        src = _source("blueprints/report/services/report_actions.py")  # the shared delete (2026-10-15)
         for model, col in (("XeroReportSync", "report_id"),
                            ("XeroBankTransfer", "sync_report_id"),
                            ("XeroBankTransaction", "sync_report_id")):

@@ -285,7 +285,6 @@ def report_sale(id=None, entity_id=None):
             logger.info(f"Loading existing draft {existing_draft.id} for sales form")
             is_draft = True
             draft_id = existing_draft.id
-            next_transaction_date = existing_draft.transaction_date
             datenow = datetime.now()
 
             default_saletypes = {
@@ -346,7 +345,6 @@ def report_sale(id=None, entity_id=None):
             logger.info("No existing draft found for sales form")
             is_draft = False
             draft_id = None
-            next_transaction_date = datetime.now().date()
             datenow = datetime.now()
             draft_report = {
                 "cash_sales": 0.0,

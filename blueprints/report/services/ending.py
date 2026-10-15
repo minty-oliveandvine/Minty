@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report.services.cash_denominations import (
-    cash_summary, get_cash_count_details, refresh_cash_stock)
+    cash_summary, get_cash_count_details)
 from blueprints.report.services.shared import (check_user_has_entities,
                                                resolve_report_entity_id)
 from blueprints.shared.entity_display import entity_badge_data
@@ -58,132 +58,32 @@ def entity_ending_with_report(entity_id, report_id):
 
 
 
-class RevertError(Exception):
-    """A revert-to-draft attempt that failed a guard, with an HTTP status."""
-
-    def __init__(self, message, status_code):
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
-
-
-def revert_report_to_draft(report_id):
-    """Revert a submitted report to an editable draft.
-
-    Deletes the posted Report (and its ShopExpense rows) and rewinds the
-    report to the opening step, so the whole report — balances included —
-    can be re-entered through the normal flow and re-submitted.
-
-    Two things are deliberately preserved on the draft before the Report row
-    goes away:
-
-    * ``publishing_status`` — the only record that this report was already
-      pushed to Xero. Publishing does not store Xero object IDs, so a second
-      publish re-POSTs everything and duplicates it. Submitting the draft again
-      restores this marker onto the new Report so the publish flow can warn.
-    * ``xero_integrated_yes`` — whether that push fully succeeded.
-
-    Raises RevertError on a failed guard. Commits on success and returns the
-    reverted report row.
-    """
-    report = Report.query.filter(Report.id == report_id).first()
-    if not report:
-        raise RevertError("Report not found", 404)
-
-    entity_id = report.company
-    if not entity_id or not has_permission(
-        current_user, Permission.REPORT_EDIT_OWN, entity_id
-    ):
-        raise RevertError("You do not have permission to edit this report.", 403)
-
-    # Reports chain: each one's opening balance comes from the previous one's
-    # closing balance. Reverting an older report deletes a link mid-chain and
-    # leaves the newer reports' opening balances dangling, so only the latest
-    # may be reverted -- matching edit_report and delete_report.
-    newer_report = (
-        Report.query.filter(
-            Report.company == entity_id,
-            Report.transaction_date > report.transaction_date,
-        )
-        .order_by(Report.transaction_date.desc())
-        .first()
-    )
-    if newer_report:
-        raise RevertError(
-            "You can only edit the most recent report. Delete or edit the newer "
-            "reports first.",
-            400,
-        )
-
-    # WRITE FLIP (Step 2): `report` IS the row. Reverting is a status change
-    # on it, not a delete-and-recreate — which also removes the old hazard
-    # where a Report with no draft could not be reverted at all.
-    #
-    # The expense lines stay (F1): since drafts and reports became one row there
-    # is no separate draft copy to rebuild them from, so deleting them here lost
-    # the report's expenses on revert.
-    was_published = bool(report.xero_integrated_yes)
-    prior_publishing_status = report.publishing_status
-
-    try:
-        report.status = "draft"
-        report.current_section = "opening"
-        report.completed_sections = []
-        # Preserve the Xero publish markers: publishing stores no Xero object
-        # ids, so a re-publish would duplicate every transaction. These are
-        # what let the publish flow warn about that.
-        report.xero_integrated_yes = was_published
-        report.publishing_status = prior_publishing_status
-        # No longer submitted: the stock falls back to the previous submitted report.
-        db.session.flush()
-        refresh_cash_stock(entity_id)
-
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        raise
-
-    logger.info(
-        f"Report {report_id} reverted to draft "
-        f"(was_published={was_published}, publishing_status={prior_publishing_status})"
-    )
-    # `report` is the reverted row; the caller reads .id / .transaction_date
-    # off it, both unchanged by the revert.
-    return report
-
-
 def convert_report_to_draft(report_id):
-    """JSON endpoint wrapper around revert_report_to_draft."""
+    """JSON endpoint for the Daily Report's Edit report: services/report_actions.py::reopen_report,
+    shared with the Petty Cash API."""
+    from blueprints.report.services.report_actions import ReportActionRefused, reopen_report
+
+    report = Report.query.filter(Report.id == report_id).first()
+    if report is None:
+        return jsonify({"status": "error", "message": "Report not found"}), 404
     try:
-        report_draft = revert_report_to_draft(report_id)
-    except RevertError as e:
-        return jsonify({"status": "error", "message": e.message}), e.status_code
+        reopened = reopen_report(report, current_user)
+    except ReportActionRefused as refused:
+        return jsonify({"status": "error", "message": refused.message}), refused.status
     except Exception as e:
         logger.exception(f"Error converting report to draft: {str(e)}")
         return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": "I couldn't convert that report to a draft. Mind trying again?",
-                }
-            ),
+            jsonify({"status": "error", "message": "I couldn't convert that report to a draft. Mind trying again?"}),
             500,
         )
-
     return jsonify(
         {
             "status": "success",
             "message": "Report converted to draft",
-            "draft_id": report_draft.id,
-            "transaction_date": (
-                report_draft.transaction_date.strftime("%Y-%m-%d")
-                if report_draft.transaction_date
-                else None
-            ),
+            "draft_id": reopened.id,
+            "transaction_date": reopened.transaction_date.strftime("%Y-%m-%d") if reopened.transaction_date else None,
         }
     )
-
-
 
 
 def entity_ending(entity_id):

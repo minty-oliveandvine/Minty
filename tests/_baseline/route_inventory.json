@@ -3535,10 +3535,66 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.daily_report",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/<report_id>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "report_sale",
+    "report_expense",
+    "report_cash_count"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.reopen",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/<report_id>/reopen",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "report",
+    "entity_cash_detail"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.delete",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/<report_id>",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [
+    "report",
+    "report_sale",
+    "report_expense",
+    "attachment",
+    "entity_cash_detail"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.share_link",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/<report_id>/share-link",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "report"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 193,
-  "in_scope": 130
+  "routes": 197,
+  "in_scope": 134
  }
 }

@@ -78,7 +78,7 @@ class TestDeleteHandlersClearAllKeys:
     def test_report_history_clears_all_bf_keys(self):
         content = _read(TEMPLATES / "report_history" / "report_history.html")
         delete_section_match = re.search(
-            r"fetch\(`/report/delete/.*?\.then\(response\s*=>\s*\{(.*?)\}\s*\)\s*\.catch",
+            r"fetch\(`/report/delete/.*?\.then\(\(\)\s*=>\s*\{(.*?)\}\s*\)\s*\.catch",
             content,
             re.DOTALL,
         )
@@ -93,7 +93,7 @@ class TestDeleteHandlersClearAllKeys:
     def test_ending_clears_all_bf_keys(self):
         content = _read(TEMPLATES / "report" / "ending.html")
         delete_section_match = re.search(
-            r"fetch\(`/report/delete/.*?\.then\(response\s*=>\s*\{(.*?)\}\s*\)\s*\.catch",
+            r"fetch\(`/report/delete/.*?\.then\(\(\)\s*=>\s*\{(.*?)\}\s*\)\s*\.catch",
             content,
             re.DOTALL,
         )
@@ -181,7 +181,7 @@ class TestDeleteClearsHistoryState:
     def _check_template_clears_state_keys(self, path: Path):
         content = _read(path)
         delete_section_match = re.search(
-            r"fetch\(`/report/delete/.*?\.then\(response\s*=>\s*\{(.*?)\}\s*\)\s*\.catch",
+            r"fetch\(`/report/delete/.*?\.then\(\(\)\s*=>\s*\{(.*?)\}\s*\)\s*\.catch",
             content,
             re.DOTALL,
         )

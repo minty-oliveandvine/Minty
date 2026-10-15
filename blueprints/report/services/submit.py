@@ -17,6 +17,7 @@ Changed on the way out, deliberately:
 - **A difference needs its reason** at submit too (the owner's rule of 2026-10-15).
 - An expense line with no item or no amount is refused with the step to fix, not a crash.
 - One commit, under a row lock, and a second submit is told the day is already submitted.
+- A report reopened after it was in Xero is no longer marked "Published to Xero" once resubmitted.
 """
 from __future__ import annotations
 
@@ -129,6 +130,10 @@ def submit_report(report, user):
         flag_modified(locked, "completed_sections")
         locked.current_section = "submitted"
         locked.status = ReportStatus.SUBMITTED
+        # A report reopened after it was in Xero no longer matches what Xero holds: it is not
+        # "Published to Xero" any more. publishing_status / published_at stay - the record that it
+        # went there, which is what makes the outcome page offer "Publish to Xero again".
+        locked.xero_integrated = False
         locked.submitted_at = datetime.now(timezone.utc)
         db.session.flush()
         refresh_cash_stock(locked.company)

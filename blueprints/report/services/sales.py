@@ -137,3 +137,25 @@ def save_sales(entity_id, user, draft, amounts: dict, action_type: str):
         ),
     )
     return draft
+
+
+def report_methods(entity_id, report_id) -> list[dict]:
+    """``page_methods`` for a report already filled in: the methods the company has on, then any
+    method switched off or removed since that still holds an amount on this report (a submitted
+    report keeps what it said - Flask's Daily Report listed them too). Deliveroo stays out."""
+    from models.db import ReportSaleDetail, SaleInfo
+
+    methods = page_methods(entity_id, report_id)
+    listed = {m["sale_id"] for m in methods}
+    extra = (
+        ReportSaleDetail.query.join(SaleInfo, SaleInfo.id == ReportSaleDetail.sale_id)
+        .filter(ReportSaleDetail.report_id == report_id)
+        .with_entities(SaleInfo.id, SaleInfo.sale_name, SaleInfo.value_name, SaleInfo.type, ReportSaleDetail.amount)
+        .all()
+    )
+    for sale_id, name, value_name, kind, amount in extra:
+        if str(sale_id) in listed or not amount or value_name in (SKIPPED, SaleInfo.CASH_VALUE_NAME):
+            continue
+        methods.append({"sale_id": str(sale_id), "name": name, "value_name": value_name,
+                        "type": str(getattr(kind, "value", kind)), "amount": amount})
+    return methods

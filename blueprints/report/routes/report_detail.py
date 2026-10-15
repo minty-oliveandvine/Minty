@@ -13,7 +13,6 @@ from sqlalchemy.exc import IntegrityError
 
 from blueprints.report import report_bp
 from blueprints.report.services.shared import split_receipt_keys
-from blueprints.report.services.cash_denominations import refresh_cash_stock
 from blueprints.report.services.history import log_history
 from blueprints.report.services.report_detail import has_route
 from blueprints.report.services.s3_storage import (delete_expense_with_receipts,
@@ -28,11 +27,10 @@ from blueprints.report.services.shared import (get_cash_sales_from_detail,
                                                safe_float,
                                                sales_amounts_by_short_name,
                                                write_sales_detail_rows)
-from models.db import Report, ReportHistory, ReportSaleDetail, ShopExpense, db
+from models.db import Report, ReportHistory, ShopExpense, db
 from services.authz import permission_denied
 from services.helpers.xero_bridge import get_entity_account_settings
-from services.permission_policy import (Permission, can_delete_report,
-                                        can_view_report, has_permission)
+from services.permission_policy import (Permission, can_view_report, has_permission)
 
 
 @report_bp.route("/report/<string:id>")
@@ -380,156 +378,39 @@ def edit_report(id):
 @report_bp.route("/report/delete/<string:id>", methods=["POST"])
 @login_required
 def delete_report(id):
-    def _delete_report_children(report_id):
-        """Delete the child rows that must go before a report row can.
+    """Delete the latest report: services/report_actions.py::delete_report, shared with the Petty
+    Cash API. A caller that asks for JSON (the Daily Report and history pages' fetch) gets JSON -
+    every refusal used to be a redirect, which their fetch took for success; a form post gets a
+    flash and a redirect as before."""
+    from blueprints.report.services.report_actions import ReportActionRefused
+    from blueprints.report.services.report_actions import delete_report as delete_the_report
 
-        Renamed from _delete_report_v2_cascade in Step 4a-2: ReportV2 had no
-        writers since r2a02, its delete went with that edit, and the table
-        itself was dropped in r10a10.
+    wants_json = request.accept_mimetypes.best == "application/json"
 
-        The report_expense_detail delete went in Step 3.5.
-
-        The Xero sync rows (xero_report_sync, xero_bank_transaction,
-        xero_bank_transfer) go WITH the report: the schema's FKs are ON DELETE
-        CASCADE (C5 reversed r9a09's SET NULL - a publish record for a report
-        that no longer exists has nothing to protect). Deleted here explicitly
-        so SQLite, which enforces no FK, behaves like Postgres.
-        """
-        from models.db import XeroBankTransaction, XeroBankTransfer, XeroReportSync
-
-        ReportSaleDetail.query.filter_by(report_id=report_id).delete()
-        XeroReportSync.query.filter_by(report_id=report_id).delete()
-        XeroBankTransfer.query.filter_by(sync_report_id=report_id).delete()
-        XeroBankTransaction.query.filter_by(sync_report_id=report_id).delete()
-
-    def _delete_expenses_with_receipts(report_id):
-        """Delete a report's expense lines and their receipts (F2)."""
-        expenses = ShopExpense.query.filter_by(report_id=report_id).all()
-        logger.info(
-            f"Deleting {len(expenses)} expense lines and "
-            f"{sum(len(e.attachments) for e in expenses)} receipts of report {report_id}"
-        )
-        for expense in expenses:
-            delete_expense_with_receipts(expense)
-
-    try:
-        # Step 4a-6: the whole "no Report row, fall back to a ReportDraft"
-        # branch that used to sit here is gone. It existed for drafts predating
-        # Stage 4a, which is when every draft gained a paired `report` row with
-        # the same id. With report_draft dropped there is nothing to fall back
-        # to — no row means the report genuinely does not exist.
-        report = Report.query.get_or_404(id)
-
-        entity_id = report.company
-        if not can_delete_report(current_user, report):
-            return permission_denied(
-                "You are not authorized to delete this report.",
-                entity_id=entity_id,
-            )
-
-        # Deliberately INCLUDES drafts. Deleting a report whose successor
-        # exists — draft or submitted — would leave that successor's opening
-        # balance dangling, since it chains off this report's closing balance.
-        newer_report = (
-            Report.query.filter(
-                Report.company == report.company,
-                Report.transaction_date > report.transaction_date,
-            )
-            .order_by(Report.transaction_date.asc())
-            .first()
-        )
-
-        if newer_report:
-            flash(
-                "I can only delete the most recent report, and there's a newer one after this.", "danger",
-            )
+    def answer(message, status, entity_id=None, category="danger"):
+        if wants_json:
+            return jsonify({"status": "success" if status == 200 else "error", "message": message}), status
+        flash(message, category)
+        if entity_id:
             return redirect(url_for("entity.report_dashboard", id=entity_id))
+        return redirect(url_for("entity.entity_list"))
 
-        prev_report = (
-            Report.query.filter(
-                Report.company == report.company,
-                Report.transaction_date < report.transaction_date,
-            )
-            .order_by(Report.transaction_date.desc())
-            .first()
-        )
-
-        next_report = (
-            Report.query.filter(
-                Report.company == report.company,
-                Report.transaction_date > report.transaction_date,
-            )
-            .order_by(Report.transaction_date.asc())
-            .first()
-        )
-
-        if prev_report:
-            prev_report.next_transaction_date = (
-                next_report.transaction_date if next_report else None
-            )
-            db.session.add(prev_report)
-
-        # The receipts go with the report: every expense line's attachments are
-        # removed from S3 and their rows deleted with the line (F2).
-        _delete_expenses_with_receipts(report.id)
-        _delete_report_children(report.id)
-
-        # The paired-ReportDraft delete that sat here went with Step 4a-6 —
-        # report and draft are one row, already being deleted below.
-
-        # Sibling rows for the same (company, transaction_date); duplicates per
-        # date do occur. The status filter is LOAD-BEARING and now the only
-        # thing scoping this to drafts — the table used to imply it. Without
-        # it this deletes submitted reports for the same entity and date.
-        other_drafts = (
-            Report.query.filter(
-                Report.company == report.company,
-                Report.transaction_date == report.transaction_date,
-                Report.id != report.id,
-                Report.status == "draft",
-            ).all()
-        )
-
-        for draft in other_drafts:
-            _delete_expenses_with_receipts(draft.id)
-            _delete_report_children(draft.id)
-            # One row per sibling now (Step 4a-6) — delete it directly.
-            paired_sibling = Report.query.filter_by(id=draft.id).first()
-            if paired_sibling:
-                db.session.delete(paired_sibling)
-            db.session.delete(draft)
-
-        db.session.delete(report)
-        # The stock falls back to the latest report still submitted.
-        db.session.flush()
-        refresh_cash_stock(entity_id)
-        db.session.commit()
-
-        flash("That report's deleted.", "success")
-        return redirect(url_for("entity.report_dashboard", id=entity_id))
-
+    report = Report.query.filter(Report.id == id).first()
+    if report is None:
+        return answer("Hmm, I couldn't find that report.", 404)
+    entity_id = report.company
+    try:
+        delete_the_report(report, current_user)
+    except ReportActionRefused as refused:
+        return answer(refused.message, refused.status, entity_id)
     except IntegrityError:
         logger.exception(f"Integrity error deleting report {id}")
-        db.session.rollback()
-        flash(
-            "I can't delete this report — other records still depend on it. "
-            "Could you remove or update those first, then try again?",
-            "danger",
-        )
-        entity_id = id
-        r = Report.query.get(id)
-        if r:
-            entity_id = r.company
-        return redirect(url_for("entity.report_dashboard", id=entity_id))
+        return answer("I can't delete this report — other records still depend on it. "
+                      "Could you remove or update those first, then try again?", 409, entity_id)
     except Exception:
         logger.exception(f"Error deleting report {id}")
-        db.session.rollback()
-        flash("Something went wrong deleting that report. Mind trying again?", "danger")
-        entity_id = id
-        r = Report.query.get(id)
-        if r:
-            entity_id = r.company
-        return redirect(url_for("entity.report_dashboard", id=entity_id))
+        return answer("Something went wrong deleting that report. Mind trying again?", 500, entity_id)
+    return answer("That report's deleted.", 200, entity_id, category="success")
 
 
 @report_bp.route("/report/download/<string:id>", methods=["GET"])

@@ -495,7 +495,8 @@ def test_sales_method_service_functions_reference_expected_permissions(
     [
         ("blueprints/report/routes/report_detail.py", "report_detail", "can_view_report", None),
         ("blueprints/report/routes/report_detail.py", "edit_report", "has_permission", "REPORT_EDIT_OWN"),
-        ("blueprints/report/routes/report_detail.py", "delete_report", "can_delete_report", None),
+        # the route delegates to the shared delete (2026-10-15); the check lives there
+        ("blueprints/report/services/report_actions.py", "delete_report", "can_delete_report", None),
         ("blueprints/report/routes/submitted.py", "report_submitted", "can_view_report", None),
         ("blueprints/report/routes/export_screenshot.py", "generate_pdf_report", "can_view_report", None),
         ("blueprints/report/routes/export_screenshot.py", "report_screenshot", "can_view_report", None),

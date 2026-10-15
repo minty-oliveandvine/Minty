@@ -95,7 +95,7 @@ The Jinja routes still leave the line's own checks to the browser; the API makes
 
 The next report's date is the day after the last submitted one (`next_transaction_date`);
 a company cannot skip or duplicate a day. `POST /report/<id>/convert-to-draft` reopens a
-submitted report as the draft again (only the most recent one).
+submitted report as the draft again (only the most recent one) - see *After a report is posted*.
 
 ## Expenses in detail
 
@@ -191,9 +191,21 @@ load (the answer was never used).
   `xero_integrated` so the page offers a fresh publish, but `publishing_status` keeps the
   record that it has been to Xero, so the page warns about duplicates
   (`tests/test_char_report_lifecycle.py::test_an_edit_after_a_xero_publish_…`).
-- `POST /report/delete/<id>` deletes the report and its lines, cash counts, history and
-  **the receipts in the bucket** (`delete_expense_with_receipts`); `report_history` keeps
-  an audit trail of the day's actions (`services/history.log_history`).
+- **Reopening and deleting go through `services/report_actions.py`** (2026-10-15), shared with
+  the Petty Cash API (`POST /reports/<id>/reopen`, `DELETE /reports/<id>`). Both act on the most
+  recent report only and are refused while Xero is publishing it (the worker would mark a draft
+  published, or find no report). Fixed with the extraction: reopening a draft wiped its progress
+  (now 409); resubmitting a report reopened from Xero kept `xero_integrated`, so the changed day
+  still read "Published to Xero" (submit now clears it; `publishing_status` keeps the record);
+  the receipts were deleted from the bucket before the commit, so a failed delete lost them;
+  an unknown id flashed against the wrong company; and the Daily Report and history pages delete
+  with `fetch`, which followed every refusal's redirect to a 200 and said "deleted" - they now
+  ask for JSON and show the refusal.
+- `POST /report/delete/<id>` deletes the report and its lines, sales, cash counts, Xero sync
+  rows and **the receipts in the bucket**; `report_history` keeps an audit trail of the day's
+  actions (`services/history.log_history`). **A report that has been to Xero may be deleted**
+  (the owner, 2026-10-15): the delete dialog warns that its entries stay in Xero, that
+  publishing the day again adds a second copy, and to use Edit report to change it instead.
 - `GET /report/edit/<id>` is the older whole-report edit form (only the most recent report).
 
 ## Statuses
@@ -215,7 +227,8 @@ submitted; history, CSV, detail, delete, the publish hand-off, the receipt links
 Close, the outcome page, the Daily Report (and its share link) and history;
 `tests/test_petty_cash_ui_foundation.py` the five stages and the status tones;
 `tests/test_char_expense_attachments.py` covers the expense lines and their files;
-`tests/test_delete_report_cleanup.py` the delete cascade. In the browser,
+`tests/test_delete_report_cleanup.py` the delete cascade; `tests/test_report_actions_state.py`
+reopen and delete, `tests/test_petty_cash_api_report.py` their API routes. In the browser,
 `e2e/02_report_wizard.spec.ts` (every stage, the expense Drawer and its refused submit, the
 receipt viewer, the count and the reason gate, Close, history and the Daily Report) and
 `e2e/04_xero_publish.spec.ts` when `E2E_XERO=1`.
