@@ -108,7 +108,9 @@ assertion JWT over the shared `SECRET_KEY`, scope `xero-access-token`, the entit
 claims). minty-petty-cash-api, which holds no Xero code at all, forwards the dashboard's deposit
 correction to `POST /api/internal/xero/deposit-correction` (scope `petty-cash-deposit-correction`,
 the company and the person in the claims; Flask re-checks `REPORT_EDIT_ENTITY` and answers as its
-Petty Cash API would). Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
+Petty Cash API would), and asks `POST /api/internal/xero/publish-reasons` (scope
+`petty-cash-publish-reasons`) why its history page's failed reports didn't publish - whether a
+reason is resolved may ask Xero. Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
 normal traffic. Details and the reasons in [authentication.md](authentication.md) §7.
 
 ## 3. The petty-cash mapping

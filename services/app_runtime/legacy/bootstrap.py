@@ -287,10 +287,12 @@ def create_app():
     # Same reason: billing asks for a Xero access token with a signed Bearer
     # assertion and no cookie. Without this the CSRF handler redirects the POST to
     # the login page, `requests` follows it, and billing parses an HTML 200 as JSON.
-    from blueprints.xero.routes.routes import internal_deposit_correction, internal_xero_access_token
+    from blueprints.xero.routes.routes import (internal_deposit_correction, internal_publish_reasons,
+                                               internal_xero_access_token)
     csrf.exempt(internal_xero_access_token)
     # minty-petty-cash-api forwards the deposit correction the same way (signed assertion, no cookie).
     csrf.exempt(internal_deposit_correction)
+    csrf.exempt(internal_publish_reasons)
     # minty-web's My Profile saves the person's own name and email with the module JWT and no
     # session cookie (blueprints/shared/hub_api.py). The write can only ever touch the
     # token's own user row - there is no id in the request to forge.

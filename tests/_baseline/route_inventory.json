@@ -2605,6 +2605,21 @@
    "in_scope": true
   },
   {
+   "endpoint": "xero.internal_publish_reasons",
+   "rule": "/api/internal/xero/publish-reasons",
+   "methods": [
+    "POST"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "publish_reasons_for": [
+     "report",
+     "report_history"
+    ]
+   },
+   "in_scope": true
+  },
+  {
    "endpoint": "xero.get_latest_xero_bank_transactions",
    "rule": "/api/xero/bank-transactions/latest/<entity_id>",
    "methods": [
@@ -3622,7 +3637,7 @@
   }
  ],
  "summary": {
-  "routes": 199,
-  "in_scope": 136
+  "routes": 200,
+  "in_scope": 137
  }
 }

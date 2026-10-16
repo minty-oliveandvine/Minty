@@ -1597,6 +1597,46 @@ def internal_deposit_correction() -> ResponseReturnValue:
     return jsonify(body), status
 
 
+#: minty-petty-cash-api's scope for ``internal_publish_reasons``.
+_PUBLISH_REASONS_SCOPE = "petty-cash-publish-reasons"
+_MAX_REASON_REPORTS = 100
+
+
+@xero_bp.route("/api/internal/xero/publish-reasons", methods=["POST"])
+def internal_publish_reasons() -> ResponseReturnValue:
+    """Why each of a company's failed reports didn't publish, and whether each reason is resolved
+    now - for minty-petty-cash-api's report history (``GET /reports``), which holds no Xero code.
+    Working out "resolved" may ask Xero, so it stays here
+    (``report/services/history_query.py::publish_reasons``, the list's own).
+
+    ``{report_ids: [..]}`` (at most 100) -> ``{reasons: {report id: [{text, resolved}]}}`` for the
+    ids that are this company's; any other report has no reasons. The caller presents a 60-second
+    HS256 assertion (the shared SECRET_KEY) naming the company; the company is never read from the
+    body. It answers what the history page itself shows, so no person is named.
+
+    SECURITY: like ``/api/internal/xero/token``, not meant to be reachable from the internet.
+    """
+    from blueprints.report.services.history_query import publish_reasons_for
+
+    claims, error = _authenticate_internal_caller(_PUBLISH_REASONS_SCOPE)
+    if error:
+        logger.warning(f"internal publish reasons: rejected caller ({error})")
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True)
+    ids = body.get("report_ids") if isinstance(body, dict) else None
+    if not isinstance(ids, list) or len(ids) > _MAX_REASON_REPORTS:
+        return jsonify({"error": f"Send report_ids: a list of at most {_MAX_REASON_REPORTS} report ids."}), 422
+    try:
+        ids = [str(uuid.UUID(str(i))) for i in ids]
+    except ValueError:
+        return jsonify({"error": "Every report id must be a uuid."}), 422
+    reasons = publish_reasons_for(str(claims["entity_id"]), ids)
+    return jsonify({"reasons": {
+        report_id: [{"text": r["text"], "resolved": bool(r["resolved"])} for r in items]
+        for report_id, items in reasons.items()
+    }}), 200
+
+
 @xero_bp.route("/api/xero/bank-transactions/latest/<entity_id>",
                methods=["GET"])
 @login_required

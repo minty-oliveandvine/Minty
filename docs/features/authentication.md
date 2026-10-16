@@ -397,7 +397,9 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
   the dashboard's deposit correction to `POST /api/internal/xero/deposit-correction`: the same
   60-second assertion with its own scope (`petty-cash-deposit-correction`), the company AND the
   person (`user_id`) in the signed claims. Flask refuses an unknown or unapproved person (401) and
-  re-checks `REPORT_EDIT_ENTITY` (403). Each internal route accepts only its own scope.
+  re-checks `REPORT_EDIT_ENTITY` (403). Its history list asks `POST /api/internal/xero/publish-reasons`
+  the same way (scope `petty-cash-publish-reasons`, the company alone in the claims: it answers what
+  the history page shows). Each internal route accepts only its own scope.
 - Tokens are never logged: `tests/test_zz_no_token_logging.py` fails any logger f-string
   that formats a value named like a token.
 

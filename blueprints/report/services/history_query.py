@@ -48,6 +48,25 @@ def _status_clause(status):
     }[status]
 
 
+def publish_reasons(report, cache) -> list[dict]:
+    """A failed report's publish reasons, each marked resolved or not (which may ask Xero); [] for
+    any other report. ``cache`` is shared across one company's reports, so live Xero contacts are
+    fetched at most once."""
+    if getattr(report.publishing_status, "value", report.publishing_status) != "failed":
+        return []
+    return annotate_resolution(report.company, latest_publish_reason_items(list(report.report_histories)),
+                               report_id=report.id, cache=cache)
+
+
+def publish_reasons_for(entity_id, report_ids) -> dict[str, list[dict]]:
+    """``{report id: publish_reasons}`` for those of ``report_ids`` that are this company's - for
+    minty-petty-cash-api's history list, which holds no Xero code
+    (``xero/routes/routes.py::internal_publish_reasons``)."""
+    rows = Report.query.filter(Report.company == entity_id, Report.id.in_([str(i) for i in report_ids])).all()
+    cache = {}
+    return {str(report.id): publish_reasons(report, cache) for report in rows}
+
+
 def get_entity_report_history(
     entity_id,
     start_date="",
@@ -102,11 +121,7 @@ def get_entity_report_history(
             "first_name": (report.creator.first_name or "") if report.creator else "",
             "xero_integrated_yes": report.xero_integrated_yes or False,
             "publishing_status": report.publishing_status,
-            "publish_reasons": (
-                annotate_resolution(report.company, latest_publish_reason_items(histories),
-                                    report_id=report.id, cache=resolution_cache)
-                if failed else []
-            ),
+            "publish_reasons": publish_reasons(report, resolution_cache),
             "total_sales": report.total_sales or 0.0,
             "expenses": report.expenses or 0.0,
             "report_histories": histories,
