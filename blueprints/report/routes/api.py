@@ -16,7 +16,6 @@ from blueprints.report import report_bp
 from blueprints.report.services.file_downsize import downsize_bytes
 from blueprints.report.services.history import log_history
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from blueprints.report.services.shared import mark_diverged_from_xero
 from blueprints.shared.column_types import cents
 from blueprints.report.services.share import create_share_link_for_report
 from blueprints.report.services.shared import get_cash_sales_from_detail
@@ -891,280 +890,105 @@ def report_expense_update(expense_id):
 # ---------------------------------------------------------------------------
 
 
-def _report_for_edit(report):
-    """Authorize the current user to edit `report`; return entity_id or None.
-
-    Returns the entity_id on success, or None when unauthorized (caller turns
-    that into a 403). Only submitted Report rows are valid here.
-    """
-    if not report:
-        return None
-    entity_id = report.company
-    if not entity_id or not has_permission(
-        current_user, Permission.REPORT_EDIT_OWN, entity_id
-    ):
-        return None
-    return entity_id
-
-
 @report_bp.route("/report/expense/edit/<string:expense_id>", methods=["POST"])
 @login_required
 def report_expense_edit_submitted(expense_id):
-    """Edit non-balance fields of a SUBMITTED report's expense.
+    """Edit non-balance fields of a SUBMITTED report's expense - description, supplier, account
+    and the receipt file(s); never the amount - through ``services/report_edits.py``. A supplier
+    or account the form posts unchanged is not re-checked (it may have left Xero since)."""
+    from blueprints.report.services.report_edits import EditRefused, edit_expense_line
 
-    Editable here: description/remarks, supplier/contact, account code, and the
-    attached receipt file(s). The amount is intentionally immutable so the
-    report's cash balance is never affected; replacing the receipt photo does
-    not feed the balance, so it is permitted.
-    """
-    from blueprints.report.services.s3_storage import upload_file_to_s3
-    from services.helpers.xero_bridge import resolve_contact_name
-
+    expense = ShopExpense.query.get(expense_id)
+    if not expense:
+        return jsonify({"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
+    form = request.form
+    contact_id = form.get("contactId") or None
+    account_id = form.get("accountId") or None
+    receipts = []
+    index = 0
+    while f"files[0][{index}]" in request.files:
+        upload = request.files[f"files[0][{index}]"]
+        if upload and (upload.filename or "").strip():
+            receipts.append(upload)
+        index += 1
     try:
-        expense = ShopExpense.query.get(expense_id)
-        if not expense:
-            return jsonify(
-                {"status": "error", "message": "Hmm, I couldn't find that expense."}), 404
-
-        report = Report.query.filter_by(id=expense.report_id).first()
-        entity_id = _report_for_edit(report)
-        if not entity_id:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "It looks like you don't have permission to edit this expense.",
-                    }
-                ),
-                403,
-            )
-
-        contact_id = request.form.get("contactId") or expense.contact_id
-        contact_name = request.form.get("contactName") or expense.contact_name
-        if contact_id and not contact_name:
-            contact_name = resolve_contact_name(entity_id, contact_id)
-        account_id = request.form.get("accountId") or expense.account_id
-        account_code = request.form.get("account_code") or expense.account_code
-        item_code = request.form.get("item_code") or expense.item_code
-        remarks = request.form.get("remarks", expense.remarks or "")
-
-        # Optional receipt replacement: only when the client uploads at least
-        # one new file under files[0][n]. The amount is left untouched, so the
-        # cash balance is unaffected; when omitted, existing files are kept.
-        new_files = []
-        file_index = 0
-        while True:
-            file_key = f"files[0][{file_index}]"
-            if file_key in request.files:
-                f = request.files[file_key]
-                if f and f.filename.strip():
-                    new_files.append(f)
-                file_index += 1
-            else:
-                break
-
-        if new_files:
-            description = expense.item or remarks or "EXPENSE"
-            file_paths = []
-            for idx, f in enumerate(new_files):
-                file_path = upload_file_to_s3(
-                    f,
-                    str(report.id),
-                    transaction_date=report.transaction_date,
-                    description=description,
-                    amount=expense.amount,
-                    file_index=idx if len(new_files) > 1 else None,
-                )
-                file_paths.append(file_path)
-            expense.set_receipts(
-                [(path, f.filename, f.mimetype) for f, path in zip(new_files, file_paths)],
-                uploaded_by=current_user.id,
-            )
-
-        # Non-balance fields only — the amount is never touched.
-        expense.remarks = remarks
-        expense.contact_id = contact_id
-        expense.contact_name = contact_name
-        expense.account_id = account_id
-        expense.account_code = account_code
-        expense.item_code = item_code
-
-        # Editing a submitted report makes its data diverge from what was pushed
-        # to Xero, so clear the integrated flag — it shows as "Submitted" in
-        # report history again and can be published afresh. publishing_status is
-        # left intact so the publish flow still knows it was previously published
-        # and can warn about Xero duplicates.
-        if report:
-            mark_diverged_from_xero(report)
-
-        db.session.commit()
-        return jsonify(
-            {
-                "status": "success",
-                "message": "Expense updated successfully.",
-                "expense": {
-                    "id": expense.id,
-                    "item": expense.item or "",
-                    "amount": expense.amount or 0,
-                    "remarks": expense.remarks or "",
-                    "account_code": expense.account_code or "",
-                    "item_code": expense.item_code or "",
-                    "account_id": expense.account_id or "",
-                    "contact_id": expense.contact_id or "",
-                    "contact_name": expense.contact_name or "",
-                },
-            }
+        edit_expense_line(
+            expense,
+            current_user,
+            remarks=form.get("remarks") if "remarks" in form else None,
+            supplier_id=contact_id if contact_id and contact_id != expense.contact_id else None,
+            account_id=account_id if account_id and account_id != expense.account_id else None,
+            receipts=receipts,
         )
+    except EditRefused as refused:
+        return jsonify({"status": "error", "message": refused.message}), refused.status
     except Exception as e:
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
         logger.error(f"Error editing submitted expense: {str(e)}")
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": "Something went wrong on my end while updating that expense. Mind trying again?",
-                }
-            ),
-            500,
-        )
+        return jsonify({"status": "error",
+                        "message": "Something went wrong on my end while updating that expense. Mind trying again?"}), 500
+    return jsonify(
+        {
+            "status": "success",
+            "message": "Expense updated successfully.",
+            "expense": {
+                "id": expense.id,
+                "item": expense.item or "",
+                "amount": expense.amount or 0,
+                "remarks": expense.remarks or "",
+                "account_code": expense.account_code or "",
+                "item_code": expense.item_code or "",
+                "account_id": expense.account_id or "",
+                "contact_id": expense.contact_id or "",
+                "contact_name": expense.contact_name or "",
+            },
+        }
+    )
 
 
 @report_bp.route("/report/<string:id>/edit/discrepancy-reason",
                  methods=["POST"])
 @login_required
 def report_edit_discrepancy_reason(id):
-    """Edit only the free-text discrepancy reason of a SUBMITTED report.
+    """Edit only the free-text discrepancy reason of a SUBMITTED report (the amount and type come
+    from the cash count and stay locked) - ``services/report_edits.py``."""
+    from blueprints.report.services.report_edits import EditRefused, edit_difference_reason
 
-    The discrepancy amount and type are derived from the cash count and stay
-    locked; only the explanation text is editable.
-    """
+    report = Report.query.filter_by(id=id).first()
+    if report is None:
+        return jsonify({"status": "error", "message": "It looks like you don't have permission to edit this report."}), 403
     try:
-        report = Report.query.filter_by(id=id).first()
-        entity_id = _report_for_edit(report)
-        if not entity_id:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "It looks like you don't have permission to edit this report.",
-                    }
-                ),
-                403,
-            )
-
-        # Column is String(300); trim to fit.
-        reason = (request.form.get("discrepancy_reason") or "").strip()[:300]
-        report.discrepancy_reason = reason
-
-        # Both mirror writes that used to sit here went with Step 3.5:
-        #
-        #   ReportCashCountDraft.discrepancy_reason — the cash count page now
-        #     reads the reason off `report`, which the line above already set.
-        #   ReportDetail.discrepancy_description    — the comment claiming
-        #     "Xero/exports read ReportDetail" was stale; nothing in the
-        #     codebase ever read it back. publish.py, the download and the
-        #     export-screenshot paths all read `report` directly.
-
-        # Editing diverges the report from Xero — back to "submitted" while
-        # keeping publishing_status as the "was previously published" marker.
-        mark_diverged_from_xero(report)
-
-        db.session.commit()
-        return jsonify(
-            {
-                "status": "success",
-                "message": "Discrepancy reason updated successfully.",
-                "discrepancy_reason": report.discrepancy_reason or "",
-            }
-        )
+        reason = edit_difference_reason(report, current_user, request.form.get("discrepancy_reason"))
+    except EditRefused as refused:
+        return jsonify({"status": "error", "message": refused.message}), refused.status
     except Exception as e:
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
         logger.error(f"Error editing discrepancy reason: {str(e)}")
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": "Something went wrong on my end while updating that report. Mind trying again?",
-                }
-            ),
-            500,
-        )
+        return jsonify({"status": "error",
+                        "message": "Something went wrong on my end while updating that report. Mind trying again?"}), 500
+    return jsonify({"status": "success", "message": "Discrepancy reason updated successfully.",
+                    "discrepancy_reason": reason})
 
 
 @report_bp.route("/report/<string:id>/edit/withdrawal", methods=["POST"])
 @login_required
 def report_edit_withdrawal(id):
-    """Edit only the "withdrawal from" source of a SUBMITTED report.
+    """Edit only where an addition to the drawer came from (personal / company) on a SUBMITTED
+    report - the amount is locked; this feeds the Xero mapping, not the cash balance -
+    ``services/report_edits.py``."""
+    from blueprints.report.services.report_edits import EditRefused, edit_withdrawal
 
-    The cash amount (cash_addition) is locked; this changes only where the
-    cash came from (withdrawal_type + bank account), which feeds Xero mapping,
-    not the cash balance. Persisted on the report row — the submitted
-    Report has no withdrawal columns and Xero reads them from the draft
-    (matched by company + transaction_date).
-    """
+    report = Report.query.filter_by(id=id).first()
+    if report is None:
+        return jsonify({"status": "error", "message": "It looks like you don't have permission to edit this report."}), 403
     try:
-        report = Report.query.filter_by(id=id).first()
-        entity_id = _report_for_edit(report)
-        if not entity_id:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "It looks like you don't have permission to edit this report.",
-                    }
-                ),
-                403,
-            )
-
-        withdrawal_type = (request.form.get("withdrawal_type") or "").strip()
-        if withdrawal_type not in ("personal", "company"):
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "That withdrawal type doesn't look quite right to me.",
-                    }
-                ),
-                400,
-            )
-        # The bank account is not per report: a company withdrawal always comes from
-        # the main bank account on entity_pettycash_settings (schema item 13).
-        report.cash_addition_type = withdrawal_type
-
-        # Editing diverges the report from Xero — back to "submitted" while
-        # keeping publishing_status as the "was previously published" marker.
-        mark_diverged_from_xero(report)
-
-        db.session.commit()
-        return jsonify(
-            {
-                "status": "success",
-                "message": "Withdrawal source updated successfully.",
-                "withdrawal_type": report.withdrawal_type,
-                "withdrawal_bank_account": "",
-            }
-        )
+        kind = edit_withdrawal(report, current_user, request.form.get("withdrawal_type"))
+    except EditRefused as refused:
+        return jsonify({"status": "error", "message": refused.message}), refused.status
     except Exception as e:
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
         logger.error(f"Error editing withdrawal source: {str(e)}")
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": "Something went wrong on my end while updating that report. Mind trying again?",
-                }
-            ),
-            500,
-        )
+        return jsonify({"status": "error",
+                        "message": "Something went wrong on my end while updating that report. Mind trying again?"}), 500
+    return jsonify({"status": "success", "message": "Withdrawal source updated successfully.",
+                    "withdrawal_type": kind, "withdrawal_bank_account": ""})
 
 
 @report_bp.route("/report/expense/delete/<string:expense_id>",

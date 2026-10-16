@@ -187,7 +187,12 @@ load (the answer was never used).
 - Edits that do not change balances stay allowed on a submitted report: the discrepancy
   reason (`POST /report/<id>/edit/discrepancy-reason`), the withdrawal source
   (`…/edit/withdrawal`), an expense line's non-balance fields
-  (`POST /report/expense/edit/<id>`). An edit after a Xero publish clears
+  (`POST /report/expense/edit/<id>`). **They go through `services/report_edits.py`** since
+  2026-10-16, shared with the Petty Cash API; fixed on the way: a draft or a report Xero is
+  publishing is refused, a difference keeps its reason and a long one is refused rather than cut,
+  a line's account and supplier must be the company's own, a new account renames the line, a new
+  receipt is checked like the Expenses step's and the replaced file leaves the bucket
+  (`tests/test_report_edits_state.py`). An edit after a Xero publish clears
   `xero_integrated` so the page offers a fresh publish, but `publishing_status` keeps the
   record that it has been to Xero, so the page warns about duplicates
   (`tests/test_char_report_lifecycle.py::test_an_edit_after_a_xero_publish_…`).

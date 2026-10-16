@@ -43,7 +43,8 @@ def test_the_daily_report_brings_the_day_and_what_may_be_done(app, client, db, s
     assert body["cash"]["expected"] == 55 and body["cash"]["counted"] == 55
     assert body["cash"]["difference"] == {"amount": 0, "kind": "none", "reason": ""}
     assert body["closing_balance"] == 55 and body["submitted_at"]
-    assert body["permissions"] == {"edit": True, "delete": True, "publish": True, "share": True}
+    assert body["permissions"] == {"edit": True, "delete": True, "publish": True, "share": True, "edit_details": True}
+    assert body["options"] == {"suppliers": [], "accounts": []}
 
 
 def test_the_daily_report_compares_with_the_day_before_as_close_does(app, client, db, shop):  # noqa: F811
@@ -188,3 +189,69 @@ def test_a_submitted_day_gets_a_share_link_and_a_draft_does_not(app, client, db,
     _set(app, report, status="draft")
     refused = client.post(_url(entity, report, "/share-link"), headers=_headers(app, owner))
     assert refused.status_code == 409
+
+
+# --- a submitted report's details (report_edits; pinned by tests/test_report_edits_state.py) ------
+
+
+def test_the_reason_and_the_withdrawal_are_edited_and_the_day_comes_back(app, client, db, shop):  # noqa: F811
+    owner, entity = shop
+    report = _submitted(app, client, db, entity, owner)
+    _set(app, report, xero_integrated=True, publishing_status="completed", status="published")
+
+    resp = client.put(_url(entity, report, "/difference-reason"), json={"reason": " recounted "}, headers=_headers(app, owner))
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["cash"]["difference"]["reason"] == "recounted"
+    assert resp.get_json()["status_label"] == "Submitted"  # out of Xero until it is published again
+
+    resp = client.put(_url(entity, report, "/withdrawal"), json={"withdrawal_type": "company"}, headers=_headers(app, owner))
+    assert resp.status_code == 200 and resp.get_json()["cash"]["cash_addition_type"] == "company"
+    bad = client.put(_url(entity, report, "/withdrawal"), json={"withdrawal_type": "bank"}, headers=_headers(app, owner))
+    assert bad.status_code == 400
+
+
+def test_an_older_report_s_details_may_be_edited(app, client, db, shop):  # noqa: F811
+    owner, entity = shop
+    older = _older(app, db, entity, owner)
+    _submitted(app, client, db, entity, owner)
+
+    body = client.get(_url(entity, older), headers=_headers(app, owner)).get_json()
+    assert body["permissions"]["edit"] is False and body["permissions"]["edit_details"] is True
+    resp = client.put(_url(entity, older, "/difference-reason"), json={"reason": "late note"}, headers=_headers(app, owner))
+    assert resp.status_code == 200, resp.get_json()
+
+
+@pytest.mark.parametrize("fields, status, message", [
+    ({"status": "draft"}, 409, "This report is still a draft. Change it in the Daily Closing."),
+    ({"publishing_status": "publishing"}, 409, "Xero is still publishing this report. Wait until it finishes, then edit it."),
+])
+def test_a_draft_or_a_report_being_published_keeps_its_details(app, client, db, shop, fields, status, message):  # noqa: F811
+    owner, entity = shop
+    report = _submitted(app, client, db, entity, owner)
+    _set(app, report, **fields)
+
+    assert client.get(_url(entity, report), headers=_headers(app, owner)).get_json()["permissions"]["edit_details"] is False
+    resp = client.put(_url(entity, report, "/difference-reason"), json={"reason": "x"}, headers=_headers(app, owner))
+    assert resp.status_code == status and resp.get_json() == {"error": message}
+
+
+def test_an_expense_line_of_another_report_or_company_is_not_found(app, client, db, shop):  # noqa: F811
+    from models.db import ShopExpense
+
+    owner, entity = shop
+    older = _older(app, db, entity, owner)
+    report = _submitted(app, client, db, entity, owner)
+    with app.app_context():
+        line_id = str(ShopExpense.query.filter_by(report_id=report).first().id)
+
+    assert client.patch(_url(entity, older, f"/expense-lines/{line_id}"), data={"remarks": "x"},
+                        headers=_headers(app, owner)).status_code == 404
+    assert client.patch(_url(entity, report, f"/expense-lines/{uuid.uuid4()}"), data={"remarks": "x"},
+                        headers=_headers(app, owner)).status_code == 404
+    done = client.patch(_url(entity, report, f"/expense-lines/{line_id}"), data={"remarks": "Posters"},
+                        headers=_headers(app, owner))
+    assert done.status_code == 200, done.get_json()
+    assert done.get_json()["expenses"]["lines"][0]["remarks"] == "Posters"
+    refused = client.patch(_url(entity, report, f"/expense-lines/{line_id}"), data={"account_id": "acc-elsewhere"},
+                           headers=_headers(app, owner))
+    assert refused.status_code == 422 and refused.get_json() == {"error": "Choose an account code from the list."}

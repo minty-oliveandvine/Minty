@@ -25,6 +25,31 @@ class ExpenseRefused(Exception):
 
 
 NOT_A_DRAFT = "This report isn't a draft anymore, so I can't change its expenses."
+MAX_RECEIPT_BYTES = 10 * 1024 * 1024
+
+
+def checked_receipt(upload):
+    """One uploaded receipt checked as the Expenses step takes it: ``(upload, None)`` - its
+    Content-Type set to what the bytes are (PDF, JPEG or PNG) - or ``(None, the refusal)``."""
+    import os
+
+    from blueprints.report.services.expense_ai import sniff_mime
+
+    upload.stream.seek(0, os.SEEK_END)
+    size = upload.stream.tell()
+    upload.stream.seek(0)
+    if size == 0:
+        return None, "That file is empty. Attach the receipt again."
+    if size > MAX_RECEIPT_BYTES:
+        return None, "Attach a file of 10 MB or less."
+    mime = sniff_mime(upload.stream.read(16))
+    upload.stream.seek(0)
+    if mime is None:
+        return None, "Attach a PDF, JPEG or PNG file."
+    # Stored as what the bytes are, not what the browser claimed (FileStorage parses this header
+    # lazily, and nothing has read it yet).
+    upload.headers["Content-Type"] = mime
+    return upload, None
 
 
 def suppliers(entity_id):

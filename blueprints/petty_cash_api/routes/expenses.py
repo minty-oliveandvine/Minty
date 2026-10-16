@@ -107,30 +107,15 @@ def _amount(raw) -> float | None:
 
 
 def _receipt():
-    """The uploaded receipt as ``(file, mime)``, or a refusal sentence."""
-    from blueprints.report.services.expense_ai import sniff_mime
+    """The uploaded receipt (checked by ``expenses.checked_receipt``), or a refusal sentence."""
+    from blueprints.report.services.expenses import checked_receipt
 
     files = [f for f in request.files.getlist("receipt") if f and (f.filename or "").strip()]
     if not files:
         return None, "Attach the receipt to add this expense."
     if len(files) > 1:
         return None, "Attach one receipt per expense."
-    upload = files[0]
-    upload.stream.seek(0, os.SEEK_END)
-    size = upload.stream.tell()
-    upload.stream.seek(0)
-    if size == 0:
-        return None, "That file is empty. Attach the receipt again."
-    if size > MAX_RECEIPT_BYTES:
-        return None, "Attach a file of 10 MB or less."
-    mime = sniff_mime(upload.stream.read(16))
-    upload.stream.seek(0)
-    if mime is None:
-        return None, "Attach a PDF, JPEG or PNG file."
-    # Stored as what the bytes are, not what the browser claimed (FileStorage parses this header
-    # lazily, and nothing has read it yet).
-    upload.headers["Content-Type"] = mime
-    return upload, None
+    return checked_receipt(files[0])
 
 
 @petty_cash_api_bp.post("/reports/expenses/lines")
