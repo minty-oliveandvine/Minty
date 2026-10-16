@@ -303,6 +303,10 @@ def test_saving_the_company_s_settings(app, client, db, shop):
     ):
         resp = call(client, app, "PATCH", "/api/me/company/integration", shop["admin"], entity, json=body)
         assert resp.status_code == status, (body, resp.get_json())
+        if "country_code" in body:
+            assert resp.get_json()["error"] == "Pick one of the countries offered."
+        if "currency_id" in body:
+            assert resp.get_json()["error"] == "Pick one of the currencies offered."
 
     saved = call(client, app, "PATCH", "/api/me/company/integration", shop["admin"], entity,
                  json={"name": "Olive and Vine Ltd", "country_code": "hk"})

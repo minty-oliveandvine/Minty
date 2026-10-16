@@ -79,6 +79,14 @@ exist before a company is created (the onboarding wizard's Step 1 reads them fro
 `/api/onboarding/countries` and `/currencies`). Changing the country is
 `POST /entity/<co>/settings/petty-cash` (`ENTITY_UPDATE`).
 
+**For minty-petty-cash-web** (2026-10-16) the Petty Cash API serves the two cards that need no
+Xero - Country & currency and the Electronic / Delivery sales methods - over the same services:
+`GET /settings`, `PUT /settings/country`, `POST`/`PUT`/`DELETE /sales-methods...`
+(`docs/features/petty-cash-api.md`). The Xero mapping and the account codes stay on this page for
+now. The API refuses an unknown country or currency (this page's form skips it), through
+`country_currency.checked_country_currency`, which minty-web's Entities & Integration save now
+shares.
+
 ## Denominations (the cash count)
 
 `cash_info` is the catalogue of a currency's notes and coins, unique on (currency, value), so

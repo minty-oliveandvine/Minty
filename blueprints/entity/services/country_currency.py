@@ -3,6 +3,8 @@ Entity & Integration tab through ``routes/hub_settings.py``)."""
 
 from __future__ import annotations
 
+import uuid
+
 from models.db import CountryInfo, CurrencyInfo, db
 
 
@@ -68,3 +70,26 @@ def country_currency_choices(org):
         (c for c in currencies if c["currency_id"] == org.currency_id), None
     )
     return country_code, currencies, selected_country, selected_currency
+
+
+def checked_country_currency(data) -> tuple[dict, str | None]:
+    """The ``country_code`` / ``currency_id`` a save sent, checked against the registries:
+    ``(fields for apply_country_currency_selection, None)``, or ``({}, the sentence that refuses
+    them)``. An unknown country or currency is refused, never skipped. Shared by minty-web's
+    Entities & Integration save and the Petty Cash API's settings save."""
+    fields = {}
+    country_code = str(data.get("country_code") or "").strip().upper()
+    if country_code:
+        if db.session.get(CountryInfo, country_code) is None:
+            return {}, "Pick one of the countries offered."
+        fields["country_code"] = country_code
+    currency_id = str(data.get("currency_id") or "").strip()
+    if currency_id:
+        try:
+            uuid.UUID(currency_id)
+        except ValueError:
+            return {}, "Pick one of the currencies offered."
+        if db.session.get(CurrencyInfo, currency_id) is None:
+            return {}, "Pick one of the currencies offered."
+        fields["currency_id"] = currency_id
+    return fields, None

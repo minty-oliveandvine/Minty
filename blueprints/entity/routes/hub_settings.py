@@ -458,11 +458,11 @@ def _save_integration(user, entity_id, data: dict):
     """The name (``ENTITY_RENAME``: admins), the country and the currency. An unknown country
     or currency is refused, not skipped; an explicit currency wins, and a country alone
     brings its own (``apply_country_currency_selection``)."""
+    from blueprints.entity.services.country_currency import checked_country_currency
     from blueprints.entity.services.xero_account_mapping_post import apply_country_currency_selection
-    from models.db import CountryInfo, CurrencyInfo, Entity, db
+    from models.db import Entity, db
 
     org = db.session.get(Entity, entity_id)
-    fields = {}
     if "name" in data:
         name = str(data.get("name") or "").strip()
         if name != (org.name or ""):
@@ -476,20 +476,9 @@ def _save_integration(user, entity_id, data: dict):
             if Entity.query.filter(Entity.name == name, Entity.id != entity_id).first():
                 return hub_api.refuse("Oh, someone got there first! Do you have another name in mind?", 422)
             org.name = name
-    country_code = str(data.get("country_code") or "").strip().upper()
-    if country_code:
-        if db.session.get(CountryInfo, country_code) is None:
-            return hub_api.refuse("Pick one of the countries offered.", 422)
-        fields["country_code"] = country_code
-    currency_id = str(data.get("currency_id") or "").strip()
-    if currency_id:
-        try:
-            uuid.UUID(currency_id)
-        except ValueError:
-            return hub_api.refuse("Pick one of the currencies offered.", 422)
-        if db.session.get(CurrencyInfo, currency_id) is None:
-            return hub_api.refuse("Pick one of the currencies offered.", 422)
-        fields["currency_id"] = currency_id
+    fields, problem = checked_country_currency(data)
+    if problem:
+        return hub_api.refuse(problem, 422)
     try:
         apply_country_currency_selection(org, fields)
         db.session.commit()

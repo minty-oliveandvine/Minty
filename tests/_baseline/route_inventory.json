@@ -3634,10 +3634,88 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.settings_page",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/settings",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "country_info",
+    "currency_info",
+    "entity_sale_setting",
+    "sale_info"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_country",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/settings/country",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "entities",
+    "entity_cash_setting"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.add_sales_method",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/sales-methods",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "entity_sale_setting",
+    "sale_info"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.reorder_sales_methods",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/sales-methods/order",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "entity_sale_setting"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.rename_sales_method",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/sales-methods/<method_id>",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "sale_info"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.remove_sales_method",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/sales-methods/<method_id>",
+   "methods": [
+    "DELETE"
+   ],
+   "touches": [
+    "entity_sale_setting"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 200,
-  "in_scope": 137
+  "routes": 206,
+  "in_scope": 143
  }
 }
