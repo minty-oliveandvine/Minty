@@ -3605,10 +3605,24 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.report_history",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "report_history",
+    "user"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 197,
-  "in_scope": 134
+  "routes": 199,
+  "in_scope": 136
  }
 }

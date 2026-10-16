@@ -9,3 +9,4 @@ from . import expenses  # noqa: F401
 from . import cash  # noqa: F401
 from . import close  # noqa: F401
 from . import report  # noqa: F401
+from . import history  # noqa: F401

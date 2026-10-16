@@ -208,6 +208,19 @@ load (the answer was never used).
   publishing the day again adds a second copy, and to use Edit report to change it instead.
 - `GET /report/edit/<id>` is the older whole-report edit form (only the most recent report).
 
+## Report history
+
+`GET /entity/<id>/petty-cash/reports` lists the company's reports, newest day first, through
+`services/history_query.py::get_entity_report_history` - shared with the Petty Cash API's
+`GET /reports`. Filters: a Status chip (`draft`, `submitted`, `published`, `failed` - Publish failed
+and Publishing to Xero together; the tones of `report_status`), a date range (both dates; one alone
+is ignored), 10/25/50/100 a page. Since 2026-10-15 it filters, counts and pages **in SQL** (it
+loaded every report the company had and cut the page in Python, with a user lookup per row); a
+failed row's publish reasons, which may ask Xero, are worked out only for the rows on the page
+(every failed report was resolved on every load). The dead draft merge and the per-day dedup went
+with it: a draft is a `report` row, one per company and day. A start date after the end date still
+answers the page with a JSON 400 (`tests/test_report_history_state.py`).
+
 ## Statuses
 
 `draft` → `submitted` → `published` (written only when the Xero publish completes) →
@@ -228,7 +241,8 @@ Close, the outcome page, the Daily Report (and its share link) and history;
 `tests/test_petty_cash_ui_foundation.py` the five stages and the status tones;
 `tests/test_char_expense_attachments.py` covers the expense lines and their files;
 `tests/test_delete_report_cleanup.py` the delete cascade; `tests/test_report_actions_state.py`
-reopen and delete, `tests/test_petty_cash_api_report.py` their API routes. In the browser,
+reopen and delete, `tests/test_petty_cash_api_report.py` their API routes;
+`tests/test_report_history_state.py` the history list, `tests/test_petty_cash_api_history.py` its API route. In the browser,
 `e2e/02_report_wizard.spec.ts` (every stage, the expense Drawer and its refused submit, the
 receipt viewer, the count and the reason gate, Close, history and the Daily Report) and
 `e2e/04_xero_publish.spec.ts` when `E2E_XERO=1`.
