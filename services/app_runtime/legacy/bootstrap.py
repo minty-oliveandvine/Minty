@@ -297,6 +297,9 @@ def create_app():
     csrf.exempt(internal_publish_reasons)
     csrf.exempt(internal_publish)
     csrf.exempt(internal_xero_settings)
+    # ... and a receipt to be read by the model (it holds no model code).
+    from blueprints.report.routes.expense_ai import internal_expense_extract
+    csrf.exempt(internal_expense_extract)
     # minty-web's My Profile saves the person's own name and email with the module JWT and no
     # session cookie (blueprints/shared/hub_api.py). The write can only ever touch the
     # token's own user row - there is no id in the request to forge.
