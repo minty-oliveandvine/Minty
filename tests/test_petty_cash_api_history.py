@@ -33,6 +33,7 @@ def test_one_page_newest_first_with_what_may_be_done(app, client, db, shop):  # 
     assert (first["status"], first["status_label"], first["status_tone"]) == ("submitted", "Submitted", "info")
     assert first["submitted_by"] == "Olive" and first["publish_reasons"] == []
     assert first["was_published"] is False and body["reports"][1]["was_published"] is True
+    assert (first["publishing_status"], body["reports"][1]["publishing_status"]) == ("unpublished", "failed")
     assert first["permissions"] == {"edit": True, "delete": True}
     assert body["reports"][1]["status_label"] == "Publish failed"
     assert body["reports"][1]["permissions"] == {"edit": False, "delete": False}

@@ -5,6 +5,11 @@
 newest day first, each with its Status pill, its figures, who submitted it, a failed publish's
 reasons and what this person may do to it. The Jinja page quietly falls back on a bad filter;
 this refuses it (422), so the app never shows a list it did not ask for.
+
+``GET /reports/export.csv?start_date=&end_date=``: the movements CSV of the submitted reports in the
+range (``report/services/report_csv.py``, the Jinja page's Export CSV too), as a file. Both dates,
+``YYYY-MM-DD``, start on or before end, at most a year (366 days); a bad range is 422, a range with
+nothing to export 404 - each ``{error}``. Static, so ``/reports/<report_id>`` never captures it.
 """
 from __future__ import annotations
 
@@ -15,6 +20,15 @@ from blueprints.petty_cash_api.api import company, refuse, respond, user
 from blueprints.petty_cash_api.routes.opening import _currency_code
 
 PER_PAGE = (10, 25, 50, 100)
+#: The export's sentence for each refused range (``report_csv.parse_range``'s reasons).
+EXPORT_REFUSALS = {
+    "missing": "Choose both dates to export the reports between them.",
+    "format": "A date isn't in the YYYY-MM-DD form. Choose it from the calendar.",
+    "order": "The start date is after the end date. Choose a start on or before the end.",
+    "too_long": "The range is longer than a year. Choose 366 days or fewer.",
+}
+NO_EXPORT_ACCESS = "You don't have permission to export this company's reports."
+NOTHING_TO_EXPORT = "There are no submitted reports between those dates. Choose another range."
 
 
 def _money(value) -> float:
@@ -95,6 +109,8 @@ def report_history():
             "submitted_at": _iso(row.submitted_at),
             "published_at": _iso(row.published_at),
             # it has been to Xero, even if edited since: the delete warns (as GET /reports/<id>)
+            # a row already publishing when the list loads can be watched (GET .../publishing-status)
+            "publishing_status": _word(row.publishing_status),
             "was_published": bool(row.xero_integrated_yes) or _word(row.publishing_status) not in (None, "unpublished"),
             "publish_reasons": [{"text": r["text"], "resolved": bool(r["resolved"])} for r in row.publish_reasons],
             "permissions": {
@@ -112,3 +128,27 @@ def report_history():
         "currency_code": _currency_code(entity_id),
         "can_publish": has_permission(person, Permission.REPORT_PUBLISH, entity_id),
     })
+
+
+@petty_cash_api_bp.get("/reports/export.csv")
+def report_export_csv():
+    from flask import make_response, request
+
+    from blueprints.report.services import report_csv
+
+    entity_id = company()["id"]
+    if not report_csv.may_export(user(), entity_id):
+        return refuse(NO_EXPORT_ACCESS, 403)
+    try:
+        first, last = report_csv.parse_range(request.args.get("start_date"), request.args.get("end_date"))
+    except report_csv.RangeRefused as refused:
+        return refuse(EXPORT_REFUSALS[refused.reason], 422)
+    rows = report_csv.movements(entity_id, report_csv.submitted_reports(entity_id, first, last))
+    if not rows:
+        return refuse(NOTHING_TO_EXPORT, 404)
+    resp = make_response(report_csv.to_csv(rows))
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = report_csv.export_disposition(company().get("name"), first, last)
+    # the app reads the file name from a cross-origin fetch
+    resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return resp

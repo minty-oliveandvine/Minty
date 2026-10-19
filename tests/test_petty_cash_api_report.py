@@ -9,6 +9,7 @@ import uuid
 import char_factories as F
 import pytest
 from test_report_actions_state import _older, _set, _submitted  # noqa: F401
+from test_report_publish_state import _wait, xero  # noqa: F401  (Xero stubbed)
 from test_report_submit_state import D3, _ready, _row, db, shop  # noqa: F401  (fixtures)
 
 pytestmark = pytest.mark.char
@@ -255,3 +256,58 @@ def test_an_expense_line_of_another_report_or_company_is_not_found(app, client, 
     refused = client.patch(_url(entity, report, f"/expense-lines/{line_id}"), data={"account_id": "acc-elsewhere"},
                            headers=_headers(app, owner))
     assert refused.status_code == 422 and refused.get_json() == {"error": "Choose an account code from the list."}
+
+
+# --- publishing to Xero (publish_start; pinned by tests/test_report_publish_state.py) ------------
+
+
+def test_publishing_starts_the_worker_and_the_status_follows_it(app, client, db, shop, xero):  # noqa: F811
+    owner, entity = shop
+    report = _submitted(app, client, db, entity, owner)
+
+    resp = client.post(_url(entity, report, "/publish"), headers=_headers(app, owner))
+
+    assert resp.status_code == 202, resp.get_json()
+    assert resp.get_json()["publishing_status"] == "publishing"
+    assert str(_wait(xero.started)[0][2]) == report
+    status = client.get(_url(entity, report, "/publishing-status"), headers=_headers(app, owner)).get_json()
+    assert (status["publishing_status"], status["status_label"], status["reasons"]) == ("publishing", "Publishing to Xero", [])
+
+    again = client.post(_url(entity, report, "/publish"), headers=_headers(app, owner))
+    assert again.status_code == 409
+
+
+def test_publishing_says_when_xero_must_be_connected_again(app, client, db, shop, xero):  # noqa: F811
+    owner, entity = shop
+    report = _submitted(app, client, db, entity, owner)
+    xero.token = None
+
+    resp = client.post(_url(entity, report, "/publish"), headers=_headers(app, owner))
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "I've lost access to your Xero account. Mind reconnecting it in Settings?",
+                               "reconnect": True}
+
+
+def test_a_draft_or_a_stranger_s_report_is_not_published(app, client, db, shop, xero):  # noqa: F811
+    owner, entity = shop
+    report = _submitted(app, client, db, entity, owner)
+    _set(app, report, status="draft")
+
+    resp = client.post(_url(entity, report, "/publish"), headers=_headers(app, owner))
+    assert resp.status_code == 409
+    assert client.post(_url(entity, uuid.uuid4(), "/publish"), headers=_headers(app, owner)).status_code == 404
+    assert not xero.started
+
+
+def test_a_failed_publish_brings_its_reasons(app, client, db, shop, monkeypatch):  # noqa: F811
+    owner, entity = shop
+    report = _submitted(app, client, db, entity, owner)
+    _set(app, report, publishing_status="failed")
+    monkeypatch.setattr("blueprints.report.services.history_query.annotate_resolution",
+                        lambda *a, **k: [{"text": "No account code for Fees", "resolved": True, "resolvable": True}])
+
+    body = client.get(_url(entity, report, "/publishing-status"), headers=_headers(app, owner)).get_json()
+
+    assert body["status_label"] == "Publish failed"
+    assert body["reasons"] == [{"text": "No account code for Fees", "resolved": True}]

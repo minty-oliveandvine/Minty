@@ -167,7 +167,7 @@ def test_the_outcome_says_what_was_counted_and_what_happens_next(app, client, db
     assert body["report_id"] == report and body["submitted"] is True and body["status"] == "submitted"
     assert body["cash_counted"] == 50
     assert body["difference"] == {"amount": -5, "kind": "short", "has_reason": True}
-    assert body["xero"]["xero_integrated"] is False
+    assert body["xero"]["xero_integrated"] is False and body["xero"]["was_published"] is False
     assert body["next_day"] == (D3.fromordinal(D3.toordinal() + 1)).isoformat()
     assert body["company_name"] == "Acme Shop" and body["submitted_at"]
 

@@ -1,6 +1,5 @@
 """Entity settings and contact routes."""
 
-import html
 from typing import Protocol
 from urllib.parse import urlencode
 
@@ -14,21 +13,14 @@ from blueprints.entity import entity_bp
 from blueprints.entity.routes.modules import (billing_settings_app_url,
                                               minty_web_module_page_url)
 from blueprints.entity.services.settings import (
-    COA_INCLUDED_TYPES, saveable_account_codes,
-    sync_chart_of_accounts_if_changed, sync_contacts_if_changed_background,
-    sync_entity_account_xero_active, sync_xero_accounts_to_db_background,
-    sync_xero_coa_pettycash)
+    saveable_account_codes,
+    sync_entity_account_xero_active)
 from blueprints.entity.services.xero_account_mapping_post import (
     apply_country_currency_selection, process_xero_account_mapping_post)
 from blueprints.entity.services.country_currency import country_currency_choices
-from blueprints.xero.services.settings import sync_entity_xero_status
-from models.db import (AccountInfo, Entity,
-                       EntityAccountXero, EntityPettycashSettings, db)
-from services.app_runtime.legacy.xero_service import (
-    account_info_to_xero_format)
-from services.auth.token_service import (ensure_valid_token,
-                                         get_xero_token_user_for_entity,
-                                         resolve_xero_token)
+from models.db import (Entity,
+                       EntityPettycashSettings, db)
+from services.auth.token_service import (ensure_valid_token)
 from services.authz import (permission_denied, require_entity_access,
                             require_module, require_permission)
 from services.permission_policy import Permission, has_permission
@@ -47,45 +39,18 @@ def _redirect_xero_mapping(entity_id: str, *, return_view: str):
 
 
 def _xero_disconnected(org) -> bool:
-    """Whether the entity was connected to a Xero org but is no longer live.
+    """Whether the entity was connected to a Xero org but is no longer live
+    (``entity/services/xero_mapping.py::disconnected``, which checks Xero's /connections live)."""
+    from blueprints.entity.services import xero_mapping
 
-    Only entities that are SUPPOSED to be connected (``org.xero_org_id`` is set)
-    count, so entities that never connected don't nag the user.
-
-    Runs the authoritative LIVE check first: ``sync_entity_xero_status`` hits
-    Xero's /connections endpoint and reconciles ``org.status`` to reality. This
-    matters because a connection revoked on the Xero website can leave the
-    connector token still valid — so a token-only check (``resolve_xero_token``)
-    would wrongly report "connected". So: disconnected when EITHER no token
-    resolves OR the live sync flipped status to "disconnected".
-    """
-    if org is None or not getattr(org, "xero_org_id", None):
-        return False
-
-    token_resolved = resolve_xero_token(org.id, current_user) is not None
-
-    # Authoritative live reconcile (best-effort; gate on a resolvable connector
-    # token since the sync needs one to call Xero).
-    if token_resolved:
-        try:
-            sync_entity_xero_status(org.id)
-            refreshed = Entity.query.get(org.id)
-            if refreshed is not None:
-                org = refreshed
-        except Exception as sync_error:
-            logger.warning(
-                "Xero live status sync failed for entity %s: %s",
-                org.id, sync_error,
-            )
-
-    return not (token_resolved and getattr(org, "status", None) != "disconnected")
+    return xero_mapping.disconnected(org, current_user)
 
 
 def _xero_live(org) -> bool:
-    """Whether the entity has a live Xero connection: an org that was never connected, or one
-    disconnected inside Minty (which nulls ``xero_org_id``), is not live either - unlike
-    ``_xero_disconnected``, which only nags entities that are supposed to be connected."""
-    return bool(org is not None and getattr(org, "xero_org_id", None)) and not _xero_disconnected(org)
+    """Whether the entity has a live Xero connection (``xero_mapping.is_live``)."""
+    from blueprints.entity.services import xero_mapping
+
+    return xero_mapping.is_live(org, current_user)
 
 
 def _flash_if_xero_disconnected(org) -> bool:
@@ -319,41 +284,12 @@ def entity_settings_entity(org_id):
                 return _redirect_xero_mapping(org_id, return_view="entity_settings_entity"
                 )
 
-        # Handle GET request (display form)
-        # Compare Xero live vs DB and sync both modules if changes detected
+        # Handle GET request (display form): a live company's lists are refreshed from Xero first
+        # (entity/services/xero_mapping.py, shared with the Petty Cash API).
+        from blueprints.entity.services import xero_mapping
+
         if xero_live:
-            try:
-                token_user = get_xero_token_user_for_entity(org_id)
-                if token_user and ensure_valid_token(token_user):
-                    # Full sync inserts BANK / EQUITY / etc rows that the
-                    # CoA-only sync skips, so visiting this page also catches
-                    # new accounts of every type (e.g. a newly-added Bank in
-                    # Xero appearing in the Petty Cash Account dropdown).
-                    sync_xero_accounts_to_db_background(
-                        org_id,
-                        token_user.access_token,
-                        org.xero_org_id,
-                        flask_app=current_app._get_current_object(),
-                    )
-                    # Also sync contacts → xero_contact_sync so the Cash Sales /
-                    # Director / Discrepancy contact dropdowns are seeded on page
-                    # load. Without this the contact table only filled in after a
-                    # user manually created a contact.
-                    sync_contacts_if_changed_background(
-                        org_id,
-                        token_user.access_token,
-                        org.xero_org_id,
-                        flask_app=current_app._get_current_object(),
-                    )
-                    sync_chart_of_accounts_if_changed(
-                        org_id, token_user.access_token, org.xero_org_id,
-                        user_id=str(current_user.id),
-                    )
-            except Exception as rec_err:
-                logger.warning(
-                    "entity_settings_entity: chart sync skipped for %s: %s",
-                    org_id, rec_err,
-                )
+            xero_mapping.refresh_from_xero(org, current_user, current_app._get_current_object())
 
         # Country / currency registries: the dropdowns list the active rows
         # and preselect via the entity's country_code / currency_id FKs.
@@ -364,60 +300,9 @@ def entity_settings_entity(org_id):
             selected_currency,
         ) = country_currency_choices(org)
 
-        # Petty cash CoA list is sourced from entity_account_xero (joined to
-        # account_info) — the single source of truth — instead of a live Xero
-        # API call. EntityAccountXero.is_active drives the checkbox state. No
-        # SystemAccount / code-497 / Status filtering is applied here: whatever
-        # the sync placed in entity_account_xero is shown as-is.
-        # Backfill entity_account_xero from account_info SYNCHRONOUSLY before
-        # building the list below. The heavier Xero refresh runs in the
-        # background (above) and the inner join below only returns accounts that
-        # already have an entity_account_xero row — so on first load the list
-        # would be partial until the background thread caught up. This backfill
-        # reads account_info only (no Xero API call), so it's fast and safe to
-        # run inline. Wrapped so a failure can't break the page. Not live: the card is hidden.
-        if xero_live:
-            try:
-                sync_xero_coa_pettycash(org_id, org.xero_org_id)
-            except Exception as _coa_backfill_err:
-                logger.warning(
-                    "entity_settings_entity: petty cash CoA backfill skipped "
-                    "entity={}: {}",
-                    org_id,
-                    _coa_backfill_err,
-                )
-
         # The Petty Cash Account Code list, in code order: {code, name, selected} per row. The
         # page script draws it as text and posts the ticks (static/js/petty_cash_settings.js).
-        petty_cash_codes = []
-        if xero_live:
-            coa_rows = (
-                db.session.query(AccountInfo, EntityAccountXero.is_active)
-                .join(
-                    EntityAccountXero,
-                    EntityAccountXero.account_id == AccountInfo.id,
-                )
-                .filter(
-                    AccountInfo.entity_id == org_id,
-                    AccountInfo.type.in_(list(COA_INCLUDED_TYPES)),
-                )
-                .order_by(AccountInfo.xero_code)
-                .all()
-            )
-            for acc, is_active in coa_rows:
-                entry = account_info_to_xero_format(acc)
-                petty_cash_codes.append(
-                    {
-                        "code": entry.get("Code") or "",
-                        "name": html.unescape(entry.get("Name", "") or ""),
-                        "selected": bool(is_active),
-                    }
-                )
-            logger.info(
-                "entity_settings_entity: loaded {} petty cash CoA accounts "
-                "from entity_account_xero for entity {}",
-                len(petty_cash_codes), org_id,
-            )
+        petty_cash_codes = xero_mapping.account_codes(org_id) if xero_live else []
 
         _can_edit_coa = has_permission(current_user, Permission.COA_UPDATE, org_id)
         _mapping = {}

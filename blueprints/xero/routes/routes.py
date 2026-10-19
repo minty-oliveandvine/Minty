@@ -1597,6 +1597,77 @@ def internal_deposit_correction() -> ResponseReturnValue:
     return jsonify(body), status
 
 
+#: minty-petty-cash-api's scope for ``internal_publish``.
+_PUBLISH_SCOPE = "petty-cash-publish"
+
+
+@xero_bp.route("/api/internal/xero/publish", methods=["POST"])
+def internal_publish() -> ResponseReturnValue:
+    """Start a report's Xero publish for minty-petty-cash-api, which holds no Xero credentials:
+    ``{report_id}`` -> the Petty Cash API's own answer (``petty_cash_api/routes/report.py::
+    publish_answer``: 202 while the background worker runs, or the refusal), handed on unchanged.
+
+    The caller presents a 60-second HS256 assertion (the shared SECRET_KEY) whose claims name the
+    company (``entity_id``) and the person (``user_id``); neither is read from the body. The person
+    is checked again here (approved; ``REPORT_PUBLISH`` and viewing rights on the report).
+
+    SECURITY: like ``/api/internal/xero/token``, not meant to be reachable from the internet.
+    """
+    from blueprints.petty_cash_api.routes.report import publish_answer
+
+    claims, error = _authenticate_internal_caller(_PUBLISH_SCOPE, ("user_id",))
+    if error:
+        logger.warning(f"internal publish: rejected caller ({error})")
+        return jsonify({"error": "unauthorized"}), 401
+    person = db.session.get(User, str(claims["user_id"]))
+    if person is None or not person.approved:
+        logger.warning(f"internal publish: unknown or unapproved user {claims['user_id']}")
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True)
+    report_id = body.get("report_id") if isinstance(body, dict) else None
+    if not report_id:
+        return jsonify({"error": "Send report_id: the report to publish."}), 422
+    answer, status = publish_answer(str(claims["entity_id"]), report_id, person)
+    logger.info(f"internal publish: entity {claims['entity_id']} report {report_id} by {person.id} -> {status}")
+    return jsonify(answer), status
+
+
+#: minty-petty-cash-api's scope for ``internal_xero_settings``.
+_XERO_SETTINGS_SCOPE = "petty-cash-xero-settings"
+
+
+@xero_bp.route("/api/internal/xero/petty-cash-settings", methods=["POST"])
+def internal_xero_settings() -> ResponseReturnValue:
+    """Petty Cash Settings' Xero cards for minty-petty-cash-api, which holds no Xero code: opening
+    them checks the connection live and refreshes the lists from Xero, and a mapping save may ask
+    Xero. ``{action: "read" | "mapping" | "account-codes", body}`` -> the Petty Cash API's own answer
+    (``petty_cash_api/routes/settings.py::xero_settings_answer``), handed on unchanged.
+
+    The caller presents a 60-second HS256 assertion (the shared SECRET_KEY) whose claims name the
+    company (``entity_id``) and the person (``user_id``); neither is read from the body. The person
+    is checked again here (approved; the rights each action needs).
+
+    SECURITY: like ``/api/internal/xero/token``, not meant to be reachable from the internet.
+    """
+    from blueprints.petty_cash_api.routes.settings import XERO_ACTIONS, xero_settings_answer
+
+    claims, error = _authenticate_internal_caller(_XERO_SETTINGS_SCOPE, ("user_id",))
+    if error:
+        logger.warning(f"internal xero settings: rejected caller ({error})")
+        return jsonify({"error": "unauthorized"}), 401
+    person = db.session.get(User, str(claims["user_id"]))
+    if person is None or not person.approved:
+        logger.warning(f"internal xero settings: unknown or unapproved user {claims['user_id']}")
+        return jsonify({"error": "unauthorized"}), 401
+    payload = request.get_json(silent=True)
+    action = payload.get("action") if isinstance(payload, dict) else None
+    if action not in XERO_ACTIONS:
+        return jsonify({"error": "Send action: read, mapping or account-codes."}), 422
+    answer, status = xero_settings_answer(str(claims["entity_id"]), person, action, payload.get("body"))
+    logger.info(f"internal xero settings: {action} entity {claims['entity_id']} by {person.id} -> {status}")
+    return jsonify(answer), status
+
+
 #: minty-petty-cash-api's scope for ``internal_publish_reasons``.
 _PUBLISH_REASONS_SCOPE = "petty-cash-publish-reasons"
 _MAX_REASON_REPORTS = 100

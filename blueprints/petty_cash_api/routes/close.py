@@ -164,6 +164,7 @@ def submit_day():
 
 @petty_cash_api_bp.get("/reports/<report_id>/outcome")
 def report_outcome(report_id):
+    from blueprints.report.services.report_actions import was_published
     from blueprints.report.services.report_page import report_facts
     from models.db import Report, db, tz
     from services.permission_policy import Permission, can_view_report, has_permission
@@ -196,7 +197,9 @@ def report_outcome(report_id):
             "difference": {"amount": _money(report.discrepancy_amount), "kind": kind,
                            "has_reason": bool((report.discrepancy_reason or "").strip())},
             "xero": {"publishing_status": publishing, "published_at": _iso(facts["published_at"]),
-                     "xero_integrated": bool(report.xero_integrated)},
+                     "xero_integrated": bool(report.xero_integrated),
+                     # it has been to Xero, even if changed since: a publish warns (report_actions)
+                     "was_published": was_published(report)},
             "can_publish": has_permission(user(), Permission.REPORT_PUBLISH, entity_id),
             "is_today": report.transaction_date == datetime.now(tz).date(),
             "next_day": (report.transaction_date + timedelta(days=1)).isoformat(),

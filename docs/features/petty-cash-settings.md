@@ -83,7 +83,13 @@ exist before a company is created (the onboarding wizard's Step 1 reads them fro
 Xero - Country & currency and the Electronic / Delivery sales methods - over the same services:
 `GET /settings`, `PUT /settings/country`, `POST`/`PUT`/`DELETE /sales-methods...`
 (`docs/features/petty-cash-api.md`). The Xero mapping and the account codes stay on this page for
-now. The API refuses an unknown country or currency (this page's form skips it), through
+now - since the owner's go-ahead (2026-10-16) the API serves the Xero cards too
+(`GET /settings/xero`, `PUT /settings/xero/mapping`, `PUT /settings/xero/account-codes`) through
+`entity/services/xero_mapping.py`, which this page now shares: the live connection check, the refresh
+from Xero on opening, the code list and its at-least-one rule. **Fixed with it, here too:** a mapping
+choice the lists do not offer is refused ("Choose the … from the list.") - an id the page never
+offered used to be saved as an "Unknown Account" / "Unknown Contact" row made up on the spot
+(`tests/test_xero_mapping_state.py`). The API refuses an unknown country or currency (this page's form skips it), through
 `country_currency.checked_country_currency`, which minty-web's Entities & Integration save now
 shares.
 

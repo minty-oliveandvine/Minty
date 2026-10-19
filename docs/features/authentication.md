@@ -399,7 +399,11 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
   person (`user_id`) in the signed claims. Flask refuses an unknown or unapproved person (401) and
   re-checks `REPORT_EDIT_ENTITY` (403). Its history list asks `POST /api/internal/xero/publish-reasons`
   the same way (scope `petty-cash-publish-reasons`, the company alone in the claims: it answers what
-  the history page shows). Each internal route accepts only its own scope.
+  the history page shows). A report's Xero publish is forwarded to `POST /api/internal/xero/publish`
+  (scope `petty-cash-publish`, the company and the person in the claims; Flask re-checks the person,
+  `REPORT_PUBLISH` and viewing rights, and answers as `POST /reports/<id>/publish` would), and Petty Cash Settings' Xero cards to
+  `POST /api/internal/xero/petty-cash-settings` (scope `petty-cash-xero-settings`, the same claims;
+  the answer is `xero_settings_answer`'s). Each internal route accepts only its own scope.
 - Tokens are never logged: `tests/test_zz_no_token_logging.py` fails any logger f-string
   that formats a value named like a token.
 

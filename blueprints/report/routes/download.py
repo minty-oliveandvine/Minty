@@ -16,15 +16,14 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.report import report_bp
+from blueprints.report.services import report_csv
 from blueprints.report.services.shared import split_receipt_keys
 from blueprints.report.services.s3_storage import get_s3_bucket, get_s3_client
-from blueprints.shared.enums import DiscrepancyType
+from blueprints.shared.enums import ReportStatus
 from blueprints.report.models.shop_expense import (Attachment, ReportExpense,
                                                     ReportExpenseAttachment)
-from models.db import Report, ShopExpense, db
-from services.helpers.xero_bridge import get_entity_account_settings
-from services.permission_policy import (Permission, can_view_report,
-                                        has_permission, is_superuser)
+from models.db import Report, db
+from services.permission_policy import can_view_report, is_superuser
 
 
 def _superuser_only() -> Any:
@@ -381,475 +380,62 @@ def download_attachments():
         )
 
 
+#: The Jinja export's sentence for each refused range (report_csv.parse_range's reasons).
+_RANGE_REFUSALS = {
+    "missing": "I need both a start and an end date to do that.",
+    "format": "That date doesn't look quite right — could you use YYYY-MM-DD?",
+    "order": "Your start date lands after your end date — could you flip them around?",
+    "too_long": f"That range is longer than a year — could you choose {report_csv.MAX_DAYS} days or fewer?",
+}
+
+
+def _csv_error(message: str, status: int):
+    return jsonify({"status": "error", "message": message}), status
+
+
+def _csv_file(body: bytes, filename: str):
+    response = make_response(body)
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    response.headers["Content-type"] = "text/csv"
+    return response
+
+
 @report_bp.route("/entity/<entity:entity_id>/petty-cash/reports/download-csv", methods=["GET"])
 @login_required
 def download_reports_csv(entity_id):
+    """History's Export CSV (``report/services/report_csv.py``): a date range, or one report by
+    ``report_id``. Submitted and published reports only."""
     from blueprints.report.services.shared import check_user_has_entities
 
+    if not check_user_has_entities(current_user.id):
+        return _csv_error("You need to create an entity first before accessing reports.", 403)
+    if not report_csv.may_export(current_user, entity_id):
+        return _csv_error("You do not have access to this entity.", 403)
+
+    report_id = request.args.get("report_id")
+    if report_id:
+        try:
+            report = db.session.get(Report, str(uuid.UUID(report_id)))
+        except ValueError:
+            report = None
+        # this company's submitted report, and one this person may see
+        if report is None or str(report.company) != str(entity_id) or report.status == ReportStatus.DRAFT:
+            return _csv_error("I can only download submitted or published reports as CSV.", 404)
+        if not can_view_report(current_user, report):
+            return _csv_error("You do not have access to this report.", 403)
+        rows = report_csv.movements(entity_id, [report])
+        if not rows:
+            return _csv_error("No data to export for this report.", 404)
+        return _csv_file(report_csv.to_csv(rows), f"report_{report.id}.csv")
+
     try:
-        if not check_user_has_entities(current_user.id):
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "You need to create an entity first before accessing reports.",
-                    }
-                ),
-                403,
-            )
-        if not has_permission(current_user, Permission.REPORT_VIEW_OWN, entity_id):
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "You do not have access to this entity.",
-                    }
-                ),
-                403,
-            )
-
-        report_id = request.args.get("report_id")
-
-        if report_id:
-            report = Report.query.filter_by(id=report_id).first()
-            if not report:
-                return (
-                    jsonify({"status": "error", "message": "I can only download submitted or published reports as CSV."}),
-                    404,
-                )
-
-            # can_view_report, not "uploader OR permission": an uploader whose
-            # membership was removed must lose access too.
-            report_entity_id = report.company
-            if not can_view_report(current_user, report):
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "You do not have access to this report.",
-                        }
-                    ),
-                    403,
-                )
-
-            _pettycash_settings = (
-                get_entity_account_settings(report_entity_id, "pettycash") or {}
-            )
-            main_bank_account = _pettycash_settings.get("account_code")
-
-            _discrepancy_account_settings = (
-                get_entity_account_settings(
-                    report_entity_id, "discrepancy_account"
-                ) or {}
-            )
-            discrepancy_account_code = _discrepancy_account_settings.get(
-                "account_code"
-            )
-
-            transaction_date = report.transaction_date
-            all_rows = []
-
-            cash_addition = report.cash_addition
-            cash_addition_account_code = main_bank_account
-            withdrawal_type = getattr(report, "withdrawal_type", None)
-            if withdrawal_type == "personal":
-                director_settings = get_entity_account_settings(
-                    report_entity_id, "director"
-                )
-                if director_settings and "account_code" in director_settings:
-                    cash_addition_account_code = director_settings["account_code"]
-            elif withdrawal_type == "company":
-                pass
-
-            if cash_addition and cash_addition != 0:
-                all_rows.append(
-                    {
-                        "Date": (
-                            transaction_date.strftime("%Y-%m-%d")
-                            if transaction_date
-                            else "N/A"
-                        ),
-                        "Account Code": cash_addition_account_code or "",
-                        "Amount": cash_addition,
-                        "Description": "Cash Addition/Withdrawal From (Start)",
-                        "Reference": " ",
-                        "Check Number": " ",
-                    }
-                )
-
-            expenses = ShopExpense.query.filter_by(report_id=report_id).all()
-
-            for exp in expenses:
-                all_rows.append(
-                    {
-                        "Date": (
-                            transaction_date.strftime("%Y-%m-%d")
-                            if transaction_date
-                            else "N/A"
-                        ),
-                        "Account Code": exp.account_code or "N/A",
-                        "Amount": -(exp.amount or 0),
-                        "Description": (
-                            "Expense"
-                            if exp.remarks in ("No description", "-")
-                            else exp.remarks or "Expense"
-                        ),
-                        "Reference": " ",
-                        "Check Number": " ",
-                    }
-                )
-
-            cash_sales = report.cash_sales
-            cash_sale_settings = get_entity_account_settings(
-                report_entity_id, "cash_sale"
-            )
-            cash_sale_account_code = (
-                cash_sale_settings["account_code"]
-                if cash_sale_settings and "account_code" in cash_sale_settings
-                else ""
-            )
-
-            if cash_sales and cash_sales > 0:
-                all_rows.append(
-                    {
-                        "Date": (
-                            transaction_date.strftime("%Y-%m-%d")
-                            if transaction_date
-                            else "N/A"
-                        ),
-                        "Account Code": cash_sale_account_code or "",
-                        "Amount": cash_sales,
-                        "Description": "Cash Sale (Pettycash)",
-                        "Reference": " ",
-                        "Check Number": " ",
-                    }
-                )
-
-            bank_deposit = report.bank_deposit
-            if bank_deposit and bank_deposit > 0:
-                all_rows.append(
-                    {
-                        "Date": (
-                            transaction_date.strftime("%Y-%m-%d")
-                            if transaction_date
-                            else "N/A"
-                        ),
-                        "Account Code": main_bank_account or "",
-                        "Amount": -bank_deposit,
-                        "Description": "Bank Deposit",
-                        "Reference": " ",
-                        "Check Number": " ",
-                    }
-                )
-
-            discrepancy_amount = report.discrepancy_amount
-            discrepancy_type = report.discrepancy_type
-
-            if (
-                discrepancy_type
-                and discrepancy_type != "none"
-                and discrepancy_amount
-                and discrepancy_amount != 0
-            ):
-                discrepancy_value = (
-                    -abs(discrepancy_amount)
-                    if DiscrepancyType.normalize(discrepancy_type) == DiscrepancyType.SHORT
-                    else abs(discrepancy_amount)
-                )
-                all_rows.append(
-                    {
-                        "Date": (
-                            transaction_date.strftime("%Y-%m-%d")
-                            if transaction_date
-                            else "N/A"
-                        ),
-                        "Account Code": discrepancy_account_code or "",
-                        "Amount": discrepancy_value,
-                        "Description": f"Discrepancy ({discrepancy_type})",
-                        "Reference": " ",
-                        "Check Number": " ",
-                    }
-                )
-
-            if not all_rows:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "No data to export for this report.",
-                        }
-                    ),
-                    404,
-                )
-
-            df = pd.DataFrame(
-                all_rows,
-                columns=pd.Index(
-                    [
-                        "Date",
-                        "Account Code",
-                        "Amount",
-                        "Description",
-                        "Reference",
-                        "Check Number",
-                    ]
-                ),
-            )
-            output = BytesIO()
-            df.to_csv(output, index=False)
-            output.seek(0)
-            response = make_response(output.read())
-            response.headers["Content-Disposition"] = (
-                f"attachment; filename=report_{report_id}.csv"
-            )
-            response.headers["Content-type"] = "text/csv"
-            return response
-
-        else:
-            start_date = request.args.get("start_date")
-            end_date = request.args.get("end_date")
-
-            if not start_date or not end_date:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "I need both a start and an end date to do that.",
-                        }
-                    ),
-                    400,
-                )
-
-            if start_date > end_date:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "Your start date lands after your end date — could you flip them around?",
-                        }
-                    ),
-                    400,
-                )
-
-            _pettycash_settings = (
-                get_entity_account_settings(entity_id, "pettycash") or {}
-            )
-            main_bank_account = _pettycash_settings.get("account_code")
-
-            _discrepancy_account_settings = (
-                get_entity_account_settings(
-                    entity_id, "discrepancy_account"
-                ) or {}
-            )
-            discrepancy_account_code = _discrepancy_account_settings.get(
-                "account_code"
-            )
-
-            report_ids_query = (
-                Report.query.with_entities(
-                    Report.id.label("id"),
-                    Report.transaction_date.label("transaction_date"),
-                )
-                .filter(
-                    Report.company == entity_id,
-                    Report.transaction_date >= start_date,
-                    Report.transaction_date <= end_date,
-                )
-                .order_by(Report.transaction_date.asc())
-            )
-            report_ids_query = report_ids_query.all()
-
-            if not report_ids_query:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "No reports found in the specified date range.",
-                        }
-                    ),
-                    404,
-                )
-
-            all_rows = []
-            processed_report_ids = set()
-
-            for report_row in report_ids_query:
-                rid = report_row.id
-                transaction_date = report_row.transaction_date
-
-                if rid in processed_report_ids:
-                    continue
-                processed_report_ids.add(rid)
-
-                report = Report.query.filter_by(id=rid).first()
-                if not report:
-                    continue
-
-                cash_addition = report.cash_addition
-                cash_addition_account_code = main_bank_account
-                withdrawal_type = getattr(report, "withdrawal_type", None)
-                if withdrawal_type == "personal":
-                    director_settings = get_entity_account_settings(
-                        entity_id, "director"
-                    )
-                    if director_settings and "account_code" in director_settings:
-                        cash_addition_account_code = director_settings["account_code"]
-                elif withdrawal_type == "company":
-                    pass
-
-                if cash_addition and cash_addition != 0:
-                    all_rows.append(
-                        {
-                            "Date": (
-                                transaction_date.strftime("%Y-%m-%d")
-                                if transaction_date
-                                else "N/A"
-                            ),
-                            "Account Code": cash_addition_account_code or "",
-                            "Amount": cash_addition,
-                            "Description": "Cash Addition/Withdrawal From (Start)",
-                            "Reference": " ",
-                            "Check Number": " ",
-                        }
-                    )
-
-                expenses = ShopExpense.query.filter_by(report_id=rid).all()
-
-                for exp in expenses:
-                    all_rows.append(
-                        {
-                            "Date": (
-                                transaction_date.strftime("%Y-%m-%d")
-                                if transaction_date
-                                else "N/A"
-                            ),
-                            "Account Code": exp.account_code or "N/A",
-                            "Amount": -(exp.amount or 0),
-                            "Description": (
-                                "Expense"
-                                if exp.remarks in ("No description", "-")
-                                else exp.remarks or "Expense"
-                            ),
-                            "Reference": " ",
-                            "Check Number": " ",
-                        }
-                    )
-
-                cash_sales = report.cash_sales
-                cash_sale_settings = get_entity_account_settings(entity_id, "cash_sale")
-                cash_sale_account_code = (
-                    cash_sale_settings["account_code"]
-                    if cash_sale_settings and "account_code" in cash_sale_settings
-                    else ""
-                )
-
-                if cash_sales and cash_sales > 0:
-                    all_rows.append(
-                        {
-                            "Date": (
-                                transaction_date.strftime("%Y-%m-%d")
-                                if transaction_date
-                                else "N/A"
-                            ),
-                            "Account Code": cash_sale_account_code or "",
-                            "Amount": cash_sales,
-                            "Description": "Cash Sale (Pettycash)",
-                            "Reference": " ",
-                            "Check Number": " ",
-                        }
-                    )
-
-                bank_deposit = report.bank_deposit
-                if bank_deposit and bank_deposit > 0:
-                    all_rows.append(
-                        {
-                            "Date": (
-                                transaction_date.strftime("%Y-%m-%d")
-                                if transaction_date
-                                else "N/A"
-                            ),
-                            "Account Code": main_bank_account or "",
-                            "Amount": -bank_deposit,
-                            "Description": "Bank Deposit",
-                            "Reference": " ",
-                            "Check Number": " ",
-                        }
-                    )
-
-                discrepancy_amount = report.discrepancy_amount
-                discrepancy_type = report.discrepancy_type
-
-                if (
-                    discrepancy_type
-                    and discrepancy_type != "none"
-                    and discrepancy_amount
-                    and discrepancy_amount != 0
-                ):
-                    discrepancy_value = (
-                        -abs(discrepancy_amount)
-                        if DiscrepancyType.normalize(discrepancy_type) == DiscrepancyType.SHORT
-                        else abs(discrepancy_amount)
-                    )
-                    all_rows.append(
-                        {
-                            "Date": (
-                                transaction_date.strftime("%Y-%m-%d")
-                                if transaction_date
-                                else "N/A"
-                            ),
-                            "Account Code": discrepancy_account_code or "",
-                            "Amount": discrepancy_value,
-                            "Description": f"Discrepancy ({discrepancy_type})",
-                            "Reference": " ",
-                            "Check Number": " ",
-                        }
-                    )
-
-            if not all_rows:
-                return (
-                    jsonify(
-                        {
-                            "status": "error",
-                            "message": "No data to export in the specified date range.",
-                        }
-                    ),
-                    404,
-                )
-
-            df = pd.DataFrame(
-                all_rows,
-                columns=pd.Index(
-                    [
-                        "Date",
-                        "Account Code",
-                        "Amount",
-                        "Description",
-                        "Reference",
-                        "Check Number",
-                    ]
-                ),
-            )
-            output = BytesIO()
-            df.to_csv(output, index=False)
-            output.seek(0)
-            response = make_response(output.read())
-            response.headers["Content-Disposition"] = (
-                f"attachment; filename=reports_{start_date}_to_{end_date}.csv"
-            )
-            response.headers["Content-type"] = "text/csv"
-            return response
-
-    except Exception as e:
-        logger.error(f"Error downloading CSV reports: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "message": "Something went wrong on my end while building that CSV. Mind trying again?",
-                }
-            ),
-            500,
-        )
+        first, last = report_csv.parse_range(request.args.get("start_date"), request.args.get("end_date"))
+    except report_csv.RangeRefused as refused:
+        return _csv_error(_RANGE_REFUSALS[refused.reason], 400)
+    reports = report_csv.submitted_reports(entity_id, first, last)
+    if not reports:
+        return _csv_error("No reports found in the specified date range.", 404)
+    rows = report_csv.movements(entity_id, reports)
+    if not rows:
+        return _csv_error("No data to export in the specified date range.", 404)
+    return _csv_file(report_csv.to_csv(rows), report_csv.range_filename(first, last))

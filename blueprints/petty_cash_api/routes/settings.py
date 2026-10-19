@@ -3,8 +3,11 @@ and the Electronic / Delivery sales methods - through the code Flask's settings 
 (``entity/services/country_currency.py``, ``xero_account_mapping_post.apply_country_currency_selection``,
 ``entity/services/payment_methods.py``).
 
-The Xero mapping and the account codes stay on Flask's page for now (the owner, 2026-10-16):
-they read Xero live, sync its accounts and contacts, and can create a contact in Xero.
+The Xero cards (the owner's go-ahead, 2026-10-16) - ``GET /settings/xero``,
+``PUT /settings/xero/mapping``, ``PUT /settings/xero/account-codes`` - go through
+``entity/services/xero_mapping.py``, the Jinja page's own: opening them checks the Xero connection
+live and refreshes the lists from Xero, as the page does. Connecting to Xero stays Flask's (its
+callback). A new contact for the mapping is ``POST /suppliers``.
 
 - ``GET /settings``: the country and currency with the lists offered, the two method lists, the
   catalogue methods not on them, whether Xero is connected, and what this person may change.
@@ -246,3 +249,107 @@ def _uuid(value) -> bool:
     except ValueError:
         return False
     return True
+
+
+# --- the Xero cards ---------------------------------------------------------------------------------
+
+MAPPING_KEYS = ("main_bank", "deposit_bank", "cashsale_account", "cashsale_contact", "owners_account",
+                "owners_contact", "discrepancy_account", "discrepancy_contact")
+NOT_LIVE = "Xero isn't connected for this company. Connect it in the company's settings first."
+XERO_ACTIONS = ("read", "mapping", "account-codes")
+
+
+def xero_settings_answer(entity_id, person, action, body) -> tuple[dict, int]:
+    """The Xero cards for ``person`` - ``read`` (``GET /settings/xero``), ``mapping``
+    (``PUT /settings/xero/mapping``) or ``account-codes`` (``PUT /settings/xero/account-codes``) -
+    shared with the internal route minty-petty-cash-api forwards them to
+    (``xero/routes/routes.py::internal_xero_settings``): each asks Xero."""
+    from flask import current_app
+    from loguru import logger
+
+    from blueprints.entity.services import xero_mapping
+    from blueprints.entity.services.xero_account_mapping_post import save_mapping
+    from models.db import Entity, EntityPettycashSettings, db
+    from services.permission_policy import Permission, has_permission
+
+    org = db.session.get(Entity, entity_id)
+    may = all(has_permission(person, getattr(Permission, n), entity_id) for n in COUNTRY_RIGHTS)
+
+    def payload() -> dict:
+        live = xero_mapping.is_live(org, person)
+        if live:
+            xero_mapping.refresh_from_xero(org, person, current_app._get_current_object())
+        return {
+            "live": live,
+            "organisation": org.xero_tenant_name if live else None,
+            "mapping": xero_mapping.read(org.id, org) if live else None,
+            "mapping_saved": EntityPettycashSettings.query.filter_by(entity_id=org.id).first() is not None,
+            "account_codes": xero_mapping.account_codes(org.id) if live else None,
+            "permissions": {"edit_mapping": may, "edit_account_codes": may},
+        }
+
+    if action == "read":
+        if not has_permission(person, Permission.COA_VIEW, entity_id):
+            return {"error": "You don't have permission to see these settings."}, 403
+        return payload(), 200
+    if not may:
+        return {"error": NO_RIGHT}, 403
+    if not xero_mapping.is_live(org, person):
+        return {"error": NOT_LIVE}, 409
+    body = body if isinstance(body, dict) else {}
+
+    if action == "account-codes":
+        codes = body.get("codes")
+        if not isinstance(codes, list) or not all(isinstance(c, str) for c in codes):
+            return {"error": "Send the ticked account codes as a list."}, 422
+        problem = xero_mapping.save_account_codes(org, codes)
+        if problem:
+            return {"error": problem}, 422
+        return {**payload(), "message": "Account codes saved."}, 200
+
+    values = {key: str(body.get(key) or "").strip() for key in MAPPING_KEYS}
+    labels = {key: label for key, label, *_ in xero_mapping.FIELDS}
+    missing = [labels[key] for key in MAPPING_KEYS if not values[key]]
+    if missing:
+        return {"error": " ".join(f"Choose the {label}." for label in missing)}, 422
+    if values["main_bank"] == values["deposit_bank"]:
+        return {"error": "The Petty Cash Account and the Deposit Bank Account can't be the same. "
+                         "Choose a different one for each."}, 422
+    values["discrepancy_bank"] = values["main_bank"]  # it mirrors the Petty Cash Account, as on the page
+    not_offered = xero_mapping.unoffered(org.id, org, values)
+    if not_offered:
+        return {"error": xero_mapping.unoffered_sentence(not_offered)}, 422
+    first_save = EntityPettycashSettings.query.filter_by(entity_id=org.id).first() is None
+    try:
+        unresolved = save_mapping(org, values)
+        if unresolved:
+            db.session.rollback()
+            return {"error": "Some choices haven't synced from Xero yet: " + "; ".join(unresolved)
+                             + ". Try again once the Xero sync has finished."}, 409
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.exception("Petty Cash API: the Xero mapping was not saved entity={}", org.id)
+        raise
+    return {**payload(), "message": "Xero account mapping saved.", "first_save": first_save}, 200
+
+
+@petty_cash_api_bp.get("/settings/xero")
+def xero_settings():
+    body, status = xero_settings_answer(company()["id"], user(), "read", None)
+    return respond(body, status)
+
+
+@petty_cash_api_bp.put("/settings/xero/mapping")
+def save_xero_mapping():
+    """``{main_bank, deposit_bank, cashsale_account, cashsale_contact, owners_account,
+    owners_contact, discrepancy_account, discrepancy_contact}`` - Xero ids from ``GET``'s options."""
+    body, status = xero_settings_answer(company()["id"], user(), "mapping", _body())
+    return respond(body, status)
+
+
+@petty_cash_api_bp.put("/settings/xero/account-codes")
+def save_xero_account_codes():
+    """``{codes: [..]}``: exactly these account codes ticked for Petty Cash (at least one)."""
+    body, status = xero_settings_answer(company()["id"], user(), "account-codes", _body())
+    return respond(body, status)

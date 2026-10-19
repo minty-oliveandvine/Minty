@@ -212,18 +212,21 @@ def process_xero_account_mapping_post(
     returns a Flask ``Response`` (redirect or JSON error).
     """
 
+    from blueprints.entity.services.xero_mapping import FIELDS, unoffered, unoffered_sentence
+
     if not request.form.get("main_bank"):
         return None
     try:
-        main_bank = request.form.get("main_bank")
-        deposit_bank = request.form.get("deposit_bank")
-        cashsale_account = request.form.get("cashsale_account")
-        cashsale_contact = request.form.get("cashsale_contact")
-        owners_account = request.form.get("owners_account")
-        owners_contact = request.form.get("owners_contact")
-        discrepancy_bank = request.form.get("discrepancy_bank")
-        discrepancy_account = request.form.get("discrepancy_account")
-        discrepancy_contact = request.form.get("discrepancy_contact")
+        values = {key: request.form.get(key) for key, *_ in FIELDS}
+        main_bank = values["main_bank"]
+        deposit_bank = values["deposit_bank"]
+        cashsale_account = values["cashsale_account"]
+        cashsale_contact = values["cashsale_contact"]
+        owners_account = values["owners_account"]
+        owners_contact = values["owners_contact"]
+        discrepancy_bank = values["discrepancy_bank"]
+        discrepancy_account = values["discrepancy_account"]
+        discrepancy_contact = values["discrepancy_contact"]
 
         if main_bank and deposit_bank and main_bank == deposit_bank:
             flash(
@@ -251,6 +254,13 @@ def process_xero_account_mapping_post(
 
         entity = Entity.query.get_or_404(entity_id)
 
+        # Only the lists' own choices (2026-10-16): an id the page never offered used to become an
+        # "Unknown Account" / "Unknown Contact" row made up on the spot.
+        not_offered = unoffered(entity_id, entity, values)
+        if not_offered:
+            flash(unoffered_sentence(not_offered), "danger")
+            return _mapping_redirect(entity_id, return_view=return_view)
+
         if with_country:
             apply_country_currency_selection(entity, request.form)
 
@@ -259,56 +269,7 @@ def process_xero_account_mapping_post(
             is not None
         )
 
-        xero_org_id = entity.xero_org_id
-
-        pettycash_account_id = _resolve_account_id(
-            entity_id, main_bank, xero_org_id, fallback_type="BANK"
-        )
-        bank_account_id = _resolve_account_id(
-            entity_id, deposit_bank, xero_org_id, fallback_type="BANK"
-        )
-        cash_sale_account_id = _resolve_account_id(
-            entity_id, cashsale_account, xero_org_id, fallback_type="REVENUE"
-        )
-        discrepancy_bank_account_id = _resolve_account_id(
-            entity_id, discrepancy_bank, xero_org_id, fallback_type="BANK"
-        )
-        discrepancy_account_id = _resolve_account_id(
-            entity_id, discrepancy_account, xero_org_id, fallback_type="EXPENSE"
-        )
-        director_account_id = _resolve_account_id(
-            entity_id, owners_account, xero_org_id, fallback_type="LIABILITY"
-        )
-
-        cash_sale_contact_id = _resolve_contact_id(
-            entity_id, cashsale_contact, xero_org_id
-        )
-        director_contact_id = _resolve_contact_id(
-            entity_id, owners_contact, xero_org_id
-        )
-        discrepancy_contact_id = _resolve_contact_id(
-            entity_id, discrepancy_contact, xero_org_id
-        )
-
-        # Pair each resolved id with the field label and the value the user
-        # submitted, so an unresolved item can be named specifically (e.g.
-        # "Cash Sales account code (48001)") instead of a vague "one or more".
-        resolution_checks = [
-            (pettycash_account_id, "Petty Cash Account", main_bank),
-            (bank_account_id, "Deposit Bank Account", deposit_bank),
-            (cash_sale_account_id, "Cash Sales account code", cashsale_account),
-            (discrepancy_bank_account_id, "Discrepancy Bank Account", discrepancy_bank),
-            (discrepancy_account_id, "Discrepancy account code", discrepancy_account),
-            (director_account_id, "Director Personal Account code", owners_account),
-            (cash_sale_contact_id, "Cash Sales contact", cashsale_contact),
-            (director_contact_id, "Director / Responsible person", owners_contact),
-            (discrepancy_contact_id, "Discrepancy contact", discrepancy_contact),
-        ]
-        unresolved = [
-            f"{label} ({value})" if value else label
-            for resolved_id, label, value in resolution_checks
-            if not resolved_id
-        ]
+        unresolved = save_mapping(entity, values)
         if unresolved:
             db.session.rollback()
             flash(
@@ -319,23 +280,6 @@ def process_xero_account_mapping_post(
                 "danger",
             )
             return _mapping_redirect(entity_id, return_view=return_view)
-
-        settings_row = EntityPettycashSettings.query.filter_by(
-            entity_id=entity_id
-        ).first()
-        if settings_row is None:
-            settings_row = EntityPettycashSettings(entity_id=entity_id)
-            db.session.add(settings_row)
-
-        settings_row.pettycash_account_id = pettycash_account_id
-        settings_row.bank_account_id = bank_account_id
-        settings_row.cash_sale_account_id = cash_sale_account_id
-        settings_row.discrepancy_bank_account_id = discrepancy_bank_account_id
-        settings_row.discrepancy_account_id = discrepancy_account_id
-        settings_row.director_account_id = director_account_id
-        settings_row.cash_sale_contact_id = cash_sale_contact_id
-        settings_row.director_contact_id = director_contact_id
-        settings_row.discrepancy_contact_id = discrepancy_contact_id
 
         db.session.commit()
 
@@ -391,3 +335,89 @@ def process_xero_account_mapping_post(
             ),
             500,
         )
+
+def save_mapping(entity, values: dict) -> list[str]:
+    """Resolve each chosen Xero id to the company's own row and write ``entity_pettycash_settings``
+    (uncommitted - the caller commits). Returns the labels of choices that did not resolve (the
+    caller then rolls back and says so). The caller has checked the choices are offered
+    (``xero_mapping.unoffered``), so the resolvers' Xero fetch is only a safety net."""
+    entity_id = entity.id
+    xero_org_id = entity.xero_org_id
+    main_bank = values.get("main_bank")
+    deposit_bank = values.get("deposit_bank")
+    cashsale_account = values.get("cashsale_account")
+    cashsale_contact = values.get("cashsale_contact")
+    owners_account = values.get("owners_account")
+    owners_contact = values.get("owners_contact")
+    discrepancy_bank = values.get("discrepancy_bank")
+    discrepancy_account = values.get("discrepancy_account")
+    discrepancy_contact = values.get("discrepancy_contact")
+
+    pettycash_account_id = _resolve_account_id(
+        entity_id, main_bank, xero_org_id, fallback_type="BANK"
+    )
+    bank_account_id = _resolve_account_id(
+        entity_id, deposit_bank, xero_org_id, fallback_type="BANK"
+    )
+    cash_sale_account_id = _resolve_account_id(
+        entity_id, cashsale_account, xero_org_id, fallback_type="REVENUE"
+    )
+    discrepancy_bank_account_id = _resolve_account_id(
+        entity_id, discrepancy_bank, xero_org_id, fallback_type="BANK"
+    )
+    discrepancy_account_id = _resolve_account_id(
+        entity_id, discrepancy_account, xero_org_id, fallback_type="EXPENSE"
+    )
+    director_account_id = _resolve_account_id(
+        entity_id, owners_account, xero_org_id, fallback_type="LIABILITY"
+    )
+
+    cash_sale_contact_id = _resolve_contact_id(
+        entity_id, cashsale_contact, xero_org_id
+    )
+    director_contact_id = _resolve_contact_id(
+        entity_id, owners_contact, xero_org_id
+    )
+    discrepancy_contact_id = _resolve_contact_id(
+        entity_id, discrepancy_contact, xero_org_id
+    )
+
+    # Pair each resolved id with the field label and the value the user
+    # submitted, so an unresolved item can be named specifically (e.g.
+    # "Cash Sales account code (48001)") instead of a vague "one or more".
+    resolution_checks = [
+        (pettycash_account_id, "Petty Cash Account", main_bank),
+        (bank_account_id, "Deposit Bank Account", deposit_bank),
+        (cash_sale_account_id, "Cash Sales account code", cashsale_account),
+        (discrepancy_bank_account_id, "Discrepancy Bank Account", discrepancy_bank),
+        (discrepancy_account_id, "Discrepancy account code", discrepancy_account),
+        (director_account_id, "Director Personal Account code", owners_account),
+        (cash_sale_contact_id, "Cash Sales contact", cashsale_contact),
+        (director_contact_id, "Director / Responsible person", owners_contact),
+        (discrepancy_contact_id, "Discrepancy contact", discrepancy_contact),
+    ]
+    unresolved = [
+        f"{label} ({value})" if value else label
+        for resolved_id, label, value in resolution_checks
+        if not resolved_id
+    ]
+    if unresolved:
+        return unresolved
+
+    settings_row = EntityPettycashSettings.query.filter_by(
+        entity_id=entity_id
+    ).first()
+    if settings_row is None:
+        settings_row = EntityPettycashSettings(entity_id=entity_id)
+        db.session.add(settings_row)
+
+    settings_row.pettycash_account_id = pettycash_account_id
+    settings_row.bank_account_id = bank_account_id
+    settings_row.cash_sale_account_id = cash_sale_account_id
+    settings_row.discrepancy_bank_account_id = discrepancy_bank_account_id
+    settings_row.discrepancy_account_id = discrepancy_account_id
+    settings_row.director_account_id = director_account_id
+    settings_row.cash_sale_contact_id = cash_sale_contact_id
+    settings_row.director_contact_id = director_contact_id
+    settings_row.discrepancy_contact_id = discrepancy_contact_id
+    return []

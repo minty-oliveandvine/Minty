@@ -1522,21 +1522,15 @@
     "GET"
    ],
    "touches": [
-    "ShopExpense",
-    "bank_deposit",
-    "cash_addition",
-    "cash_sales",
     "company",
-    "date",
-    "discrepancy_amount",
-    "discrepancy_type",
-    "expenses",
-    "uploaded_by",
-    "withdrawal_type"
+    "status"
    ],
    "touches_via_service": {
-    "get_entity_account_settings": [
-     "Roles"
+    "report_csv": [
+     "account_info",
+     "entity_pettycash_settings",
+     "report",
+     "report_expense"
     ]
    },
    "in_scope": true
@@ -3636,6 +3630,23 @@
    "in_scope": true
   },
   {
+   "endpoint": "petty_cash_api.report_export_csv",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/export.csv",
+   "methods": [
+    "GET"
+   ],
+   "touches": [],
+   "touches_via_service": {
+    "report_csv": [
+     "account_info",
+     "entity_pettycash_settings",
+     "report",
+     "report_expense"
+    ]
+   },
+   "in_scope": true
+  },
+  {
    "endpoint": "petty_cash_api.settings_page",
    "rule": "/api/petty-cash/v1/companies/<entity_id>/settings",
    "methods": [
@@ -3750,10 +3761,116 @@
    ],
    "touches_via_service": {},
    "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.publish",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/<report_id>/publish",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "report",
+    "user_token",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.publishing_status",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/<report_id>/publishing-status",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.internal_publish",
+   "rule": "/api/internal/xero/publish",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "report",
+    "user_token",
+    "report_history"
+   ],
+   "touches_via_service": {
+    "correct_previous_deposit": [
+     "report"
+    ]
+   },
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.xero_settings",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/settings/xero",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "entities",
+    "account_info",
+    "xero_contact_sync",
+    "entity_account_xero",
+    "entity_pettycash_settings"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_xero_mapping",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/settings/xero/mapping",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "entity_pettycash_settings",
+    "account_info",
+    "xero_contact_sync"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.save_xero_account_codes",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/settings/xero/account-codes",
+   "methods": [
+    "PUT"
+   ],
+   "touches": [
+    "entity_account_xero"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "xero.internal_xero_settings",
+   "rule": "/api/internal/xero/petty-cash-settings",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "entity_pettycash_settings",
+    "entity_account_xero",
+    "account_info",
+    "xero_contact_sync"
+   ],
+   "touches_via_service": {
+    "correct_previous_deposit": [
+     "report"
+    ]
+   },
+   "in_scope": true
   }
  ],
  "summary": {
-  "routes": 209,
-  "in_scope": 146
+  "routes": 217,
+  "in_scope": 154
  }
 }

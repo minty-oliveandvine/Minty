@@ -449,7 +449,8 @@ def test_publish_locks_the_report_and_hands_it_to_the_background_worker(shop, cl
     F.login(client, owner)
     report_id, _ = post_report(client, entity)
 
-    route = sys.modules["blueprints.report.routes.submitted"]  # the module the app registered
+    # the publish start lives in xero/services/publish_start.py since 2026-10-16
+    route = sys.modules["blueprints.xero.services.publish_start"]
     started = []
     monkeypatch.setattr(route, "resolve_xero_token", lambda entity_id, user: SimpleNamespace(access_token="tok", username=user.username))
     monkeypatch.setattr(route, "check_entity_xero_settings_complete", lambda entity_id: True)

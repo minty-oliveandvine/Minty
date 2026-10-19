@@ -110,7 +110,10 @@ correction to `POST /api/internal/xero/deposit-correction` (scope `petty-cash-de
 the company and the person in the claims; Flask re-checks `REPORT_EDIT_ENTITY` and answers as its
 Petty Cash API would), and asks `POST /api/internal/xero/publish-reasons` (scope
 `petty-cash-publish-reasons`) why its history page's failed reports didn't publish - whether a
-reason is resolved may ask Xero. Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
+reason is resolved may ask Xero; a report's publish goes to `POST /api/internal/xero/publish`
+(scope `petty-cash-publish`, the company and the person in the claims; the answer is the Petty Cash
+API's `publish_answer`), and Petty Cash Settings' Xero cards go to
+`POST /api/internal/xero/petty-cash-settings` (scope `petty-cash-xero-settings`). Xero access tokens live ~30 minutes; `after_request` refreshes an expired one on
 normal traffic. Details and the reasons in [authentication.md](authentication.md) §7.
 
 ## 3. The petty-cash mapping
@@ -137,7 +140,11 @@ fails to land in its field. Publish checks `status` only, so an unticked code st
 ## 4. Publishing a report
 
 `POST /report/submitted/publish_to_xero?entity_id=&report_id=` (`REPORT_PUBLISH` =
-accountant and up):
+accountant and up), and the Petty Cash API's `POST /reports/<id>/publish` - both through
+`xero/services/publish_start.py::start_publish` since 2026-10-16
+(`tests/test_report_publish_state.py`; fixed on the way: a draft is refused - with a report id
+the route took any report - and a start that fails after the lock always leaves the report
+`failed`, where the reset used to need the id from the address):
 
 1. resolves the token, checks the mapping is complete, re-syncs a stale `status`;
 2. refuses expense lines that point at **system accounts** (the mapped control accounts;

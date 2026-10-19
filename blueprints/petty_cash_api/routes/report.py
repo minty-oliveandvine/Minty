@@ -12,6 +12,9 @@ to it - through the services the Jinja pages use (``report/services/report_actio
   ``PATCH /reports/<id>/expense-lines/<line id>``: a submitted report's details that move no
   balance (``report/services/report_edits.py``, the Jinja Daily Report's too). Any submitted
   report may be edited this way, not only the latest; each answers the Daily Report again.
+- ``POST /reports/<id>/publish``: start the Xero publish (``xero/services/publish_start.py``, the
+  Jinja Submitted page's too) - 202 while the background worker runs; ``GET
+  /reports/<id>/publishing-status`` says how it went (polled while ``publishing``).
 
 Another company's or an unknown report is 404, as for the outcome.
 """
@@ -254,3 +257,65 @@ def edit_report_line(report_id, line_id):
                           receipts=receipts)
 
     return _edit(report_id, change)
+
+
+def publish_answer(entity_id, report_id, person) -> tuple[dict, int]:
+    """``POST /reports/<id>/publish``'s answer for ``person`` - shared with the internal route
+    minty-petty-cash-api forwards a publish to (``xero/routes/routes.py::internal_publish``)."""
+    import uuid
+
+    from flask import current_app
+
+    from blueprints.xero.services.publish_start import PublishRefused, start_publish
+    from models.db import Report, db
+    from services.permission_policy import Permission, can_view_report, has_permission
+
+    try:
+        report = db.session.get(Report, str(uuid.UUID(str(report_id))))
+    except ValueError:
+        report = None
+    if report is None or str(report.company) != str(entity_id) or not can_view_report(person, report):
+        return {"error": NOT_FOUND}, 404
+    if not has_permission(person, Permission.REPORT_PUBLISH, entity_id):
+        return {"error": "You don't have permission to publish reports for this company."}, 403
+    try:
+        start_publish(entity_id, str(report.id), person, current_app._get_current_object())
+    except PublishRefused as refused:
+        body = {"error": refused.message}
+        if refused.requires_connection:
+            body["reconnect"] = True
+        return body, refused.status
+    return {"publishing_status": "publishing", "message": "Publishing to Xero. This can take a few minutes."}, 202
+
+
+@petty_cash_api_bp.post("/reports/<report_id>/publish")
+def publish(report_id):
+    """Start the Xero publish: 202 ``{publishing_status: "publishing", message}``; a refusal is
+    ``{error}`` with the service's status, plus ``reconnect: true`` when Xero must be connected
+    again (in Flask's settings)."""
+    body, status = publish_answer(company()["id"], report_id, user())
+    return respond(body, status)
+
+
+@petty_cash_api_bp.get("/reports/<report_id>/publishing-status")
+def publishing_status(report_id):
+    """How the publish went: ``publishing_status``, the pill, ``xero_integrated``,
+    ``was_published``, ``published_at`` and a failed publish's ``reasons [{text, resolved}]``."""
+    from blueprints.report.services.daily_closing import report_status
+    from blueprints.report.services.history_query import publish_reasons
+    from blueprints.report.services.report_actions import was_published
+
+    report = _report(report_id)
+    if report is None:
+        return refuse(NOT_FOUND, 404)
+    label, tone = report_status(report.status, report.publishing_status, report.xero_integrated)
+    return respond({
+        "report_id": str(report.id),
+        "publishing_status": _word(report.publishing_status),
+        "status_label": label,
+        "status_tone": tone,
+        "xero_integrated": bool(report.xero_integrated),
+        "was_published": was_published(report),
+        "published_at": _iso(report.published_at),
+        "reasons": [{"text": r["text"], "resolved": bool(r["resolved"])} for r in publish_reasons(report, {})],
+    })
