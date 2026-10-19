@@ -151,9 +151,15 @@ test.describe.serial('daily closing', () => {
     await page.locator('#bank_deposit').fill(String(DEPOSIT));
     await page.locator('#bank_deposit').blur();
     await expect(page.locator('#expected_cash_count_balance')).toHaveText(moneyRegex(CLOSING));
-    // 825 = 500 + 100x3 + 20 + 5, counted on the page itself (labelled rows, a live total)
+    // one task at a time: Save & Next waits for the count
+    await expect(saveAndNext(page)).toBeDisabled();
+    await expect(page.locator('#nextReason')).toHaveText('Count the drawer to continue');
+    // 825 = 500 + 100x3 + 20 + 5, counted in the sheet (labelled rows, a live total)
+    await page.getByRole('button', { name: 'Count notes and coins' }).click();
+    const sheet = page.locator('#countSheet');
+    await expect(sheet).toBeVisible();
     const counts: Record<string, string> = { '500': '1', '100': '3', '20': '1', '5': '1' };
-    const inputs = page.locator('input[data-denomination]');
+    const inputs = sheet.locator('input[data-denomination]');
     const n = await inputs.count();
     expect(n).toBeGreaterThan(5);
     for (let i = 0; i < n; i++) {
@@ -162,6 +168,9 @@ test.describe.serial('daily closing', () => {
       const hit = Object.entries(counts).find(([f]) => Number(f) === face);
       await el.fill(hit ? hit[1] : '');
     }
+    await expect(sheet.locator('#sheetTotal')).toHaveText(moneyRegex(CLOSING));
+    await sheet.getByRole('button', { name: 'Save count' }).click();
+    await expect(sheet).toBeHidden();
     await page.locator('#safeBoxBalance').fill('0');
     await page.locator('#safeBoxBalance').blur();
     await expect(page.locator('#cash_count_balance')).toHaveText(moneyRegex(CLOSING));
@@ -173,18 +182,24 @@ test.describe.serial('daily closing', () => {
 
   test('cash count: a difference holds Save & Next until it has a reason', async ({ page }) => {
     await page.goto(stepUrl('cash-count'));
+    // the saved count opens done; Edit reopens the sheet
+    const sheet = page.locator('#countSheet');
+    const recount = async (value: string) => {
+      await page.getByRole('button', { name: 'Edit the count' }).click();
+      await expect(sheet).toBeVisible();
+      await sheet.locator('input[data-denomination="5.0"], input[data-denomination="5"]').first().fill(value);
+      await sheet.getByRole('button', { name: 'Save count' }).click();
+      await expect(sheet).toBeHidden();
+    };
     // the HKD 5 coin: take it out of the count and the drawer is 5 short
-    const five = page.locator('input[data-denomination="5.0"], input[data-denomination="5"]');
-    await five.first().fill('');
-    await five.first().blur();
+    await recount('');
     await expect(page.locator('#variance')).toHaveText(/short$/);
     await expect(saveAndNext(page)).toBeDisabled();
     await expect(page.locator('#nextReason')).toHaveText('Add a reason for the difference to continue.');
     await page.locator('#discrepancyDescription').fill('Float swap');
     await expect(saveAndNext(page)).toBeEnabled();
     // put the count back: the journey's report is exact
-    await five.first().fill('1');
-    await five.first().blur();
+    await recount('1');
     await expect(page.locator('#variance')).toHaveText('None');
   });
 
@@ -192,7 +207,8 @@ test.describe.serial('daily closing', () => {
     await page.goto(stepUrl('ending'));
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Close');
     const summary = page.locator('main');
-    for (const amount of [CASH + VISA + ALIPAY + FOODPANDA, VISA, FOODPANDA, CASH, EXPENSE, DEPOSIT, CLOSING]) {
+    // one row per stage (Daily Closing Phase 1): totals, not each sales method
+    for (const amount of [CASH + VISA + ALIPAY + FOODPANDA, CASH, EXPENSE, DEPOSIT, CLOSING]) {
       await expect(summary).toContainText(moneyRegex(amount));
     }
     await expect(summary.getByRole('link', { name: /^Edit / })).toHaveCount(4);

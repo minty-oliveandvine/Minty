@@ -186,8 +186,9 @@ def test_the_stage_page_draws_deposit_count_check_and_reason(shop, client):
     html = client.get(f"{F.co(client, entity.id)}/petty-cash/reports/new/cash-count?transaction_date={F.iso(DAY)}").get_data(as_text=True)
 
     assert 'name="bank_deposit"' in html
-    assert "Cash taken for bank deposit" in html
-    assert "Expected in drawer" in html and "Counted" in html and "Difference" in html
+    # one task at a time (Daily Closing Phase 1): the deposit, the count in its sheet, the safe box
+    assert "Cash taken to the bank" in html and 'id="countSheet"' in html and "Save count" in html
+    assert 'id="expected_cash_count_balance"' in html and 'id="variance"' in html and "The numbers match" in html
     assert 'id="discrepancyDescription"' in html
     assert 'aria-current="step"' in html and 'data-stage="cash_count"' in html
     assert "cdn.tailwindcss.com" not in html

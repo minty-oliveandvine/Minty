@@ -2,9 +2,10 @@
   The outcome page after Submit Daily Report (Part 15.12e), and where the report goes to Xero
   (Wave 5). Route: report.report_submitted (blueprints/report/routes/submitted.py).
 
-  Outcome state (440, the happy Minty, no confetti): the outcome sentence -> at most three facts
-  from the server (Cash counted, Difference, Sent to Xero) -> the next action. Focus moves to the
-  title. Publishing sends bank transactions to Xero, so it asks first (15.9h: a confirmation only
+  Completion (Daily Closing Phase 1, 2026-10-16; 440, the happy Minty, no confetti): the outcome
+  sentence -> three facts from the server (Sales, Expenses, Cash counted with the difference as a
+  pill) -> one quiet Xero line -> Back to home / View report. Focus moves to the title. The next
+  day starts from the launch page, which already offers it. Publishing sends bank transactions to Xero, so it asks first (15.9h: a confirmation only
   when the consequence is external); publishing again warns that Xero gets duplicates. The publish
   endpoints are unchanged: POST /report/submitted/publish_to_xero, then GET
   /api/report/<id>/publishing_status until it settles.
@@ -24,39 +25,41 @@
 
 {% block content %}
 <div class="pc-wrap pc-wrap--640">
-  <section class="pc-outcome" aria-labelledby="outcome-title">
-    <img src="{{ url_for('static', filename='img/minty_cat.png') }}" alt="" width="120" height="120">
+  <section class="pc-outcome pc-outcome--done" aria-labelledby="outcome-title">
+    <img src="{{ url_for('static', filename='img/minty_cat.png') }}" alt="" width="168" height="168">
     <div>
-      <h1 class="pc-t-display-m" id="outcome-title" tabindex="-1">{% if is_today %}Today's report is submitted{% else %}The report is submitted{% endif %}</h1>
-      <p class="pc-c-secondary" style="margin-top: 8px">{{ transaction_date|day if transaction_date else '' }}{% if org %} · {{ org.name }}{% endif %}</p>
+      <h1 class="pc-t-display-m" id="outcome-title" tabindex="-1">{% if is_today %}Today is closed{% else %}The report is submitted{% endif %}</h1>
+      {% if transaction_date %}<p class="pc-c-secondary" style="margin-top: 8px">The Daily Report for {{ transaction_date|day }} is submitted. Nice work — see you tomorrow.</p>{% endif %}
     </div>
 
     {% if report %}
-    <dl class="pc-dl pc-dl--amounts pc-outcome__facts">
-      <div><dt>Cash counted</dt><dd class="pc-num" translate="no">{{ counted|money(code) }}</dd></div>
-      <div><dt>Difference</dt><dd translate="no">{% if off %}{{ ((report.discrepancy_amount|float)|abs)|money(code) }} {{ 'short' if (report.discrepancy_amount|float) < 0 else 'over' }}{% if report.discrepancy_reason %} · note added{% endif %}{% else %}None{% endif %}</dd></div>
-      <div><dt>Sent to Xero</dt><dd id="xeroFact">{% if status[1] == 'success' %}Yes{% if facts.published_at %} · {{ facts.published_at|clock }}{% endif %}{% elif facts.publishing_status == 'publishing' %}Pending{% elif facts.publishing_status == 'failed' %}Not yet: it failed{% else %}Not yet{% endif %}</dd></div>
+    <dl class="pc-facts">
+      <div><dt>Sales</dt><dd class="pc-num" translate="no">{{ (report.total_sales or 0)|money(code) }}</dd></div>
+      <div><dt>Expenses</dt><dd class="pc-num" translate="no">{{ (report.expenses or 0)|money(code) }}</dd></div>
+      <div><dt>Cash counted</dt><dd><span class="pc-num" translate="no">{{ counted|money(code) }}</span>{% if off %}<span translate="no">{{ ui.pill((((report.discrepancy_amount|float)|abs)|money(code)) ~ (' short' if (report.discrepancy_amount|float) < 0 else ' over'), 'warning') }}</span>{% endif %}</dd></div>
     </dl>
+
+    {% if can_publish %}
+    <div class="pc-xero-line" id="xeroFact">
+      {% if is_published_to_xero %}
+        <span>Sent to Xero{% if facts.published_at %} · {{ facts.published_at|clock }}{% endif %}</span>
+        <button type="button" class="pc-btn pc-btn--link" id="republishButton" data-pc-open="republishReportModal">Publish again</button>
+      {% elif was_previously_published %}
+        <span>Not sent to Xero yet</span>
+        <button type="button" class="pc-btn pc-btn--link" id="republishButton" data-pc-open="republishReportModal">Send to Xero</button>
+      {% else %}
+        <span>Not sent to Xero yet</span>
+        <button type="button" class="pc-btn pc-btn--link" id="publishButton" data-pc-open="publishReportModal">Send to Xero</button>
+      {% endif %}
+    </div>
+    {% endif %}
     {% endif %}
 
     <div id="publishStatus" class="pc-outcome__facts" aria-live="polite"></div>
 
     <div class="pc-actions">
-      {% if can_publish and report %}
-        {% if is_published_to_xero or was_previously_published %}
-          <button type="button" class="pc-btn pc-btn--secondary" id="republishButton" data-pc-open="republishReportModal">{{ 'Publish to Xero again' if is_published_to_xero else 'Publish to Xero' }}</button>
-          <a class="pc-btn pc-btn--primary" href="{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=id) }}">View report</a>
-        {% else %}
-          <a class="pc-btn pc-btn--secondary" href="{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=id) }}">View report</a>
-          <button type="button" class="pc-btn pc-btn--primary" id="publishButton" data-pc-open="publishReportModal">Publish to Xero</button>
-        {% endif %}
-      {% elif report %}
-        <a class="pc-btn pc-btn--primary" href="{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=id) }}">View report</a>
-      {% endif %}
-    </div>
-    <div class="pc-cluster" style="justify-content: center">
-      <a class="pc-btn pc-btn--link" href="{{ url_for('entity.report_dashboard', id=entity_id) }}">Back to home</a>
-      {% if transaction_date %}<button type="button" class="pc-btn pc-btn--link" id="nextDayButton">Start the next day</button>{% endif %}
+      {% if report %}<a class="pc-btn pc-btn--secondary" href="{{ url_for('report.entity_ending_with_report', entity_id=entity_id, report_id=id) }}">View report</a>{% endif %}
+      <a class="pc-btn pc-btn--primary" href="{{ url_for('entity.report_dashboard', id=entity_id) }}">Back to home</a>
     </div>
   </section>
 </div>
@@ -209,18 +212,6 @@
   alertBox("info", "Publishing to Xero…", "This can take a minute. You can leave this page; it carries on.");
   poll();
   {% endif %}
-
-  // The launch page starts the next day when it lands (launch.html reads autoStartNextDay).
-  const next = document.getElementById("nextDayButton");
-  if (next) {
-    next.addEventListener("click", function () {
-      const day = new Date({{ (transaction_date.isoformat() if transaction_date else '')|tojson }} + "T00:00:00");
-      day.setDate(day.getDate() + 1);
-      const iso = day.getFullYear() + "-" + String(day.getMonth() + 1).padStart(2, "0") + "-" + String(day.getDate()).padStart(2, "0");
-      sessionStorage.setItem("autoStartNextDay", iso);
-      window.location.href = {{ url_for('entity.report_dashboard', id=entity_id)|tojson }};
-    });
-  }
 })();
 </script>
 {% endblock %}

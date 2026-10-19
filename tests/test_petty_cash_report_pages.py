@@ -74,7 +74,9 @@ def test_close_is_the_work_verification(shop, client):
     for section in ("Addition to Drawer", "Sales", "Expenses (1)", "Cash Count"):
         assert section in html
     assert html.count('aria-label="Edit ') == 4  # one Edit link per stage
-    assert "HKD 120.00" in html and "HKD 25.00" in html and "HKD 1,275.00" in html
+    # one row per stage with its total (Daily Closing Phase 1): sales 300 + Visa 120, expenses, the count
+    assert "HKD 420.00" in html and "HKD 25.00" in html and "HKD 1,275.00" in html
+    assert "Ready to submit" in html
     assert 'name="action_type" value="submit"' in html
     for gone in ("pie_chart", "bar_chart", "cdn.tailwindcss.com", "salesHistory"):
         assert gone not in html
@@ -88,7 +90,7 @@ def test_the_outcome_page_draws_the_server_facts(shop, client):
     html = get(client, f"{F.co(client, entity.id)}/petty-cash/reports/{report_id}/submitted")
 
     assert "report is submitted" in html
-    assert "Cash counted" in html and "Difference" in html and "Sent to Xero" in html
+    assert "Sales" in html and "Expenses" in html and "Cash counted" in html and "Not sent to Xero yet" in html
     assert f"HKD {closing:,.2f}" in html
     assert 'id="publishButton"' in html and 'id="publishReportModal"' in html  # asks before Xero
     assert "/summary" in html  # View report

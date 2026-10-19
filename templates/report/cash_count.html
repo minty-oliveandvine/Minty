@@ -3,10 +3,13 @@
   Route: report.report_cash_count (blueprints/report/routes/cash_count.py), which saves the deposit
   and the count in one commit.
 
-  Order: the optional "Cash taken for bank deposit" -> the count by notes and coins (labelled rows,
-  a polite live total) -> the safe box -> the Check block (Expected in drawer, Counted, Difference
-  as "HKD 20.00 short") -> the reason, which any difference needs before Save & Next (the user's
-  decision, 2026-10-14; the server refuses it too and keeps what was counted).
+  Daily Closing Phase 1 (2026-10-16): one task at a time. Three task cards - the cash taken to the
+  bank, the count, the safe box - and only the first one not yet done is open; the others show
+  their result (done) or wait ("Next, after ..."). The notes and coins are counted in a sheet
+  (#countSheet, the Drawer: 480 on a desktop, full screen on a phone) that sits INSIDE the form, so
+  actual_cash[...] posts with the page. The Check (match card, or the warning and the reason any
+  difference needs) appears only once the drawer has been counted, and Save & Next waits for the
+  count and for that reason (the user's decision, 2026-10-14; the server refuses it too).
 
   The expected-cash formula is the code's, unchanged: opening + addition + cash sales - expenses -
   deposit, against the count plus the safe box (Part 15's A15-01 differs; that is the owner's call).
@@ -18,16 +21,29 @@
 {% set d = current_draft %}
 {% set before_deposit = (d.opening_balance or 0)|float + (d.cash_addition or 0)|float + (d.cash_sales or 0)|float - (d.expenses or 0)|float %}
 {% set deposit = (d.bank_deposit or 0)|float %}
+{% set safe_value = (d.safe_box_balance or 0)|float %}
 {% set reason_needed = request.args.get('reason') == 'needed' %}
+{# A saved count means the stage was posted (Save & Next or Save & Exit): every task opens done. #}
+{% set stage_done = locked or ('cash_count' in (completed_sections or [])) or (denomination_rows | selectattr('count') | list | length > 0) %}
 
 {% macro face(value) -%}{{ code }} {{ (value|int) if value == (value|int) else ('%.2f'|format(value)) }}{%- endmacro %}
 
-{% block guidance %}<p class="pc-page-header__purpose">Count the cash in the drawer. Any cash taken to the bank comes first.</p>{% endblock %}
+{% block guidance %}<p class="pc-page-header__purpose" id="cashGuidance">{% if stage_done %}All three checks are done.{% else %}Three quick checks. We'll go one at a time.{% endif %}</p>{% endblock %}
 
 {% block stage %}
+{%- set done = {'deposit': stage_done or deposit > 0, 'count': stage_done, 'safe': stage_done or safe_value > 0} -%}
+{%- set ns = namespace(current=None) -%}
+{%- for t in ['deposit', 'count', 'safe'] %}{% if not done[t] and ns.current is none %}{% set ns.current = t %}{% endif %}{% endfor -%}
+{%- set states = {} -%}
+{%- for t in ['deposit', 'count', 'safe'] %}{% set _ = states.update({t: 'done' if done[t] else ('current' if ns.current == t else 'next')}) %}{% endfor -%}
+{%- set notes = [] -%}{%- set coins = [] -%}
+{%- for row in denomination_rows -%}
+  {%- set kind = ((row.type.value if row.type.value is defined else row.type)|string|lower) -%}
+  {%- set _ = (coins if 'coin' in kind else notes).append(row) -%}
+{%- endfor -%}
 <form id="cash-count-form" data-pc-stage-form novalidate method="post"
       action="{{ url_for('report.report_cash_count', entity_id=org.id, transaction_date=request.args.get('transaction_date')) }}"
-      data-before-deposit="{{ before_deposit }}">
+      data-before-deposit="{{ before_deposit }}"{% if locked %} data-locked{% endif %}>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="entity_id" value="{{ org.id }}">
   <input type="hidden" name="action_type" value="save_next">
@@ -43,64 +59,75 @@
       {% endcall %}
     {% endif %}
 
-    {# ---- 1. the deposit (optional) ---- #}
-    <section class="pc-stack--16" style="display: flex; flex-direction: column" aria-labelledby="deposit-title">
-      <div>
-        <h2 class="pc-t-title-m" id="deposit-title">Cash taken for bank deposit</h2>
-        <p class="pc-t-body-s pc-c-secondary">In the drawer before any deposit: <span class="pc-num" translate="no" id="currentBalanceDisplay">{{ before_deposit|money(code) }}</span></p>
-      </div>
-      {% call ui.field('bank_deposit', 'Deposit amount', note='Leave it empty when no cash went to the bank.') %}
-        {{ ui.amount_input('bank_deposit', 'bank_deposit', value=(('%.2f'|format(deposit)) if deposit > 0 else ''), code=code, readonly=locked,
-             extra='placeholder="0.00" data-pc-empty-zero data-pc-amount="Enter the deposit in numbers, with up to 2 decimals." data-pc-max="' ~ ([before_deposit, 0]|max) ~ '" data-pc-max-msg="The deposit can be at most ' ~ (([before_deposit, 0]|max)|money(code)) ~ ', the cash in the drawer. Lower it to continue."') }}
-      {% endcall %}
-    </section>
-
-    {# ---- 2. the count, by notes and coins ---- #}
-    <section class="pc-stack--16" style="display: flex; flex-direction: column" aria-labelledby="count-title">
-      <div>
-        <h2 class="pc-t-title-m" id="count-title">Count the drawer</h2>
-        <p class="pc-t-body-s pc-c-secondary">How many of each note and coin. Leave a row empty for none.</p>
-      </div>
-      <div class="pc-count">
-        {% for row in denomination_rows %}
-        <div class="pc-count__row">
-          <label class="pc-count__face pc-num" for="{{ row.field }}" translate="no">{{ face(row.value) }}</label>
-          <div class="pc-field">
-            <input type="text" inputmode="numeric" class="pc-input pc-input--amount" id="{{ row.field }}" name="actual_cash[{{ row.field }}]"
-                   value="{{ row.count if row.count else '' }}" placeholder="0" autocomplete="off" data-denomination="{{ row.value }}"
-                   aria-describedby="{{ row.field }}-note"{% if locked %} readonly{% endif %}>
-            <p class="pc-note" id="{{ row.field }}-note" data-pc-helper="" hidden></p>
+    <div class="pc-tasks" aria-live="polite">
+      {# ---- 1. the cash taken to the bank (optional) ---- #}
+      {% call ui.task('deposit', 1, 'Cash taken to the bank', states.deposit) %}
+        <div class="pc-task__body" data-pc-task-body>
+          <div class="pc-total">
+            <span class="pc-total__label">In the drawer before any deposit</span>
+            <span class="pc-total__amount pc-num" translate="no" id="currentBalanceDisplay">{{ before_deposit|money(code) }}</span>
           </div>
-          <span class="pc-count__total pc-num" id="{{ row.field }}Total" translate="no" aria-hidden="true">{{ 0|money(code) }}</span>
+          {% call ui.field('bank_deposit', 'Deposit amount', note='Leave it empty when no cash went to the bank.') %}
+            {{ ui.amount_input('bank_deposit', 'bank_deposit', value=(('%.2f'|format(deposit)) if deposit > 0 else ''), code=code, readonly=locked,
+                 extra='placeholder="0.00" data-pc-empty-zero data-pc-amount="Enter the deposit in numbers, with up to 2 decimals." data-pc-max="' ~ ([before_deposit, 0]|max) ~ '" data-pc-max-msg="The deposit can be at most ' ~ (([before_deposit, 0]|max)|money(code)) ~ ', the cash in the drawer. Lower it to continue."') }}
+          {% endcall %}
+          {% if not locked %}<div><button type="button" class="pc-btn pc-btn--secondary" data-pc-task-continue="deposit">Continue</button></div>{% endif %}
         </div>
-        {% endfor %}
-      </div>
-      <dl class="pc-dl pc-dl--amounts pc-dl--sunk" aria-live="polite">
-        <div class="pc-dl__total"><dt>Counted in the drawer</dt><dd class="pc-num" translate="no" id="cash_count_balance">{{ 0|money(code) }}</dd></div>
-      </dl>
-    </section>
-
-    {# ---- 3. the safe box ---- #}
-    <section aria-labelledby="safe-title">
-      <h2 class="sr-only" id="safe-title">Safe box</h2>
-      {% call ui.field('safeBoxBalance', 'Cash in the safe box', note='Leave it empty when the safe box is empty.') %}
-        {{ ui.amount_input('safeBoxBalance', 'safe_box_balance', value=(d.safe_box_balance if d and d.safe_box_balance is not none and d.safe_box_balance != 0 else ''), code=code, readonly=locked,
-             extra='placeholder="0.00" data-pc-empty-zero data-pc-amount="Enter the amount in numbers, with up to 2 decimals."') }}
+        <div class="pc-task__result" data-pc-task-result>
+          <p id="depositResult">{% if deposit > 0 %}<span class="pc-num" translate="no">{{ deposit|money(code) }}</span> to the bank{% else %}None today{% endif %}</p>
+          {% if not locked %}<button type="button" class="pc-btn pc-btn--link" data-pc-task-change="deposit">Change<span class="sr-only"> the cash taken to the bank</span></button>{% endif %}
+        </div>
       {% endcall %}
-    </section>
 
-    {# ---- 4. the Check block ---- #}
-    <section class="pc-stack--16" style="display: flex; flex-direction: column" aria-labelledby="check-title">
-      <h2 class="pc-t-title-m" id="check-title">Check</h2>
-      <dl class="pc-dl pc-dl--amounts" aria-live="polite">
-        <div><dt>Expected in drawer</dt><dd class="pc-num" translate="no" id="expected_cash_count_balance">{{ (before_deposit - deposit)|money(code) }}</dd></div>
-        <div><dt>Counted</dt><dd class="pc-num" translate="no" id="totalCashCount">{{ 0|money(code) }}</dd></div>
-        <div class="pc-dl__total"><dt>Difference</dt><dd translate="no" id="variance">None</dd></div>
-      </dl>
+      {# ---- 2. the count, in the sheet ---- #}
+      {% call ui.task('count', 2, 'Count the drawer', states.count, sub='Notes and coins in the till right now') %}
+        <div class="pc-task__body" data-pc-task-body>
+          {{ ui.scene('img/cash_reg.webp', 128) }}
+          <button type="button" class="pc-btn pc-btn--primary pc-btn--full" data-pc-count-open>Count notes and coins</button>
+        </div>
+        <div class="pc-task__result" data-pc-task-result>
+          <div class="pc-total">
+            <span class="pc-total__label">Counted in the drawer</span>
+            <span class="pc-total__amount pc-num" translate="no" id="cash_count_balance">{{ 0|money(code) }}</span>
+          </div>
+          {% if not locked %}<button type="button" class="pc-btn pc-btn--link" data-pc-count-open>Edit<span class="sr-only"> the count</span></button>{% endif %}
+        </div>
+        <p class="pc-task__next" data-pc-task-next>Next, after the bank deposit.</p>
+      {% endcall %}
+
+      {# ---- 3. the safe box ---- #}
+      {% call ui.task('safe', 3, 'Safe box', states.safe) %}
+        <div class="pc-task__body" data-pc-task-body>
+          <div class="pc-task__aside">
+            {{ ui.scene('img/safebox.webp', 56) }}
+            {% call ui.field('safeBoxBalance', 'Cash in the safe box', note='Leave it empty when the safe box is empty.') %}
+              {{ ui.amount_input('safeBoxBalance', 'safe_box_balance', value=(d.safe_box_balance if d and d.safe_box_balance is not none and d.safe_box_balance != 0 else ''), code=code, readonly=locked,
+                   extra='placeholder="0.00" data-pc-empty-zero data-pc-amount="Enter the amount in numbers, with up to 2 decimals."') }}
+            {% endcall %}
+          </div>
+        </div>
+        <div class="pc-task__result" data-pc-task-result>
+          <p><span class="pc-num" translate="no" id="safeResult">{{ safe_value|money(code) }}</span></p>
+          {% if not locked %}<button type="button" class="pc-btn pc-btn--link" data-pc-task-change="safe">Edit<span class="sr-only"> the safe box</span></button>{% endif %}
+        </div>
+        <p class="pc-task__next" data-pc-task-next>Next, after the count.</p>
+      {% endcall %}
+    </div>
+
+    {# ---- the Check: only once the drawer has been counted ---- #}
+    <section class="pc-stack--16" style="display: flex; flex-direction: column" id="cashCheck" aria-labelledby="check-title"{% if not done.count %} hidden{% endif %}>
+      <h2 class="sr-only" id="check-title">Check</h2>
+      <div class="pc-check" id="checkMatch">
+        <span class="pc-check__mark">{{ ui.icon('check') }}</span>
+        <div>
+          <p class="pc-check__title">The numbers match</p>
+          <p class="pc-check__line">Counted <span class="pc-num" translate="no" id="totalCashCount">{{ 0|money(code) }}</span> · expected <span class="pc-num" translate="no" id="expected_cash_count_balance">{{ (before_deposit - deposit)|money(code) }}</span></p>
+        </div>
+      </div>
       <div class="pc-alert pc-alert--warning" id="discrepancyAlert" role="status" hidden>
         <span class="pc-icon" aria-hidden="true">warning</span>
         <div class="pc-alert__body">
-          <p class="pc-alert__title" id="discrepancyTitle"></p>
+          <p class="pc-alert__title">The count is <span translate="no" id="variance">None</span>.</p>
           <p class="pc-alert__text">Add a reason so the reviewer knows what happened.</p>
         </div>
       </div>
@@ -121,6 +148,37 @@
     </section>
   </div>
 
+  {# ---- the count sheet: inside the form, so the counts post with the page ---- #}
+  {% call ui.drawer('countSheet', 'Count the drawer', desc='How many of each? Leave a row empty for none.', scene='img/cash_reg.webp') %}
+    <div class="pc-drawer__body">
+      {% for group, label, items in [('notes', 'Notes', notes), ('coins', 'Coins', coins)] if items %}
+      <div class="pc-sheet-group" role="group" aria-labelledby="sheet-{{ group }}">
+        <p class="pc-sheet-group__label" id="sheet-{{ group }}">{{ label }}</p>
+        <div class="pc-count">
+          {% for row in items %}
+          <div class="pc-count__row">
+            <label class="pc-count__face pc-num" for="{{ row.field }}" translate="no">{{ face(row.value) }}</label>
+            <input type="text" inputmode="numeric" class="pc-input pc-input--amount" id="{{ row.field }}" name="actual_cash[{{ row.field }}]"
+                   value="{{ row.count if row.count else '' }}" placeholder="0" autocomplete="off" data-denomination="{{ row.value }}"
+                   aria-describedby="{{ row.field }}-note"{% if locked %} readonly{% endif %}>
+            <span class="pc-count__eq" aria-hidden="true">=</span>
+            <span class="pc-count__total pc-num" id="{{ row.field }}Total" translate="no" aria-hidden="true">—</span>
+            <p class="pc-note" id="{{ row.field }}-note" data-pc-helper="" hidden></p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="pc-drawer__footer">
+      <div class="pc-total" aria-live="polite">
+        <span class="pc-total__label">Total in the drawer</span>
+        <span class="pc-total__amount pc-num" translate="no" id="sheetTotal">{{ 0|money(code) }}</span>
+      </div>
+      {% if not locked %}<button type="button" class="pc-btn pc-btn--primary pc-btn--full" id="saveCountBtn">Save count</button>{% endif %}
+    </div>
+  {% endcall %}
+
   {{ stage_actions(gate='Add a reason for the difference to continue.') }}
 </form>
 {% endblock %}
@@ -131,9 +189,11 @@
   "use strict";
   const CODE = {{ code|tojson }};
   const form = document.getElementById("cash-count-form");
+  const locked = form.hasAttribute("data-locked");
   const beforeDeposit = parseFloat(form.dataset.beforeDeposit) || 0;
   const deposit = document.getElementById("bank_deposit");
   const safeBox = document.getElementById("safeBoxBalance");
+  const check = document.getElementById("cashCheck");
   const reasonField = document.getElementById("reasonField");
   const reason = document.getElementById("discrepancyDescription");
   const next = form.querySelector('[data-pc-save="save_next"]');
@@ -141,11 +201,119 @@
   const rows = Array.from(form.querySelectorAll("input[data-denomination]"));
   const money = (v) => CODE + " " + Currency.formatMoney(v);
   const cents = (v) => Math.round(v * 100) / 100;
+  const COUNT_FIRST = "Count the drawer to continue";
+  const REASON_FIRST = "Add a reason for the difference to continue.";
+  const COUNT_RULE = /^\d{0,6}$/;
 
   // A count is whole notes or coins.
   rows.forEach((input) =>
-    PcValidate.rule(input, (value) => (/^\d{0,6}$/.test(value.trim()) ? "" : "Count whole notes or coins, like 3."))
+    PcValidate.rule(input, (value) => (COUNT_RULE.test(value.trim()) ? "" : "Count whole notes or coins, like 3."))
   );
+
+  // ---- the three tasks: the first one not done is open, one at a time ----
+  const ORDER = ["deposit", "count", "safe"];
+  const card = (key) => form.querySelector('[data-pc-task="' + key + '"]');
+  const done = {};
+  ORDER.forEach((key) => (done[key] = card(key).dataset.state === "done"));
+  const currentKey = () => ORDER.find((key) => !done[key]) || null;
+
+  function render() {
+    const current = currentKey();
+    ORDER.forEach((key) => {
+      const c = card(key);
+      c.dataset.state = done[key] ? "done" : key === current ? "current" : "next";
+      if (key === current) c.setAttribute("aria-current", "step");
+      else c.removeAttribute("aria-current");
+    });
+    document.getElementById("cashGuidance").textContent = current ? "Three quick checks. We'll go one at a time." : "All three checks are done.";
+    check.hidden = !done.count; // the expected amount stays out of sight until there is a count
+
+    const taken = Currency.parseMoney(deposit.value);
+    const result = document.getElementById("depositResult");
+    if (taken > 0) {
+      const amount = document.createElement("span");
+      amount.className = "pc-num";
+      amount.setAttribute("translate", "no");
+      amount.textContent = money(taken);
+      result.replaceChildren(amount, " to the bank");
+    } else {
+      result.textContent = "None today";
+    }
+    document.getElementById("safeResult").textContent = money(Currency.parseMoney(safeBox.value));
+    gate();
+  }
+
+  // Focus the open task's control, or the footer once all three are done.
+  function focusCurrent() {
+    const current = currentKey();
+    if (current === "deposit") deposit.focus();
+    else if (current === "count") card("count").querySelector("[data-pc-task-body] [data-pc-count-open]").focus();
+    else if (current === "safe") safeBox.focus();
+    else if (!reasonField.hidden && reason.value.trim() === "") reason.focus();
+    else if (next) next.focus();
+  }
+
+  // A typed task is done once its field is left with a valid value (or empty: "none").
+  function finish(key, input, moveFocus) {
+    PcValidate.refresh(input, true);
+    if (input.getAttribute("aria-invalid") === "true") return false;
+    done[key] = true;
+    render();
+    if (moveFocus) focusCurrent();
+    return true;
+  }
+
+  [["deposit", deposit], ["safe", safeBox]].forEach(([key, input]) => {
+    card(key).addEventListener("focusout", (event) => {
+      if (locked || done[key] || card(key).dataset.state !== "current") return;
+      const to = event.relatedTarget;
+      // still inside the card, or on the way to Save: leave it (a collapsing card would move the button)
+      if (to && (card(key).contains(to) || to.closest("[data-pc-save]"))) return;
+      finish(key, input, !to || !to.closest("[data-pc-task]"));
+    });
+  });
+  form.querySelectorAll("[data-pc-task-continue]").forEach((button) =>
+    button.addEventListener("click", () => {
+      if (!finish("deposit", deposit, true)) deposit.focus();
+    })
+  );
+  form.querySelectorAll("[data-pc-task-change]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const key = button.getAttribute("data-pc-task-change");
+      done[key] = false;
+      render();
+      (key === "deposit" ? deposit : safeBox).focus();
+    })
+  );
+
+  // ---- the count sheet ----
+  form.querySelectorAll("[data-pc-count-open]").forEach((button) =>
+    button.addEventListener("click", () => PcOverlay.open("countSheet", { opener: button, initialFocus: rows[0] }))
+  );
+  const saveCount = document.getElementById("saveCountBtn");
+  if (saveCount) {
+    saveCount.addEventListener("click", () => {
+      rows.forEach((input) => PcValidate.refresh(input, true));
+      const bad = rows.find((input) => !COUNT_RULE.test(input.value.trim()));
+      if (bad) {
+        bad.focus();
+        return;
+      }
+      PcOverlay.close("countSheet");
+      done.count = true;
+      calculate();
+      render();
+      focusCurrent();
+    });
+    // Enter in the sheet saves the count (it never submits the page behind it).
+    rows.forEach((input) =>
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        saveCount.click();
+      })
+    );
+  }
 
   function calculate() {
     let counted = 0;
@@ -153,13 +321,14 @@
       const quantity = /^\d+$/.test(input.value.trim()) ? parseInt(input.value, 10) : 0;
       const total = quantity * parseFloat(input.dataset.denomination);
       counted += total;
-      document.getElementById(input.id + "Total").textContent = money(total);
+      document.getElementById(input.id + "Total").textContent = input.value.trim() === "" ? "—" : money(total);
     });
     counted = cents(counted);
     const expected = cents(beforeDeposit - Currency.parseMoney(deposit.value));
     const withSafe = cents(counted + Currency.parseMoney(safeBox.value));
     const difference = cents(withSafe - expected); // the server's rule: count + safe box - expected
     document.getElementById("cash_count_balance").textContent = money(counted);
+    document.getElementById("sheetTotal").textContent = money(counted);
     document.getElementById("expected_cash_count_balance").textContent = money(expected);
     document.getElementById("totalCashCount").textContent = money(withSafe);
     document.getElementById("discrepancyAmount").value = difference;
@@ -168,23 +337,26 @@
     document.getElementById("discrepancyType").value = off ? (difference < 0 ? "short" : "over") : "none";
     document.getElementById("variance").textContent = off ? money(Math.abs(difference)) + " " + word : "None";
     document.getElementById("discrepancyAlert").hidden = !off;
-    document.getElementById("discrepancyTitle").textContent = off ? "The count is " + money(Math.abs(difference)) + " " + word + "." : "";
+    document.getElementById("checkMatch").hidden = off;
     reasonField.hidden = !off;
     reason.disabled = !off; // no difference, nothing to explain: not sent
     gate();
   }
 
-  // Part 15.15d / 15.2: Save & Next waits for the reason, and says so beside it.
+  // Part 15.15d / 15.2: Save & Next waits for the count, then for the reason, and says so.
   function gate() {
     if (!next || !nextReason) return;
-    const blocked = !reasonField.hidden && reason.value.trim() === "";
-    next.disabled = blocked;
-    nextReason.hidden = !blocked;
+    const needCount = !done.count;
+    const needReason = !needCount && !reasonField.hidden && reason.value.trim() === "";
+    next.disabled = needCount || needReason;
+    nextReason.textContent = needCount ? COUNT_FIRST : REASON_FIRST;
+    nextReason.hidden = !(needCount || needReason);
   }
 
   form.addEventListener("input", calculate);
   form.addEventListener("focusout", calculate);
   calculate();
+  render();
   {% if reason_needed %}reason.focus();{% endif %}
 
   {% if is_report_edit_mode %}
