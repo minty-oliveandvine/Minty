@@ -21,7 +21,7 @@ pytestmark = pytest.mark.char
 
 WEB = "http://petty-cash.minty.test"
 REGEX = (
-    r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|petty-cash)"
+    r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|pettycash)"
     r"\.dailyminty\.com$"
 )
 BASE = "/api/petty-cash/v1/companies"
@@ -221,7 +221,7 @@ def test_another_origin_is_answered_with_ours_so_the_browser_refuses_it(app, cli
 
 
 def test_a_preview_set_origin_is_allowed_only_with_the_regex(app, client, shop, monkeypatch):
-    preview = "https://pr-feat-x-petty-cash.dailyminty.com"
+    preview = "https://pr-feat-x-pettycash.dailyminty.com"
     headers = F.petty_cash_headers(app, shop["owner"].id, origin=preview)
 
     monkeypatch.delenv("PREVIEW_ORIGIN_REGEX", raising=False)

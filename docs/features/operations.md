@@ -29,10 +29,10 @@ the old → new rename table — is [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md). 
 | runtime | `APP_ENV` — `development` or `production` (the default; anything else counts as production). `development` turns on debug and allows Xero's OAuth over plain http |
 | database | `DATABASE_URL` — `postgresql://user:pass@host:5432/db?schema=pettycashv3`. `?schema=` (default `pettycashv3`) is the schema name every model, raw query, the session table and the Django services read — `services/app_runtime/env.py` pops it off before SQLAlchemy connects (`blueprints/shared/schema.py` reads it from there); other query params such as `sslmode` stay |
 | secrets | `SECRET_KEY` (shared with the three Django APIs; also signs CSRF tokens) |
-| Xero | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`; the redirect URI is `PETTY_CASH_URL` + `/callback` |
+| Xero | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`; the redirect URI is `ACCOUNTS_API_URL` (alias `PETTY_CASH_URL`) + `/callback` |
 | storage | `S3_URL` — `https://KEY:SECRET@s3.<region>.backblazeb2.com/<bucket>` (key and secret URL-encoded), Backblaze B2 through the S3 API; one bucket shared by every environment today |
 | mail | `SMTP_URL` — `smtp://user:pass@host:587` (STARTTLS) or `smtps://…:465`, `?timeout=` seconds per SMTP step (default 10 - `services/app_runtime/mail.py`); `MAIL_FROM` (the sender) |
-| URLs | `PETTY_CASH_URL` (this app's public origin), `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL` (the payment app), `ONBOARDING_WEB_URL` (the wizard) |
+| URLs | `ACCOUNTS_API_URL` (this app's public origin; `PETTY_CASH_URL` is its transitional alias, and one of them is required outside development), `PETTY_CASH_WEB_URL` (minty-petty-cash-web), `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL` (the payment app), `ONBOARDING_WEB_URL` (the wizard) |
 | other keys | `SPIRE_KEY` (DOCX export). No Stripe keys since 2026-10-06 - Stripe is minty-subscription-api's |
 | switches | `EXPENSE_AI_*` |
 | sessions | `SESSION_TYPE` (`sqlalchemy`), `SESSION_SQLALCHEMY_TABLE` (`sessions`) |

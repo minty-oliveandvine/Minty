@@ -32,7 +32,7 @@ def test_resend_uses_persisted_names(app, monkeypatch):
         monkeypatch.setattr(inv.Entity, "query", MagicMock(get=lambda _id: None))
         monkeypatch.setattr(inv.User, "query", MagicMock(get=lambda _id: None))
     monkeypatch.setattr(inv, "current_app", MagicMock(extensions={"mail": mail},
-                                                      config={"PETTY_CASH_URL": "http://x"}))
+                                                      config={"ACCOUNTS_API_URL": "http://x"}))
     monkeypatch.setattr(inv, "Message", MagicMock())
 
     # Resend shape: no name args, exactly how api.py:205 calls it.

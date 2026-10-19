@@ -210,7 +210,7 @@ def send_invitation_email(
 
         from urllib.parse import urlencode
 
-        public_url = (current_app.config.get("PETTY_CASH_URL") or "").rstrip("/")
+        public_url = (current_app.config.get("ACCOUNTS_API_URL") or "").rstrip("/")
         accept_path = url_for(
             "invitation.accept_invitation_page",
             token=invitation.token,
@@ -516,14 +516,14 @@ _ASSET_FINGERPRINTS: dict[str, str] = {}
 
 
 def email_base_url() -> str:
-    """The site root an emailed asset is served from: ``PETTY_CASH_URL``, else this request's.
+    """The site root an emailed asset is served from: ``ACCOUNTS_API_URL``, else this request's.
 
     Not ``url_for("static", filename="", _external=True)``: that already ends in
-    ``/static``, ``_asset_url`` adds another, and the logo 404'd wherever ``PETTY_CASH_URL``
-    was unset. Shared with the password-reset email. Needs a request when ``PETTY_CASH_URL`` is
+    ``/static``, ``_asset_url`` adds another, and the logo 404'd wherever this app's
+    URL was unset. Shared with the password-reset email. Needs a request when ``ACCOUNTS_API_URL`` is
     unset; every sender of these emails runs inside one.
     """
-    return (current_app.config.get("PETTY_CASH_URL") or "").rstrip("/") or request.url_root.rstrip("/")
+    return (current_app.config.get("ACCOUNTS_API_URL") or "").rstrip("/") or request.url_root.rstrip("/")
 
 
 def _asset_url(base_url: str, rel_path: str) -> str:

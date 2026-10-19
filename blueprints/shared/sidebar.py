@@ -28,12 +28,13 @@ from flask import request, url_for
 from flask_login import current_user
 from loguru import logger
 
+from blueprints.shared import bearer_api
 from blueprints.user_management.services import profile
 from services.app_runtime.env import url_env
 
 #: Where minty-subscription-api answers (the Subscriptions Overview's read) - the same
 #: ``SUBSCRIPTION_API_URL`` minty-web reads.
-SUBSCRIPTION_API_URL_DEFAULT = "http://localhost:8000"
+SUBSCRIPTION_API_URL_DEFAULT = "http://localhost:8001"
 
 #: Pages where a person is CHOOSING a company rather than inside one: no company sections and
 #: no Settings there, whatever the page was handed (minty-web: never on the entity list).
@@ -86,6 +87,24 @@ def _settings(company: str) -> tuple[str, str]:
     return url_for(endpoint, entity_id=company), endpoint
 
 
+def _petty_cash_links(company: str) -> dict[str, str]:
+    """The Petty Cash group's Dashboard and Reports. Where ``PETTY_CASH_WEB_URL`` is set they open
+    minty-petty-cash-web through ``/handoff/petty-cash-web`` (which mints its token); unset, they
+    stay on this app's own pages."""
+    if not bearer_api.petty_cash_web_is_set():
+        return {
+            "dashboard": url_for("entity.report_dashboard", id=company),
+            "reports": url_for("report.entity_report_history", entity_id=company),
+        }
+    from blueprints.entity.routes.modules import petty_cash_web_company_path
+
+    def handoff(sub: str) -> str:
+        return url_for("entity.handoff_petty_cash_web", entity_id=company,
+                       next=petty_cash_web_company_path(company, sub))
+
+    return {"dashboard": handoff(""), "reports": handoff("/reports")}
+
+
 def _current(endpoint: str, settings_endpoint: str | None) -> str | None:
     """Which menu item is the page being shown - marked for assistive technology only
     (``aria-current``); the design draws the current item like any other."""
@@ -119,13 +138,8 @@ def sidebar_context(entity_id=None) -> dict:
     }
     if company:
         links["settings"], settings_endpoint = _settings(company)
-        links.update(
-            {
-                "dashboard": url_for("entity.report_dashboard", id=company),
-                "reports": url_for("report.entity_report_history", entity_id=company),
-                "bills": url_for("entity.go_to_bills", entity_id=company),
-            }
-        )
+        links.update(_petty_cash_links(company))
+        links["bills"] = url_for("entity.go_to_bills", entity_id=company)
 
     # Every page that draws the sidebar is signed-in only; a render without a person (a
     # template rendered on its own) draws an empty name rather than failing.

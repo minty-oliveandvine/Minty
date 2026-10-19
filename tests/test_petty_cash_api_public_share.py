@@ -130,8 +130,8 @@ def test_the_answer_is_never_cached_or_leaked_by_referrer_and_only_our_web_may_r
     assert resp.headers["Access-Control-Allow-Methods"] == "GET, OPTIONS"
 
     assert _read(app, path, origin="https://evil.example").headers["Access-Control-Allow-Origin"] == WEB
-    preview = "https://pr-feat-x-petty-cash.dailyminty.com"
-    monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", r"^https://pr-[a-z0-9-]+-(?:my|petty-cash)\.dailyminty\.com$")
+    preview = "https://pr-feat-x-pettycash.dailyminty.com"
+    monkeypatch.setenv("PREVIEW_ORIGIN_REGEX", r"^https://pr-[a-z0-9-]+-(?:my|pettycash)\.dailyminty\.com$")
     assert _read(app, path, origin=preview).headers["Access-Control-Allow-Origin"] == preview
     # a refusal carries them too
     refused = _read(app, "AB/01_Jan_2026/" + "B" * 32)

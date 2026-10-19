@@ -47,7 +47,7 @@ def allowed_origins() -> tuple[str, ...]:
 
 
 def cors(resp):
-    origin = preview_origin.cors_origin(allowed_origins(), ("my", "payment-request", "petty-cash"))
+    origin = preview_origin.cors_origin(allowed_origins(), ("my", "payment-request", "pettycash"))
     return bearer_api.cors(resp, origin, methods=METHODS)
 
 

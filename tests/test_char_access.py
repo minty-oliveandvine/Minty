@@ -402,10 +402,10 @@ def test_the_invitation_subject_is_one_line(app, client, db, mail):
 ])
 def test_the_invitation_logo_is_served_from_static_once(company, client, mail, monkeypatch,
                                                         public_url, logo):
-    """Without PETTY_CASH_URL the base came from url_for("static", ...), which already ends in
+    """Without ACCOUNTS_API_URL the base came from url_for("static", ...), which already ends in
     /static, so the logo pointed at /static/static/... and 404'd."""
     owner, entity, superuser = company
-    monkeypatch.setitem(client.application.config, "PETTY_CASH_URL", public_url or None)
+    monkeypatch.setitem(client.application.config, "ACCOUNTS_API_URL", public_url or None)
     F.login(client, owner)
 
     send_invite(client, entity, "new@test.com", "cashier")

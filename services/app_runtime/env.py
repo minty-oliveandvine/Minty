@@ -5,6 +5,8 @@ the same variables, and the harness must be able to use these before (and betwee
 builds - conftest evicts ``services.app_runtime`` along with the rest of the app.
 
 * ``APP_ENV`` - ``development`` or ``production``; anything else (or unset) is production.
+* ``ACCOUNTS_API_URL`` (alias ``PETTY_CASH_URL``) - this app's own public origin; required
+  outside development.
 * ``DATABASE_URL`` - ``postgresql://user:pass@host:5432/db?schema=pettycashv3[&sslmode=...]``.
   The schema rides in the URL and is popped before the URL reaches a driver; every other
   query parameter is kept.
@@ -56,6 +58,23 @@ def is_development() -> bool:
 def url_env(name: str, default: str) -> str:
     """A sibling service's base URL, without a trailing slash."""
     return (os.environ.get(name) or default).rstrip("/")
+
+
+def accounts_api_url() -> str | None:
+    """This app's own public origin (``accounts-api.dailyminty.com``), without a trailing slash.
+
+    ``ACCOUNTS_API_URL``, else ``PETTY_CASH_URL`` - the transitional alias that still means
+    Flask while the other services move to the new name. Both unset is None in development
+    (emails sent from a request then use its host, and the Xero callback config.py's local
+    default) and a ``RuntimeError`` anywhere else: every emailed link and the Xero redirect URI
+    are built on it, and a guessed address is worse than none."""
+    for name in ("ACCOUNTS_API_URL", "PETTY_CASH_URL"):
+        value = (os.environ.get(name) or "").strip().rstrip("/")
+        if value:
+            return value
+    if is_development():
+        return None
+    raise RuntimeError("ACCOUNTS_API_URL is not set (nor its alias PETTY_CASH_URL): Flask's own public address")
 
 
 _PREVIEW_PREFIX = "^https://pr-"

@@ -3,7 +3,7 @@
 hands a person back into the set they came from rather than to the configured front ends.
 
 The front end names itself with ``?return_origin=`` on its way to Flask; Flask keeps the SET
-(the slug) in the session, so every later hand-off - to any of the three apps - stays inside
+(the slug) in the session, so every later hand-off - to any of the apps - stays inside
 it. Unset, the parameter does nothing; a configured origin, or logging out, leaves the set.
 
 Only a SAME-SITE navigation may name a set (``Sec-Fetch-Site``: our front ends share the
@@ -24,7 +24,7 @@ from flask import make_response, redirect, session
 
 pytestmark = pytest.mark.char
 
-REGEX = r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding)\.dailyminty\.com$"
+REGEX = r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|pettycash)\.dailyminty\.com$"
 SET_MY = "https://pr-feat-x-my.dailyminty.com"
 #: What a browser sends on a navigation from one of our front ends (another dailyminty.com host).
 SAME_SITE = {"Sec-Fetch-Site": "same-site"}
@@ -244,6 +244,7 @@ def test_an_api_call_leaves_the_stored_set_alone(client, on):
 def test_every_app_is_reached_in_the_same_set(app, on):
     from blueprints.auth.services.hub_login import hub_login_url
     from blueprints.entity.routes import create, modules
+    from blueprints.shared import bearer_api, preview_origin
     from blueprints.xero.routes import routes as xero
 
     with app.test_request_context("/", headers=SAME_ORIGIN):
@@ -252,6 +253,26 @@ def test_every_app_is_reached_in_the_same_set(app, on):
         assert modules._frontend_origin() == "https://pr-feat-x-payment-request.dailyminty.com"
         assert create._onboarding_base_url() == "https://pr-feat-x-onboarding.dailyminty.com"
         assert xero._onboarding_app_url() == "https://pr-feat-x-onboarding.dailyminty.com"
+        # /handoff/petty-cash-web's target (minty-petty-cash-web's set host is `pettycash`)
+        assert (preview_origin.handoff_origin("pettycash", bearer_api.petty_cash_web_origin())
+                == "https://pr-feat-x-pettycash.dailyminty.com")
+
+
+@pytest.mark.parametrize(
+    ("origin", "parsed"),
+    [
+        ("https://pr-feat-x-pettycash.dailyminty.com", ("feat-x", "pettycash")),
+        # the app is read from the END of the label, so a slug may carry an app's name
+        ("https://pr-pettycash-my.dailyminty.com", ("pettycash", "my")),
+        ("https://pr-my-pettycash.dailyminty.com", ("my", "pettycash")),
+        # the old label is no app: Petty Cash previews are `pettycash` (minty-infra, 2026-10-16)
+        ("https://pr-feat-x-petty-cash.dailyminty.com", None),
+    ],
+)
+def test_a_set_host_names_its_slug_and_app(app, on, origin, parsed):
+    from blueprints.shared import preview_origin
+
+    assert preview_origin.parse(origin) == parsed
 
 
 def test_an_app_the_regex_leaves_out_keeps_its_configured_origin(app, hosts, monkeypatch):
@@ -282,6 +303,7 @@ def test_a_stored_set_is_dropped_once_the_regex_is_gone(app, hosts, monkeypatch)
     [
         (SET_MY, True),
         ("https://pr-feat-x-payment-request.dailyminty.com", True),
+        ("https://pr-feat-x-pettycash.dailyminty.com", True),
         ("https://pr-feat-x-onboarding.dailyminty.com", False),  # not a hub caller
         ("https://my.minty.test", True),
         ("https://evil.com", False),

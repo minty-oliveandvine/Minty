@@ -2,7 +2,7 @@ import os
 
 from dotenv import load_dotenv
 
-from services.app_runtime.env import app_env
+from services.app_runtime.env import accounts_api_url, app_env
 
 # Load environment variables
 load_dotenv()
@@ -27,9 +27,12 @@ MAIL_DEFAULT_SENDER = MAIL_FROM
 # Set explicitly rather than derived: an email sent outside a request has no host to take,
 # and `url_for(_external=True)` quietly yields http://localhost — a link that is worse than
 # no link, because it looks real. Unset, the emails sent from a request use that request's
-# host. e.g. https://app.minty.com
-PETTY_CASH_URL = (os.environ.get('PETTY_CASH_URL') or '').rstrip('/') or None
+# host. e.g. https://accounts-api.dailyminty.com
+#
+# ACCOUNTS_API_URL, else PETTY_CASH_URL (the transitional alias, which still means Flask);
+# required outside development (services/app_runtime/env.accounts_api_url).
+ACCOUNTS_API_URL = accounts_api_url()
 
 # Xero's OAuth callback (the xero blueprint's /callback), derived from this app's own URL;
 # registered with the Xero app as-is. The local default is the dev server's port.
-REDIRECT_URI = (PETTY_CASH_URL or 'http://localhost:8010') + '/callback'
+REDIRECT_URI = (ACCOUNTS_API_URL or 'http://localhost:8000') + '/callback'

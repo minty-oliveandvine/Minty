@@ -44,7 +44,7 @@ It replaced `templates/components/sidepanel.html` and the Payment Request pages'
 ## The menu
 
 Top to bottom: the Minty mark; the person (avatar + name — opens My Profile); **Select Entity**
-(`/entity`); **Manage subscriptions** (minty-web's portal through `/handoff/minty-web`); inside a company only, **Petty Cash** (Dashboard, Reports) and
+(`/entity`); **Manage subscriptions** (minty-web's portal through `/handoff/minty-web`); inside a company only, **Petty Cash** (Dashboard, Reports - to minty-petty-cash-web through `/handoff/petty-cash-web` where `PETTY_CASH_WEB_URL` is set, otherwise Flask's own pages) and
 **Payment Request** (Bills → `go_to_bills`); the cat; **Settings** (inside a company only) and
 **Logout**.
 

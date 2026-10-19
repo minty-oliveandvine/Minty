@@ -24,6 +24,8 @@ on dependency injection).
 """
 from __future__ import annotations
 
+import os
+
 import jwt
 from flask import current_app, request
 
@@ -36,7 +38,7 @@ PAYMENT_REQUEST_WEB_URL_DEFAULT = "http://localhost:3020"
 ONBOARDING_WEB_URL_DEFAULT = "http://localhost:3030"
 #: Where minty-web (the hub: subscriptions, a company's module settings page) is served from.
 MINTY_WEB_URL_DEFAULT = "http://localhost:3000"
-#: Where minty-petty-cash-web (Petty Cash's own front end) is served from - slot 1, as Flask's 8010.
+#: Where minty-petty-cash-web (Petty Cash's own front end) is served from - slot 1, as the Petty Cash API's 8010.
 PETTY_CASH_WEB_URL_DEFAULT = "http://localhost:3010"
 
 #: What every one of these responses allows a caller to send. Not parametrised: a bearer
@@ -73,6 +75,13 @@ def minty_web_origin() -> str:
 def petty_cash_web_origin() -> str:
     """Origin of minty-petty-cash-web: the Petty Cash API's caller (``blueprints.petty_cash_api``)."""
     return _origin("PETTY_CASH_WEB_URL", PETTY_CASH_WEB_URL_DEFAULT)
+
+
+def petty_cash_web_is_set() -> bool:
+    """Whether ``PETTY_CASH_WEB_URL`` is set: only then do this app's own Petty Cash links go to
+    minty-petty-cash-web (``blueprints.shared.sidebar``). The local default above serves CORS and
+    ``/handoff/petty-cash-web`` alone, so an environment without the app keeps Flask's pages."""
+    return bool((os.environ.get("PETTY_CASH_WEB_URL") or "").strip())
 
 
 def cors(resp, origin: str, *, methods: str = "GET, POST, OPTIONS"):

@@ -74,7 +74,7 @@ minty-payment-request-api triggers Minty's Xero syncs through
 
 `ONBOARDING_WEB_URL` (the wizard's origin, also the CORS origin Minty stamps on the
 `/api/onboarding/*` answers — `blueprints/shared/bearer_api.py`), `PAYMENT_REQUEST_WEB_URL` (the
-payment app), `PETTY_CASH_URL` (Minty's own absolute URL), `SECRET_KEY` shared with the
+payment app), `ACCOUNTS_API_URL` (Minty's own absolute URL; alias `PETTY_CASH_URL`), `SECRET_KEY` shared with the
 Django APIs. On the apps' side `PETTY_CASH_URL` points back at Minty (see
 `minty-production-host-topology` for the apex/www trap). Every service's variables:
 [`docs/ENVIRONMENT.md`](../ENVIRONMENT.md).

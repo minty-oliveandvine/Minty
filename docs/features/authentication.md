@@ -110,7 +110,7 @@ Password reset is the legacy `/login` page's "Forgot Password?" modal:
 password and clears both columns (`blueprints/auth/routes/password_reset.py`). The address
 is matched case-insensitively on `email` or `username`, and known or not it gets the same
 neutral flash, so the form cannot be used to find out who has an account; the link is built
-on `PETTY_CASH_URL` (the request host when that is unset).
+on `ACCOUNTS_API_URL` (the request host when that is unset).
 
 ### Email input: English only
 Every typed email address is printable ASCII (0x21-0x7E) and nothing else (2026-10-01).
@@ -320,6 +320,8 @@ secret (their `e2e/README.md` explains why nothing is bypassed by that).
 - **No refresh.** A lapsed token comes back through the same route.
 - **Calls.** The app calls Petty Cash's bearer API, `/api/petty-cash/v1/companies/<id>/...` ([petty-cash-api.md](petty-cash-api.md)). That door fails closed and takes only a **module** token.
 - **My Profile.** The app reads My Profile through the hub surface, whose CORS also names `PETTY_CASH_WEB_URL`.
+- **Flask's own sidebar.** Where `PETTY_CASH_WEB_URL` is set, the Petty Cash Dashboard and Reports rows on Flask's Jinja pages go through this hand-off to the app (`blueprints/shared/sidebar.py`); unset, they stay on Flask's pages.
+- **Hosts (Step 5, 2026-10-16).** The app is `pettycash.dailyminty.com` (`dev-pettycash.`), Flask becomes `accounts-api.dailyminty.com` (`dev-accounts-api.`) and the Django Petty Cash API is `pettycash-api.` (`docs/ENVIRONMENT.md` section 8).
 
 The entitlement claims in the token are a hint only: minty-payment-request-api re-reads
 `entity_function_map` (`GET /api/auth/entitlements`) and the DB decides what the module
@@ -328,7 +330,7 @@ shows.
 ### 6.1 Branch preview sets — handing back into a preview (2026-10-13)
 
 A branch's previews are one SET of hosts, `https://pr-<branch>-<app>.dailyminty.com` for `my`,
-`payment-request`, `onboarding`, `petty-cash` (and `www`), kept complete by the `.github` repo's
+`payment-request`, `onboarding`, `pettycash` (and `www`), kept complete by the `.github` repo's
 `vercel-preview-set.yml` (minty-infra `CUTOVER.md` section 6). Where **`PREVIEW_ORIGIN_REGEX`** is
 set, Flask hands a person back into the set they came from instead of the configured front ends
 (`blueprints/shared/preview_origin.py`):
@@ -357,12 +359,13 @@ set, Flask hands a person back into the set they came from instead of the config
   another site, which cannot name one; so a crafted link cannot park a signed-in person's session
   in a set and route the tokens of later Flask-started hand-offs into a preview. Each same-site
   trip from a set host renews it. Logging out leaves it.
-- The hand-offs that follow this rule: `hub_login_url`, the minty-web and payments `/landing`,
-  the onboarding launch and the Xero return (`bearer_api`'s origins through
+- The hand-offs that follow this rule: `hub_login_url`, the minty-web, payments and Petty Cash
+  `/landing`, the onboarding launch and the Xero return (`bearer_api`'s origins through
   `preview_origin.handoff_origin`). Outside a request (mail, jobs) there is no set.
 - CORS never reads the session: the hub routes echo a set origin for `my`/`payment-request`/
-  `petty-cash`, the onboarding routes for `onboarding`, the Petty Cash API for `petty-cash`, and
-  refuse every other.
+  `pettycash`, the onboarding routes for `onboarding`, the Petty Cash API for `pettycash`, and
+  refuse every other. (Petty Cash web's label was `petty-cash` until 2026-10-19; no preview ever
+  ran under it, and Flask no longer accepts it.)
 - The stored set is re-checked against the regex on every read, so unsetting the variable turns
   it all off at once. A value that could let in any host outside `https://pr-…\.dailyminty\.com$`
   (no anchors, a top-level `|`, another domain) refuses to boot
@@ -391,8 +394,9 @@ expiry) obtained when that user connects a company to Xero (`/xero_connect`, sco
 - minty-payment-request-api never refreshes: when its stored copy is expired it calls
   `POST /api/internal/xero/token` with a 60-second assertion JWT (`scope:
   xero-access-token`, `entity_id` in the **signed claims**, never the body) and gets a live
-  access token back; 409 means "reconnect required". Its `PETTY_CASH_URL` must point at the
-  Minty host (the token URL is derived from it: `PETTY_CASH_URL/api/internal/xero/token`).
+  access token back; 409 means "reconnect required". Its `PETTY_CASH_URL` (the transitional
+  alias that still means Flask) must point at the Minty host (the token URL is derived from it:
+  `PETTY_CASH_URL/api/internal/xero/token`).
 - minty-petty-cash-api asks for tokens the same way (it never reads `user_token`), and forwards
   the dashboard's deposit correction to `POST /api/internal/xero/deposit-correction`: the same
   60-second assertion with its own scope (`petty-cash-deposit-correction`), the company AND the
@@ -425,10 +429,11 @@ the payment module counts as leaving.
 | `SECRET_KEY` | sessions, CSRF, both hand-off JWTs, the internal token assertion — **shared with the three Django APIs** |
 | `SESSION_TYPE`, `SESSION_SQLALCHEMY_TABLE` | server-side sessions (`sqlalchemy`, `sessions`) |
 | `SMTP_URL`, `MAIL_FROM` | OTP, invitation and reset mail |
-| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | both OAuth flows (redirect URI `PETTY_CASH_URL/callback`) |
-| `PETTY_CASH_URL` | absolute links in mail and hand-offs, and the Xero redirect URI |
+| `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` | both OAuth flows (redirect URI `ACCOUNTS_API_URL/callback`; `http://localhost:8000/callback` locally) |
+| `ACCOUNTS_API_URL` (alias `PETTY_CASH_URL`) | Flask's own address (`accounts-api.dailyminty.com`): absolute links in mail and the Xero redirect URI. `ACCOUNTS_API_URL` wins; `PETTY_CASH_URL` is read only when it is unset. Both unset is refused at start-up outside development (`services/app_runtime/env.accounts_api_url`) |
+| `PETTY_CASH_WEB_URL` | minty-petty-cash-web's origin: `/handoff/petty-cash-web`'s target, the Petty Cash API's and hub routes' CORS, and (only when set) the sidebar's Petty Cash rows |
 | `MINTY_WEB_URL`, `PAYMENT_REQUEST_WEB_URL` | minty-web's and minty-payment-request-web's origins - the hand-offs, and the hub routes' CORS |
-| `SUBSCRIPTION_API_URL` | minty-subscription-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8000`) |
+| `SUBSCRIPTION_API_URL` | minty-subscription-api, read from the browser by the sidebar's Subscriptions Overview (default `http://localhost:8001`) |
 | `PREVIEW_ORIGIN_REGEX` | optional: the branch preview sets Flask may hand back into (section 6.1); unset = off |
 | `IDLE_TIMEOUT_SECONDS` | the presence window (there is no idle logout) |
 

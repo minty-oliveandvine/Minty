@@ -1,4 +1,5 @@
-"""services/app_runtime/env.py: the parsers behind APP_ENV, DATABASE_URL, S3_URL and SMTP_URL."""
+"""services/app_runtime/env.py: the parsers behind APP_ENV, ACCOUNTS_API_URL, DATABASE_URL, S3_URL and
+SMTP_URL - and config.py's Xero redirect URI, built on ACCOUNTS_API_URL."""
 
 from __future__ import annotations
 
@@ -195,11 +196,88 @@ def test_the_app_is_configured_from_the_urls(app):
     assert app.config["MAIL_USE_TLS"] is True and app.config["MAIL_USE_SSL"] is False
     assert app.config["MAIL_TIMEOUT"] == 10.0
     assert app.config["MAIL_DEFAULT_SENDER"] == app.config["MAIL_FROM"] == "noreply@minty.test"
-    assert app.config["REDIRECT_URI"] == "http://localhost:8010/callback"
+    assert app.config["ACCOUNTS_API_URL"] is None  # conftest leaves both names empty
+    assert app.config["REDIRECT_URI"] == "http://localhost:8000/callback"
     assert app.config["XERO_API_BASE_URL"] == "https://api.xero.com/api.xro/2.0"
     assert app.config["APP_ENV"] == "development"
     with app.app_context():
         assert get_s3_bucket() == "dummy-bucket"
+
+
+# --- ACCOUNTS_API_URL (Flask's own address; PETTY_CASH_URL is its transitional alias) ---------
+
+
+def _self_url_env(monkeypatch, app_env, accounts=None, petty_cash=None):
+    monkeypatch.setenv("APP_ENV", app_env)
+    for name, value in (("ACCOUNTS_API_URL", accounts), ("PETTY_CASH_URL", petty_cash)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+
+@pytest.mark.parametrize(
+    ("accounts", "petty_cash", "expected"),
+    [
+        ("https://accounts-api.minty.test/", "https://old.minty.test", "https://accounts-api.minty.test"),
+        (None, "https://old.minty.test/", "https://old.minty.test"),  # the alias, until the rename
+        ("", "https://old.minty.test", "https://old.minty.test"),  # empty counts as unset
+        ("  ", "https://old.minty.test", "https://old.minty.test"),
+    ],
+)
+@pytest.mark.parametrize("app_env", ["development", "production"])
+def test_accounts_api_url_prefers_the_new_name(monkeypatch, app_env, accounts, petty_cash, expected):
+    _self_url_env(monkeypatch, app_env, accounts, petty_cash)
+    assert env.accounts_api_url() == expected
+
+
+@pytest.mark.parametrize("blank", [None, ""])
+def test_accounts_api_url_unset_is_none_in_development(monkeypatch, blank):
+    _self_url_env(monkeypatch, "development", blank, blank)
+    assert env.accounts_api_url() is None
+
+
+@pytest.mark.parametrize("app_env", ["production", "staging"])
+def test_accounts_api_url_unset_fails_loudly_outside_development(monkeypatch, app_env):
+    _self_url_env(monkeypatch, app_env)
+    with pytest.raises(RuntimeError, match="ACCOUNTS_API_URL.*PETTY_CASH_URL"):
+        env.accounts_api_url()
+
+
+def _config(monkeypatch) -> dict:
+    """config.py as Flask loads it (``from_pyfile``), with no .env read over the test's env."""
+    import pathlib
+    import runpy
+
+    import dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
+    return runpy.run_path(str(pathlib.Path(__file__).resolve().parents[1] / "config.py"))
+
+
+@pytest.mark.parametrize(
+    ("accounts", "petty_cash", "app_env", "base", "redirect"),
+    [
+        ("https://accounts-api.dailyminty.com", "https://pettycash.dailyminty.com", "production",
+         "https://accounts-api.dailyminty.com", "https://accounts-api.dailyminty.com/callback"),
+        (None, "https://pettycash.dailyminty.com/", "production",
+         "https://pettycash.dailyminty.com", "https://pettycash.dailyminty.com/callback"),
+        (None, None, "development", None, "http://localhost:8000/callback"),
+    ],
+)
+def test_config_builds_the_xero_redirect_uri_on_flasks_own_address(
+    monkeypatch, accounts, petty_cash, app_env, base, redirect
+):
+    _self_url_env(monkeypatch, app_env, accounts, petty_cash)
+    config = _config(monkeypatch)
+    assert config["ACCOUNTS_API_URL"] == base
+    assert config["REDIRECT_URI"] == redirect
+
+
+def test_config_refuses_to_load_without_flasks_address_in_production(monkeypatch):
+    _self_url_env(monkeypatch, "production")
+    with pytest.raises(RuntimeError, match="ACCOUNTS_API_URL"):
+        _config(monkeypatch)
 
 
 # --- PREVIEW_ORIGIN_REGEX --------------------------------------------------------------------

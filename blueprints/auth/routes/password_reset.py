@@ -142,7 +142,7 @@ def _find_user_for_reset(address: str | None) -> User | None:
 
 
 def _reset_message(recipient: str, token: str) -> Message:
-    """The reset email. Its links are built on PETTY_CASH_URL, as the invitation
+    """The reset email. Its links are built on ACCOUNTS_API_URL, as the invitation
     email's are: the request host is whichever proxy or internal name the request
     arrived on, which is not necessarily one the recipient can reach."""
     # The invitation service's helpers, imported rather than copied so emailed assets keep
@@ -150,7 +150,7 @@ def _reset_message(recipient: str, token: str) -> Message:
     # auth.email_handoff does, to keep the invitation package out of import time.
     from blueprints.invitation.services.invite import _asset_url, email_base_url
 
-    public_url = (current_app.config.get("PETTY_CASH_URL") or "").rstrip("/")
+    public_url = (current_app.config.get("ACCOUNTS_API_URL") or "").rstrip("/")
     reset_url = (
         f"{public_url}{url_for('auth.reset_token', token=token)}"
         if public_url

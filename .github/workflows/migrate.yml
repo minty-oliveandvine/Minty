@@ -59,14 +59,16 @@ jobs:
       # The same install as docker/Dockerfile: the locked runtime set, no dev group.
       - run: pip install uv && uv sync --frozen --no-dev --no-default-groups --no-install-project
 
-      # Importing the app enforces SECRET_KEY, DATABASE_URL and S3_URL. A migration signs
-      # nothing and touches no bucket, so a throwaway key and a dummy bucket URL are enough;
-      # neither ever reaches a hosted service.
+      # Importing the app enforces SECRET_KEY, DATABASE_URL, S3_URL and (outside development)
+      # ACCOUNTS_API_URL. A migration signs nothing, touches no bucket and builds no link, so a
+      # throwaway key, a dummy bucket URL and a placeholder address are enough; none of them
+      # ever reaches a hosted service.
       - name: flask db ${{ inputs.action }}
         env:
           APP_ENV: production
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           S3_URL: https://dummy-key:dummy-secret@s3.us-west-004.backblazeb2.com/dummy-bucket
+          ACCOUNTS_API_URL: https://accounts-api.invalid
           ACTION: ${{ inputs.action }}
         run: |
           # Assigned and exported separately (shellcheck SC2155): combined, a failure of the

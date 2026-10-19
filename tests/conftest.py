@@ -303,7 +303,8 @@ def app(built_database) -> Iterator:
         "SPIRE_KEY": "dummy-spire-key",
         "SMTP_URL": "smtp://localhost:587",
         "MAIL_FROM": "noreply@minty.test",
-        # empty = config.py's localhost:8010 default; the local .env runs Flask on 5001
+        # both empty = config.py's localhost:8000 default (Flask's own address, and its alias)
+        "ACCOUNTS_API_URL": "",
         "PETTY_CASH_URL": "",
     }
 

@@ -43,7 +43,7 @@ def company() -> dict:
 
 @petty_cash_api_bp.after_request
 def _stamp(resp):
-    origin = preview_origin.cors_origin((bearer_api.petty_cash_web_origin(),), ("petty-cash",))
+    origin = preview_origin.cors_origin((bearer_api.petty_cash_web_origin(),), ("pettycash",))
     bearer_api.cors(resp, origin, methods=METHODS)
     resp.headers["Cache-Control"] = "no-store"
     return resp

@@ -331,7 +331,7 @@ def handoff_petty_cash_web():
     )
     # Never log this URL: it carries the token.
     return redirect(
-        f"{preview_origin.handoff_origin('petty-cash', bearer_api.petty_cash_web_origin())}/landing"
+        f"{preview_origin.handoff_origin('pettycash', bearer_api.petty_cash_web_origin())}/landing"
         f"?next={quote(destination, safe='')}"
         f"&entity_id={org.id}&entity_name={quote(org.name or '', safe='')}&token={token}"
     )

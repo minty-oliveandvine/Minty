@@ -24,7 +24,7 @@ Every rule is under `/api/petty-cash/v1/companies/<entity_id>`. The company come
 **Responses.** Every response is JSON. A refusal is `{"error": "<sentence>"}`, a sentence the app shows as it stands. The one exception is `unauthorized`, which the app answers by going back through `/handoff/petty-cash-web`. Every response is `Cache-Control: no-store`.
 
 **CORS** is stamped in `after_request`, so refusals and 500s carry it too:
-- the origin is `PETTY_CASH_WEB_URL` (default `http://localhost:3010`), or a `petty-cash` preview-set origin where `PREVIEW_ORIGIN_REGEX` allows it;
+- the origin is `PETTY_CASH_WEB_URL` (default `http://localhost:3010`), or a `pettycash` preview-set origin where `PREVIEW_ORIGIN_REGEX` allows it;
 - `Vary: Origin`;
 - methods `GET, POST, PUT, PATCH, DELETE, OPTIONS`;
 - headers `Authorization, Content-Type` only (no `X-Entity-Id`).
@@ -37,7 +37,7 @@ What the petty-cash web apps' public `/share/<path>` page shows: the read-only D
 - **Decided by** `report/services/share.py::resolve_share`, Flask's page's check too: the full path with its 32-character secret, an unexpired row, a token that passes its HMAC signature and names the row's company and day, the company, a submitted (not draft) report.
 - **Answer:** `company_name`, `transaction_date`, `currency_code`, `status`/`status_label`/`status_tone` (the pill), `publishing_status`, `submitted_at`, `submitted_by` (the audit line), `kpis`, `sales {methods [{name, value_name, type, amount}], cash, total}`, `expenses {lines [{item, supplier_name, amount, receipts [{name}]}], total}`, `cash` (as `GET /reports/<id>`, the difference and its reason included), `closing_balance`, `expires_at`. The figures are `routes/report.py::report_figures`, the Daily Report's. **Nothing else:** no ids, no permissions, no options, no line description (the shared page shows none) and no receipt id or file access (the shared page hides View).
 - **Refusals** read the same whatever failed: 404 "This link doesn't work. Ask the person who shared it for a new link." (malformed, unknown, bad or mismatched token, no company, no submitted report); 410 "This link has expired. Ask the person who shared it for a new link." (the row is deleted, as Flask does). A missing `SECRET_KEY` is a logged 500.
-- **Headers:** `Cache-Control: no-store`, `Referrer-Policy: no-referrer`; CORS GET from `PETTY_CASH_WEB_URL` or a `petty-cash` preview-set origin, no credentials.
+- **Headers:** `Cache-Control: no-store`, `Referrer-Policy: no-referrer`; CORS GET from `PETTY_CASH_WEB_URL` or a `pettycash` preview-set origin, no credentials.
 - **Logging:** the row id only. The access log blanks the path (`share_path` is in `http_hardening.SECRET_PATH_ARGS`), and a failure logs its type and frames, never its message or locals (a database error's parameters would hold the secret).
 - **No rate limit:** Flask ships no limiter and none was added (no new dependency). The 24-byte secret makes guessing hopeless; a limit would only blunt scraping of a link already held.
 

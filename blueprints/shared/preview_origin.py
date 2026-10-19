@@ -1,7 +1,7 @@
 """Preview sets: hand a person back into the branch preview they came from.
 
 A branch's previews live on ``https://pr-<slug>-<app>.dailyminty.com`` - one host per front end
-(``my``, ``payment-request``, ``onboarding``, ``petty-cash``), kept complete by the ``.github`` repo's
+(``my``, ``payment-request``, ``onboarding``, ``pettycash``), kept complete by the ``.github`` repo's
 ``vercel-preview-set.yml``. Where ``PREVIEW_ORIGIN_REGEX`` is set (minty-infra writes it onto
 ONE environment's services; ``services.app_runtime.env.preview_origin_regex``), a set's front
 ends name themselves with ``?return_origin=`` on every navigation to Flask, and the hand-off
@@ -52,7 +52,7 @@ SET_TTL_SECONDS = 30 * 60
 #: The set-host shape. The app is read from the END of the label, so a slug may itself contain
 #: an app's name. Same shape as ``@minty/shared/previewSibling``.
 _SET_ORIGIN = re.compile(
-    r"https://pr-([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)-(my|payment-request|onboarding|petty-cash)\.dailyminty\.com"
+    r"https://pr-([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)-(my|payment-request|onboarding|pettycash)\.dailyminty\.com"
 )
 
 

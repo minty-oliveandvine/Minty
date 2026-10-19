@@ -97,7 +97,8 @@ def _is_current(html: str, label: str) -> bool:
 # --- the menu --------------------------------------------------------------------------------
 
 
-def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people):
+def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people, monkeypatch):
+    monkeypatch.delenv("PETTY_CASH_WEB_URL", raising=False)  # no Petty Cash app: Flask's pages
     shop = people["both"].id
     html = _menu(app, f"{F.co(app, shop)}/petty-cash", user_id=people["olive"].id, org_id=shop)
 
@@ -114,6 +115,24 @@ def test_inside_a_company_the_menu_leads_everywhere_minty_webs_does(app, people)
     assert 'data-module-nav="PAYMENT_REQUEST">' in html
     assert f'data-entity-id="{shop}"' in html
     assert "Subscriptions Overview" in html
+
+
+@pytest.mark.parametrize(("label", "sub"), [("Dashboard", ""), ("Reports", "/reports")])
+def test_with_the_petty_cash_app_set_its_rows_hand_off_to_it(app, people, monkeypatch, label, sub):
+    """``PETTY_CASH_WEB_URL`` set: Petty Cash's rows open minty-petty-cash-web through
+    ``/handoff/petty-cash-web`` (which mints its token), on the same company's address there."""
+    from urllib.parse import parse_qs, urlsplit
+
+    monkeypatch.setenv("PETTY_CASH_WEB_URL", "https://pettycash.minty.test")
+    shop = people["both"].id
+    html = _menu(app, f"{F.co(app, shop)}/petty-cash", user_id=people["olive"].id, org_id=shop)
+
+    href = urlsplit(_link(html, label).replace("&amp;", "&"))
+    assert href.path == "/handoff/petty-cash-web"
+    assert parse_qs(href.query) == {"entity_id": [str(shop)], "next": [f"{F.co(app, shop)}/petty-cash{sub}"]}
+    # the rest of the menu is unchanged
+    assert _link(html, "Settings") == f"{F.co(app, shop)}/settings/petty-cash"
+    assert _link(html, "Bills") == f"{F.co(app, shop)}/payment-request"
 
 
 def test_the_person_is_at_the_top_and_opens_my_profile(app, people):

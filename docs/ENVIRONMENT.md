@@ -14,7 +14,8 @@ cross-repo picture and the migration from the old names (§9).
   inside them are URL-encoded.
 - **Derive, don't configure.** Anything that follows from another value (the Xero redirect
   URI, the Xero token-service URL, CORS origins, timeouts) is derived in code, not set.
-- **No fallbacks to old names.** A variable from §9's left-hand column is ignored.
+- **No fallbacks to old names.** A variable from §9's left-hand column is ignored. The one
+  deliberate exception is `PETTY_CASH_URL`, a transitional alias for `ACCOUNTS_API_URL` (§3).
 
 ## 2. Services, repos and ports
 
@@ -24,10 +25,10 @@ Each domain has a slot `N`: its web app listens on `30N0`, its API on `80N0`. Ho
 | Service | Repo | Stack | Local port | Docker stack hostname |
 |---|---|---|---|---|
 | Minty web hub | `minty-web` | Next.js | 3000 | `minty-web` |
-| Subscription API | `minty-subscription-api` | Django | 8000 | `subscription-api` |
-| Petty Cash | `Minty` | Flask | 8010 | `minty` |
+| Accounts API (Flask: sign-in, hand-offs, companies and users, Xero) | `Minty` | Flask | 8000 | `minty` (the stack still runs it on 8010) |
+| Subscription API | `minty-subscription-api` | Django | 8001 | `subscription-api` (the stack still publishes 8000) |
 | Petty Cash web | `minty-petty-cash-web` | Next.js | 3010 | — (not in the Docker stack yet) |
-| Petty Cash API | `minty-petty-cash-api` | Django | 8010 (clashes with Flask's row until the accounts-api move puts Flask on 8000 - decided 2026-10-14, not done) | — (not in the Docker stack yet) |
+| Petty Cash API | `minty-petty-cash-api` | Django | 8010 | — (not in the Docker stack yet) |
 | Payment Request web | `minty-payment-request-web` | Next.js | 3020 | `payment-request-web` |
 | Payment Request API | `minty-payment-request-api` | Django | 8020 | `payment-request-api` |
 | Onboarding web | `minty-onboarding-web` | Next.js | 3030 | `onboarding-web` |
@@ -51,19 +52,24 @@ npm normalises that to the `github:` shorthand in `package.json` and a `git+ssh:
 working the day the repo went private. See `docs/features/ci.md` for the release and pin-bump
 flow, and why its tags are immutable.
 
-Old local ports, for reference: hub 3002, subscription API 8004, Flask 5001, payment-request
-web 3000, payment-request API 8000, onboarding web 3001, onboarding API 8001.
+Flask is the slot-0 API since the accounts-api move (local ports applied 2026-10-16): Flask
+8000 and the subscription API 8001, so the Petty Cash API has 8010. The Docker stack
+(`docker/stack/`) has not moved and still runs Flask on 8010 and the subscription API on 8000.
+
+Old local ports, for reference: Flask 8010 and subscription API 8000 (until 2026-10-16); before
+that hub 3002, subscription API 8004, Flask 5001, payment-request web 3000, payment-request API
+8000, onboarding web 3001, onboarding API 8001.
 
 ## 3. Service URLs
 
 | Variable | Local default | Points at |
 |---|---|---|
 | `MINTY_WEB_URL` | `http://localhost:3000` | the hub |
-| `SUBSCRIPTION_API_URL` | `http://localhost:8000` | subscription API |
-| `PETTY_CASH_URL` | `http://localhost:8010` | Petty Cash (Flask) |
-| `ACCOUNTS_API_URL` | `http://localhost:8000` | Flask, as minty-petty-cash-api and minty-petty-cash-web name it (the hand-off, Xero tokens, the deposit correction); required outside development |
-| `PETTY_CASH_API_URL` | `http://localhost:8010` | the Petty Cash API, as minty-petty-cash-web reads it (Flask's blueprint until it points at minty-petty-cash-api) |
-| `PETTY_CASH_WEB_URL` | `http://localhost:3010` | Petty Cash web (Flask's hand-off target and the CORS origin of its Petty Cash API) |
+| `SUBSCRIPTION_API_URL` | `http://localhost:8001` | subscription API |
+| `ACCOUNTS_API_URL` | `http://localhost:8000` | Flask (`accounts-api.`): its own address in Flask (emailed links, the Xero redirect URI), and how minty-petty-cash-api and minty-petty-cash-web name it (the hand-off, Xero tokens, the deposit correction); required outside development |
+| `PETTY_CASH_URL` | `http://localhost:8000` | **transitional alias of `ACCOUNTS_API_URL` - still Flask**, not Petty Cash web. Flask reads it when `ACCOUNTS_API_URL` is unset (`services/app_runtime/env.accounts_api_url`); the other apps still call Flask by this name (about 300 references) until the rename follow-up |
+| `PETTY_CASH_API_URL` | `http://localhost:8010` | the Django Petty Cash API (`pettycash-api.`), as minty-petty-cash-web reads it |
+| `PETTY_CASH_WEB_URL` | `http://localhost:3010` | Petty Cash web (`pettycash.`): Flask's `/handoff/petty-cash-web` target, the CORS origin of its Petty Cash API, and - only when set - where the sidebar of Flask's own pages sends Petty Cash's Dashboard and Reports (through that hand-off) |
 | `PAYMENT_REQUEST_WEB_URL` | `http://localhost:3020` | payment-request web |
 | `PAYMENT_REQUEST_API_URL` | `http://localhost:8020` | payment-request API |
 | `ONBOARDING_WEB_URL` | `http://localhost:3030` | onboarding web |
@@ -71,7 +77,7 @@ web 3000, payment-request API 8000, onboarding web 3001, onboarding API 8001.
 
 Trailing slashes are stripped when read. In a deployment each value is the other service's
 public origin, exactly as the browser reaches it with no redirect in between (e.g.
-`PETTY_CASH_URL=https://pettycash.dailyminty.com`). Never a host that redirects: the old apex
+`ACCOUNTS_API_URL=https://accounts-api.dailyminty.com`). Never a host that redirects: the old apex
 `https://minty.oliveandvinehk.com` answers a CORS preflight with a 307, which every browser
 treats as a failure.
 
@@ -157,10 +163,12 @@ sessions and CSRF tokens with it (there is no separate CSRF or session secret).
 "opt" = optional. Nothing else belongs in a service's environment.
 
 **Petty Cash (`Minty`, Flask)**
-- Required: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `S3_URL`, `PETTY_CASH_URL`,
-  `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL`, `ONBOARDING_WEB_URL`,
-  `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `SPIRE_KEY`, `SMTP_URL`, `MAIL_FROM` (start-up
-  enforces `SECRET_KEY`, `DATABASE_URL` and `S3_URL`; without `SMTP_URL` no mail is sent).
+- Required: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `S3_URL`, `ACCOUNTS_API_URL` (or its
+  alias `PETTY_CASH_URL`), `MINTY_WEB_URL`, `SUBSCRIPTION_API_URL`, `PAYMENT_REQUEST_WEB_URL`,
+  `ONBOARDING_WEB_URL`, `PETTY_CASH_WEB_URL`, `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`,
+  `SPIRE_KEY`, `SMTP_URL`, `MAIL_FROM` (start-up enforces `SECRET_KEY`, `DATABASE_URL` and
+  `S3_URL`, and outside development `ACCOUNTS_API_URL` or `PETTY_CASH_URL`; without `SMTP_URL`
+  no mail is sent).
   `SUBSCRIPTION_API_URL` is also read server-side: the dashboard's subscription notice.
   No `STRIPE_*`, `SUBSCRIPTION_SCHEDULER_*` or `SUBSCRIPTION_EMAIL` since 2026-10-06 (Flask's
   subscription engine was deleted; nothing reads them).
@@ -222,12 +230,16 @@ editing an environment variable. Locally, restart `next dev`.
 
 ## 7. Xero redirect URI
 
-Derived: `PETTY_CASH_URL` + `/callback` — `http://localhost:8010/callback` locally. Every
-environment's value must be registered verbatim in the Xero app's *Redirect URIs*
-(developer.xero.com → My Apps), or sign-in fails with `unauthorized_client`. Moving local
-Flask from 5001 to 8010 means adding `http://localhost:8010/callback` there. The Django APIs
-fetch Xero tokens from `PETTY_CASH_URL/api/internal/xero/token` (also derived); only Flask
-holds `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET`.
+Derived: Flask's own address (`ACCOUNTS_API_URL`, else its alias `PETTY_CASH_URL`) +
+`/callback` — `http://localhost:8000/callback` locally (`config.py`). Every environment's value
+must be registered verbatim in the Xero app's *Redirect URIs* (developer.xero.com → My Apps), or
+sign-in fails with `unauthorized_client`. The accounts-api move needs
+`https://accounts-api.dailyminty.com/callback`, `https://dev-accounts-api.dailyminty.com/callback`
+and `http://localhost:8000/callback` registered before Flask moves; keep
+`https://pettycash.dailyminty.com/callback` until the switch is verified. The Django APIs fetch
+Xero tokens from Flask's `/api/internal/xero/token` (also derived; `ACCOUNTS_API_URL` in the
+Petty Cash API, `PETTY_CASH_URL` in the others); only Flask holds `XERO_CLIENT_ID` /
+`XERO_CLIENT_SECRET`.
 
 ## 8. Branches and deployments
 
@@ -310,7 +322,9 @@ backend host answered its health check on 2026-10-13.
 
 | Service | Production | Development | Host |
 |---|---|---|---|
-| Petty Cash | `pettycash.dailyminty.com` | `dev-petty-cash-api.dailyminty.com` | Render |
+| Accounts API (Flask) | `accounts-api.dailyminty.com` | `dev-accounts-api.dailyminty.com` | Render |
+| Petty Cash API (Django) | `pettycash-api.dailyminty.com` | `dev-pettycash-api.dailyminty.com` | Render |
+| Petty Cash web | `pettycash.dailyminty.com` | `dev-pettycash.dailyminty.com` | Vercel |
 | Subscription API | `subscription-api.dailyminty.com` | `dev-subscription-api.dailyminty.com` | Render |
 | Payment Request API | `payment-request-api.dailyminty.com` | `dev-payment-request-api.dailyminty.com` | Render |
 | Onboarding API | `onboarding-api.dailyminty.com` | `dev-onboarding-api.dailyminty.com` | Render |
@@ -319,9 +333,14 @@ backend host answered its health check on 2026-10-13.
 | Onboarding web | `onboarding.dailyminty.com` | `dev-onboarding.dailyminty.com` | Vercel |
 | Marketing site | `www.dailyminty.com` | `dev-www.dailyminty.com` | Vercel |
 
-- **Petty Cash stays on `pettycash.`** until the November 2026 cutover: Xero lists only
-  `https://pettycash.dailyminty.com/callback`, so Xero connect fails on development (its
-  callback is not registered). It becomes `petty-cash-api.` once Xero has that URI.
+- **The Petty Cash split (Step 5, decided 2026-10-16, both environments now - not in
+  November):** Flask becomes `accounts-api.`, and `pettycash.` passes to the Next.js Petty Cash
+  web app, beside the Django `pettycash-api.`. Branch previews of Petty Cash web are
+  `pr-<slug>-pettycash.dailyminty.com` (Flask hands back to them: `blueprints/shared/preview_origin.py`).
+  **Until minty-infra's Step 5 apply**, Flask still serves `pettycash.dailyminty.com`
+  (production) and `dev-petty-cash-api.dailyminty.com` (development), and the two Petty Cash
+  rows are not hosted. Xero lists only `https://pettycash.dailyminty.com/callback` until the
+  owner registers the accounts-api callbacks (§7), so Xero connect fails on development.
 - `payment-backend.dailyminty.com` is the old Payment Request API host; nothing reads it.
 
 - **The hub is `my.dailyminty.com`** (corrected 2026-10-09; this table said `login.` and was
@@ -378,7 +397,7 @@ order to follow for a new environment, and step 4 is the post-deploy check:
    (with `?schema=pettycashv3`), `S3_URL`, `SMTP_URL`, `MAIL_FROM`, the `*_URL` set - including
    the onboarding API's `SUBSCRIPTION_API_URL`, without which it no longer starts (2026-10-06);
    on Render leave `PORT` to the platform. Rotate `SECRET_KEY` (§4) while you are there.
-2. **Register** the development `PETTY_CASH_URL/callback` in the Xero app if it is not there.
+2. **Register** the development `ACCOUNTS_API_URL/callback` in the Xero app if it is not there.
 3. **Deploy `development`** in every repo (the Next apps must rebuild — §6).
 4. **Verify**: sign in, hand off to each module (hub, payment request, onboarding), upload a
    receipt (S3), trigger a mail (OTP or invitation), connect Xero, open the subscription
@@ -461,7 +480,7 @@ STACK = `docker/stack` / `docker/` compose files.
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_TIMEOUT`, `EMAIL_BACKEND` | SUB | `SMTP_URL` (unset → console backend) |
 | `DEFAULT_FROM_EMAIL` | SUB | `MAIL_FROM` |
 | `S3_BUCKET`, `S3_KEY`, `S3_SECRET`, `S3_REGION`, `S3_ENDPOINT_URL` | PC, PRA, STACK | `S3_URL` |
-| `XERO_REDIRECT_URI` | PC, STACK | derived (`PETTY_CASH_URL/callback`) |
+| `XERO_REDIRECT_URI` | PC, STACK | derived (`ACCOUNTS_API_URL/callback`, alias `PETTY_CASH_URL`) |
 | `XERO_API_BASE_URL` | PC, STACK | constant (`https://api.xero.com`) |
 | `XERO_TOKEN_SERVICE_URL` | PRA, ONA, STACK | derived (`PETTY_CASH_URL/api/internal/xero/token`) |
 | `XERO_TOKEN_SERVICE_TIMEOUT` | PRA, ONA | constant (15 s) |

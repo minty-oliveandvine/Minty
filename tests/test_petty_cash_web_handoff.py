@@ -167,25 +167,25 @@ def test_a_company_still_in_onboarding_goes_back_to_the_wizard(app, client, db, 
 def test_inside_a_preview_set_it_lands_on_the_sets_petty_cash_host(client, shop, monkeypatch):
     monkeypatch.setenv(
         "PREVIEW_ORIGIN_REGEX",
-        r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|petty-cash)\.dailyminty\.com$",
+        r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|pettycash)\.dailyminty\.com$",
     )
     F.login(client, shop["owner"])
     # The trip names its set (preview_origin: only a same-site navigation may, with return_origin).
     resp = client.get(
         "/handoff/petty-cash-web",
         query_string={"entity_id": shop["entity"].id,
-                      "return_origin": "https://pr-development-petty-cash.dailyminty.com"},
+                      "return_origin": "https://pr-development-pettycash.dailyminty.com"},
         headers={"Sec-Fetch-Site": "same-site"},
     )
     parts, _ = _landing(resp)
 
-    assert parts.netloc == "pr-development-petty-cash.dailyminty.com"
+    assert parts.netloc == "pr-development-pettycash.dailyminty.com"
 
 
 def test_a_link_on_a_flask_page_follows_the_set_the_person_came_from(client, shop, monkeypatch):
     monkeypatch.setenv(
         "PREVIEW_ORIGIN_REGEX",
-        r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|petty-cash)\.dailyminty\.com$",
+        r"^https://pr-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-(?:my|payment-request|onboarding|pettycash)\.dailyminty\.com$",
     )
     F.login(client, shop["owner"])
     with client.session_transaction() as sess:
@@ -195,7 +195,7 @@ def test_a_link_on_a_flask_page_follows_the_set_the_person_came_from(client, sho
                       headers={"Sec-Fetch-Site": "same-origin"})
     parts, _ = _landing(resp)
 
-    assert parts.netloc == "pr-development-petty-cash.dailyminty.com"
+    assert parts.netloc == "pr-development-pettycash.dailyminty.com"
 
 
 def test_the_default_origin_is_the_local_app(monkeypatch):
