@@ -1,7 +1,6 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
-from flask import current_app as app
 from flask import flash, jsonify, redirect, request, url_for
 from flask.typing import ResponseReturnValue
 from flask_login import login_required
@@ -11,104 +10,27 @@ from blueprints.report import report_bp
 from blueprints.report.services.shared import safe_float
 from blueprints.xero.services.publish import (update_after_deposit_change,
                                               update_xero_deposit_after_change)
-from models.db import Entity, Report, ShareLink, db
+from models.db import Entity, Report, ShareLink, db  # noqa: F401  (tests patch these here)
 from services.authz import require_entity_access, require_permission
 from services.helpers.xero_bridge import get_entity_account_settings
 from services.permission_policy import Permission
-from utils import verify_share_token
 
 
 @report_bp.route("/Minty_Report/<path:entity_and_date>/", methods=["GET"])
 def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
-    """Public share link: Minty_Report/{initials}/{date}/{secret}/.
-
-    Only the full path, secret included, finds a link. The old two-part form had no
-    secret and could be guessed, so it is refused even while its row still exists.
-    """
+    """Public share link: Minty_Report/{initials}/{date}/{secret}/ (``share.resolve_share``
+    decides; a refusal is its flash and the company list)."""
     try:
-        from blueprints.report.services.ending import \
-            report_ending as render_report_ending
-        from blueprints.report.services.share import is_share_path
+        from blueprints.report.services.ending import             report_ending as render_report_ending
+        from blueprints.report.services.share import ShareRefused, resolve_share
 
-        if not is_share_path(entity_and_date):
-            logger.warning(
-                f"share link refused: malformed or old-form path, from {request.remote_addr}")
-            flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
+        try:
+            link, _entity, report = resolve_share(entity_and_date)
+        except ShareRefused as refused:
+            flash(refused.message, refused.category)
             return redirect(url_for("entity.entity_list"))
-
-        share_link = ShareLink.query.filter_by(
-            path_segment=entity_and_date.strip("/")).first()
-
-        if not share_link:
-            logger.warning(f"share link refused: unknown secret, from {request.remote_addr}")
-            flash("Hmm, I couldn't find that share link.", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        # expires_at is TIMESTAMPTZ; a naive value (a hand-made row) is local time.
-        expires_at = share_link.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.astimezone()
-        if datetime.now(timezone.utc) > expires_at:
-            flash("This link has expired. Could you ask for a fresh one?", "warning")
-            db.session.delete(share_link)
-            db.session.commit()
-            return redirect(url_for("entity.entity_list"))
-
-        # Verify token
-        secret_key = app.config.get("SECRET_KEY")
-        if not secret_key:
-            flash("Something's not set up right on my end. Could you let us know?", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        is_valid, params = verify_share_token(share_link.token, secret_key)
-        if not is_valid or not params:
-            flash("This link doesn't work anymore. Could you ask for a fresh one?", "danger")
-            db.session.delete(share_link)
-            db.session.commit()
-            return redirect(url_for("entity.entity_list"))
-
-        # Extract params from token
-        token_entity_id = params.get("entity_id")
-        token_transaction_date = params.get("transaction_date")
-        if not token_entity_id or not token_transaction_date:
-            flash("This link doesn't look right to me.", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        # The signed token must name the same company and day as the row.
-        if (str(token_entity_id) != str(share_link.entity_id)
-                or str(token_transaction_date) != str(share_link.transaction_date)):
-            logger.warning(f"share link refused: token does not match link {share_link.id}")
-            flash("This link doesn't look right to me.", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        # Get the entity
-        org = Entity.query.get(token_entity_id)
-        if not org:
-            flash("Hmm, I looked everywhere but couldn't find that one.", "danger")
-            return redirect(url_for("entity.entity_list"))
-
-        # Find the report for the transaction_date from token
-        report_date = datetime.strptime(
-            token_transaction_date, "%Y-%m-%d").date()
-        specific_report = Report.query.filter(
-            # Share-link target: SUBMITTED reports only, never a draft.
-            db.or_(Report.status.is_(None), Report.status != "draft"),
-            Report.company == str(token_entity_id),
-            Report.transaction_date == report_date,
-        ).first()
-
-        if specific_report:
-            logger.info(
-                f"share link opened: link={share_link.id} entity={token_entity_id} "
-                f"date={token_transaction_date} from {request.remote_addr}")
-            # Render ending page without login requirement
-            return render_report_ending(
-                id=specific_report.id,
-                entity_id=token_entity_id,
-                skip_auth=True)
-        else:
-            flash(f"I couldn't find a report for {token_transaction_date}.", "warning")
-            return redirect(url_for("entity.entity_list"))
+        # Render ending page without login requirement
+        return render_report_ending(id=report.id, entity_id=str(link.entity_id), skip_auth=True)
 
     except Exception:
         # logger.exception keeps the traceback: a crash here once hid that every
@@ -116,7 +38,6 @@ def minty_report_share(entity_and_date: str) -> ResponseReturnValue:
         logger.exception("Error processing share link")
         flash("This link doesn't look right to me.", "danger")
         return redirect(url_for("entity.entity_list"))
-    return redirect(url_for("entity.entity_list"))
 
 
 @report_bp.route("/api/check-dept-bank-yest/<string:entity_id>", methods=["POST"])

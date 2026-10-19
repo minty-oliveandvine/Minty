@@ -137,6 +137,7 @@ def test_generate_share_link_denies_membership_missing(app, monkeypatch):
 def test_public_share_route_calls_report_ending_without_auth_gate(app, monkeypatch):
     from blueprints.report.routes import legacy
     from blueprints.report.services import ending as ending_service
+    from blueprints.report.services import share
 
     called = {}
     future = datetime.now() + timedelta(days=1)
@@ -155,7 +156,7 @@ def test_public_share_route_calls_report_ending_without_auth_gate(app, monkeypat
             legacy.Report, "query", _FakeFilterQuery(SimpleNamespace(id="report-1"))
         )
         monkeypatch.setattr(
-            legacy,
+            share,
             "verify_share_token",
             lambda *_args, **_kwargs: (
                 True,
@@ -334,3 +335,79 @@ def test_expired_link_is_refused_and_removed(app, db, client, twins, rendered):
     assert rendered == []
     with app.app_context():
         assert ShareLink.query.filter_by(entity_id=venus.id).count() == 0
+
+
+# --- The rest of today's refusals, pinned before the resolution moved into a service ---------
+
+
+def _link(app, entity_id):
+    from models.db import ShareLink
+
+    with app.app_context():
+        return ShareLink.query.filter_by(entity_id=entity_id).one_or_none()
+
+
+def test_a_token_that_fails_its_signature_is_refused_and_removed(app, db, client, twins, rendered):
+    from models.db import ShareLink
+
+    owner, venus, _ = twins
+    path = _share(app, owner.id, venus.id)
+    with app.app_context():
+        ShareLink.query.filter_by(entity_id=venus.id).one().token = "not-a-signed-token"
+        db.session.commit()
+
+    resp = _open(client, path)
+    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
+    assert rendered == []
+    assert _link(app, venus.id) is None
+
+
+def test_a_token_for_another_company_or_day_is_refused_and_kept(app, db, client, twins, rendered):
+    from models.db import ShareLink
+    from utils import generate_share_token
+
+    owner, venus, venus2 = twins
+    path = _share(app, owner.id, venus.id)
+    with app.app_context():
+        link = ShareLink.query.filter_by(entity_id=venus.id).one()
+        link.token = generate_share_token(venus2.id, SHARE_DAY.isoformat(), app.config["SECRET_KEY"])
+        db.session.commit()
+
+    resp = _open(client, path)
+    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
+    assert rendered == []
+    assert _link(app, venus.id) is not None
+
+
+def test_a_link_whose_company_is_missing_is_refused(app, db, client, twins, rendered, monkeypatch):
+    from blueprints.report.routes import legacy
+
+    owner, venus, _ = twins
+    path = _share(app, owner.id, venus.id)
+    with app.app_context():
+        monkeypatch.setattr(legacy.Entity, "query", _FakeGetQuery(None))
+
+    resp = _open(client, path)
+    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
+    assert rendered == []
+
+
+@pytest.mark.parametrize("change", ["draft", "deleted"])
+def test_a_day_that_is_a_draft_again_or_has_no_report_is_refused(app, db, client, twins, rendered, change):
+    from blueprints.shared.enums import ReportStatus
+    from models.db import Report
+
+    owner, venus, _ = twins
+    path = _share(app, owner.id, venus.id)
+    with app.app_context():
+        report = Report.query.filter_by(entity_id=venus.id, transaction_date=SHARE_DAY).one()
+        if change == "draft":
+            report.status = ReportStatus.DRAFT
+        else:
+            db.session.delete(report)
+        db.session.commit()
+
+    resp = _open(client, path)
+    assert resp.status_code == 302 and "/entity" in resp.headers["Location"]
+    assert rendered == []
+    assert _link(app, venus.id) is not None

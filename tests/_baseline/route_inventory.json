@@ -3616,6 +3616,18 @@
    "in_scope": true
   },
   {
+   "endpoint": "petty_cash_public.shared_report",
+   "rule": "/api/petty-cash/v1/public/share/<path:share_path>",
+   "methods": [
+    "GET"
+   ],
+   "touches": [
+    "report"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
    "endpoint": "petty_cash_api.report_history",
    "rule": "/api/petty-cash/v1/companies/<entity_id>/reports",
    "methods": [
@@ -3870,7 +3882,7 @@
   }
  ],
  "summary": {
-  "routes": 217,
-  "in_scope": 154
+  "routes": 218,
+  "in_scope": 155
  }
 }

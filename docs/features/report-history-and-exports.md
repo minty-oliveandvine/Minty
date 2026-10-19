@@ -60,6 +60,17 @@ CODE_CLEANSE_NOTES). A refused or
 unknown path is logged as `share link refused` with the caller's IP, and a successful open
 as `share link opened` with the link id, so access is traceable from then on.
 
+**One resolution, two readers (2026-10-19).** `share.resolve_share(path)` holds every check
+above and returns `(link, entity, report)` or raises `ShareRefused(reason, message,
+category)`. Flask's page flashes `message` and goes to the company list; the public JSON read
+`GET /api/petty-cash/v1/public/share/<path>` ([petty-cash-api.md](petty-cash-api.md)) answers
+404 for every reason but `expired` (410). Both delete an expired row and one whose token fails
+its signature; a token naming another company or day is refused and kept. Flask's HTML is to be
+deleted (the user's rule, 2026-10-16): the petty-cash web apps show the day at their own
+`/share/<path>`, built from the API share-link's `path`. The secret is never logged - only the
+row id - and the access log blanks it (`http_hardening.SECRET_PATH_ARGS`: `entity_and_date`,
+`share_path`).
+
 The old `?token=` entries - `/Minty_Report_<entity_and_date>/ending?token=` and
 `entity_ending`'s `?token=` branch - were **deleted on 2026-10-05**: their 30-day HMAC token
 ignored the ShareLink row, so revoking a link did nothing. `/entity/<co>/petty-cash/reports/summary` is
@@ -73,6 +84,6 @@ previous day's bank deposit, pushed to Xero when published) took GET and NO logi
 `tests/test_char_report_lifecycle.py` (history rows and badges, the detail's figures, the
 CSV's movement lines, the receipt links, delete), `tests/test_cashier_report_history.py`
 (what a cashier may see), `tests/test_report_export_permissions.py`,
-`tests/test_share_link_access.py`;
+`tests/test_share_link_access.py`, `tests/test_petty_cash_api_public_share.py`;
 `e2e/02_report_wizard.spec.ts` (history and detail after posting, and the movements CSV of the
 day it posted).

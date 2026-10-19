@@ -16,6 +16,11 @@ petty_cash_api_bp = Blueprint(
     "petty_cash_api", __name__, url_prefix="/api/petty-cash/v1/companies/<entity_id>"
 )
 
+#: The ONE unauthenticated read beside it: a shared Daily Report (``routes/public_share.py``). A
+#: blueprint of its own so ``guard`` (registered on ``petty_cash_api_bp`` alone) stays fail-closed
+#: for everything else; tests/test_petty_cash_api_public_share.py pins that it holds one GET.
+petty_cash_public_bp = Blueprint("petty_cash_public", __name__, url_prefix="/api/petty-cash/v1/public")
+
 
 @petty_cash_api_bp.url_value_preprocessor
 def _take_the_company(_endpoint, values):

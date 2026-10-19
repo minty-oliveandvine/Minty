@@ -1,14 +1,16 @@
-# Public share links for a submitted report: /Minty_Report/{initials}/{date}/{secret}/.
+# Public share links for a submitted report: /Minty_Report/{initials}/{date}/{secret}/ (Flask's
+# page) and GET /api/petty-cash/v1/public/share/{initials}/{date}/{secret} (the petty-cash web
+# apps' /share page). Both open a link through resolve_share.
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from flask import current_app, url_for
+from flask import current_app, request, url_for
 from loguru import logger
 
 from blueprints.shared.entity_display import build_entity_acronym
-from models.db import Entity, ShareLink, UserEntity, db
-from utils import generate_share_token
+from models.db import Entity, Report, ShareLink, UserEntity, db
+from utils import generate_share_token, verify_share_token
 
 SHARE_LINK_HOURS = 720
 # 24 random bytes -> 32 url-safe characters. The secret, not the readable
@@ -90,4 +92,92 @@ def create_share_link_for_report(user_id, payload):
         _external=True,
     )
 
-    return {"url": shareable_url}, 200
+    return {"url": shareable_url, "path": share_link.path_segment,
+            "expires_at": share_link.expires_at.astimezone(timezone.utc).isoformat()}, 200
+
+
+class ShareRefused(Exception):
+    """A share link that opens nothing. ``reason`` is which check failed (for the caller's status
+    and the log, never for an anonymous visitor); ``message``/``category`` are Flask's flash."""
+
+    def __init__(self, reason, message, category="danger"):
+        super().__init__(reason)
+        self.reason = reason
+        self.message = message
+        self.category = category
+
+
+_DEAD = "This link doesn't work anymore. Could you ask for a fresh one?"
+_WRONG = "This link doesn't look right to me."
+
+
+def resolve_share(path_segment):
+    """``(link, entity, report)`` for a live "{initials}/{date}/{secret}" path, else ShareRefused.
+
+    Only the full path, secret included, finds a link: the old two-part form had no secret and
+    could be guessed, so it is refused even while its row still exists. An expired link and one
+    whose token fails its signature are deleted. The secret is never logged - only the row id.
+    """
+    if not is_share_path(path_segment):
+        logger.warning(f"share link refused: malformed or old-form path, from {request.remote_addr}")
+        raise ShareRefused("malformed", _DEAD)
+
+    share_link = ShareLink.query.filter_by(path_segment=path_segment.strip("/")).first()
+    if not share_link:
+        logger.warning(f"share link refused: unknown secret, from {request.remote_addr}")
+        raise ShareRefused("unknown", "Hmm, I couldn't find that share link.")
+
+    # expires_at is TIMESTAMPTZ; a naive value (a hand-made row) is local time.
+    expires_at = share_link.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.astimezone()
+    if datetime.now(timezone.utc) > expires_at:
+        logger.info(f"share link refused: expired, link {share_link.id} removed")
+        db.session.delete(share_link)
+        db.session.commit()
+        raise ShareRefused("expired", "This link has expired. Could you ask for a fresh one?", "warning")
+
+    secret_key = current_app.config.get("SECRET_KEY")
+    if not secret_key:
+        logger.error("share link refused: SECRET_KEY is not set")
+        raise ShareRefused("misconfigured", "Something's not set up right on my end. Could you let us know?")
+
+    is_valid, params = verify_share_token(share_link.token, secret_key)
+    if not is_valid or not params:
+        logger.warning(f"share link refused: token fails its signature, link {share_link.id} removed")
+        db.session.delete(share_link)
+        db.session.commit()
+        raise ShareRefused("bad_token", _DEAD)
+
+    token_entity_id = params.get("entity_id")
+    token_transaction_date = params.get("transaction_date")
+    if not token_entity_id or not token_transaction_date:
+        logger.warning(f"share link refused: token names no company or day, link {share_link.id}")
+        raise ShareRefused("bad_token", _WRONG)
+
+    # The signed token must name the same company and day as the row.
+    if (str(token_entity_id) != str(share_link.entity_id)
+            or str(token_transaction_date) != str(share_link.transaction_date)):
+        logger.warning(f"share link refused: token does not match link {share_link.id}")
+        raise ShareRefused("mismatch", _WRONG)
+
+    entity = Entity.query.get(token_entity_id)
+    if not entity:
+        logger.warning(f"share link refused: no company, link {share_link.id}")
+        raise ShareRefused("no_company", "Hmm, I looked everywhere but couldn't find that one.")
+
+    report_date = datetime.strptime(token_transaction_date, "%Y-%m-%d").date()
+    report = Report.query.filter(
+        # Share-link target: SUBMITTED reports only, never a draft.
+        db.or_(Report.status.is_(None), Report.status != "draft"),
+        Report.company == str(token_entity_id),
+        Report.transaction_date == report_date,
+    ).first()
+    if report is None:
+        logger.warning(f"share link refused: no submitted report, link {share_link.id}")
+        raise ShareRefused("no_report", f"I couldn't find a report for {token_transaction_date}.", "warning")
+
+    logger.info(
+        f"share link opened: link={share_link.id} entity={token_entity_id} "
+        f"date={token_transaction_date} from {request.remote_addr}")
+    return share_link, entity, report

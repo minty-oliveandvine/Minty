@@ -11,3 +11,4 @@ from . import close  # noqa: F401
 from . import report  # noqa: F401
 from . import history  # noqa: F401
 from . import settings  # noqa: F401
+from . import public_share  # noqa: F401  (its own blueprint, outside the guard)
