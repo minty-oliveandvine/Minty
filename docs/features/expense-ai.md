@@ -14,8 +14,14 @@ the technical one `docs/expense_ai/Stage 1 Expense Implementation Technical.md`.
   with confidence scores come back. **Constrained matching**: the model is given the
   company's own lists, so its supplier and account suggestions are existing rows, not
   free text.
+- `POST /api/petty-cash/v1/companies/<id>/reports/expenses/extract` — the same reading for
+  minty-petty-cash-web through the Petty Cash API (`docs/features/petty-cash-api.md`), and
+  `POST /api/internal/petty-cash/expense-extract`, where minty-petty-cash-api (which holds no
+  model code) forwards a receipt under a scoped service assertion. All three end in
+  `report/routes/expense_ai.py::read_receipt`, so there is one log line and one answer shape.
 - `blueprints/report/services/expense_ai.py` — the provider call, the prompt, the
-  rate limits, the confidence bands and the size/time limits.
+  rate limits, the confidence bands and the size/time limits. Still the ONLY module that
+  talks to the model.
 - `flask expense-ai check` (`cli/expense_ai.py`) — one round-trip call from wherever the
   code runs, to prove the configuration.
 - The page: `templates/report/expense.html` marks a suggested value visibly, clears it
@@ -46,4 +52,6 @@ tell the tiers apart the tier is stated in configuration and
 ## Tests
 
 `tests/test_expense_ai.py` (the extraction contract with the provider stubbed, the limits,
-the disabled state).
+the disabled state); `tests/test_expense_ai_routes.py` (the page route, the API route and the
+internal route, the model stubbed: switched off, a checked suggestion, refusals, who may ask,
+the assertion).

@@ -10,6 +10,12 @@ expenses.py``, the same functions the Jinja page's routes use.
   route hands out, a description of at most 300 characters, a PDF / JPEG / PNG of at most 10 MB
   (by its bytes, not its name).
 - ``DELETE /expense-lines/<id>``: a line of a draft of this company.
+- ``PATCH /expense-lines/<id>`` (multipart): change that line - amount, description, supplier,
+  account, its receipt replaced or some of its receipts removed - checked as adding is
+  (``expenses.update_expense``, the Jinja page's ``/report/expense/update/<id>`` too).
+- ``POST /reports/expenses/extract`` (multipart ``receipt``): the model's suggestions for a line
+  (``report/services/expense_ai.py``, through ``report/routes/expense_ai.py::read_receipt``).
+  Suggestions only - nothing is written.
 - ``GET /expense-lines/<id>/receipts/<attachment id>``: the receipt's bytes - by the attachment's
   id, never by its storage key.
 - ``PUT /reports/expenses`` ``{transaction_date, action}``: the step's Save & Next / Save & Exit.
@@ -21,6 +27,7 @@ from __future__ import annotations
 import os
 
 from flask import make_response, request
+from loguru import logger
 
 from blueprints.petty_cash_api import petty_cash_api_bp
 from blueprints.petty_cash_api.api import company, refuse, respond, user
@@ -282,3 +289,123 @@ def add_supplier():
     except SupplierRefused as refused:
         return refuse(refused.message, 409 if refused.status == 400 else refused.status)
     return respond({"id": row.xero_contact_id, "name": row.name}, 201)
+
+
+# --- editing a draft's line ----------------------------------------------------------------------
+
+
+@petty_cash_api_bp.patch("/expense-lines/<line_id>")
+def edit_expense_line(line_id):
+    """A line of this company's DRAFT, in place - multipart, each field only when it changes:
+    ``amount``, ``remarks``, ``supplier_id``, ``account_id``, one ``receipt`` that replaces the
+    line's receipts, and ``remove_receipt_ids`` (repeatable) dropping some of them. Checked as
+    adding a line is checked; ``report/services/expenses.py::update_expense`` (the Jinja page's
+    ``/report/expense/update/<id>`` too) recomputes the totals. A submitted report's line is
+    ``PATCH /reports/<id>/expense-lines/<id>``'s (the amount stays), so here it is a 409."""
+    from blueprints.report.services.expenses import (KEEP_A_RECEIPT, NOT_A_DRAFT, ExpenseRefused,
+                                                     checked_receipt, expense_accounts, suppliers,
+                                                     update_expense)
+
+    entity_id = company()["id"]
+    line, report = _company_line(entity_id, line_id)
+    if line is None:
+        return refuse(NOT_FOUND, 404)
+    if not _may_edit(entity_id):
+        return refuse(NOT_ALLOWED, 403)
+    if report.status != "draft":
+        return refuse(NOT_A_DRAFT, 409)
+
+    form = request.form
+    amount = float(line.amount or 0)
+    if "amount" in form:
+        amount = _amount(form.get("amount"))
+        if amount is None:
+            return refuse(f"Enter the amount as a number above 0 and up to {MAX_AMOUNT:,.2f}.", 422)
+    remarks = line.remarks or ""
+    if "remarks" in form:
+        remarks = (form.get("remarks") or "").strip()
+        if len(remarks) > MAX_REMARKS:
+            return refuse(f"Keep the description to {MAX_REMARKS} characters or fewer.", 422)
+    contact_id, contact_name = line.contact_id, line.contact_name
+    if form.get("supplier_id"):
+        supplier = next((c for c in suppliers(entity_id) if c.xero_contact_id == form.get("supplier_id")), None)
+        if supplier is None:
+            return refuse("Choose a supplier from the list.", 422)
+        contact_id, contact_name = supplier.xero_contact_id, supplier.name
+    item, account_id, account_code = line.item, line.account_id, line.account_code
+    if form.get("account_id"):
+        account = next((a for a in expense_accounts(entity_id) if a.xero_account_id == form.get("account_id")), None)
+        if account is None:
+            return refuse("Choose an account code from the list.", 422)
+        item, account_id, account_code = account.name, account.xero_account_id, account.xero_code
+    files = [f for f in request.files.getlist("receipt") if f and (f.filename or "").strip()]
+    if len(files) > 1:
+        return refuse("Attach one receipt per expense.", 422)
+    if files:
+        upload, problem = checked_receipt(files[0])
+        if problem:
+            return refuse(problem, 422)
+        files = [upload]
+    remove = [str(i).strip() for i in form.getlist("remove_receipt_ids") if str(i).strip()]
+    held = {str(a.id) for a in line.attachments}
+    if any(i not in held for i in remove):
+        return refuse("That receipt isn't on this expense. Reload the expenses and try again.", 422)
+    if not files and held and held <= set(remove):
+        return refuse(KEEP_A_RECEIPT, 422)
+
+    try:
+        line = update_expense(report, line, user(), item=item, amount=amount, remarks=remarks,
+                              contact_id=contact_id, contact_name=contact_name, account_id=account_id,
+                              account_code=account_code, files=files, remove_receipt_ids=remove)
+    except ExpenseRefused as refused:
+        return refuse(refused.message, 409)
+    return respond({"line": line_payload(line), "total": float(report.expenses or 0)})
+
+
+# --- reading a receipt with the model ------------------------------------------------------------
+
+
+def extract_answer(entity_id, person, uploads) -> tuple[dict, int]:
+    """``POST /reports/expenses/extract``'s answer, shared with ``POST /api/internal/petty-cash/
+    expense-extract`` (minty-petty-cash-api forwards a receipt there; it holds no model code).
+
+    Who may ask (``REPORT_EDIT_OWN``, 403) and the file (one PDF / JPEG / PNG of at most 10 MB by
+    its bytes - the Expenses step's checks, 422) are refused like any other input. Past those,
+    every outcome is 200 ``{suggestions, reason}``, as on the Jinja page
+    (``report/routes/expense_ai.py``): switched off, rate limited, over the model's own size cap,
+    no accounts or contacts, or any failure of the model is ``suggestions: null`` with a reason
+    code (``services/expense_ai.py``'s ``REASON_*``) - the app then shows nothing and the person
+    types the line. Nothing is written."""
+    from blueprints.report.routes.expense_ai import read_receipt
+    from blueprints.report.services import expense_ai
+    from blueprints.report.services.expenses import checked_receipt
+    from services.permission_policy import Permission, has_permission
+
+    if not has_permission(person, Permission.REPORT_EDIT_OWN, entity_id):
+        return {"error": NOT_ALLOWED}, 403
+    files = [f for f in uploads or [] if f and (f.filename or "").strip()]
+    if not files:
+        return {"error": "Attach the receipt to read it."}, 422
+    if len(files) > 1:
+        return {"error": "Attach one receipt at a time."}, 422
+    upload, problem = checked_receipt(files[0])
+    if problem:
+        return {"error": problem}, 422
+
+    if not expense_ai.is_enabled():
+        return {"suggestions": None, "reason": expense_ai.REASON_DISABLED}, 200
+    if not expense_ai.check_rate_limit(str(person.id), str(entity_id)):
+        logger.info(f"expense_ai: rate limited entity={entity_id}")
+        return {"suggestions": None, "reason": expense_ai.REASON_RATE_LIMITED}, 200
+    cap = expense_ai.max_file_bytes()
+    data = upload.stream.read(cap + 1)
+    if len(data) > cap:
+        return {"suggestions": None, "reason": expense_ai.REASON_FILE_TOO_LARGE}, 200
+    return read_receipt(entity_id, person.id, data, expense_ai.sniff_mime(data)), 200
+
+
+@petty_cash_api_bp.post("/reports/expenses/extract")
+def extract_expense():
+    """Multipart ``receipt`` -> the model's suggestions for a line (``extract_answer``)."""
+    body, status = extract_answer(company()["id"], user(), request.files.getlist("receipt"))
+    return respond(body, status)

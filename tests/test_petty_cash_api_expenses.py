@@ -312,3 +312,189 @@ def test_save_next_marks_expenses_done_and_save_exit_records_nothing(app, client
 
     bad = client.put(url, json={"transaction_date": F.iso(D3), "action": "later"}, headers=_headers(app, owner))
     assert bad.status_code == 422
+
+
+# --- editing a draft's line (PATCH /expense-lines/<id>) ----------------------------------------------
+
+
+def _edit(app, client, who, entity, line_id, *, receipt=None, name="new.png", claimed="image/png", **form):
+    data = dict(form)
+    if receipt is not None:
+        data["receipt"] = (BytesIO(receipt), name, claimed)
+    return client.patch(f"{_base(entity)}/expense-lines/{line_id}", data=data, content_type="multipart/form-data",
+                        headers=_headers(app, who))
+
+
+def _second_receipt(app, line_id, s3, key="expenses/second.jpg"):
+    """A second receipt on a line (the Jinja page can add several; the API adds one)."""
+    from models.db import ShopExpense, db
+
+    s3.objects[key] = JPEG
+    with app.app_context():
+        line = db.session.get(ShopExpense, line_id)
+        attachment = line.add_receipt(key, original_name="second.jpg", mime_type="image/jpeg")
+        db.session.commit()
+        return str(attachment.id)
+
+
+def test_a_draft_line_is_changed_in_place_and_the_totals_follow(app, client, db, shop, s3):
+    from models.db import AccountInfo, EntityAccountXero
+
+    owner, entity = shop
+    with app.app_context():
+        row = AccountInfo(id=str(uuid.uuid4()), entity_id=entity.id, xero_account_id="acc-0003", xero_code="461",
+                          name="Printing", type="EXPENSE", status="ACTIVE")
+        db.session.add(row)
+        db.session.flush()
+        db.session.add(EntityAccountXero(account_id=row.id, name="Printing", type="EXPENSE",
+                                         xero_account_id="acc-0003", is_active=True))
+        db.session.commit()
+    draft = _draft(app, db, entity, owner, bank_deposit=5)
+    line = _add(app, client, owner, entity, amount="10").get_json()["line"]
+    _add(app, client, owner, entity, amount="15")
+
+    resp = _edit(app, client, owner, entity, line["id"], amount="1,234.50", remarks="  Posters ",
+                 supplier_id="con-0002", account_id="acc-0003")
+
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    assert body["total"] == 1249.5
+    changed = body["line"]
+    assert changed["id"] == line["id"] and changed["amount"] == 1234.5 and changed["remarks"] == "Posters"
+    assert changed["item"] == "Printing"  # a new account renames the line
+    assert changed["supplier"] == {"id": "con-0002", "name": "Taxi Co"}
+    assert changed["account"] == {"id": "acc-0003", "code": "461", "name": "Printing"}
+    assert changed["receipts"] == line["receipts"]  # no file sent: the receipt is kept
+    assert _row(app, draft)["expenses"] == 1249.5
+    assert _row(app, draft)["closing"] == 100 + 20 + 50 - 1249.5 - 5
+    assert resp.headers["Access-Control-Allow-Origin"] == WEB
+
+
+def test_fields_not_sent_stay_and_an_empty_description_clears(app, client, db, shop):
+    owner, entity = shop
+    _draft(app, db, entity, owner)
+    line = _add(app, client, owner, entity, amount="10").get_json()["line"]
+
+    resp = _edit(app, client, owner, entity, line["id"], remarks="")
+
+    assert resp.status_code == 200
+    changed = resp.get_json()["line"]
+    assert changed["remarks"] == "" and changed["amount"] == 10.0
+    assert changed["supplier"] == line["supplier"] and changed["account"] == line["account"]
+
+
+def test_a_new_receipt_replaces_the_line_s_and_the_old_file_goes(app, client, db, shop, s3):
+    from models.db import ShopExpense
+
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner)
+    line = _add(app, client, owner, entity, amount="10").get_json()["line"]
+    with app.app_context():
+        old_key = db.session.get(ShopExpense, line["id"]).receipt_keys[0]
+
+    resp = _edit(app, client, owner, entity, line["id"], receipt=PNG, name="scan.pdf", claimed="application/pdf")
+
+    assert resp.status_code == 200, resp.get_json()
+    [receipt] = resp.get_json()["line"]["receipts"]
+    assert receipt["name"] == "scan.pdf" and receipt["mime_type"] == "image/png"  # typed by its bytes
+    assert receipt["id"] != line["receipts"][0]["id"]
+    assert old_key in s3.deleted
+    with app.app_context():
+        [row] = ShopExpense.query.filter_by(report_id=draft).all()
+        assert s3.objects[row.receipt_keys[0]] == PNG
+
+
+def test_a_receipt_can_be_removed_but_never_the_last_one(app, client, db, shop, s3):
+    owner, entity = shop
+    _draft(app, db, entity, owner)
+    line = _add(app, client, owner, entity, amount="10").get_json()["line"]
+    first = line["receipts"][0]["id"]
+    second = _second_receipt(app, line["id"], s3)
+
+    resp = _edit(app, client, owner, entity, line["id"], remove_receipt_ids=second)
+
+    assert resp.status_code == 200, resp.get_json()
+    assert [r["id"] for r in resp.get_json()["line"]["receipts"]] == [first]
+    assert "expenses/second.jpg" in s3.deleted
+
+    last = _edit(app, client, owner, entity, line["id"], remove_receipt_ids=first)
+    assert last.status_code == 422
+    assert last.get_json()["error"] == (
+        "Every expense needs its receipt. Attach a new receipt before removing the last one.")
+    stranger = _edit(app, client, owner, entity, line["id"], remove_receipt_ids=str(uuid.uuid4()))
+    assert stranger.status_code == 422 and "isn't on this expense" in stranger.get_json()["error"]
+
+    # removing the last one WITH a replacement is a replacement
+    swap = _edit(app, client, owner, entity, line["id"], remove_receipt_ids=first, receipt=PNG)
+    assert swap.status_code == 200
+    assert [r["mime_type"] for r in swap.get_json()["line"]["receipts"]] == ["image/png"]
+
+
+@pytest.mark.parametrize("over, message", [
+    ({"amount": "0"}, "Enter the amount as a number above 0"),
+    ({"amount": "-5"}, "Enter the amount as a number above 0"),
+    ({"amount": ""}, "Enter the amount as a number above 0"),
+    ({"amount": "twelve"}, "Enter the amount as a number above 0"),
+    ({"amount": "100000000000"}, "up to 99,999,999,999.99"),
+    ({"remarks": "x" * 301}, "Keep the description to 300 characters or fewer."),
+    ({"supplier_id": "con-unknown"}, "Choose a supplier from the list."),
+    ({"account_id": "acc-0002"}, "Choose an account code from the list."),  # switched off
+    ({"receipt": b"GIF89a-not-allowed"}, "Attach a PDF, JPEG or PNG file."),
+    ({"receipt": b""}, "That file is empty. Attach the receipt again."),
+    ({"receipt": b"%PDF" + b"0" * (10 * 1024 * 1024)}, "Attach a file of 10 MB or less."),
+])
+def test_bad_input_for_an_edit_is_a_422_and_nothing_changes(app, client, db, shop, s3, over, message):
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner)
+    line = _add(app, client, owner, entity, amount="10").get_json()["line"]
+    stored = dict(s3.objects)
+
+    resp = _edit(app, client, owner, entity, line["id"], **over)
+
+    assert resp.status_code == 422
+    assert message in resp.get_json()["error"]
+    page = _get(app, client, owner, entity).get_json()
+    assert page["lines"] == [line] and _row(app, draft)["expenses"] == 10
+    assert s3.objects == stored and s3.deleted == []
+
+
+def test_two_receipts_in_one_edit_are_refused(app, client, db, shop):
+    owner, entity = shop
+    _draft(app, db, entity, owner)
+    line = _add(app, client, owner, entity, amount="10").get_json()["line"]
+
+    resp = client.patch(f"{_base(entity)}/expense-lines/{line['id']}",
+                        data={"receipt": [(BytesIO(PNG), "a.png"), (BytesIO(PNG), "b.png")]},
+                        content_type="multipart/form-data", headers=_headers(app, owner))
+
+    assert resp.status_code == 422 and resp.get_json()["error"] == "Attach one receipt per expense."
+
+
+def test_an_edit_is_refused_for_another_company_a_submitted_report_or_no_right(app, client, db, shop):
+    from models.db import Report, UserEntity
+
+    owner, entity = shop
+    with app.app_context():
+        other = _company(db, owner, "Other Shop")
+        base = F.make_user(db, "base@test.com")
+        db.session.add(UserEntity(user_id=base.id, entity_id=entity.id, role="entity_base", approved=True))
+        db.session.commit()
+    _draft(app, db, other, owner)
+    theirs = _add(app, client, owner, other, amount="10").get_json()["line"]["id"]
+    assert _edit(app, client, owner, entity, theirs, amount="99").status_code == 404
+    assert _edit(app, client, owner, entity, "not-a-uuid", amount="99").status_code == 404
+    assert _edit(app, client, owner, entity, str(uuid.uuid4()), amount="99").status_code == 404
+
+    draft = _draft(app, db, entity, owner)
+    mine = _add(app, client, owner, entity, amount="10").get_json()["line"]["id"]
+    refused = _edit(app, client, base, entity, mine, amount="99")
+    assert refused.status_code == 403
+    assert refused.get_json()["error"] == "You do not have permission to edit reports for this entity."
+
+    with app.app_context():
+        db.session.get(Report, draft).status = "submitted"
+        db.session.commit()
+    resp = _edit(app, client, owner, entity, mine, amount="99")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"] == "This report isn't a draft anymore, so I can't change its expenses."
+    assert _row(app, draft)["expenses"] == 10

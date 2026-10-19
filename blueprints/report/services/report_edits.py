@@ -91,9 +91,9 @@ def edit_expense_line(line, user, *, remarks=None, supplier_id=None, account_id=
     ``supplier_id`` / ``account_id`` are Xero ids that must be among the company's synced
     suppliers and its accounts switched on for Petty Cash; ``receipts`` are uploaded files that
     replace the line's receipts. Returns the line."""
-    from blueprints.report.models.shop_expense import ReportExpenseAttachment
-    from blueprints.report.services.expenses import checked_receipt, expense_accounts, suppliers
-    from blueprints.report.services.s3_storage import delete_files_from_s3, upload_file_to_s3
+    from blueprints.report.services.expenses import (checked_receipt, expense_accounts, replace_receipts,
+                                                     suppliers)
+    from blueprints.report.services.s3_storage import delete_files_from_s3
     from models.db import Report, db
 
     report = db.session.get(Report, line.report_id)
@@ -129,22 +129,8 @@ def edit_expense_line(line, user, *, remarks=None, supplier_id=None, account_id=
         if account is not None:
             line.account_id, line.account_code, line.item = account.xero_account_id, account.xero_code, account.name
         if checked:
-            old = list(line.attachments)
-            keys = [
-                upload_file_to_s3(upload, str(report.id), transaction_date=report.transaction_date,
-                                  description=line.item or line.remarks or "EXPENSE", amount=line.amount,
-                                  file_index=i if len(checked) > 1 else None)
-                for i, upload in enumerate(checked)
-            ]
-            line.set_receipts([(k, u.filename, u.mimetype) for k, u in zip(keys, checked)], uploaded_by=user.id)
-            db.session.flush()
-            for attachment in old:
-                if attachment.file_path in keys:
-                    continue
-                if db.session.query(ReportExpenseAttachment.id).filter_by(attachment_id=attachment.id).first() is None:
-                    if attachment.file_path:
-                        replaced.append(attachment.file_path)
-                    db.session.delete(attachment)
+            replaced = replace_receipts(line, report, checked, user,
+                                        description=line.item or line.remarks or "EXPENSE", amount=line.amount)
         _save(report)
     except Exception:
         db.session.rollback()

@@ -9,6 +9,11 @@ Every outcome is HTTP 200. A failure is `{"suggestions": null, "reason": ...}`
 and the page shows nothing — unavailable means invisible (§7.4, §9.3). A
 non-200 would only invite the browser to treat this as an error worth
 surfacing, which is precisely what §9 rules out.
+
+``read_receipt`` - everything after the checks - is shared with the Petty Cash API's
+``POST /reports/expenses/extract`` and with ``POST /api/internal/petty-cash/expense-extract``
+(below), through which minty-petty-cash-api, holding no model code, reads a receipt
+(``petty_cash_api/routes/expenses.py::extract_answer``).
 """
 
 from flask import jsonify, request
@@ -84,10 +89,19 @@ def report_expense_extract():
     if mime is None:
         return _no_suggestion(expense_ai.REASON_UNSUPPORTED_FILE)
 
+    return jsonify(read_receipt(entity_id, getattr(current_user, "id", None), data, mime)), 200
+
+
+def read_receipt(entity_id, user_id, data: bytes, mime: str) -> dict:
+    """The model's reading of a receipt already checked by the caller (who may ask, the rate
+    limit, the bytes and their sniffed ``mime``): the entity's lists, the call, the ONE log line,
+    and the answer ``{suggestions, reason}`` - ``suggestions`` null on every failure. Shared by
+    this page's route, the Petty Cash API's ``POST /reports/expenses/extract`` and the internal
+    route minty-petty-cash-api forwards to (``petty_cash_api/routes/expenses.py::extract_answer``)."""
     context = expense_ai.build_entity_context(entity_id)
     if context is None:
         logger.info("expense_ai: no accounts or contacts for entity={}", entity_id)
-        return _no_suggestion(expense_ai.REASON_NO_CONTEXT)
+        return {"suggestions": None, "reason": expense_ai.REASON_NO_CONTEXT}
 
     document, mime = expense_ai.prepare_document(data, mime)
     result = expense_ai.extract(document, mime, context)
@@ -109,7 +123,7 @@ def report_expense_extract():
         "expense_ai: extract entity={} user={} model={} location={} "
         "latency_ms={} tokens_in={} tokens_out={} thought={} cached={} "
         "cost={} status={} reason={} confidence={}",
-        entity_id, getattr(current_user, "id", None),
+        entity_id, user_id,
         result.audit.get("model_id"), result.audit.get("location"),
         result.audit.get("latency_ms"), result.audit.get("input_tokens"),
         result.audit.get("output_tokens"), result.audit.get("thought_tokens"),
@@ -118,6 +132,40 @@ def report_expense_extract():
     )
 
     if not result.suggestions:
-        return _no_suggestion(result.reason or expense_ai.REASON_NO_USABLE_FIELD)
+        return {"suggestions": None, "reason": result.reason or expense_ai.REASON_NO_USABLE_FIELD}
+    return {"suggestions": result.suggestions, "reason": result.reason}
 
-    return jsonify({"suggestions": result.suggestions, "reason": result.reason}), 200
+
+#: minty-petty-cash-api's scope for ``internal_expense_extract``.
+_EXPENSE_EXTRACT_SCOPE = "petty-cash-expense-extract"
+
+
+@report_bp.route("/api/internal/petty-cash/expense-extract", methods=["POST"])
+def internal_expense_extract():
+    """The receipt reader for minty-petty-cash-api, which holds no model code: this module and
+    ``services/expense_ai.py`` stay the only place that talks to the model. Multipart ``receipt``
+    -> the Petty Cash API's own answer (``petty_cash_api/routes/expenses.py::extract_answer``),
+    handed on unchanged.
+
+    The caller presents a 60-second HS256 assertion (the shared SECRET_KEY, checked by the Xero
+    internal routes' ``_authenticate_internal_caller``) whose claims name the company
+    (``entity_id``) and the person (``user_id``); neither is read from the body. The person is
+    checked again here (approved; ``REPORT_EDIT_OWN`` on the company) and so is the file.
+
+    SECURITY: like ``/api/internal/xero/token``, not meant to be reachable from the internet.
+    """
+    from blueprints.petty_cash_api.routes.expenses import extract_answer
+    from blueprints.xero.routes.routes import _authenticate_internal_caller
+    from models.db import User, db
+
+    claims, error = _authenticate_internal_caller(_EXPENSE_EXTRACT_SCOPE, ("user_id",))
+    if error:
+        logger.warning(f"internal expense extract: rejected caller ({error})")
+        return jsonify({"error": "unauthorized"}), 401
+    person = db.session.get(User, str(claims["user_id"]))
+    if person is None or not person.approved:
+        logger.warning(f"internal expense extract: unknown or unapproved user {claims['user_id']}")
+        return jsonify({"error": "unauthorized"}), 401
+    answer, status = extract_answer(str(claims["entity_id"]), person, request.files.getlist("receipt"))
+    logger.info(f"internal expense extract: entity {claims['entity_id']} by {person.id} -> {status}")
+    return jsonify(answer), status

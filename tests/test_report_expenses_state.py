@@ -327,3 +327,122 @@ def test_with_no_draft_the_step_sends_you_to_opening(app, client, db, shop):
 
     assert resp.status_code == 302 and "/reports/new/opening" in resp.headers["Location"]
     assert _flashes(client) == ["I don't see a draft yet - let's start with the opening entry."]
+
+
+# --- updating a line (``/report/expense/update/<id>``) -------------------------------------------
+# Pinned 2026-10-19 before the update moved into ``expenses.update_expense``, which the Petty Cash
+# API's ``PATCH /expense-lines/<id>`` shares.
+
+
+def _update(client, owner, line_id, *, files=0, **form):
+    F.login(client, owner)
+    data = dict(form)
+    for i in range(files):
+        data[f"files[0][{i}]"] = F.receipt(f"new{i}.jpg")
+    return client.post(f"/report/expense/update/{line_id}", data=data, content_type="multipart/form-data")
+
+
+def test_updating_a_line_changes_its_fields_keeps_its_receipt_and_moves_the_totals(app, client, db, shop, s3):
+    from models.db import ReportHistory
+
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner, bank_deposit=5)
+    line = _add(client, owner, entity, amount="10").get_json()["expense"]["id"]
+    [before] = _lines(app, draft)
+
+    resp = _update(client, owner, line, amount="1,234.50", remarks="Posters", item="Printing",
+                   contactId="con-0002", accountId="acc-0001")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "success", "message": "Expense updated successfully."}
+    [after] = _lines(app, draft)
+    assert (after["item"], after["amount"], after["remarks"], after["contact"], after["account"]) == (
+        "Printing", 1234.5, "Posters", "Taxi Co", "400")
+    assert after["keys"] == before["keys"]  # no new file: the receipt is kept
+    assert _row(app, draft)["expenses"] == 1234.5
+    assert _row(app, draft)["closing"] == 100 + 20 + 50 - 1234.5 - 5
+    with app.app_context():
+        assert [h.new_value for h in ReportHistory.query.filter_by(report_id=draft).order_by(
+            ReportHistory.created_at).all()][-1] == "updated to amount: $1234.5"
+
+
+def test_updating_a_line_with_a_new_file_replaces_its_receipt(app, client, db, shop, s3):
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner)
+    line = _add(client, owner, entity, amount="10").get_json()["expense"]["id"]
+    [before] = _lines(app, draft)
+
+    resp = _update(client, owner, line, files=1)
+
+    assert resp.status_code == 200
+    [after] = _lines(app, draft)
+    assert after["names"] == ["new0.jpg"] and after["keys"] != before["keys"]
+    assert after["keys"][0] in s3.objects
+    assert after["amount"] == 10  # fields not sent stay as they were
+    # Fixed in the service extraction: the replaced file was left in the bucket.
+    assert before["keys"][0] in s3.deleted
+
+
+def test_a_line_on_a_submitted_report_cannot_be_updated(app, client, db, shop):
+    from models.db import Report
+
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner)
+    line = _add(client, owner, entity, amount="10").get_json()["expense"]["id"]
+    with app.app_context():
+        db.session.get(Report, draft).status = "submitted"
+        db.session.commit()
+
+    resp = _update(client, owner, line, amount="99")
+
+    assert resp.status_code == 400
+    assert resp.get_json()["message"] == "This report isn't a draft anymore, so I can't change its expenses."
+    assert _lines(app, draft)[0]["amount"] == 10
+
+
+def test_an_update_racing_a_submit_rechecks_the_locked_report(app, client, db, shop):
+    # Security review 2026-10-19: the draft check read the Report loaded at the start of the
+    # request, so a submit landing in between let the amount change on a submitted report.
+    # update_expense now re-reads the report under a row lock before it writes.
+    from sqlalchemy import text
+
+    from blueprints.report.services.expenses import ExpenseRefused, update_expense
+    from models.db import Report, ReportExpense, User
+
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner)
+    line_id = _add(client, owner, entity, amount="10").get_json()["expense"]["id"]
+    with app.app_context():
+        report = db.session.get(Report, draft)
+        line = db.session.get(ReportExpense, line_id)
+        user = db.session.get(User, owner.id)
+        assert report.status == "draft"  # what the request saw
+        # A submit from another connection, committed while this request is still working.
+        with db.engine.connect() as other:
+            other.execute(text(f"UPDATE {Report.__table__.fullname} SET status = 'submitted' WHERE id = :id"),
+                          {"id": draft})
+            other.commit()
+
+        with pytest.raises(ExpenseRefused):
+            update_expense(report, line, user, item=line.item, amount=99, remarks=line.remarks,
+                           contact_id=line.contact_id, contact_name=line.contact_name,
+                           account_id=line.account_id, account_code=line.account_code)
+        db.session.rollback()
+
+    assert _lines(app, draft)[0]["amount"] == 10
+
+
+def test_updating_needs_the_edit_right_and_a_line_that_exists(app, client, db, shop):
+    from models.db import UserEntity
+
+    owner, entity = shop
+    draft = _draft(app, db, entity, owner)
+    line = _add(client, owner, entity, amount="10").get_json()["expense"]["id"]
+    with app.app_context():
+        base = F.make_user(db, "base@test.com")
+        db.session.add(UserEntity(user_id=base.id, entity_id=entity.id, role="entity_base", approved=True))
+        db.session.commit()
+
+    assert _update(client, base, line, amount="99").status_code == 403
+    assert _update(client, owner, str(uuid.uuid4()), amount="99").status_code == 404
+    assert _lines(app, draft)[0]["amount"] == 10

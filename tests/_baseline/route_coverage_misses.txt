@@ -19,9 +19,7 @@ report.expense_validate_drafts                          GET       /report/expens
 report.report_edit_withdrawal                           POST      /report/<string:id>/edit/withdrawal                cash_addition, company, date, withdrawal_bank_account, withdrawal_type, xero_integrated_yes
 report.report_expense_create_contact                    POST      /report/expense/create_contact                     access_token
 report.report_expense_edit_submitted                    POST      /report/expense/edit/<string:expense_id>           ShopExpense, xero_integrated_yes
-report.report_expense_extract                           POST      /report/expense/extract                            company
 report.report_expense_submit_all                        POST      /report/expense/submit_all                         ReportSaleDetail, ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, date, expenses, opening_balance
-report.report_expense_update                            POST      /report/expense/update/<string:expense_id>         ShopExpense, bank_deposit, cash_addition, cash_sales, closing_balance, company, expenses, opening_balance
 report.report_publishing_status                         GET       /api/report/<report_id>/publishing_status          company, xero_integrated_yes
 report.report_screenshot                                GET       /report/<string:id>/screenshot                     via can_view_report, remove
 user_management.deactivate_my_account                   DELETE    /minty/api/users/me                                access_token, company, expires_in, id_token, refresh_token

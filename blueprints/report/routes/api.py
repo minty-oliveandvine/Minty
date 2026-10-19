@@ -722,10 +722,12 @@ def report_expense_update(expense_id):
     Files under files[0][n] are optional: when present they replace the
     existing files; when omitted, existing files are preserved so the user
     can edit text/amount/account without re-uploading receipts.
+
+    The change itself is ``report/services/expenses.py::update_expense``, which the Petty Cash
+    API's ``PATCH /expense-lines/<id>`` shares.
     """
-    from blueprints.report.services.s3_storage import upload_file_to_s3
+    from blueprints.report.services.expenses import ExpenseRefused, update_expense
     from blueprints.report.services.shared import safe_float
-    from models.db import db
     from services.helpers.xero_bridge import resolve_contact_name
 
     try:
@@ -738,17 +740,6 @@ def report_expense_update(expense_id):
         if not draft:
             return jsonify(
                 {"status": "error", "message": "I don't see a draft for that yet."}), 404
-
-        if draft.status != "draft":
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "This report isn't a draft anymore, so I can't change its expenses.",
-                    }
-                ),
-                400,
-            )
 
         entity_id = draft.company
         if not has_permission(current_user, Permission.REPORT_EDIT_OWN, entity_id):
@@ -770,7 +761,6 @@ def report_expense_update(expense_id):
             contact_name = resolve_contact_name(entity_id, contact_id)
         account_id = request.form.get("accountId") or expense.account_id
         account_code = request.form.get("account_code") or expense.account_code
-        item_code = request.form.get("item_code") or expense.item_code
         remarks = request.form.get("remarks", expense.remarks or "")
         amount_raw = request.form.get("amount")
         amount = (
@@ -791,72 +781,22 @@ def report_expense_update(expense_id):
             else:
                 break
 
-        if new_files:
-            description = item if item else (remarks if remarks else "EXPENSE")
-            file_paths = []
-            for idx, f in enumerate(new_files):
-                file_path = upload_file_to_s3(
-                    f,
-                    str(draft.id),
-                    transaction_date=draft.transaction_date,
-                    description=description,
-                    amount=amount,
-                    file_index=idx if len(new_files) > 1 else None,
-                )
-                file_paths.append(file_path)
-            expense.set_receipts(
-                [(path, f.filename, f.mimetype) for f, path in zip(new_files, file_paths)],
-                uploaded_by=current_user.id,
-            )
-
-        expense.item = item
-        expense.amount = amount
-        expense.remarks = remarks
-        expense.contact_id = contact_id
-        expense.contact_name = contact_name
-        expense.account_id = account_id
-        expense.account_code = account_code
-        expense.item_code = item_code
-
-        # The ReportExpenseDetail mirror that sat here went with Step 3.5 —
-        # the assignments above already updated the one surviving row.
-
-        # Recalculate draft total + closing balance using same formula as
-        # create/delete handlers.
-        # Read-only: migrated to ShopExpense (Stage 4b). The paired row now
-        # exists from draft creation via ensure_shop_expense_for_draft, and
-        # report_id holds the same value report_draft_id did.
-        remaining_expenses = ShopExpense.query.filter_by(
-            report_id=draft.id
-        ).all()
-        new_total = sum(exp.amount for exp in remaining_expenses)
-        draft.expenses = new_total
-        cash_sales = get_cash_sales_from_detail(
-            draft.id,
-            fallback_value=draft.cash_sales or 0.0,
-        )
-        draft.closing_balance = (
-            draft.opening_balance
-            + (draft.cash_addition or 0)
-            + cash_sales
-            - draft.expenses
-            - (draft.bank_deposit or 0)
-        )
-
-        db.session.commit()
-
         try:
-            log_history(
-                report_id=draft.id,
-                company=draft.company,
-                user_id=current_user.id,
-                action="updated",
-                field_changed="expense",
-                old_value=f"expense_{expense_id}",
-                new_value=f"updated to amount: ${amount}",
+            update_expense(
+                draft,
+                expense,
+                current_user,
+                item=item,
+                amount=amount,
+                remarks=remarks,
+                contact_id=contact_id,
+                contact_name=contact_name,
+                account_id=account_id,
+                account_code=account_code,
+                files=new_files,
             )
-        except Exception as history_error:
-            logger.warning(f"Failed to log history: {str(history_error)}")
+        except ExpenseRefused as refused:
+            return jsonify({"status": "error", "message": refused.message}), 400
 
         return jsonify(
             {"status": "success", "message": "Expense updated successfully."}

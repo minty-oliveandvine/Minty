@@ -172,6 +172,18 @@ def test_the_outcome_says_what_was_counted_and_what_happens_next(app, client, db
     assert body["company_name"] == "Acme Shop" and body["submitted_at"]
 
 
+def test_the_outcomes_totals_are_the_daily_reports_kpis(app, client, db, shop):  # noqa: F811
+    owner, entity = shop
+    report = _ready(app, db, entity, owner, total_sales=80)
+    _submit(app, client, owner, entity)
+
+    body = client.get(f"{_base(entity)}/{report}/outcome", headers=_headers(app, owner)).get_json()
+    kpis = client.get(f"{_base(entity)}/{report}", headers=_headers(app, owner)).get_json()["kpis"]
+
+    assert (body["total_sales"], body["total_expenses"]) == (kpis["total_sales"], kpis["total_expenses"])
+    assert (body["total_sales"], body["total_expenses"]) == (80, 15)
+
+
 def test_the_outcome_of_another_companys_or_an_unknown_report_is_404(app, client, db, shop):  # noqa: F811
     owner, entity = shop
     assert client.get(f"{_base(entity)}/{uuid.uuid4()}/outcome", headers=_headers(app, owner)).status_code == 404

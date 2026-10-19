@@ -69,6 +69,7 @@ def daily_report(report_id):
 def report_figures(report, entity_id) -> dict:
     """The day's figures: the KPIs, sales by method, the cash and the closing balance - what
     ``GET /reports/<id>`` and the public share read (``public_share.py``) both show."""
+    from blueprints.petty_cash_api.routes.close import report_totals
     from blueprints.report.services.cash import expected_cash
     from blueprints.report.services.cash_denominations import cash_summary
     from blueprints.report.services.sales import report_methods
@@ -77,8 +78,7 @@ def report_figures(report, entity_id) -> dict:
     counted, cash_position = cash_summary(report.id)
     return {
         "kpis": {
-            "total_sales": _money(report.total_sales),
-            "total_expenses": _money(report.expenses),
+            **report_totals(report),
             "cash_position": _money(cash_position if cash_position is not None else report.closing_balance),
         },
         "sales": {

@@ -37,6 +37,12 @@ def _iso(moment):
     return moment.isoformat() if moment is not None else None
 
 
+def report_totals(report) -> dict:
+    """The day's total sales and expenses - the Daily Report's ``kpis`` (``report.py``'s
+    ``report_figures``) and the outcome's, one rule."""
+    return {"total_sales": _money(report.total_sales), "total_expenses": _money(report.expenses)}
+
+
 def _sales_history(entity_id, day, today_total) -> tuple[list, float | None]:
     """The 30 days up to ``day`` (``[{date, total}]``, the day itself with the draft's own total) and
     the day before's total sales, or None - Flask's "Compared to Yesterday" and "Sales History".
@@ -193,6 +199,7 @@ def report_outcome(report_id):
             "submitted": status != "draft",
             "submitted_at": _iso(facts["submitted_at"]),
             "submitted_by": facts["submitted_by"],
+            **report_totals(report),
             "cash_counted": _money((report.actual_cash_total or 0) + (report.safe_box_balance or 0)),
             "difference": {"amount": _money(report.discrepancy_amount), "kind": kind,
                            "has_reason": bool((report.discrepancy_reason or "").strip())},

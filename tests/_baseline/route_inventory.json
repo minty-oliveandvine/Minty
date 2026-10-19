@@ -1710,6 +1710,23 @@
    "in_scope": true
   },
   {
+   "endpoint": "report.internal_expense_extract",
+   "rule": "/api/internal/petty-cash/expense-extract",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "user",
+    "entities",
+    "account_info",
+    "entity_account_xero",
+    "xero_contact_sync",
+    "currency_info"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
    "endpoint": "report.generate_pdf_report",
    "rule": "/report/<string:id>/export",
    "methods": [
@@ -3440,6 +3457,38 @@
    "in_scope": true
   },
   {
+   "endpoint": "petty_cash_api.edit_expense_line",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/expense-lines/<line_id>",
+   "methods": [
+    "PATCH"
+   ],
+   "touches": [
+    "report",
+    "report_expense",
+    "attachment",
+    "report_expense_attachment",
+    "report_history"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
+   "endpoint": "petty_cash_api.extract_expense",
+   "rule": "/api/petty-cash/v1/companies/<entity_id>/reports/expenses/extract",
+   "methods": [
+    "POST"
+   ],
+   "touches": [
+    "entities",
+    "account_info",
+    "entity_account_xero",
+    "xero_contact_sync",
+    "currency_info"
+   ],
+   "touches_via_service": {},
+   "in_scope": true
+  },
+  {
    "endpoint": "petty_cash_api.expense_receipt",
    "rule": "/api/petty-cash/v1/companies/<entity_id>/expense-lines/<line_id>/receipts/<attachment_id>",
    "methods": [
@@ -3882,7 +3931,7 @@
   }
  ],
  "summary": {
-  "routes": 218,
-  "in_scope": 155
+  "routes": 221,
+  "in_scope": 158
  }
 }
