@@ -3,10 +3,13 @@
   outcome page, and the public share link (is_shared_link: no actions, no navigation).
   Rendered by blueprints/report/services/ending.py; a draft's Close stage is report/close.html.
 
-  Order: Report header (name, date, one Status pill, Share, More: Edit / Delete) -> 3 KPIs (Total
-  sales, Total expenses, Cash position) -> the difference as a Warning alert, stated as fact ->
-  collapsible Sales by method, Expenses (n), Receipts (n), Cash -> audit meta. The Delete/Edit/Close
-  stack is retired (15.C): Edit and Delete sit in More, Close is gone.
+  Order: Report header (name, date, one Status pill, Share, More: Edit / Delete) -> the outcome
+  band (Cash position as the one hero amount, Total sales and Total expenses beside it) -> the
+  difference as a Warning alert, stated as fact -> "Where the money came from and went" (sales by
+  method as a proportion bar, expenses by account as bar rows; both computed in
+  services/report_page.py, the lists below are their table alternative) -> collapsible Sales by
+  method, Expenses (n), Receipts (n), Cash -> audit meta. The Delete/Edit/Close stack is retired
+  (15.C): Edit and Delete sit in More, Close is gone.
 #}
 {% extends 'petty_cash/base.html' %}
 {% import 'petty_cash/_ui.html' as ui %}
@@ -73,15 +76,70 @@
   </header>
 
   <div class="pc-stack" style="display: flex; flex-direction: column">
-    <div class="pc-kpis">
-      {{ ui.kpi('Total sales', (total_sales or 0)|money(code)) }}
-      {{ ui.kpi('Total expenses', (cash_expense or 0)|money(code), (facts.expenses|length) ~ (' expense' if facts.expenses|length == 1 else ' expenses')) }}
-      {{ ui.kpi('Cash position', (cash_balance or 0)|money(code), 'Counted, with the safe box') }}
-    </div>
+    {# Outcome band (15.7, Operational Review): Cash position is the one hero amount (display/xl). #}
+    <section class="pc-band" aria-labelledby="bandHero">
+      <span class="pc-module-chip">{{ ui.icon('point_of_sale', 16) }}Petty Cash</span>
+      <div class="pc-band__body">
+        <div class="pc-band__hero">
+          <p class="pc-band__label" id="bandHero">Cash position</p>
+          <p class="pc-band__amount pc-num" translate="no">{{ (cash_balance or 0)|money(code) }}</p>
+          <p class="pc-band__meta">Counted, with the safe box</p>
+        </div>
+        <dl class="pc-band__figures">
+          <div>
+            <dt class="pc-band__label">Total sales</dt>
+            <dd class="pc-band__figure pc-num" translate="no">{{ (total_sales or 0)|money(code) }}</dd>
+          </div>
+          <div>
+            <dt class="pc-band__label">Total expenses</dt>
+            <dd class="pc-band__figure pc-num" translate="no">{{ (cash_expense or 0)|money(code) }}</dd>
+            <dd class="pc-band__meta">{{ facts.expenses|length }} {{ 'expense' if facts.expenses|length == 1 else 'expenses' }}</dd>
+          </div>
+        </dl>
+        <img class="pc-band__art" src="{{ url_for('static', filename='img/safebox.webp') }}" alt="" width="96" height="96">
+      </div>
+    </section>
 
     {% if off %}
       {{ ui.alert('warning', title='Cash was ' ~ (((discrepancy_amount|float)|abs)|money(code)) ~ (' short' if discrepancy_type == 'short' else ' over'), text=('Note: ' ~ discrepancy_reason) if discrepancy_reason else None) }}
     {% endif %}
+
+    {# Where the money came from and went: brand + neutral only, every mark named with its amount.
+       The data is the server's (sales_chart, expense_chart); the lists below are the tables. #}
+    <section class="pc-card pc-flow" aria-labelledby="flowTitle">
+      <h2 class="pc-t-title-l" id="flowTitle">Where the money came from and went</h2>
+
+      <h3 class="pc-flow__title">Sales by method</h3>
+      {% if sales_chart %}
+        {% set mix_text = [] %}
+        {% for seg in sales_chart %}{% set _ = mix_text.append((seg.label or ui.method_name(seg.sale)) ~ ' ' ~ (seg.amount|money(code)) ~ ', ' ~ seg.pct ~ '%') %}{% endfor %}
+        <div class="pc-stackbar" role="img" aria-label="Sales by method: {{ mix_text|join('; ') }}">
+          {% for seg in sales_chart %}<span class="pc-stackbar__seg" data-tone="{{ seg.tone }}" style="flex-grow: {{ seg.width }}"></span>{% endfor %}
+        </div>
+        <ul class="pc-legend">
+          {% for seg in sales_chart %}
+          <li><span class="pc-legend__swatch" data-tone="{{ seg.tone }}" aria-hidden="true"></span><span class="pc-legend__name">{{ seg.label or ui.method_name(seg.sale) }}</span> <span class="pc-num" translate="no">{{ seg.amount|money(code) }}</span> <span class="pc-c-secondary">· {{ seg.pct }}%</span></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="pc-c-secondary">No sales this day.</p>
+      {% endif %}
+
+      <h3 class="pc-flow__title">Expenses by account</h3>
+      {% if expense_chart %}
+        <ul class="pc-barrows" aria-label="Expenses by account">
+          {% for bar in expense_chart %}
+          <li class="pc-barrow">
+            <span class="pc-barrow__name">{{ bar.name }}</span>
+            <span class="pc-barrow__amount pc-num" translate="no">{{ bar.amount|money(code) }}</span>
+            <span class="pc-barrow__track" aria-hidden="true"><span class="pc-barrow__bar" style="width: {{ bar.width }}%"></span></span>
+          </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="pc-c-secondary">No expenses this day.</p>
+      {% endif %}
+    </section>
 
     <details class="pc-details">
       <summary><span>Sales by method</span>{{ ui.icon('expand_more') }}</summary>

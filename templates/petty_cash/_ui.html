@@ -102,12 +102,13 @@
 {%- endmacro %}
 
 {# Drawer (Part 14): 480 at the right, full screen on a phone. The caller writes
-   .pc-drawer__body and .pc-drawer__footer. #}
-{% macro drawer(id, title, desc=None) -%}
+   .pc-drawer__body and .pc-drawer__footer. scene = a static image drawn small beside the title. #}
+{% macro drawer(id, title, desc=None, scene=None) -%}
 <div class="pc-overlay pc-overlay--drawer" id="{{ id }}" hidden data-pc-overlay>
   <div class="pc-overlay__scrim" data-pc-scrim></div>
   <div class="pc-drawer" role="dialog" aria-modal="true" aria-labelledby="{{ id }}-title" tabindex="-1">
     <div class="pc-drawer__header">
+      {% if scene %}<img class="pc-scene pc-scene--44" src="{{ url_for('static', filename=scene) }}" alt="" width="44" height="44">{% endif %}
       <div>
         <h2 class="pc-t-title-l" id="{{ id }}-title">{{ title }}</h2>
         {% if desc %}<p class="pc-drawer__desc">{{ desc }}</p>{% endif %}
@@ -117,6 +118,32 @@
     {{ caller() }}
   </div>
 </div>
+{%- endmacro %}
+
+{# A step scene (Part 13 §13.11): a decorative illustration in a task card or beside a field -
+   never in an input, a table, an error or a destructive dialog. size = 44, 56 or 128 (max). #}
+{% macro scene(file, size=128) -%}
+<img class="pc-scene pc-scene--{{ size }}" src="{{ url_for('static', filename=file) }}" alt="" height="{{ size }}">
+{%- endmacro %}
+
+{# A task card: one manageable step of a stage, shown one at a time (Daily Closing Phase 1).
+   state = current | done | next; the page's script moves it by setting data-state. The caller
+   writes three parts, and CSS shows the one that matches the state:
+     [data-pc-task-body]    the inputs (current)
+     [data-pc-task-result]  one line with the result and a Change/Edit button (done)
+     [data-pc-task-next]    "Next, after ..." (next)
+   All three stay in the DOM, so every input keeps submitting with the form. #}
+{% macro task(id, number, title, state='next', sub=None) -%}
+<section class="pc-task" id="task-{{ id }}" data-pc-task="{{ id }}" data-state="{{ state }}" aria-labelledby="task-{{ id }}-title"{% if state == 'current' %} aria-current="step"{% endif %}>
+  <div class="pc-task__head">
+    <span class="pc-task__mark" aria-hidden="true"><span class="pc-task__num">{{ number }}</span>{{ icon('check', 16) }}</span>
+    <div class="pc-task__heading">
+      <h2 class="pc-task__title" id="task-{{ id }}-title">{{ title }}</h2>
+      {% if sub %}<p class="pc-task__sub">{{ sub }}</p>{% endif %}
+    </div>
+  </div>
+  {{ caller() }}
+</section>
 {%- endmacro %}
 
 {# Description rows (Part 14): term 160 from 640, stacked on a phone; "Not set yet" for no value.

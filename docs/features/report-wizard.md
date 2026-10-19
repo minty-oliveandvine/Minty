@@ -20,17 +20,28 @@ the six keys (`deposit` and `cash_count` are both Cash Count, which is done once
 | Addition to Drawer | `GET/POST /entity/<co>/petty-cash/reports/new/opening` (`.../reports/<id>/opening` for an existing report) - `report/opening.html` | the cash added to the drawer and where it came from ("Company bank" / "Personal"); the starting balance is the server's (a company's first report: the onboarding opening balance from `entity_pettycash_settings`) | `report.opening_balance`, `cash_addition`, `cash_addition_type` |
 | Sales | `.../reports/new/sale`, `.../reports/<id>/sale` - `report/sales.html` | one amount per sales method in three grouped sections (electronic, delivery, cash) with live sub-totals and the total (`sales[<bucket>][<method>]`) | `report_sale` rows (one per method; the class is still importable as `ReportSaleDetail`) |
 | Expenses | `.../reports/new/expense`, `.../reports/<id>/expense` - `report/expense.html` | an entry list; each entry opens in a Drawer (480, full screen on a phone): the receipt (or a photo), amount, supplier, account, description | `report_expense` rows + attachment rows, saved as each entry is added |
-| Cash Count | `.../reports/new/cash-count`, `.../reports/<id>/cash-count` - `report/cash_count.html` | the optional **cash taken for bank deposit** first, then the count by notes and coins, the safe box, the Check block (Expected in drawer, Counted, Difference "HKD 20.00 short"), and **a reason for any difference** | `report.bank_deposit`, `report_cash_count` rows, `safe_box_balance`, `discrepancy_*` - in one commit |
-| Close | `.../reports/new/ending` - `report/close.html` | the work verification: every stage read-only with an Edit link, the totals and the difference; **Submit Daily Report** posts it | `status = submitted`, `submitted_at` |
+| Cash Count | `.../reports/new/cash-count`, `.../reports/<id>/cash-count` - `report/cash_count.html` | three task cards, one open at a time (Daily Closing Phase 1, 2026-10-16): the optional **cash taken to the bank**, the count by notes and coins in the **Count the drawer** sheet (`#countSheet`, a Drawer inside the form; Save count marks it done), the safe box. Once counted, the Check: "The numbers match", or the warning ("The count is HKD 20.00 short.") and **a reason for any difference**. Save & Next waits for the count and the reason |  `report.bank_deposit`, `report_cash_count` rows, `safe_box_balance`, `discrepancy_*` - in one commit |
+| Close | `.../reports/new/ending` - `report/close.html` | the work verification: a readiness banner ("Ready to submit", or the alert that blocks it), one summary card with a row per stage (its total and an Edit link; per-item breakdowns stay in the stages), the difference inside the Cash Count row; **Submit Daily Report** posts it | `status = submitted`, `submitted_at` |
 
 Then the outcome page (`.../reports/<id>/submitted`, `report/submitted.html`, Part 15.12e):
-the outcome, three facts from the server (cash counted, the difference, Xero), Publish to Xero
-behind a confirmation ([xero-integration.md](xero-integration.md)), View report, Back to home
-and Start the next day. A saved report reads as the **Daily Report** (`.../reports/<id>/summary`,
-`report/ending.html`, Part 15.7): three KPIs (Total sales, Total expenses, Cash position), the
-difference as a Warning alert, collapsible Sales by method / Expenses / Receipts / Cash, the
-audit line, Share and More (Edit report / Delete report on the latest; Edit details on an older
-one). The public share link draws the same page without actions or navigation.
+"Today is closed" (the Completion state), three facts from the server (Sales, Expenses, Cash
+counted with the difference as a pill), one quiet Xero line ("Not sent to Xero yet" + Send to Xero
+behind a confirmation, or "Sent to Xero · time" + Publish again;
+[xero-integration.md](xero-integration.md)), then Back to home and View report. The next day
+starts from the launch page. A saved report reads as the **Daily Report** (`.../reports/<id>/summary`,
+`report/ending.html`, Part 15.7, read as an Operational Review): the **outcome band** (brand/50
+tint, the Petty Cash module chip, **Cash position** as the screen's one display/xl hero amount,
+Total sales and Total expenses beside it, the safe-box art from 640 px), the difference as a
+Warning alert, then **Where the money came from and went** - sales by method as a stacked
+proportion bar with a legend (name, amount, %) and expenses summed per account as bar rows,
+brand ramp + neutral only, plain HTML/CSS. The chart data is the server's
+(`services/report_page.py` `sales_mix` / `expense_bars`, called by `services/ending.py`): methods
+that sold nothing are left out, the whole percentages add up to 100, accounts run largest first;
+one method is one full bar, no expenses reads "No expenses this day.". The bar carries a
+`role="img"` summary, and the collapsible Sales by method / Expenses / Receipts / Cash lists
+below stay as the tables. Then the audit line; Share and More (Edit report / Delete report on the
+latest; Edit details on an older one) sit in the header. No trends or other days. The public
+share link draws the same page without actions or navigation.
 
 The day starts from the **launch page** (`entity.report_dashboard`, `petty_cash/launch.html`,
 Part 15.6a), which `blueprints/entity/services/launch.py` decides on the server: the open draft
