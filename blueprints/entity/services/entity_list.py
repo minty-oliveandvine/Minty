@@ -19,15 +19,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Iterable
 
+import pytz
 from flask import current_app
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from loguru import logger
+from sqlalchemy import and_
 from sqlalchemy.orm import aliased
 
 from blueprints.entity.services.modules import (get_enabled_modules_for_entities,
                                                 module_display_names)
-from blueprints.subscription.services.store_ro import trial_modules_for_entities
+from blueprints.shared.enums import SystemRole
+from blueprints.subscription.services.store_ro import subscription_attention_for_entities
 from models.db import Entity, User, UserEntity, db
+from models.db import tz as DEFAULT_ZONE
 from services.permission_policy import is_superuser
 
 NOTICE_SALT = "hub-flash"
@@ -51,6 +55,19 @@ def _utc(dt: datetime | None) -> datetime | None:
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
 
+def _company_day(instant: datetime, zone_name: str | None) -> str:
+    """``instant`` as the day on the company's calendar (``entities.timezone``, else Hong
+    Kong - the zone minty-subscription-api dates a company's subscription emails in, see its
+    ``notify.zone_named``): a trial ending late in a UTC day ends tomorrow in Hong Kong."""
+    zone = DEFAULT_ZONE
+    if zone_name and zone_name.strip():
+        try:
+            zone = pytz.timezone(zone_name.strip())
+        except pytz.UnknownTimeZoneError:
+            logger.warning(f"Entity list: unknown time zone {zone_name!r}; dated in {DEFAULT_ZONE}")
+    return instant.astimezone(zone).date().isoformat()
+
+
 def build_entity_list(user) -> list[dict]:
     """Every company ``user`` may pick, "Setup in progress" first, then most recently opened.
 
@@ -59,22 +76,39 @@ def build_entity_list(user) -> list[dict]:
     switched on - the resolver is fail-closed, so a code here is a module the request gate
     will let through), ``trial_modules`` (those running on a free trial, intersected with
     ``modules`` so a badge never claims a trial on a module whose icon is not there),
-    ``trial_module_names``, ``last_accessed_at`` (aware UTC, or None when never opened) and
-    ``last_accessed_by`` (the name of whoever opened it last, or None).
+    ``trial_module_names``, ``last_accessed_at`` (aware UTC, or None when never opened),
+    ``last_accessed_by`` (the name of whoever opened it last, or None), and what needs
+    attention:
+
+    * ``role`` - the CALLER's own ``user_entity.role`` there (``entity_base`` ...
+      ``super_admin``); ``"superadmin"`` (the system role) for a superuser holding no
+      membership on it.
+    * ``trial_ends_on`` - ``YYYY-MM-DD``, the earliest end among ``trial_modules``, on the
+      company's calendar; None with no trial.
+    * ``payment_failed`` - a module of it reads "payment failed" (``store_ro``).
     """
     # Who last opened each entity - outer-joined so entities never opened
     # (last_accessed_by_user_id IS NULL) still come back.
     accessor = aliased(User)
+    # The caller's own membership only - joined on their id, so no one else's role can
+    # come back - and outer, so a superuser's companies without one still do.
+    membership = aliased(UserEntity)
     query = (
         db.session.query(
             Entity.id,
             Entity.name,
             Entity.status,
             Entity.last_accessed_at,
+            Entity.timezone,
             accessor.first_name,
             accessor.last_name,
+            membership.role,
         )
         .outerjoin(accessor, Entity.last_accessed_by_user_id == accessor.id)
+        .outerjoin(
+            membership,
+            and_(membership.entity_id == Entity.id, membership.user_id == user.id),
+        )
         # "Setup in progress" floats to the top so a half-finished entity is the first
         # thing seen, then most-recently-opened first. Never-opened entities sort last
         # rather than first, which is what NULLS LAST buys.
@@ -84,24 +118,25 @@ def build_entity_list(user) -> list[dict]:
         )
     )
     if not is_superuser(user):
-        query = query.join(UserEntity, UserEntity.entity_id == Entity.id).filter(
-            UserEntity.user_id == user.id
-        )
+        query = query.filter(membership.user_id.isnot(None))
     rows = query.all()
     if not rows:
         return []
 
     entity_ids = [r.id for r in rows]
     modules_by_entity = get_enabled_modules_for_entities(entity_ids)
-    trials_by_entity = trial_modules_for_entities(entity_ids)
+    attention = subscription_attention_for_entities(entity_ids)
     trial_labels = module_display_names(
-        {code for codes in trials_by_entity.values() for code in codes}
+        {code for flags in attention.values() for code in flags["trials"]}
     )
 
     entries = []
     for r in rows:
         modules = modules_by_entity.get(r.id, set())
-        trial_modules = trials_by_entity.get(r.id, set()) & modules
+        flags = attention.get(str(r.id), {"trials": {}, "payment_failed": False})
+        trial_modules = set(flags["trials"]) & modules
+        trial_ends = [flags["trials"][code] for code in trial_modules]
+        role = getattr(r.role, "value", r.role)
         entries.append(
             {
                 "id": str(r.id),
@@ -118,6 +153,9 @@ def build_entity_list(user) -> list[dict]:
                 "last_accessed_by": (
                     f"{r.first_name or ''} {r.last_name or ''}".strip() or None
                 ),
+                "role": str(role) if role else SystemRole.SUPERADMIN.value,
+                "trial_ends_on": _company_day(min(trial_ends), r.timezone) if trial_ends else None,
+                "payment_failed": bool(flags["payment_failed"]),
             }
         )
     return entries

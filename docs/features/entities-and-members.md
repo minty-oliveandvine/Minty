@@ -15,7 +15,16 @@ in `blueprints/entity/services/entity_list.py::build_entity_list`, for its one r
 - **minty-web's list** (`/entities`, the hub's "Select Company", 2026-09-29) — `/entity` mints
   an unscoped token and sends the browser there
   (`routes/list.py::_to_minty_web_list`), which reads `GET /api/me/entities`
-  (`routes/me_api.py`, bearer + CORS for minty-web through `blueprints/shared/hub_api.py`). **Whether or not Terms are owed** (since 2026-09-29):
+  (`routes/me_api.py`, bearer + CORS for minty-web through `blueprints/shared/hub_api.py`).
+  Each company carries `id`, `name`, `status`, `modules`, `trial_modules`, `trial_module_names`,
+  `last_accessed_at`, `last_accessed_by` and, since 2026-10-19, what needs attention: `role` (the
+  CALLER's own `user_entity.role` - `entity_base` … `super_admin` - or `"superadmin"` for a
+  superuser with no membership there; joined on the caller's id, so nobody else's role leaks),
+  `trial_ends_on` (`YYYY-MM-DD`, the earliest end among `trial_modules`, on the company's calendar:
+  `entities.timezone`, else Hong Kong, as minty-subscription-api dates its emails) and
+  `payment_failed` (a module reads "payment failed" - the rule is in
+  [modules-and-subscriptions.md](modules-and-subscriptions.md) §3). Read-only, batched for the
+  whole list (`tests/test_hub_entity_list.py` counts the queries). **Whether or not Terms are owed** (since 2026-09-29):
   minty-web's own Terms gate takes the acceptance ([legal-terms.md](legal-terms.md), minty-web's
   panel). Seventy-odd routes flash a message
   and redirect to `/entity`; the redirect drains those flashes, signs them (`itsdangerous`,

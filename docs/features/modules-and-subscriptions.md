@@ -54,9 +54,21 @@ Alembic and `models.db`; `tests/test_zz_no_stripe.py` fails if anything else in
   handover is offered to cannot be demoted (`user_management/services/roles.py`,
   `approve_reject_access.py`, the Users tab's subscriber mark in `entity/routes/hub_settings.py`);
 - `module_is_paid` - the manual module switch (§2);
-- `trial_modules_for_entities` - the entity list's trial badge (`entity/services/entity_list.py`,
-  served to minty-web by `GET /api/me/entities`), against the DATABASE's clock, with a six-hour
-  closing window for a trial the pass has not closed yet.
+- `subscription_attention_for_entities` - the entity list's subscription flags
+  (`entity/services/entity_list.py`, served to minty-web by `GET /api/me/entities`), one read of
+  the module rows for the whole list, against the DATABASE's clock (`trial_modules_for_entities`
+  is its badge-only view):
+  - **trials** with their end (`app_access_until`, else `trial_end`), with a six-hour closing
+    window for a trial the pass has not closed yet → `trial_modules` and `trial_ends_on`;
+  - **payment failed** → `payment_failed`, mirroring minty-subscription-api's module card
+    (`cards.get_module_cards` saying `past_due`): a `past_due` row that still grants access
+    (`app_access_until`, else the company's paid-through - its card's, or a parked handover's
+    `collect_at` when later - plus `billing_policy.past_due_window_days`, validated as
+    `policy._dunning_pair` does, else 15) on a card whose customer was TOLD
+    (`dunning_started_at` set, or collection over; no card counts as told). Past due because
+    the processor failed is not a failed payment. Three more reads, only when a listed company
+    is past due. Fail-soft like the badge: an error is no flags, logged. If the engine's rule
+    changes, change this mirror with it.
 
 **The dashboard notice.** The Petty Cash dashboard shows the subscription notice once per company
 per login (`entity/services/modules.py::claim_subscription_notice`, `NOTICE_SEEN_SESSION_KEY`;

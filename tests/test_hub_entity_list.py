@@ -178,15 +178,169 @@ def test_a_trial_badge_never_claims_a_module_that_is_off(app, client, people, hu
     petty = people["petty"]
     # Petty Only runs a Payment Request trial row although the module is not switched on,
     # and a Petty Cash trial that is.
+    ends = datetime.now(timezone.utc) + timedelta(days=5)
     monkeypatch.setattr(
-        "blueprints.entity.services.entity_list.trial_modules_for_entities",
-        lambda ids: {petty.id: {"PETTY_CASH", "PAYMENT_REQUEST"}},
+        "blueprints.entity.services.entity_list.subscription_attention_for_entities",
+        lambda ids: {petty.id: {"trials": {"PETTY_CASH": ends, "PAYMENT_REQUEST": ends},
+                                "payment_failed": False}},
     )
     entries = {e["name"]: e for e in _get(client, app, people["olive"].id).get_json()["entities"]}
 
     assert entries["Petty Only Ltd"]["trial_modules"] == ["PETTY_CASH"]
     assert entries["Petty Only Ltd"]["trial_module_names"] == ["Petty Cash"]
     assert entries["Both Modules Ltd"]["trial_modules"] == []
+
+
+# --- what needs attention: role, trial end, failed payment ------------------------------
+
+
+def _sub(db, entity_id, payer_id, *, code="PETTY_CASH", phase="trial", trial_end=None,
+         billed=False):
+    from models.db import EntityModuleSubscription
+
+    db.session.add(EntityModuleSubscription(
+        entity_id=entity_id, function_code=code, payer_user_id=payer_id, phase=phase,
+        trial_end=trial_end,
+        first_billed_at=datetime.now(timezone.utc) - timedelta(days=40) if billed else None,
+    ))
+    db.session.commit()
+
+
+def _declined_card(db, entity_id, payer_id):
+    """A billing account whose renewal was declined two days ago: dunning is running."""
+    from models.db import EntityBillingGroup, PayerBillingGroup
+
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+    group = PayerBillingGroup(payer_user_id=payer_id, stripe_payment_method_id="pm_test",
+                              paid_through=two_days_ago, dunning_started_at=two_days_ago)
+    db.session.add(group)
+    db.session.flush()
+    db.session.add(EntityBillingGroup(entity_id=entity_id, payer_user_id=payer_id,
+                                      billing_group_id=group.id, source="chosen"))
+    db.session.commit()
+
+
+def test_every_company_carries_its_attention_fields(app, client, people, hub):
+    for entry in _get(client, app, people["olive"].id).get_json()["entities"]:
+        assert entry["role"] == "admin"  # make_entity's owner role
+        assert entry["trial_ends_on"] is None
+        assert entry["payment_failed"] is False
+
+
+def test_the_role_is_the_callers_own(app, client, people, hub, db):
+    """Each person reads their OWN role on a company, never someone else's on it."""
+    from models.db import UserEntity
+
+    with app.app_context():
+        db.session.add(UserEntity(user_id=people["stranger"].id, entity_id=people["both"].id,
+                                  role="cashier", approved=True))
+        db.session.commit()
+
+    olive = {e["name"]: e for e in _get(client, app, people["olive"].id).get_json()["entities"]}
+    stranger = {e["name"]: e for e in _get(client, app, people["stranger"].id).get_json()["entities"]}
+
+    assert olive["Both Modules Ltd"]["role"] == "admin"
+    assert stranger["Both Modules Ltd"]["role"] == "cashier"
+    assert stranger["Somebody Else Ltd"]["role"] == "admin"
+    assert "Somebody Else Ltd" not in olive
+
+
+def test_a_superuser_reads_superadmin_where_they_hold_no_membership(app, client, people, hub, db):
+    from models.db import UserEntity
+
+    with app.app_context():
+        db.session.add(UserEntity(user_id=people["staff"].id, entity_id=people["petty"].id,
+                                  role="accountant", approved=True))
+        db.session.commit()
+
+    roles = {e["name"]: e["role"] for e in _get(client, app, people["staff"].id).get_json()["entities"]}
+    assert roles == {"Setup Ltd": "superadmin", "Petty Only Ltd": "accountant",
+                     "Both Modules Ltd": "superadmin", "Somebody Else Ltd": "superadmin"}
+
+
+def test_the_trial_end_is_the_earliest_on_the_companys_calendar(app, client, people, hub, db):
+    """Two trials: the list names the one ending first, as the day it is in Hong Kong (the
+    zone a company that has set none is dated in, as minty-subscription-api's emails do) - an
+    instant late in a UTC day is already the next day there."""
+    import pytz
+
+    late_utc = (datetime.now(timezone.utc) + timedelta(days=3)).replace(
+        hour=20, minute=0, second=0, microsecond=0)
+    with app.app_context():
+        _sub(db, people["both"].id, None, code="PETTY_CASH", trial_end=late_utc + timedelta(days=7))
+        _sub(db, people["both"].id, None, code="PAYMENT_REQUEST", trial_end=late_utc)
+        # a trial on a module that is not switched on draws no badge, so it names no date
+        _sub(db, people["petty"].id, None, code="PAYMENT_REQUEST", trial_end=late_utc)
+
+    entries = {e["name"]: e for e in _get(client, app, people["olive"].id).get_json()["entities"]}
+    expected = late_utc.astimezone(pytz.timezone("Asia/Hong_Kong")).date()
+    assert expected == (late_utc + timedelta(days=1)).date()
+    assert entries["Both Modules Ltd"]["trial_ends_on"] == expected.isoformat()
+    assert entries["Petty Only Ltd"]["trial_ends_on"] is None
+    assert entries["Petty Only Ltd"]["payment_failed"] is False
+
+
+def test_the_trial_end_follows_the_companys_own_zone(app, client, people, hub, db):
+    from models.db import Entity
+
+    late_utc = (datetime.now(timezone.utc) + timedelta(days=3)).replace(
+        hour=20, minute=0, second=0, microsecond=0)
+    with app.app_context():
+        Entity.query.filter(Entity.id == people["petty"].id).first().timezone = "Europe/London"
+        db.session.commit()
+        _sub(db, people["petty"].id, None, trial_end=late_utc)
+
+    entries = {e["name"]: e for e in _get(client, app, people["olive"].id).get_json()["entities"]}
+    assert entries["Petty Only Ltd"]["trial_ends_on"] == late_utc.date().isoformat()
+
+
+def test_a_declined_renewal_flags_the_company(app, client, people, hub, db):
+    olive = people["olive"].id
+    with app.app_context():
+        _sub(db, people["petty"].id, olive, phase="past_due", billed=True)
+        _declined_card(db, people["petty"].id, olive)
+
+    entries = {e["name"]: e for e in _get(client, app, olive).get_json()["entities"]}
+    assert entries["Petty Only Ltd"]["payment_failed"] is True
+    assert entries["Both Modules Ltd"]["payment_failed"] is False
+
+
+def test_the_attention_fields_cost_no_query_per_company(app, client, people, hub, db):
+    """Batched for the list: one company or three, past due and on trial alike, the request
+    makes the same number of queries."""
+    from sqlalchemy import event
+
+    from models.db import UserEntity, db as _db
+
+    olive = people["olive"].id
+    with app.app_context():
+        for key in ("both", "petty", "setup"):
+            _sub(_db, people[key].id, olive, phase="past_due", billed=True)
+            _declined_card(_db, people[key].id, olive)
+            _sub(_db, people[key].id, None, code="PAYMENT_REQUEST",
+                 trial_end=datetime.now(timezone.utc) + timedelta(days=5))
+        # a second person on just one of them
+        _db.session.add(UserEntity(user_id=people["stranger"].id, entity_id=people["both"].id,
+                                   role="cashier", approved=True))
+        _db.session.commit()
+
+    def count(user_id) -> int:
+        n = {"q": 0}
+
+        def _count(*_a, **_kw):
+            n["q"] += 1
+
+        with app.app_context():
+            engine = _db.engine
+        event.listen(engine, "before_cursor_execute", _count)
+        try:
+            assert _get(client, app, user_id).status_code == 200
+        finally:
+            event.remove(engine, "before_cursor_execute", _count)
+        return n["q"]
+
+    # the stranger has two companies (one past due), Olive three (all past due)
+    assert count(olive) == count(people["stranger"].id)
 
 
 def test_a_person_with_no_company_gets_an_empty_list(app, client, db, hub):
