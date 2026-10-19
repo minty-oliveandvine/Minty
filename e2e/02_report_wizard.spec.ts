@@ -231,7 +231,8 @@ test.describe.serial('daily closing', () => {
     await page.locator('.pc-row__link').first().click();
     await expect(page).toHaveURL(/\/entity\/[0-9a-f]{8}\/[^/]+\/petty-cash\/reports\/([0-9a-f-]{36})\/summary/);
     const report = page.locator('main');
-    await expect(report.locator('.pc-kpi__label')).toHaveText(['Total sales', 'Total expenses', 'Cash position']);
+    // the outcome band: Cash position is the hero, Total sales and Total expenses beside it
+    await expect(report.locator('.pc-band__label')).toHaveText(['Cash position', 'Total sales', 'Total expenses']);
     await expect(report).toContainText(moneyRegex(CASH + VISA + ALIPAY + FOODPANDA));
     await expect(report).toContainText(moneyRegex(EXPENSE));
     // the expense lines sit in the collapsed Expenses section, named by their ACCOUNT

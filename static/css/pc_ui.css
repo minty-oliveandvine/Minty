@@ -478,6 +478,75 @@ a.pc-step:hover { background: var(--color-state-hover); }
 @media (min-width: 768px) { .pc-kpi__value { font-size: var(--text-display-m); line-height: var(--text-display-m--line-height); } }
 .pc-kpi__meta { margin-top: 4px; color: var(--color-text-muted); font-size: var(--text-caption); }
 
+/* ---------------------------------------------------------------- Daily Report (15.7) */
+
+/* Outcome band: the mint tint the totals use (brand/50), the module chip (identity only) and the
+   screen's one display/xl amount. Phone: one column; 640: the art beside the hero, the two
+   figures two-up below; 1024: hero | figures | art in one row. */
+.pc-band {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 16px;
+  padding: 16px; border-radius: var(--radius-xl); background: var(--color-state-selected);
+}
+.pc-module-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 12px;
+  border-radius: 9999px; background: var(--color-module-pettycash-wash); color: var(--color-module-pettycash-ink);
+  font-size: var(--text-label); line-height: var(--text-label--line-height); font-weight: 600;
+}
+.pc-band__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; width: 100%; }
+.pc-band__hero, .pc-band__figures > div { min-width: 0; }
+.pc-band__label { color: var(--color-text-secondary); font-size: var(--text-body-s); line-height: var(--text-body-s--line-height); }
+.pc-band__amount {
+  margin-top: 4px; white-space: normal;
+  font-size: var(--text-display-xl); line-height: var(--text-display-xl--line-height);
+  letter-spacing: var(--text-display-xl--letter-spacing); font-weight: var(--text-display-xl--font-weight);
+}
+.pc-band__meta { margin-top: 4px; color: var(--color-text-muted); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.pc-band__figures { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.pc-band__figure { margin-top: 2px; white-space: normal; font-size: var(--text-title-l); line-height: var(--text-title-l--line-height); font-weight: 700; }
+.pc-band__art { display: none; }
+@media (min-width: 640px) {
+  .pc-band { padding: 24px; }
+  .pc-band__body { grid-template-columns: minmax(0, 1fr) auto; }
+  .pc-band__hero { grid-row: 1; grid-column: 1; }
+  .pc-band__art { display: block; grid-row: 1; grid-column: 2; width: 96px; height: 96px; object-fit: contain; }
+  .pc-band__figures { grid-row: 2; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .pc-band__body { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 24px; }
+  .pc-band__figures { grid-row: 1; grid-column: 2; grid-template-columns: minmax(0, 1fr); padding-left: 24px; border-left: 1px solid var(--color-border-default); }
+  .pc-band__art { grid-column: 3; }
+}
+
+/* Where the money came from and went: a proportion bar and bar rows, every mark named with its
+   amount beside it. Brand ramp + neutral only, never red/green meaning (Part 13 §13.4: charts are
+   brand/primary's). The six tones are this component's own aliases of the ramp - no semantic role
+   names a chart series - ordered light/dark so neighbouring segments always differ. */
+.pc-flow {
+  display: flex; flex-direction: column; gap: 12px;
+  --pc-chart-1: var(--minty-brand-400); --pc-chart-2: var(--minty-brand-800); --pc-chart-3: var(--minty-brand-200);
+  --pc-chart-4: var(--minty-brand-600); --pc-chart-5: var(--minty-neutral-400); --pc-chart-6: var(--minty-brand-950);
+}
+.pc-flow__title { margin-top: 8px; font-size: var(--text-title-m); line-height: var(--text-title-m--line-height); font-weight: var(--text-title-m--font-weight); }
+.pc-flow [data-tone="1"] { background: var(--pc-chart-1); }
+.pc-flow [data-tone="2"] { background: var(--pc-chart-2); }
+.pc-flow [data-tone="3"] { background: var(--pc-chart-3); }
+.pc-flow [data-tone="4"] { background: var(--pc-chart-4); }
+.pc-flow [data-tone="5"] { background: var(--pc-chart-5); }
+.pc-flow [data-tone="6"] { background: var(--pc-chart-6); }
+/* Segments share the track by flex-grow (their exact share), so the 2px gaps never overflow it. */
+.pc-stackbar { display: flex; gap: 2px; height: 24px; border-radius: var(--radius-md); overflow: hidden; }
+.pc-stackbar__seg { flex: 0 1 0; min-width: 4px; }
+.pc-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.pc-legend li { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-body-s); line-height: var(--text-body-s--line-height); }
+.pc-legend__swatch { flex: none; width: 12px; height: 12px; border-radius: var(--radius-sm); }
+.pc-legend__name { font-weight: 600; }
+.pc-barrows { display: flex; flex-direction: column; gap: 12px; }
+.pc-barrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; row-gap: 6px; }
+.pc-barrow__name { min-width: 0; }
+.pc-barrow__amount { font-weight: 600; text-align: right; }
+.pc-barrow__track { grid-column: 1 / -1; height: 8px; border-radius: 9999px; background: var(--color-surface-sunk); overflow: hidden; }
+.pc-barrow__bar { display: block; height: 100%; min-width: 4px; border-radius: inherit; background: var(--color-brand-primary); }
+
 .pc-dl { border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); background: var(--color-surface-card); padding: 0 16px; }
 .pc-dl > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 0; border-bottom: 1px solid var(--color-border-subtle); }
 .pc-dl > div:last-child { border-bottom: 0; }

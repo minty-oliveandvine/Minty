@@ -29,10 +29,19 @@ counted with the difference as a pill), one quiet Xero line ("Not sent to Xero y
 behind a confirmation, or "Sent to Xero · time" + Publish again;
 [xero-integration.md](xero-integration.md)), then Back to home and View report. The next day
 starts from the launch page. A saved report reads as the **Daily Report** (`.../reports/<id>/summary`,
-`report/ending.html`, Part 15.7): three KPIs (Total sales, Total expenses, Cash position), the
-difference as a Warning alert, collapsible Sales by method / Expenses / Receipts / Cash, the
-audit line, Share and More (Edit report / Delete report on the latest; Edit details on an older
-one). The public share link draws the same page without actions or navigation.
+`report/ending.html`, Part 15.7, read as an Operational Review): the **outcome band** (brand/50
+tint, the Petty Cash module chip, **Cash position** as the screen's one display/xl hero amount,
+Total sales and Total expenses beside it, the safe-box art from 640 px), the difference as a
+Warning alert, then **Where the money came from and went** - sales by method as a stacked
+proportion bar with a legend (name, amount, %) and expenses summed per account as bar rows,
+brand ramp + neutral only, plain HTML/CSS. The chart data is the server's
+(`services/report_page.py` `sales_mix` / `expense_bars`, called by `services/ending.py`): methods
+that sold nothing are left out, the whole percentages add up to 100, accounts run largest first;
+one method is one full bar, no expenses reads "No expenses this day.". The bar carries a
+`role="img"` summary, and the collapsible Sales by method / Expenses / Receipts / Cash lists
+below stay as the tables. Then the audit line; Share and More (Edit report / Delete report on the
+latest; Edit details on an older one) sit in the header. No trends or other days. The public
+share link draws the same page without actions or navigation.
 
 The day starts from the **launch page** (`entity.report_dashboard`, `petty_cash/launch.html`,
 Part 15.6a), which `blueprints/entity/services/launch.py` decides on the server: the open draft

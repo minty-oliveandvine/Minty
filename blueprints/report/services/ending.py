@@ -12,6 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from blueprints.report.services.cash_denominations import (
     cash_summary, get_cash_count_details, refresh_cash_stock)
+from blueprints.report.services.report_page import expense_bars, sales_mix
 from blueprints.report.services.shared import (check_user_has_entities,
                                                cleanup_partial_submission_data,
                                                future_date_error,
@@ -547,6 +548,11 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             # Get expenses from ShopExpense table for completed reports
             existing_expenses = ShopExpense.query.filter_by(report_id=report.id).all()
 
+        # The Daily Report's bar rows: the expenses summed per account (one joined read each).
+        expense_chart = expense_bars(
+            (e.account.name if e.account is not None else None, e.amount) for e in existing_expenses
+        )
+
         # Group expenses by account_code
         grouped_expenses = {}
         for expense in existing_expenses:
@@ -587,6 +593,15 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             cash_sales = report.cash_sales if report.cash_sales else 0
 
         total_sales = report.total_sales if report.total_sales else 0
+        # The Daily Report's proportion bar: the same methods as its "Sales by method" list
+        # (electronic, then delivery without Deliveroo, then Cash).
+        listed = [s for s in sale_info if SaleType.normalize(s.type) == SaleType.ELECTRONIC] + [
+            s for s in sale_info
+            if SaleType.normalize(s.type) == SaleType.DELIVERY and s.value_name != "deliveroo_sales"
+        ]
+        sales_chart = sales_mix(
+            [(s, None, sales_amounts.get(s.value_name, 0)) for s in listed] + [(None, "Cash", cash_sales)]
+        )
         # Calculate actual cash balance from cash count data - one
         # report_cash_summary row: NULL means never counted (show the closing
         # balance instead), 0 means counted with every denomination zero.
@@ -738,6 +753,8 @@ def report_ending(id=None, entity_id=None, skip_auth=False):
             is_shared_link=skip_auth,
             sale_info=sale_info,
             sales_amounts=sales_amounts,
+            sales_chart=sales_chart,
+            expense_chart=expense_chart,
             is_edit_mode=is_edit_mode,
         )
 
