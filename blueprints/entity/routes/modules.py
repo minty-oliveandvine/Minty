@@ -36,7 +36,7 @@ from blueprints.shared.safe_redirect import safe_next
 from blueprints.entity.services.modules import LOGIN_SID_SESSION_KEY, MODULE_BILL
 from models.db import (Entity, EntityFunction, EntityFunctionMap, User,
                        UserEntity, db)
-from services.permission_policy import Role, is_superuser
+from services.permission_policy import Role, is_superuser, is_superuser_readonly
 from services.user_presence import resume_presence
 from blueprints.shared.enums import ModuleCode
 
@@ -487,10 +487,11 @@ def billing_relogin(entity_id: str):
 def go_to_bills(entity_id):
     """Direct handoff to Module 2 Bills (skips the module picker).
 
-    ``?request=<uuid>`` lands on that payment request instead of the list: the payments app
-    sends a page of another company here (its cookie holds one company at a time). Anything
-    that is not a uuid is ignored; the payments API decides whether the request is this
-    company's.
+    ``?request=<uuid or Payment No.>`` lands on that payment request instead of the list: the
+    payments app sends a page of another company here (its cookie holds one company at a time),
+    and since 2026-10-20 names it by its Payment No. (the bill reference, decoded plain text).
+    Anything ``_request_segment`` refuses is ignored; the payments API decides whether the
+    request is this company's.
     """
     org = Entity.query.filter(Entity.id == entity_id).first()
     if not org:
@@ -510,11 +511,32 @@ def go_to_bills(entity_id):
         flash("The Payment module isn't switched on for this entity yet - an admin can turn it on in the entity's module settings.", "warning")
         return redirect(url_for("entity.report_dashboard", id=entity_id))
 
-    try:
-        request_id = str(uuid.UUID(request.args.get("request", "")))
-    except ValueError:
-        request_id = None
+    request_id = _request_segment(request.args.get("request", ""))
     return redirect(billing_app_home_url(entity_id, org, current_user.id, request_id))
+
+
+#: The longest Payment No. (``bill.reference``, varchar 255) ``?request=`` carries on.
+REQUEST_REFERENCE_MAX = 255
+
+
+def _request_segment(raw: str) -> str | None:
+    """The payment request ``?request=`` names, fit for the payments app's address - or None
+    (the list). A uuid, or a Payment No.: 1-255 characters, no control character, no backslash,
+    and no empty, ``.`` or ``..`` piece between its slashes, so it can never climb out of
+    ``payment-request/`` whatever decodes it later. ``billing_app_home_url`` quotes it into ONE
+    path segment."""
+    value = (raw or "").strip()
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        pass
+    if not 1 <= len(value) <= REQUEST_REFERENCE_MAX:
+        return None
+    if "\\" in value or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        return None
+    if any(piece in ("", ".", "..") for piece in value.split("/")):
+        return None
+    return value
 
 
 def _generate_module_token(
@@ -546,6 +568,10 @@ def _generate_module_token(
         # Module 2 nav's Petty Cash section visibility. Defaults True so old
         # call sites (e.g. unscoped profile handoff) don't silently hide nav.
         "petty_cash_enabled": petty_cash_enabled,
+        # A system super admin inside a company they are not a member of may look, not change
+        # (services.permission_policy.is_superuser_readonly) - the payments app greys its
+        # actions on this claim, as it does on the token its API refreshes. False unscoped.
+        "is_view_only": bool(entity_id) and is_superuser_readonly(user_obj, str(entity_id)),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=MODULE_TOKEN_MINUTES),
         "iat": datetime.now(timezone.utc),
     }
@@ -644,10 +670,12 @@ def _billing_app_landing_url(entity_id: str, org: Entity, user_id, page: str) ->
 
 def billing_app_home_url(entity_id: str, org: Entity, user_id, request_id: str | None = None) -> str:
     """Handoff URL for Module 2 main app with entity pre-selected - its list, or one payment
-    request when ``request_id`` (a uuid, checked by the caller) is given."""
+    request when ``request_id`` (a uuid or Payment No., checked by the caller with
+    ``_request_segment``) is given. It is quoted into one path segment, so a ``/`` in a
+    Payment No. stays ``%2F``; the origin is always this app's configured one."""
     page = PAYMENT_REQUEST_APP_HOME_PATH
     if request_id:
-        page = f"{page}/{request_id}"
+        page = f"{page}/{quote(request_id, safe='')}"
     return _billing_app_landing_url(entity_id, org, user_id, page)
 
 

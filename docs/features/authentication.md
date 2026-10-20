@@ -226,7 +226,10 @@ The short id decides; the name is only for reading (`blueprints/shared/entity_re
   `/entity/<shortid>/<name>/…` too (the module page `…/settings/modules` since phase 2), and the payments app's pages are
   `/entity/<shortid>/<name>/payment-request[/<id>]` and `/settings/payment-request` on its origin -
   the hand-overs land there (`billing_app_home_url`; `/payment-request?request=<id>` lands on one
-  request), and its middleware sends another company's page back here
+  request - a uuid, or since 2026-10-20 its Payment No. sent as plain text, kept only when 1-255
+  characters with no control character, no backslash and no empty/`.`/`..` piece between slashes
+  (`modules._request_segment`; anything else lands on the list) and quoted into ONE path segment,
+  so `PR/0001` arrives as `…/payment-request/PR%2F0001`), and its middleware sends another company's page back here
   (`minty-payment-request-web/docs/features/authentication.md`).
 - **Old addresses keep working** (`blueprints/shared/legacy_addresses.py`): each pre-2026-10-05 rule
   308s straight to the readable address (308 keeps a form's method and body). Old `/report/...`
@@ -290,7 +293,7 @@ set on Minty, minty-payment-request-api, minty-onboarding-api and minty-subscrip
 
 | Token | Minted by | Lifetime | Claims | Verified by |
 |---|---|---|---|---|
-| module / billing | `blueprints/entity/routes/modules.py::_generate_module_token` when a person clicks **Payments** (`/entity/<co>/payment-request`, `/entity/<id>/modules`) | 30 min | `user_id`, `entity_id`, `xero_org_id`, `role`, `system_role`, `module: "billing"`, `sid` (the login session id, `LOGIN_SID_SESSION_KEY`), `billing_enabled`, `petty_cash_enabled`, `iat`, `exp` | minty-payment-request-api `core/auth.BearerAuth` |
+| module / billing | `blueprints/entity/routes/modules.py::_generate_module_token` when a person clicks **Payments** (`/entity/<co>/payment-request`, `/entity/<id>/modules`) | 30 min | `user_id`, `entity_id`, `xero_org_id`, `role`, `system_role`, `module: "billing"`, `sid` (the login session id, `LOGIN_SID_SESSION_KEY`), `billing_enabled`, `petty_cash_enabled`, `is_view_only` (a system super admin in a company they are not a member of - `permission_policy.is_superuser_readonly`; false unscoped; since 2026-10-20, matching the token minty-payment-request-api refreshes), `iat`, `exp` | minty-payment-request-api `core/auth.BearerAuth` |
 | onboarding | `blueprints/entity/routes/create.py::_mint_onboarding_token` when the wizard is launched | 60 min | `user_id`, `scope: "onboarding"`, `iat`, `exp` | minty-onboarding-api `core/auth.OnboardingBearerAuth`; Flask's own `/api/onboarding/*` routes |
 
 The browser is sent to `minty-payment-request-web` `/landing?token=…&entity_id=…&entity_name=…`,

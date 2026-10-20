@@ -114,3 +114,82 @@ def test_a_payment_request_id_lands_on_that_request(shop, client, monkeypatch):
 
     _, query = _landing(client.get(f"{F.co(client, entity.id)}/payment-request?request=../settings"))
     assert query["next"] == [f"{F.co(client, entity.id)}/payment-request"]
+
+
+def test_a_payment_number_lands_on_that_request(shop, client, monkeypatch):
+    # the payments app sends the Payment No. (free text) since 2026-10-20, decoded
+    owner, entity, _ = shop
+    _bill_module_on(monkeypatch)
+    F.login(client, owner)
+    base = f"{F.co(client, entity.id)}/payment-request"
+    origin = urlsplit(bearer_api.frontend_origin())
+
+    parts, query = _landing(client.get(base, query_string={"request": "MBIOLI-101530201026"}))
+    assert (parts.scheme, parts.netloc) == (origin.scheme, origin.netloc)
+    assert query["next"] == [f"{base}/MBIOLI-101530201026"]
+
+    # a '/' stays inside the one segment
+    parts, query = _landing(client.get(base, query_string={"request": "PR/0001"}))
+    assert (parts.scheme, parts.netloc) == (origin.scheme, origin.netloc)
+    assert query["next"] == [f"{base}/PR%2F0001"]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["..", ".", "a/../b", "PR/", "/PR", "PR\\0001", "PR\n0001", "PR\x7f", "x" * 256, "   "],
+)
+def test_a_payment_number_that_is_not_a_plain_reference_lands_on_the_list(shop, client, monkeypatch, raw):
+    owner, entity, _ = shop
+    _bill_module_on(monkeypatch)
+    F.login(client, owner)
+    base = f"{F.co(client, entity.id)}/payment-request"
+    origin = urlsplit(bearer_api.frontend_origin())
+
+    parts, query = _landing(client.get(base, query_string={"request": raw}))
+
+    assert (parts.scheme, parts.netloc, parts.path) == (origin.scheme, origin.netloc, "/landing")
+    assert query["next"] == [base]
+
+
+def test_a_255_character_payment_number_is_kept(shop, client, monkeypatch):
+    owner, entity, _ = shop
+    _bill_module_on(monkeypatch)
+    F.login(client, owner)
+    base = f"{F.co(client, entity.id)}/payment-request"
+
+    _, query = _landing(client.get(base, query_string={"request": "x" * 255}))
+
+    assert query["next"] == [f"{base}/{'x' * 255}"]
+
+
+def _hand_off_claims(app, resp):
+    import jwt as pyjwt
+
+    _, query = _landing(resp)
+    return pyjwt.decode(query["token"][0], app.config["SECRET_KEY"], algorithms=["HS256"])
+
+
+def test_a_superadmin_outside_the_company_gets_a_view_only_token(app, db, shop, client, monkeypatch):
+    from models.db import User
+
+    _, entity, _ = shop
+    with app.app_context():
+        root = F.make_user(db, "root@test.com", system_role=User.SYSTEM_ROLE_SUPERUSER)
+    _bill_module_on(monkeypatch)
+    F.login(client, root)
+
+    claims = _hand_off_claims(app, client.get(f"{F.co(client, entity.id)}/payment-request"))
+
+    assert claims["system_role"] == "superadmin"
+    assert claims["role"] == "super_admin"
+    assert claims["is_view_only"] is True
+
+
+def test_the_company_owner_gets_a_token_that_is_not_view_only(app, shop, client, monkeypatch):
+    owner, entity, _ = shop
+    _bill_module_on(monkeypatch)
+    F.login(client, owner)
+
+    claims = _hand_off_claims(app, client.get(f"{F.co(client, entity.id)}/payment-request"))
+
+    assert claims["is_view_only"] is False
