@@ -3,9 +3,11 @@
 from flask import current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
+from blueprints.entity.routes.modules import petty_cash_web_handoff_url
 from blueprints.entity.services.shared import check_user_has_entities
 from blueprints.report import report_bp
 from blueprints.report.services.history_query import STATUS_FILTERS, get_entity_report_history
+from blueprints.shared import bearer_api
 from models.db import Entity
 from services.authz import require_entity_access
 from services.permission_policy import Permission, has_permission
@@ -18,6 +20,10 @@ PER_PAGE = (10, 25, 50, 100)
 @login_required
 @require_entity_access(entity_arg="entity_id")
 def entity_report_history(entity_id):
+    # As the dashboard (entity.report_dashboard): with minty-petty-cash-web set, its history.
+    if bearer_api.petty_cash_web_is_set():
+        return redirect(petty_cash_web_handoff_url(entity_id, "/reports", request.query_string.decode()))
+
     can_view_entity_history = True
 
     if not check_user_has_entities(current_user.id):

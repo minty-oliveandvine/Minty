@@ -8,7 +8,8 @@ from flask_login import current_user, login_required
 from loguru import logger
 
 from blueprints.entity import entity_bp
-from blueprints.entity.routes.modules import minty_web_module_page_handoff
+from blueprints.entity.routes.modules import minty_web_module_page_handoff, petty_cash_web_handoff_url
+from blueprints.shared import bearer_api
 from blueprints.entity.services.entity_list import sign_notices
 from blueprints.entity.services.launch import greeting, launch_state
 from blueprints.entity.services.modules import claim_subscription_notice
@@ -78,6 +79,12 @@ def report_dashboard(id):
         return permission_denied(
             "You do not have permission to view this entity.", entity_id=id
         )
+
+    # Where minty-petty-cash-web is set, Petty Cash is that app's: the older front ends still
+    # link here (through /enter), so this page hands over instead of drawing itself. The
+    # hand-off sends a company mid-onboarding back to the wizard on its own.
+    if bearer_api.petty_cash_web_is_set():
+        return redirect(petty_cash_web_handoff_url(id))
 
     # Entity still mid-onboarding → bounce the member back into the wizard to
     # finish setup. Gated on user_entity so a superuser inspecting an entity

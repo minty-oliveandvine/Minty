@@ -53,6 +53,7 @@ The hand-off is in `blueprints/entity/routes/modules.py`. Flask is the only mint
   - onboarding → the wizard;
   - Petty Cash off → `entity.entity_list` with a flash.
 - **Destination.** `<petty-cash-web>/landing?token=&entity_id=&entity_name=&next=`, through `preview_origin.handoff_origin("petty-cash", …)`, so a preview set stays in its set.
+- **Flask's own pages hand over too (2026-10-20).** Where `PETTY_CASH_WEB_URL` is set, `entity.report_dashboard` (`/entity/<id>/petty-cash`, after its membership and permission checks) and `report.entity_report_history` (`/entity/<id>/petty-cash/reports`, its query carried on) redirect here through `modules.petty_cash_web_handoff_url`, the helper the sidebar uses too. The older front ends (minty-web, payment-request-web, onboarding-web) still link to those two pages through `/enter`, so Petty Cash opens in the app without touching them. Unset, Flask's pages render as before (`tests/test_petty_cash_web_handoff.py`).
 
 ## Endpoints
 

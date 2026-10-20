@@ -96,13 +96,10 @@ def _petty_cash_links(company: str) -> dict[str, str]:
             "dashboard": url_for("entity.report_dashboard", id=company),
             "reports": url_for("report.entity_report_history", entity_id=company),
         }
-    from blueprints.entity.routes.modules import petty_cash_web_company_path
+    from blueprints.entity.routes.modules import petty_cash_web_handoff_url
 
-    def handoff(sub: str) -> str:
-        return url_for("entity.handoff_petty_cash_web", entity_id=company,
-                       next=petty_cash_web_company_path(company, sub))
-
-    return {"dashboard": handoff(""), "reports": handoff("/reports")}
+    return {"dashboard": petty_cash_web_handoff_url(company),
+            "reports": petty_cash_web_handoff_url(company, "/reports")}
 
 
 def _current(endpoint: str, settings_endpoint: str | None) -> str | None:

@@ -203,3 +203,82 @@ def test_the_default_origin_is_the_local_app(monkeypatch):
 
     monkeypatch.delenv("PETTY_CASH_WEB_URL", raising=False)
     assert bearer_api.petty_cash_web_origin() == "http://localhost:3010"
+
+
+# --- Flask's own Petty Cash pages hand over to the app ------------------------------------------
+# The older front ends (minty-web, payment-request-web, onboarding-web, every branch) still send
+# "Petty Cash" to Flask's dashboard or report history, through /enter. Where the app is set, those
+# two pages go on through /handoff/petty-cash-web, so Flask serves no Petty Cash page; unset, they
+# stay Flask's, as the sidebar does (blueprints/shared/sidebar.py's _petty_cash_links).
+
+
+def _handoff_next(resp, entity_id):
+    assert resp.status_code == 302, resp.data[:300]
+    parts = urlsplit(resp.headers["Location"])
+    query = parse_qs(parts.query)
+    assert parts.path == "/handoff/petty-cash-web"
+    assert query["entity_id"] == [entity_id]
+    return query["next"][0]
+
+
+def test_flasks_dashboard_hands_over_to_the_apps_petty_cash(client, shop):
+    F.login(client, shop["owner"])
+    entity = shop["entity"]
+
+    nxt = _handoff_next(client.get(F.co(client, entity.id) + "/petty-cash"), entity.id)
+
+    assert nxt == f"/entity/{_ref(client, entity.id)}/petty-cash"
+
+
+def test_flasks_report_history_hands_over_with_its_filters(client, shop):
+    F.login(client, shop["owner"])
+    entity = shop["entity"]
+
+    resp = client.get(
+        F.co(client, entity.id) + "/petty-cash/reports",
+        query_string={"start_date": "2026-10-01", "end_date": "2026-10-20", "page": "2"},
+    )
+    nxt = urlsplit(_handoff_next(resp, entity.id))
+
+    assert nxt.path == f"/entity/{_ref(client, entity.id)}/petty-cash/reports"
+    assert parse_qs(nxt.query) == {"start_date": ["2026-10-01"], "end_date": ["2026-10-20"], "page": ["2"]}
+
+
+def test_enter_with_no_next_ends_in_the_app(app, client, shop):
+    """``/entity/<id>/enter`` defaults to the dashboard, which is how payment-request-web's and
+    minty-web's plain "Petty Cash" link arrives."""
+    from blueprints.entity.routes.modules import _generate_module_token
+    from blueprints.legal.services.consent import record_consent
+    from models.db import db
+
+    entity = shop["entity"]
+    with app.app_context():
+        record_consent(shop["owner"].id, source="gate")  # past the Terms gate, as F.login is
+        db.session.commit()
+        token = _generate_module_token(
+            shop["owner"].id, entity.id, None, "admin", billing_enabled=False, petty_cash_enabled=True,
+        )
+    first = client.get(F.co(client, entity.id) + "/enter", query_string={"token": token})
+    assert first.status_code == 302
+    second = client.get(first.headers["Location"])
+    nxt = _handoff_next(second, entity.id)
+    assert nxt == f"/entity/{_ref(client, entity.id)}/petty-cash"
+
+
+def test_without_the_app_flasks_pages_stay(client, shop, monkeypatch):
+    monkeypatch.delenv("PETTY_CASH_WEB_URL", raising=False)
+    F.login(client, shop["owner"])
+    base = F.co(client, shop["entity"].id)
+
+    for path in ("/petty-cash", "/petty-cash/reports"):
+        resp = client.get(base + path)
+        assert resp.status_code == 200, (path, resp.status_code, resp.headers.get("Location"))
+
+
+def test_a_stranger_is_not_handed_over(client, shop):
+    """The hand-off checks membership itself, but the page must not even send a stranger there."""
+    F.login(client, shop["stranger"])
+
+    resp = client.get(F.co(client, shop["entity"].id) + "/petty-cash")
+
+    assert "/handoff/petty-cash-web" not in resp.headers.get("Location", "")

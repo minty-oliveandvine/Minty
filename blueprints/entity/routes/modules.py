@@ -286,6 +286,13 @@ def petty_cash_web_company_path(entity_id, sub: str = "") -> str:
     return minty_web_company_path(entity_id, f"/petty-cash{sub}")
 
 
+def petty_cash_web_handoff_url(entity_id, sub: str = "", query: str = "") -> str:
+    """This app's way into one company's Petty Cash on minty-petty-cash-web, landing on ``sub``
+    (``""`` the dashboard, ``/reports`` the history) with ``query`` carried on."""
+    destination = petty_cash_web_company_path(entity_id, sub) + (f"?{query}" if query else "")
+    return url_for("entity.handoff_petty_cash_web", entity_id=entity_id, next=destination)
+
+
 @entity_bp.route("/handoff/petty-cash-web")
 @login_required
 def handoff_petty_cash_web():
