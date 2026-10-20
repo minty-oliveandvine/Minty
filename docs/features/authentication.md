@@ -176,7 +176,10 @@ plain http): `SESSION_COOKIE_SECURE = not is_development()`.
   (`/reset_password/<token>`, `/invitation/accept/<token>`, share links). The three Next apps
   send the same set from `next.config.ts` (`frame-ancestors 'self'` instead of a full CSP).
 - **Logs never hold a secret from an address.** gunicorn's access log (it printed the whole
-  request line) is off in the `Procfile`; `http_hardening` logs `METHOD path status ms` with
+  request line) writes nothing: Render switched it back on through `GUNICORN_CMD_ARGS`
+  (production's log held `/enter?token=` and `/callback?code=` lines, 2026-10-20), so
+  `gunicorn.conf.py` sets `logger_class` to `services/app_runtime/gunicorn_logging.py`'s
+  `NoAccessLogger`, which the environment cannot override; `http_hardening` logs `METHOD path status ms` with
   the query string dropped and secret path segments shown as `[redacted]`. The Datadog
   browser logs send `origin + path` only (`static/js/datadog-logs.js`, also scrubbing the
   SDK's own `view.url`/`view.referrer`), and a share-link path as `/Minty_Report/[redacted]`.

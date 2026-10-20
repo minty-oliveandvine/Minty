@@ -62,7 +62,9 @@ user (`docs/features/ERROR_MESSAGE_LEAKS.md`).
 The access log is Flask's own since 2026-10-05 (`pettycash/core/http_hardening.py`):
 `METHOD path status ms`, no query string, secret path segments `[redacted]`. gunicorn's
 `--access-logfile` is gone from the `Procfile` because it printed the whole request line,
-tokens included. `diagnose` (variable values in tracebacks) is on in development only.
+tokens included, and since 2026-10-20 `gunicorn.conf.py` (repo root, read from the working
+directory) gives gunicorn `NoAccessLogger`, because Render's native runtime turns the access
+log on through `GUNICORN_CMD_ARGS` anyway (`tests/test_gunicorn_access_log.py`). `diagnose` (variable values in tracebacks) is on in development only.
 On Windows, parallel pytest workers share `services/app_runtime/legacy/app.log`, and loguru's
 5 MB rotation then fails with `PermissionError: [WinError 32]` ("Logging error in Loguru
 Handler"). It is noise, not a test failure, and does not happen on the Linux host.

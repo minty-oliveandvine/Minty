@@ -12,7 +12,9 @@ Security headers (2026-10-05, the URL security round):
 
 The access log replaces gunicorn's (``--access-logfile``), which printed every
 request line in full - query-string tokens and path secrets included. This one
-prints the path only, with the secret segments blanked.
+prints the path only, with the secret segments blanked. Render switches gunicorn's
+back on through ``GUNICORN_CMD_ARGS``, so ``gunicorn.conf.py`` gives gunicorn a
+logger that writes no access line (``services/app_runtime/gunicorn_logging.py``).
 """
 
 from __future__ import annotations
